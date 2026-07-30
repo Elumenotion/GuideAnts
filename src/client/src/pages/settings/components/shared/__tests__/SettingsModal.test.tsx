@@ -26,8 +26,8 @@ describe('SettingsModal', () => {
         isOpen
         title="Download model"
         onClose={onClose}
+        size="lg"
         footer={<button type="button">Save</button>}
-        maxWidthClass="max-w-4xl"
       >
         <p>Modal body</p>
       </SettingsModal>,
@@ -37,6 +37,21 @@ describe('SettingsModal', () => {
     expect(screen.getByText('Modal body')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Download model');
+  });
+
+  it('applies size presets without forcing full viewport height', () => {
+    render(
+      <SettingsModal isOpen title="Sized" onClose={onClose} size="sm">
+        Body
+      </SettingsModal>,
+    );
+
+    const panel = screen.getByRole('dialog', { name: 'Sized' }).firstElementChild as HTMLElement;
+    expect(panel.className).toContain('max-w-2xl');
+    expect(panel.className).toContain('max-h-[calc(100vh-3rem)]');
+    expect(panel.className.split(/\s+/)).not.toContain('h-full');
+    expect(panel.className.split(/\s+/).some((token) => /^h-\[/.test(token))).toBe(false);
+    expect(panel.className.split(/\s+/)).not.toContain('flex-1');
   });
 
   it('closes on Escape when dismiss is allowed', () => {

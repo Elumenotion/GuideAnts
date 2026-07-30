@@ -91,7 +91,7 @@ describe('ModelIdTypeahead', () => {
       expect.objectContaining({
         modelId: 'gpt-4.1',
         displayName: 'GPT-4.1',
-        runtimeProfileId: 'openai_chat_standard',
+        parameterSurfaceSeed: 'openai_chat_standard',
         reasoningEffortEnabled: false,
       })
     );
@@ -112,7 +112,7 @@ describe('ModelIdTypeahead', () => {
     expect(onSelect).toHaveBeenCalledWith(
       expect.objectContaining({
         modelId: 'o3',
-        runtimeProfileId: 'openai_responses_reasoning',
+        parameterSurfaceSeed: 'openai_responses_reasoning',
         reasoningEffortEnabled: true,
       })
     );

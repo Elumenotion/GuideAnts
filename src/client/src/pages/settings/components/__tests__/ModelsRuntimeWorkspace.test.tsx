@@ -20,8 +20,6 @@ const baseProps = {
   onLoadLlamaModel: vi.fn(),
   onRequestUnloadLlamaRouter: vi.fn(),
   onRequestDeleteLlamaRouter: vi.fn(),
-  profilesLoading: false,
-  profiles: [],
   modelsLoading: false,
   modelsError: null,
   orderedModels: [],

@@ -18,7 +18,6 @@ vi.mock('../../services/api', () => ({
     settings: {
       getSections: vi.fn(),
       getModels: vi.fn(),
-      getRuntimeProfiles: vi.fn(),
       getLlamaInventory: vi.fn(),
     },
   },
@@ -135,7 +134,6 @@ describe('Settings navigation deep links', () => {
     vi.clearAllMocks();
     vi.mocked(api.settings.getSections).mockResolvedValue([]);
     vi.mocked(api.settings.getModels).mockResolvedValue([]);
-    vi.mocked(api.settings.getRuntimeProfiles).mockResolvedValue([]);
     vi.mocked(api.settings.getLlamaInventory).mockResolvedValue([]);
     window.sessionStorage.clear();
   });

@@ -618,13 +618,16 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         {
             var mappedTools = request.Tools.Select(MapTool).ToList();
             body["tools"] = JsonSerializer.SerializeToNode(mappedTools, RequestJsonOptions);
-            ApplyProfileToolFields(body);
         }
 
         if (string.Equals(request.ToolChoice, "none", StringComparison.Ordinal))
         {
             body["tool_choice"] = "none";
         }
+
+        // Extra model request fields (e.g. parallel_tool_calls) apply on every completion,
+        // not only when tools are present.
+        ApplyExtraRequestFields(body);
 
         MergeSamplingParameters(body, request);
 
@@ -637,7 +640,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         return (body, diagnosticInfo);
     }
 
-    private void ApplyProfileToolFields(JsonObject body)
+    private void ApplyExtraRequestFields(JsonObject body)
     {
         if (_profileData?.RequestFieldsWhenToolsPresent is not { Count: > 0 } fields)
         {

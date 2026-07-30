@@ -6,7 +6,8 @@ export interface KnownCloudModel {
   displayName: string;
   providers: string[];
   description?: string;
-  runtimeProfileId?: string;
+  parameterSurfaceSeed?: string;
+  reasoningEffortEnabled?: boolean;
 }
 
 const ALL_KNOWN_MODELS: KnownCloudModel[] = knownModels as KnownCloudModel[];

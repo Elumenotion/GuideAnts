@@ -6,7 +6,12 @@ import { validateLocalModelOnboardingDraft } from '../validateDraft';
 
 const explicitCustomDraft = {
   installSource: 'huggingface' as const,
-  runtimeProfileId: 'qwen3_6',
+  samplingParametersJson: '{}',
+  reasoningChoicesJson: '',
+  thinkingControlJson: '{}',
+  requestFieldsWhenToolsPresentJson: '{}',
+  combineSystemAndDeveloperMessages: true,
+  thoughtBlockPattern: '',
   routerModelId: 'qwen3.6-9b-q5km',
   huggingFaceRepository: 'unsloth/Qwen3.6-9B-GGUF',
   huggingFaceResolvedRevision: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
@@ -32,8 +37,17 @@ describe('buildLocalModelOnboardingRequest', () => {
     const { providerConfig: settingsProviderConfig, ...settingsWithoutUi } = fromSettings;
     const { providerConfig: wizardProviderConfig, ...wizardWithoutUi } = fromWizard;
 
-    expect(settingsProviderConfig).toEqual({ onboardingUi: 'settings' });
-    expect(wizardProviderConfig).toEqual({ onboardingUi: 'wizard' });
+    expect(settingsProviderConfig).toEqual({
+      onboardingUi: 'settings',
+      samplingParametersJson: '{}',
+      thinkingControlJson: '{}',
+      requestFieldsWhenToolsPresentJson: '{}',
+      combineSystemAndDeveloperMessages: true,
+    });
+    expect(wizardProviderConfig).toEqual({
+      ...settingsProviderConfig,
+      onboardingUi: 'wizard',
+    });
     expect(settingsWithoutUi).toEqual(wizardWithoutUi);
     expect(fromSettings.install?.huggingFace?.modelFiles).toEqual(['Qwen3-9B-Q5_K_M.gguf']);
     expect(fromSettings.install?.routerContextSize).toBeUndefined();
@@ -106,8 +120,8 @@ describe('validateLocalModelOnboardingDraft', () => {
   it('returns validation errors from build command', () => {
     expect(validateLocalModelOnboardingDraft({
       ...explicitCustomDraft,
-      runtimeProfileId: '',
-    })).toEqual(['Runtime profile is required for llama-cpp.']);
+      routerModelId: '',
+    })).toEqual(['Router alias is required for Hugging Face install.']);
     expect(validateLocalModelOnboardingDraft(explicitCustomDraft)).toEqual([]);
   });
 });

@@ -675,7 +675,7 @@ public sealed class LlamaCppChatClientTests
     }
 
     [TestMethod]
-    public async Task GetCompletionAsync_OmitsProfileToolFields_WhenToolsAbsent()
+    public async Task GetCompletionAsync_IncludesExtraRequestFields_WhenToolsAbsent()
     {
         string? capturedBody = null;
         var handler = new StaticResponseHandler(async httpRequest =>
@@ -692,11 +692,11 @@ public sealed class LlamaCppChatClientTests
         await client.GetCompletionAsync(request);
 
         using var doc = JsonDocument.Parse(capturedBody!);
-        doc.RootElement.TryGetProperty("parallel_tool_calls", out _).Should().BeFalse();
+        doc.RootElement.GetProperty("parallel_tool_calls").GetBoolean().Should().BeTrue();
     }
 
     [TestMethod]
-    public async Task GetCompletionAsync_DeepSeekProfile_SetsParallelToolCallsFalse_WhenToolsPresent()
+    public async Task GetCompletionAsync_DeepSeekProfile_SetsParallelToolCallsFalse()
     {
         string? capturedBody = null;
         var handler = new StaticResponseHandler(async httpRequest =>

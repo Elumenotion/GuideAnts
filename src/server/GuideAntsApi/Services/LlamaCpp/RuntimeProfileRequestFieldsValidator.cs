@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace GuideAntsApi.Services.LlamaCpp;
 
 /// <summary>
-/// Validates runtime profile tool-request field JSON.
+/// Validates extra model request-field JSON merged into every llama completion body.
 /// </summary>
 public static class RuntimeProfileRequestFieldsValidator
 {

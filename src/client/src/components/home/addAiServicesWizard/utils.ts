@@ -1,5 +1,6 @@
 import { api } from '../../../services/api';
 import { withSecretPreserved as withSecretPreservedFromSettings } from '../../../pages/settings/utils';
+import { resolveParameterSurfaceSeed } from '../../../pages/settings/parameterSurfaceSeeds';
 import type {
   AddModelRequest,
   ProviderEditorStateDto,
@@ -267,11 +268,20 @@ function inferCloudRuntimeProfileId(providerId: string, modelId: string): string
   return null;
 }
 
-function withRuntimeProfileProviderConfig(providerId: string, modelId: string): Pick<AddModelRequest, 'providerConfig'> {
-  const runtimeProfileId = inferCloudRuntimeProfileId(providerId, modelId);
-  return runtimeProfileId
-    ? { providerConfig: { runtimeProfileId } }
-    : {};
+function withParameterSurfaceProviderConfig(providerId: string, modelId: string): Pick<AddModelRequest, 'providerConfig'> {
+  const seedKey = inferCloudRuntimeProfileId(providerId, modelId);
+  if (!seedKey) {
+    return {};
+  }
+
+  const surface = resolveParameterSurfaceSeed(seedKey);
+  const providerConfig: Record<string, string> = {
+    samplingParametersJson: surface.samplingParametersJson,
+  };
+  if (surface.reasoningChoicesJson) {
+    providerConfig.reasoningChoicesJson = surface.reasoningChoicesJson;
+  }
+  return { providerConfig };
 }
 
 export function buildAddModelRequest(modelId: string, provider: FoundryModelProviderLabel): AddModelRequest {
@@ -284,7 +294,7 @@ export function buildAddModelRequest(modelId: string, provider: FoundryModelProv
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 
@@ -298,7 +308,7 @@ export function buildAddGeminiModelRequest(modelId: string): AddModelRequest {
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 
@@ -312,7 +322,7 @@ export function buildAddOpenAiModelRequest(modelId: string, provider: OpenAiMode
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 
@@ -326,7 +336,7 @@ export function buildAddHuggingFaceModelRequest(modelId: string): AddModelReques
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 
@@ -340,7 +350,7 @@ export function buildAddOpenRouterModelRequest(modelId: string): AddModelRequest
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 

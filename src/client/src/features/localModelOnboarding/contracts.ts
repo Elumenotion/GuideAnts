@@ -5,7 +5,6 @@ export type LocalModelOnboardingSource = 'huggingface' | 'existingAlias' | 'cura
 
 export interface LocalModelOnboardingDraft {
   installSource: LocalModelOnboardingSource;
-  runtimeProfileId: string;
   routerModelId: string;
   huggingFaceRepository: string;
   huggingFaceResolvedRevision: string;
@@ -21,6 +20,12 @@ export interface LocalModelOnboardingDraft {
   catalogDescription?: string;
   catalogDisplayOrder?: string;
   catalogIsActive?: boolean;
+  samplingParametersJson: string;
+  reasoningChoicesJson: string;
+  thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson: string;
+  combineSystemAndDeveloperMessages: boolean;
+  thoughtBlockPattern: string;
 }
 
 export type LocalModelOnboardingStatus =

@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   HUGGINGFACE_CHAT_MODEL_PROVIDER_ID,
   HUGGINGFACE_DEFAULT_CHAT_MODEL_ID,
-  HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
+  HUGGINGFACE_DEFAULT_PARAMETER_SURFACE_SEED,
   HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS,
   HUGGINGFACE_SECTION,
   HUGGINGFACE_SERVICE_PROVIDER_IDS,
   OPENROUTER_CHAT_MODEL_PROVIDER_ID,
   OPENROUTER_DEFAULT_CHAT_MODEL_ID,
-  OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID,
+  OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED,
   OPENROUTER_OPTIONAL_SERVICE_DEFAULTS,
   OPENROUTER_SECTION,
   OPENROUTER_SERVICE_PROVIDER_IDS,
@@ -42,8 +42,8 @@ describe('Add AI Services wizard Hugging Face constants', () => {
     expect(HUGGINGFACE_DEFAULT_CHAT_MODEL_ID).toBe('zai-org/GLM-5.2');
   });
 
-  it('defines hf default runtime profile id', () => {
-    expect(HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID).toBe('huggingface_chat_standard');
+  it('defines hf default parameter surface seed', () => {
+    expect(HUGGINGFACE_DEFAULT_PARAMETER_SURFACE_SEED).toBe('huggingface_chat_standard');
   });
 });
 
@@ -76,6 +76,6 @@ describe('Add AI Services wizard OpenRouter constants', () => {
 
   it('defines openrouter chat defaults', () => {
     expect(OPENROUTER_DEFAULT_CHAT_MODEL_ID).toBe('minimax/minimax-m3');
-    expect(OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID).toBe('openai_chat_standard');
+    expect(OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED).toBe('openai_chat_standard');
   });
 });

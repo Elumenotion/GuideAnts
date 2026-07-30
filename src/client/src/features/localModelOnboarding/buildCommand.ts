@@ -1,6 +1,7 @@
 import type { AddModelRequest } from '../../types/settings';
 import type { LocalModelOnboardingDraft } from './contracts';
 import { presetRecordFromRows } from './routerPreset';
+import { normalizeParameterSurface } from '../../pages/settings/parameterSurface';
 
 export interface LocalModelOnboardingDefaultOptions {
   defaultCatalogModelId: string;
@@ -63,6 +64,46 @@ function isExplicitCustomInstall(draft: LocalModelOnboardingDraft): boolean {
     && draft.huggingFaceRouterPresetRows.some((row) => row.key.trim().length > 0);
 }
 
+function buildModelChatBehaviorProviderConfig(draft: LocalModelOnboardingDraft): Record<string, unknown> {
+  const parameterSurface = normalizeParameterSurface({
+    samplingParametersJson: draft.samplingParametersJson,
+    reasoningChoicesJson: draft.reasoningChoicesJson,
+  });
+  const thinkingControlJson = draft.thinkingControlJson.trim() || '{}';
+  const requestFieldsWhenToolsPresentJson = draft.requestFieldsWhenToolsPresentJson.trim() || '{}';
+  for (const [label, json] of [
+    ['Thinking control JSON', thinkingControlJson],
+    ['Extra request fields JSON', requestFieldsWhenToolsPresentJson],
+  ] as const) {
+    try {
+      const parsed = JSON.parse(json) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`${label} must be a JSON object.`);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('must be')) {
+        throw error;
+      }
+      throw new Error(`${label} must be valid JSON.`);
+    }
+  }
+
+  const providerConfig: Record<string, unknown> = {
+    samplingParametersJson: parameterSurface.samplingParametersJson,
+    thinkingControlJson,
+    requestFieldsWhenToolsPresentJson,
+    combineSystemAndDeveloperMessages: draft.combineSystemAndDeveloperMessages,
+  };
+  if (parameterSurface.reasoningChoicesJson) {
+    providerConfig.reasoningChoicesJson = parameterSurface.reasoningChoicesJson;
+  }
+  const thoughtBlockPattern = draft.thoughtBlockPattern.trim();
+  if (thoughtBlockPattern) {
+    providerConfig.thoughtBlockPattern = thoughtBlockPattern;
+  }
+  return providerConfig;
+}
+
 export function buildLocalModelOnboardingRequest(
   draft: LocalModelOnboardingDraft,
   options?: {
@@ -73,11 +114,6 @@ export function buildLocalModelOnboardingRequest(
     defaultCatalogIsActive?: boolean;
   }
 ): AddModelRequest {
-  const runtimeProfileId = draft.runtimeProfileId.trim();
-  if (!runtimeProfileId) {
-    throw new Error('Runtime profile is required for llama-cpp.');
-  }
-
   const source = draft.installSource;
   const resolvedDefaults = resolveLocalModelOnboardingDefaults(draft);
   const fallbackCatalogModelId = (
@@ -96,6 +132,14 @@ export function buildLocalModelOnboardingRequest(
     throw new Error('Catalog display name is required.');
   }
 
+  const chatBehavior = buildModelChatBehaviorProviderConfig(draft);
+  const providerConfig: Record<string, unknown> = {
+    ...chatBehavior,
+  };
+  if (options?.onboardingUi) {
+    providerConfig.onboardingUi = options.onboardingUi;
+  }
+
   const request: AddModelRequest = {
     provider: 'llama-cpp',
     catalog: {
@@ -105,11 +149,7 @@ export function buildLocalModelOnboardingRequest(
       displayOrder: normalizeDisplayOrder(draft.catalogDisplayOrder),
       isActive: draft.catalogIsActive ?? options?.defaultCatalogIsActive ?? true,
     },
-    providerConfig: options?.onboardingUi
-      ? {
-          onboardingUi: options.onboardingUi,
-        }
-      : undefined,
+    providerConfig,
   };
 
   if (source === 'existingAlias') {
@@ -121,7 +161,6 @@ export function buildLocalModelOnboardingRequest(
     request.install = {
       source: 'existingAlias',
       routerModelId: alias,
-      runtimeProfileId,
       existingAlias: { routerModelId: alias },
     };
     return request;
@@ -155,7 +194,6 @@ export function buildLocalModelOnboardingRequest(
     request.install = {
       source: 'huggingface',
       routerModelId,
-      runtimeProfileId,
       presetMode: draft.huggingFacePresetMode,
       huggingFace: {
         repository,
@@ -171,5 +209,7 @@ export function buildLocalModelOnboardingRequest(
     return request;
   }
 
-  throw new Error('Complete custom Hugging Face fields: revision, artifact group, alias preset, profile, and alias.');
+  throw new Error(
+    'Complete custom Hugging Face fields: revision, artifact group, alias preset, alias, and model chat behavior.'
+  );
 }

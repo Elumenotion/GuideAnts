@@ -81,18 +81,8 @@ public static class SettingsModelsEndpoints
                     chatTargetValidator,
                     cancellationToken).ConfigureAwait(false);
 
-                var cloudReasoningChoicesJson = await SettingsModelOnboardingSupport.DeriveCloudReasoningChoicesJsonAsync(
-                    runtimeProfileResolver,
-                    request,
-                    cancellationToken).ConfigureAwait(false);
-
                 var created = await settingsService.CreateModelAsync(
-                    await SettingsModelOnboardingSupport.BuildCloudModelCreateRequestAsync(
-                        request,
-                        cloudReasoningChoicesJson,
-                        runtimeConfigJson: SettingsModelOnboardingSupport.BuildCloudRuntimeConfigJson(request),
-                        runtimeProfileResolver,
-                        cancellationToken).ConfigureAwait(false),
+                    SettingsModelOnboardingSupport.BuildCloudModelCreateRequest(request),
                     cancellationToken).ConfigureAwait(false);
 
                 return Results.Ok(new AddModelResponse(

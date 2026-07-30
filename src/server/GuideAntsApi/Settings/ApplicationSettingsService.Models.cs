@@ -136,11 +136,50 @@ public sealed partial class ApplicationSettingsService
     {
         if (!string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
         {
-            return string.IsNullOrWhiteSpace(runtimeConfigJson) ? null : runtimeConfigJson.Trim();
+            if (string.IsNullOrWhiteSpace(runtimeConfigJson))
+            {
+                return null;
+            }
+
+            if (ContainsRuntimeProfilePointer(runtimeConfigJson))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelId}' cannot persist runtimeProfileId for provider '{provider}'. Configure SamplingParametersJson and ReasoningChoicesJson on the model row instead.");
+            }
+
+            return runtimeConfigJson.Trim();
         }
 
         var parsed = LocalRuntimeConfigurationParser.ParseRequired(modelId, runtimeConfigJson);
         return LocalRuntimeConfigurationParser.SerializeCanonical(parsed);
+    }
+
+    private static bool ContainsRuntimeProfilePointer(string runtimeConfigJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(runtimeConfigJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (property.Name.Equals("runtimeProfileId", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(property.Value.GetString()))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return false;
     }
 
     private static void ValidateLlamaBehavior(string modelId, string provider, string thinkingControlJson)

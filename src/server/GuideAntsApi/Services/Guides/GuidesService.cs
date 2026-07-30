@@ -1302,21 +1302,22 @@ public class GuidesService(
                 string.IsNullOrWhiteSpace(samplingParametersJson) ? null : samplingParametersJson);
         }
 
-        var catalogProfile = await TryResolveCatalogRuntimeProfileAsync(model);
-        if (catalogProfile != null)
+        float? normalizedTemperature = temperature;
+        double? normalizedTopP = topP;
+        string? normalizedSamplingParametersJson =
+            string.IsNullOrWhiteSpace(samplingParametersJson) ? null : samplingParametersJson;
+
+        if (ModelChatBehavior.HasRowOwnedSamplingSurface(model))
         {
-            ValidateSamplingParameters(model.ModelId, catalogProfile, temperature, topP, samplingOverrides);
-
-            if (!string.IsNullOrWhiteSpace(reasoningEffort))
-            {
-                ValidateReasoningEffortChoice(model.ModelId, model.ReasoningChoicesJson, catalogProfile, reasoningEffort);
-            }
-
-            return new NormalizedModelParameters(
-                temperature,
-                topP,
-                NormalizeReasoningEffort(reasoningEffort),
-                string.IsNullOrWhiteSpace(samplingParametersJson) ? null : samplingParametersJson);
+            var profile = ModelChatBehavior.ToRowOwnedSamplingProfile(model);
+            ValidateSamplingParameters(model.ModelId, profile, temperature, topP, samplingOverrides);
+        }
+        else
+        {
+            // Empty/missing row surface: guide rows must not keep sampling values they cannot declare.
+            normalizedTemperature = null;
+            normalizedTopP = null;
+            normalizedSamplingParametersJson = null;
         }
 
         if (!string.IsNullOrWhiteSpace(reasoningEffort))
@@ -1325,37 +1326,10 @@ public class GuidesService(
         }
 
         return new NormalizedModelParameters(
-            Temperature: null,
-            TopP: null,
-            ReasoningEffort: NormalizeReasoningEffort(reasoningEffort),
-            SamplingParametersJson: null);
-    }
-
-    private async Task<RuntimeProfileData?> TryResolveCatalogRuntimeProfileAsync(Model model)
-    {
-        if (string.IsNullOrWhiteSpace(model.RuntimeConfigJson))
-        {
-            return null;
-        }
-
-        ModelRuntimeConfigDto? runtimeConfig;
-        try
-        {
-            runtimeConfig = JsonSerializer.Deserialize<ModelRuntimeConfigDto>(
-                model.RuntimeConfigJson,
-                JsonCaseInsensitiveOptions);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(runtimeConfig?.RuntimeProfileId))
-        {
-            return null;
-        }
-
-        return await _runtimeProfileResolver.ResolveAsync(runtimeConfig.RuntimeProfileId);
+            normalizedTemperature,
+            normalizedTopP,
+            NormalizeReasoningEffort(reasoningEffort),
+            normalizedSamplingParametersJson);
     }
 
     private static string? NormalizeReasoningEffort(string? reasoningEffort)

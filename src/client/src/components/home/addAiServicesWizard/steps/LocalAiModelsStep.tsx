@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FaCheck, FaRedo, FaSpinner, FaTimes } from 'react-icons/fa';
-import type { AddModelErrorDto, LlamaRuntimeInventoryItemDto, SettingsModelDto, SettingsRuntimeProfileDto } from '../../../../types/settings';
+import type { AddModelErrorDto, LlamaRuntimeInventoryItemDto, SettingsModelDto } from '../../../../types/settings';
 import type { AddModelWizardState } from '../../../../pages/settings/types';
+import { createEmptyAddModelWizardState } from '../../../../pages/settings/utils';
 import type { LocalAiInstallFormData } from '../useLocalAiWizardState';
 import type { LocalAiModelDraft } from '../types';
 import {
@@ -93,8 +94,6 @@ export function DraftProgress({ draft }: { draft: LocalAiModelDraft }) {
 interface LocalAiModelsStepProps {
   draftModels: LocalAiModelDraft[];
   existingModels: SettingsModelDto[];
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
   inventoryLoading: boolean;
   installError: string | null;
@@ -113,8 +112,6 @@ interface LocalAiModelsStepProps {
 export function LocalAiModelsStep({
   draftModels,
   existingModels,
-  profiles,
-  profilesLoading,
   inventory,
   inventoryLoading,
   installError,
@@ -124,26 +121,7 @@ export function LocalAiModelsStep({
   onRemoveDraft,
 }: LocalAiModelsStepProps) {
   const [onboardingMode, setOnboardingMode] = useState<LocalModelOnboardingMode>('curated');
-  const [advancedForm, setAdvancedForm] = useState<AddModelWizardState>({
-    provider: 'llama-cpp',
-    catalogModelId: '',
-    catalogDisplayName: '',
-    catalogDescription: '',
-    catalogDisplayOrder: '',
-    catalogIsActive: true,
-    runtimeProfileId: '',
-    llamaInstallSource: 'huggingface',
-    llamaRouterModelId: '',
-    llamaHuggingFaceRepository: '',
-    llamaHuggingFaceResolvedRevision: '',
-    llamaHuggingFaceArtifactGroupId: '',
-    llamaHuggingFaceModelFiles: [],
-    llamaHuggingFaceMmprojFiles: [],
-    llamaHuggingFaceTargetDirectory: '',
-    llamaHuggingFaceRouterPresetRows: [],
-    llamaHuggingFacePresetMode: 'replace',
-    llamaExistingAliasRouterModelId: '',
-  });
+  const [advancedForm, setAdvancedForm] = useState<AddModelWizardState>(() => createEmptyAddModelWizardState('llama-cpp'));
 
   const totalInstalled = existingModels.length + draftModels.filter((d) => d.asyncStatus === 'completed').length;
   const hasInflightInstall = draftModels.some((d) => isLocalModelOnboardingInFlight(d.asyncStatus));
@@ -180,24 +158,8 @@ export function LocalAiModelsStep({
 
   const resetForm = () => {
     setAdvancedForm({
-      provider: 'llama-cpp',
-      catalogModelId: '',
-      catalogDisplayName: '',
-      catalogDescription: '',
-      catalogDisplayOrder: '',
-      catalogIsActive: true,
-      runtimeProfileId: '',
+      ...createEmptyAddModelWizardState('llama-cpp'),
       llamaInstallSource: advancedInstallSource,
-      llamaRouterModelId: '',
-      llamaHuggingFaceRepository: '',
-      llamaHuggingFaceResolvedRevision: '',
-      llamaHuggingFaceArtifactGroupId: '',
-      llamaHuggingFaceModelFiles: [],
-      llamaHuggingFaceMmprojFiles: [],
-      llamaHuggingFaceTargetDirectory: '',
-      llamaHuggingFaceRouterPresetRows: [],
-      llamaHuggingFacePresetMode: 'replace',
-      llamaExistingAliasRouterModelId: '',
     });
     setSetAsGlobalDefault(false);
   };
@@ -209,13 +171,15 @@ export function LocalAiModelsStep({
       setOnboardingMode(draft.installSource === 'existingAlias' ? 'existingAlias' : 'custom');
     }
     setAdvancedForm({
-      provider: 'llama-cpp',
+      ...createEmptyAddModelWizardState('llama-cpp'),
       catalogModelId: draft.catalogModelId,
       catalogDisplayName: draft.catalogDisplayName,
-      catalogDescription: '',
-      catalogDisplayOrder: '',
-      catalogIsActive: true,
-      runtimeProfileId: draft.runtimeProfileId,
+      samplingParametersJson: draft.samplingParametersJson,
+      reasoningChoicesJson: draft.reasoningChoicesJson,
+      thinkingControlJson: draft.thinkingControlJson,
+      requestFieldsWhenToolsPresentJson: draft.requestFieldsWhenToolsPresentJson,
+      combineSystemAndDeveloperMessages: draft.combineSystemAndDeveloperMessages,
+      thoughtBlockPattern: draft.thoughtBlockPattern,
       llamaInstallSource: draft.installSource === 'existingAlias' ? 'existingAlias' : 'huggingface',
       llamaRouterModelId: draft.routerModelId,
       llamaHuggingFaceRepository: draft.huggingFaceRepository,
@@ -242,7 +206,12 @@ export function LocalAiModelsStep({
       routerModelId: advancedInstallSource === 'existingAlias'
         ? advancedForm.llamaExistingAliasRouterModelId
         : advancedForm.llamaRouterModelId,
-      runtimeProfileId: advancedForm.runtimeProfileId,
+      samplingParametersJson: advancedForm.samplingParametersJson,
+      reasoningChoicesJson: advancedForm.reasoningChoicesJson,
+      thinkingControlJson: advancedForm.thinkingControlJson,
+      requestFieldsWhenToolsPresentJson: advancedForm.requestFieldsWhenToolsPresentJson,
+      combineSystemAndDeveloperMessages: advancedForm.combineSystemAndDeveloperMessages,
+      thoughtBlockPattern: advancedForm.thoughtBlockPattern,
       huggingFaceRepository: advancedForm.llamaHuggingFaceRepository,
       huggingFaceResolvedRevision: advancedForm.llamaHuggingFaceResolvedRevision,
       huggingFaceArtifactGroupId: advancedForm.llamaHuggingFaceArtifactGroupId,
@@ -271,8 +240,6 @@ export function LocalAiModelsStep({
         <AttachAliasOnboardingForm
           value={advancedForm}
           onChange={patchAdvancedForm}
-          profiles={profiles}
-          profilesLoading={profilesLoading}
           inventory={inventory}
           inventoryError={llamaUnavailable ? 'No local llama server is configured.' : null}
         />
@@ -280,8 +247,6 @@ export function LocalAiModelsStep({
         <CustomHfOnboardingForm
           value={advancedForm}
           onChange={patchAdvancedForm}
-          profiles={profiles}
-          profilesLoading={profilesLoading}
           inventory={inventory}
         />
       )}
@@ -330,8 +295,6 @@ export function LocalAiModelsStep({
     isFirstModel,
     llamaUnavailable,
     onboardingMode,
-    profiles,
-    profilesLoading,
     setAsGlobalDefault,
     submitting,
   ]);
@@ -342,7 +305,7 @@ export function LocalAiModelsStep({
         <h3 className="text-sm font-semibold text-gray-900">Local Chat Models</h3>
         <p className="mt-1 text-sm text-gray-600">
           Install llama-cpp models from Hugging Face or attach existing runtime aliases. Each model requires
-          a runtime profile that controls sampling and reasoning parameters.
+          model-level sampling and reasoning settings.
         </p>
       </div>
 
@@ -407,8 +370,6 @@ export function LocalAiModelsStep({
         mode={onboardingMode}
         onModeChange={setOnboardingMode}
         onboardingUi="wizard"
-        profiles={profiles}
-        profilesLoading={profilesLoading}
         inventory={inventory}
         inventoryError={llamaUnavailable ? 'No local llama server is configured.' : null}
         onCuratedOperationStarted={(operationId, meta) => {

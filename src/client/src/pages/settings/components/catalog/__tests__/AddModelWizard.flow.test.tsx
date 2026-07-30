@@ -52,14 +52,8 @@ function catalogInputs() {
 const baseProps = {
   isOpen: true,
   providerPreselect: null as string | null,
-  profiles: [{ profileId: 'p1', displayName: 'Default', providers: ['openai-chat'] }],
-  profilesLoading: false,
   inventory: [],
   onClose: vi.fn(),
-  onCreateRuntimeProfileTemplate: vi.fn(async () => {}),
-  onCreateCustomRuntimeProfile: vi.fn(async () => {
-    throw new Error('not used');
-  }),
   onCatalogChanged: vi.fn(async () => {}),
   onSetActiveAddOperation: vi.fn(),
 };
@@ -380,15 +374,13 @@ describe('AddModelWizard flow', () => {
     });
   });
 
-  it('shows runtime profile selector and no-profiles message on provider config step', async () => {
+  it('shows model chat behavior controls on provider config step', async () => {
     const user = userEvent.setup();
 
     render(
       <AddModelWizard
         {...baseProps}
         providerPreselect="openai-chat"
-        profiles={[]}
-        profilesLoading={false}
       />
     );
 
@@ -398,8 +390,7 @@ describe('AddModelWizard flow', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(screen.getByText(/3 of 5 - Provider configuration/)).toBeInTheDocument();
-    expect(document.body.textContent).toMatch(/No profiles defined for openai-chat/);
-    expect(screen.getByText(/Assigns sampling parameter controls/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sampling Parameters JSON/i)).toBeInTheDocument();
   });
 
   it('edits optional catalog metadata fields', async () => {
@@ -423,12 +414,7 @@ describe('AddModelWizard flow', () => {
   it('renders google gemini provider configuration copy', async () => {
     const user = userEvent.setup();
 
-    render(
-      <AddModelWizard
-        {...baseProps}
-        profiles={[{ profileId: 'p1', displayName: 'Gemini', providers: ['google-gemini-chat'] }]}
-      />
-    );
+    render(<AddModelWizard {...baseProps} />);
 
     await user.selectOptions(screen.getByRole('combobox'), 'google-gemini-chat');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -448,7 +434,6 @@ describe('AddModelWizard flow', () => {
       <AddModelWizard
         {...baseProps}
         providerPreselect="llama-cpp"
-        profiles={[{ profileId: 'p1', displayName: 'Local', providers: ['llama-cpp'] }]}
       />
     );
 
@@ -461,35 +446,10 @@ describe('AddModelWizard flow', () => {
     expect(screen.getByText('huggingface')).toBeInTheDocument();
   });
 
-  it('shows loading profiles placeholder on provider config step', async () => {
-    const user = userEvent.setup();
-
-    render(
-      <AddModelWizard
-        {...baseProps}
-        providerPreselect="openai-chat"
-        profiles={[]}
-        profilesLoading
-      />
-    );
-
-    const { modelId, displayName } = catalogInputs();
-    await user.type(modelId, 'loading-profile-model');
-    await user.type(displayName, 'Loading Profile');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-
-    expect(screen.getByText(/Loading profiles/i)).toBeInTheDocument();
-  });
-
   it('renders anthropic provider configuration fields', async () => {
     const user = userEvent.setup();
 
-    render(
-      <AddModelWizard
-        {...baseProps}
-        profiles={[{ profileId: 'p1', displayName: 'Default', providers: ['anthropic'] }]}
-      />
-    );
+    render(<AddModelWizard {...baseProps} />);
 
     await user.selectOptions(screen.getByRole('combobox'), 'anthropic');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -500,7 +460,7 @@ describe('AddModelWizard flow', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(screen.getByText(/3 of 5 - Provider configuration/)).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /Default \(p1\)/i })).toBeInTheDocument();
+    expect(screen.getByText(/Sampling Parameters JSON/i)).toBeInTheDocument();
   });
 
   it('closes the wizard from the progress step footer', async () => {

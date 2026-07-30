@@ -1,5 +1,6 @@
 using FluentAssertions;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.LlamaCpp;
@@ -21,13 +22,11 @@ public class LocalModelOnboardingOrchestratorTests
         var settingsService = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
         var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>(MockBehavior.Strict);
         var downloadService = new Mock<IHuggingFaceModelDownloadService>(MockBehavior.Strict);
-
-        runtimeProfileResolver
-            .Setup(x => x.ResolveAsync("qwen3_6", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateRuntimeProfile());
+        CreateSettingsModelRequest? createRequest = null;
 
         settingsService
             .Setup(x => x.CreateModelAsync(It.IsAny<CreateSettingsModelRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateSettingsModelRequest, CancellationToken>((request, _) => createRequest = request)
             .ReturnsAsync(new SettingsModelDto(
                 ModelId: "qwen-local",
                 DisplayName: "Qwen Local",
@@ -73,6 +72,9 @@ public class LocalModelOnboardingOrchestratorTests
         result.AddOperation.Kind.Should().Be("sync");
         result.AddOperation.Status.Should().Be("completed");
         settingsService.Verify(x => x.CreateModelAsync(It.IsAny<CreateSettingsModelRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        runtimeProfileResolver.Verify(x => x.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        createRequest!.ThinkingControlJson.Should().Be("""{"defaultChoice":"medium","choiceActions":{}}""");
+        createRequest.CombineSystemAndDeveloperMessages.Should().BeFalse();
         downloadService.Verify(x => x.StartDownloadAsync(It.IsAny<StartModelDownloadRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         (await db.LocalModelInstallations.CountAsync()).Should().Be(1);
     }
@@ -245,11 +247,13 @@ public class LocalModelOnboardingOrchestratorTests
                 Description: null,
                 DisplayOrder: null,
                 IsActive: true),
-            ProviderConfig: null,
+            ProviderConfig: CreateRowOwnedChatBehavior(),
             Install: new AddModelInstallDto(
                 Source: source,
                 RouterModelId: "qwen-local",
-                RuntimeProfileId: "qwen3_6",
+                RuntimeProfileId: string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
+                    ? "qwen3_6"
+                    : null,
                 HuggingFace: string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
                     ? new AddModelInstallHuggingFaceDto(
                         Repository: "unsloth/Qwen3.6-9B-GGUF",
@@ -261,4 +265,7 @@ public class LocalModelOnboardingOrchestratorTests
                     ? new AddModelInstallExistingAliasDto("qwen-local")
                     : null));
     }
+
+    private static JsonObject CreateRowOwnedChatBehavior() =>
+        JsonNode.Parse("""{"samplingParametersJson":"{}","thinkingControlJson":"{\"defaultChoice\":\"medium\",\"choiceActions\":{}}","requestFieldsWhenToolsPresentJson":"{}","combineSystemAndDeveloperMessages":false}""")!.AsObject();
 }

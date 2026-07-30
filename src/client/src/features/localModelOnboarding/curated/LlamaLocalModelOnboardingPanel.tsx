@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { CreateRuntimeProfileRequest, LlamaRuntimeInventoryItemDto, SettingsRuntimeProfileDto } from '../../../types/settings';
+import type { LlamaRuntimeInventoryItemDto } from '../../../types/settings';
 import type { AddModelWizardState } from '../../../pages/settings/types';
 import { LlamaCppAddForm } from '../../../pages/settings/components/catalog/providers/LlamaCppForm';
 import { LlamaCuratedOnboardingFlow } from './LlamaCuratedOnboardingFlow';
@@ -12,12 +12,8 @@ export interface LlamaLocalModelOnboardingPanelProps {
   onboardingUi: 'settings' | 'wizard';
   settingsValue?: AddModelWizardState;
   onSettingsChange?: (updates: Partial<AddModelWizardState>) => void;
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
   inventoryError?: string | null;
-  onCreateRuntimeProfile?: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => Promise<void>;
-  onCreateCustomRuntimeProfile?: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>;
   advancedForm?: ReactNode;
   onCuratedStepChange?: (step: string) => void;
   onCuratedOperationStarted?: (operationId: string, meta: {
@@ -38,8 +34,6 @@ export function LlamaLocalModelOnboardingPanel({
   onboardingUi,
   settingsValue,
   onSettingsChange,
-  profiles,
-  profilesLoading,
   inventory,
   inventoryError,
   advancedForm,
@@ -78,8 +72,6 @@ export function LlamaLocalModelOnboardingPanel({
             llamaInstallSource: mode === 'existingAlias' ? 'existingAlias' : 'huggingface',
           }}
           onChange={(updates) => onSettingsChange(updates)}
-          profiles={profiles}
-          profilesLoading={profilesLoading}
           inventory={inventory}
           inventoryError={inventoryError}
         />

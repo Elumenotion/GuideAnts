@@ -225,16 +225,6 @@ describe('LocalAiModelsStep', () => {
   const defaultProps = {
     draftModels: [],
     existingModels: [],
-    profiles: [{
-      profileId: 'default',
-      displayName: 'Default',
-      combineSystemAndDeveloperMessages: false,
-      samplingParametersJson: '{}',
-      thinkingControlJson: '{}',
-      providers: ['llama-cpp'],
-      created: '2026-01-01T00:00:00Z',
-    }],
-    profilesLoading: false,
     inventory: [defaultInventoryItem],
     inventoryLoading: false,
     installError: null,
@@ -285,7 +275,6 @@ describe('LocalAiModelsStep', () => {
     render(<LocalAiModelsStep {...defaultProps} />);
     openAdvancedCustom();
 
-    fireEvent.change(selectContainingOption(/Default/), { target: { value: 'default' } });
     fireEvent.change(textboxAfterLabel('Catalog model ID'), { target: { value: 'qwen3-9b' } });
     fireEvent.change(textboxAfterLabel('Router alias'), { target: { value: 'qwen3-9b' } });
     fireEvent.change(screen.getByTestId('repo-input'), { target: { value: 'Qwen/Qwen3-9B' } });
@@ -302,7 +291,12 @@ describe('LocalAiModelsStep', () => {
         expect.objectContaining({
           installSource: 'huggingface',
           routerModelId: 'qwen3-9b',
-          runtimeProfileId: 'default',
+          samplingParametersJson: '{}',
+          reasoningChoicesJson: '',
+          thinkingControlJson: '{}',
+          requestFieldsWhenToolsPresentJson: '{}',
+          combineSystemAndDeveloperMessages: true,
+          thoughtBlockPattern: '',
           huggingFaceRepository: 'Qwen/Qwen3-9B',
           huggingFaceResolvedRevision: 'rev-1',
           huggingFaceModelFiles: ['Qwen3-9B-Q5_K_M.gguf'],
@@ -360,7 +354,6 @@ describe('LocalAiModelsStep', () => {
     );
 
     openAdvancedAttach();
-    fireEvent.change(selectContainingOption(/Default/), { target: { value: 'default' } });
     fireEvent.change(selectContainingOption('alias-1'), { target: { value: 'alias-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Install model' }));
 
@@ -416,12 +409,11 @@ describe('LocalAiModelsStep', () => {
     );
 
     openAdvancedCustom();
-    const checkbox = screen.getByRole('checkbox');
+    const checkbox = screen.getByRole('checkbox', { name: /set as global default chat model/i });
     expect(checkbox).not.toBeChecked();
     await user.click(checkbox);
     expect(checkbox).toBeChecked();
 
-    fireEvent.change(selectContainingOption(/Default/), { target: { value: 'default' } });
     fireEvent.change(textboxAfterLabel('Catalog model ID'), { target: { value: 'another-model' } });
     fireEvent.change(textboxAfterLabel('Router alias'), { target: { value: 'another-model' } });
     fireEvent.change(screen.getByTestId('repo-input'), { target: { value: 'Qwen/Qwen3-9B' } });

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GuideAntsApi.Models.Settings;
 
 namespace GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
@@ -30,6 +31,13 @@ public sealed record LocalModelOnboardingCommand(
     int? CatalogDisplayOrder,
     bool CatalogIsActive,
     string RuntimeProfileId,
+    string SamplingParametersJson,
+    string? ReasoningChoicesJson,
+    string ThinkingControlJson,
+    string RequestFieldsWhenToolsPresentJson,
+    bool CombineSystemAndDeveloperMessages,
+    string? ThoughtBlockPattern,
+    bool HasProviderConfigChatBehavior,
     string RouterModelId,
     string InstallSource,
     string? Repository,
@@ -75,6 +83,16 @@ public sealed record LocalModelOnboardingCommand(
 
         var routerModelId = (install.RouterModelId ?? string.Empty).Trim();
         var runtimeProfileId = (install.RuntimeProfileId ?? string.Empty).Trim();
+        var providerConfig = request.ProviderConfig;
+        var samplingParametersJson = GetProviderConfigString(providerConfig, "samplingParametersJson") ?? "{}";
+        var reasoningChoicesJson = GetProviderConfigString(providerConfig, "reasoningChoicesJson");
+        var thinkingControlJson = GetProviderConfigString(providerConfig, "thinkingControlJson") ?? "{}";
+        var requestFieldsWhenToolsPresentJson = GetProviderConfigString(providerConfig, "requestFieldsWhenToolsPresentJson") ?? "{}";
+        var combineSystemAndDeveloperMessages = GetProviderConfigBoolean(
+            providerConfig,
+            "combineSystemAndDeveloperMessages") ?? true;
+        var thoughtBlockPattern = GetProviderConfigString(providerConfig, "thoughtBlockPattern");
+        var hasProviderConfigChatBehavior = providerConfig?.ContainsKey("thinkingControlJson") == true;
 
         string? repository = null;
         string? quantIncludePattern = null;
@@ -115,6 +133,13 @@ public sealed record LocalModelOnboardingCommand(
             CatalogDisplayOrder: request.Catalog.DisplayOrder,
             CatalogIsActive: request.Catalog.IsActive,
             RuntimeProfileId: runtimeProfileId,
+            SamplingParametersJson: samplingParametersJson,
+            ReasoningChoicesJson: reasoningChoicesJson,
+            ThinkingControlJson: thinkingControlJson,
+            RequestFieldsWhenToolsPresentJson: requestFieldsWhenToolsPresentJson,
+            CombineSystemAndDeveloperMessages: combineSystemAndDeveloperMessages,
+            ThoughtBlockPattern: thoughtBlockPattern,
+            HasProviderConfigChatBehavior: hasProviderConfigChatBehavior,
             RouterModelId: routerModelId,
             InstallSource: source,
             Repository: repository,
@@ -125,14 +150,23 @@ public sealed record LocalModelOnboardingCommand(
             RouterCacheRamMib: install.RouterCacheRamMib,
             Curated: curated,
             ExplicitHuggingFace: explicitHuggingFace,
-            OnboardingUi: request.ProviderConfig is null
-                ? null
-                : GetProviderConfigString(request.ProviderConfig, "onboardingUi")?.Trim());
+            OnboardingUi: GetProviderConfigString(providerConfig, "onboardingUi")?.Trim());
     }
 
-    private static string? GetProviderConfigString(System.Text.Json.Nodes.JsonObject providerConfig, string propertyName)
+    public RuntimeProfileData ToRowOwnedRuntimeProfileData() =>
+        RuntimeProfileDataJson.FromJsonStrings(
+            CatalogModelId,
+            CombineSystemAndDeveloperMessages,
+            ThoughtBlockPattern,
+            SamplingParametersJson,
+            ThinkingControlJson,
+            RequestFieldsWhenToolsPresentJson,
+            CatalogDisplayName,
+            CatalogDescription);
+
+    private static string? GetProviderConfigString(JsonObject? providerConfig, string propertyName)
     {
-        if (!providerConfig.TryGetPropertyValue(propertyName, out var node) || node is null)
+        if (providerConfig?.TryGetPropertyValue(propertyName, out var node) != true || node is null)
         {
             return null;
         }
@@ -143,5 +177,15 @@ public sealed record LocalModelOnboardingCommand(
         }
 
         return null;
+    }
+
+    private static bool? GetProviderConfigBoolean(JsonObject? providerConfig, string propertyName)
+    {
+        if (providerConfig?.TryGetPropertyValue(propertyName, out var node) != true || node is not JsonValue value)
+        {
+            return null;
+        }
+
+        return value.TryGetValue<bool>(out var result) ? result : null;
     }
 }

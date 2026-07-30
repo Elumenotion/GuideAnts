@@ -39,7 +39,6 @@ describe('local onboarding cross-UI parity', () => {
     settings.catalogDisplayOrder = '3';
     settings.catalogIsActive = true;
     settings.llamaInstallSource = 'huggingface';
-    settings.runtimeProfileId = 'qwen3_6';
     settings.llamaRouterModelId = 'qwen3.6-local';
     settings.llamaHuggingFaceRepository = 'unsloth/Qwen3.6-9B-GGUF';
     settings.llamaHuggingFaceResolvedRevision = 'abc123def';
@@ -61,7 +60,12 @@ describe('local onboarding cross-UI parity', () => {
       setAsGlobalDefault: false,
       installSource: 'huggingface' as const,
       routerModelId: 'qwen3.6-local',
-      runtimeProfileId: 'qwen3_6',
+      samplingParametersJson: settings.samplingParametersJson,
+      reasoningChoicesJson: settings.reasoningChoicesJson,
+      thinkingControlJson: settings.thinkingControlJson,
+      requestFieldsWhenToolsPresentJson: settings.requestFieldsWhenToolsPresentJson,
+      combineSystemAndDeveloperMessages: settings.combineSystemAndDeveloperMessages,
+      thoughtBlockPattern: settings.thoughtBlockPattern,
       huggingFaceRepository: 'unsloth/Qwen3.6-9B-GGUF',
       huggingFaceResolvedRevision: 'abc123def',
       huggingFaceArtifactGroupId: 'q5-k-m-group',
@@ -85,7 +89,7 @@ describe('local onboarding cross-UI parity', () => {
         description: 'Local chat model',
         displayOrder: 3,
       },
-      providerConfig: { onboardingUi: 'settings' },
+      providerConfig: { ...fromWizard.providerConfig, onboardingUi: 'settings' },
     });
   });
 
@@ -95,7 +99,6 @@ describe('local onboarding cross-UI parity', () => {
     settings.catalogDisplayName = 'Qwen 3.6 Attached';
     settings.catalogIsActive = true;
     settings.llamaInstallSource = 'existingAlias';
-    settings.runtimeProfileId = 'qwen3_6';
     settings.llamaExistingAliasRouterModelId = 'qwen3.6-runtime';
 
     const wizard = {
@@ -109,7 +112,12 @@ describe('local onboarding cross-UI parity', () => {
       setAsGlobalDefault: false,
       installSource: 'existingAlias' as const,
       routerModelId: '',
-      runtimeProfileId: 'qwen3_6',
+      samplingParametersJson: settings.samplingParametersJson,
+      reasoningChoicesJson: settings.reasoningChoicesJson,
+      thinkingControlJson: settings.thinkingControlJson,
+      requestFieldsWhenToolsPresentJson: settings.requestFieldsWhenToolsPresentJson,
+      combineSystemAndDeveloperMessages: settings.combineSystemAndDeveloperMessages,
+      thoughtBlockPattern: settings.thoughtBlockPattern,
       huggingFaceRepository: '',
       huggingFaceResolvedRevision: '',
       huggingFaceArtifactGroupId: '',
@@ -127,7 +135,7 @@ describe('local onboarding cross-UI parity', () => {
     const fromWizard = buildLocalAiModelRequest(wizard);
     expect(fromSettings).toEqual({
       ...fromWizard,
-      providerConfig: { onboardingUi: 'settings' },
+      providerConfig: { ...fromWizard.providerConfig, onboardingUi: 'settings' },
     });
   });
 
@@ -137,7 +145,6 @@ describe('local onboarding cross-UI parity', () => {
     settings.catalogDisplayName = 'LLaVA Local';
     settings.catalogIsActive = true;
     settings.llamaInstallSource = 'huggingface';
-    settings.runtimeProfileId = 'qwen3_6';
     settings.llamaRouterModelId = 'llava-local';
     settings.llamaHuggingFaceRepository = 'lmstudio-community/llava-v1.6-gguf';
     settings.llamaHuggingFaceResolvedRevision = 'rev-mm';
@@ -159,7 +166,12 @@ describe('local onboarding cross-UI parity', () => {
       setAsGlobalDefault: false,
       installSource: 'huggingface' as const,
       routerModelId: 'llava-local',
-      runtimeProfileId: 'qwen3_6',
+      samplingParametersJson: settings.samplingParametersJson,
+      reasoningChoicesJson: settings.reasoningChoicesJson,
+      thinkingControlJson: settings.thinkingControlJson,
+      requestFieldsWhenToolsPresentJson: settings.requestFieldsWhenToolsPresentJson,
+      combineSystemAndDeveloperMessages: settings.combineSystemAndDeveloperMessages,
+      thoughtBlockPattern: settings.thoughtBlockPattern,
       huggingFaceRepository: 'lmstudio-community/llava-v1.6-gguf',
       huggingFaceResolvedRevision: 'rev-mm',
       huggingFaceArtifactGroupId: 'q4-group',
@@ -177,7 +189,7 @@ describe('local onboarding cross-UI parity', () => {
     const fromWizard = buildLocalAiModelRequest(wizard);
     expect(fromSettings).toEqual({
       ...fromWizard,
-      providerConfig: { onboardingUi: 'settings' },
+      providerConfig: { ...fromWizard.providerConfig, onboardingUi: 'settings' },
     });
   });
 });

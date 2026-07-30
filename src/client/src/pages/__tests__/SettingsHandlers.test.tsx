@@ -18,14 +18,10 @@ vi.mock('../../services/api', () => ({
     settings: {
       getSections: vi.fn(),
       getModels: vi.fn(),
-      getRuntimeProfiles: vi.fn(),
       getLlamaInventory: vi.fn(),
       deleteModel: vi.fn(),
-      deleteRuntimeProfile: vi.fn(),
       unloadLlamaModel: vi.fn(),
       deleteLlamaRouterEntry: vi.fn(),
-      createRuntimeProfile: vi.fn(),
-      updateRuntimeProfile: vi.fn(),
     },
   },
 }));
@@ -147,24 +143,10 @@ describe('Settings confirmation handlers', () => {
     vi.clearAllMocks();
     vi.mocked(api.settings.getSections).mockResolvedValue([]);
     vi.mocked(api.settings.getModels).mockResolvedValue([]);
-    vi.mocked(api.settings.getRuntimeProfiles).mockResolvedValue([]);
     vi.mocked(api.settings.getLlamaInventory).mockResolvedValue([]);
     vi.mocked(api.settings.deleteModel).mockResolvedValue(undefined as never);
-    vi.mocked(api.settings.deleteRuntimeProfile).mockResolvedValue(undefined as never);
     vi.mocked(api.settings.unloadLlamaModel).mockResolvedValue(undefined as never);
     vi.mocked(api.settings.deleteLlamaRouterEntry).mockResolvedValue(undefined as never);
-    vi.mocked(api.settings.createRuntimeProfile).mockResolvedValue({
-      profileId: 'custom-profile',
-      displayName: 'Custom Profile',
-      description: '',
-      providers: ['openai-chat'],
-      combineSystemAndDeveloperMessages: false,
-      thoughtBlockPattern: '',
-      samplingParametersJson: '{}',
-      thinkingControlJson: '{}',
-      created: '2026-01-01T00:00:00Z',
-      updated: '2026-01-02T00:00:00Z',
-    });
   });
 
   async function openModelsRuntime(user: ReturnType<typeof userEvent.setup>) {

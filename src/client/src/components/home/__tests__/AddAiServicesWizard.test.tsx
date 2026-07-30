@@ -20,7 +20,6 @@ vi.mock('../../../services/api', () => ({
       getSection: vi.fn(),
       updateSection: vi.fn(),
       addModel: vi.fn(),
-      getRuntimeProfiles: vi.fn(),
       getLlamaInventory: vi.fn(),
       getLlamaCatalog: vi.fn(),
       getLlamaCatalogQuants: vi.fn(),
@@ -373,17 +372,6 @@ describe('AddAiServicesWizard', () => {
     vi.mocked(api.settings.services.updateProviderFields).mockResolvedValue(undefined as never);
     vi.mocked(api.settings.services.updateActiveProvider).mockResolvedValue(undefined as never);
     vi.mocked(api.settings.warmupLocalAi).mockResolvedValue(undefined as never);
-    vi.mocked(api.settings.getRuntimeProfiles).mockResolvedValue([
-      {
-        profileId: 'qwen3_6',
-        displayName: 'Qwen 3.6',
-        providerKind: 'llama-cpp',
-        description: 'Test profile',
-        isDefault: true,
-        samplingParametersJson: null,
-        reasoningEffort: null,
-      },
-    ] as any);
     vi.mocked(api.settings.getLlamaInventory).mockResolvedValue([
       {
         routerModelId: 'qwen3-local',
@@ -967,20 +955,15 @@ describe('AddAiServicesWizard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
     await screen.findByRole('heading', { name: /Local Chat Models/i });
-    await waitFor(() => expect(api.settings.getRuntimeProfiles).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole('button', { name: /Attach existing alias/i }));
     await waitFor(() => {
       expect(screen.getByText(/Advanced install/i)).toBeInTheDocument();
     });
     const comboboxes = screen.getAllByRole('combobox');
-    const runtimeProfileSelect = comboboxes.find((select) =>
-      Array.from(select.querySelectorAll('option')).some((option) => option.textContent?.includes('qwen3_6'))
-    ) ?? comboboxes[0]!;
     const existingAliasSelect = comboboxes.find((select) =>
       Array.from(select.querySelectorAll('option')).some((option) => option.textContent?.includes('qwen3-local'))
-    ) ?? comboboxes[1]!;
-    fireEvent.change(runtimeProfileSelect, { target: { value: 'qwen3_6' } });
+    ) ?? comboboxes[0]!;
     fireEvent.change(existingAliasSelect, { target: { value: 'qwen3-local' } });
     fireEvent.click(screen.getByRole('button', { name: /Install model/i }));
 

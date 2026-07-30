@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Text.Json.Nodes;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.HuggingFace;
 using GuideAntsApi.Services.LlamaCpp;
@@ -157,11 +158,13 @@ public class LocalModelOnboardingValidatorTests
                 Description: "",
                 DisplayOrder: null,
                 IsActive: true),
-            ProviderConfig: null,
+            ProviderConfig: CreateRowOwnedChatBehavior(),
             Install: new AddModelInstallDto(
                 Source: source,
                 RouterModelId: alias,
-                RuntimeProfileId: "qwen3_6",
+                RuntimeProfileId: string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
+                    ? "qwen3_6"
+                    : null,
                 HuggingFace: string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
                     ? new AddModelInstallHuggingFaceDto(
                         Repository: "unsloth/Qwen3.6-9B-GGUF",
@@ -173,4 +176,7 @@ public class LocalModelOnboardingValidatorTests
                     ? new AddModelInstallExistingAliasDto(alias)
                     : null));
     }
+
+    private static JsonObject CreateRowOwnedChatBehavior() =>
+        JsonNode.Parse("""{"samplingParametersJson":"{}","thinkingControlJson":"{}","requestFieldsWhenToolsPresentJson":"{}","combineSystemAndDeveloperMessages":true}""")!.AsObject();
 }

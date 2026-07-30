@@ -1,7 +1,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import '@testing-library/jest-dom';
 import Settings from '../Settings';
@@ -18,9 +18,7 @@ vi.mock('../../services/api', () => ({
     settings: {
       getSections: vi.fn(),
       getModels: vi.fn(),
-      getRuntimeProfiles: vi.fn(),
       getLlamaInventory: vi.fn(),
-      createRuntimeProfile: vi.fn(),
     },
   },
 }));
@@ -78,30 +76,13 @@ vi.mock('../settings/components/catalog/AddModelWizard', () => ({
   AddModelWizard: ({
     isOpen,
     onClose,
-    onCreateCustomRuntimeProfile,
   }: {
     isOpen: boolean;
     onClose: () => void;
-    onCreateCustomRuntimeProfile: (request: {
-      profileId: string;
-      displayName: string;
-      description: string;
-    }) => Promise<unknown>;
   }) =>
     isOpen ? (
       <div>
-        <button
-          type="button"
-          onClick={() =>
-            void onCreateCustomRuntimeProfile({
-              profileId: 'wizard_profile',
-              displayName: 'Wizard Profile',
-              description: 'Created from wizard',
-            })
-          }
-        >
-          create-wizard-profile
-        </button>
+        <div>add-model-wizard</div>
         <button type="button" onClick={onClose}>
           close-wizard
         </button>
@@ -134,23 +115,10 @@ describe('Settings add-model wizard integration', () => {
     });
     vi.mocked(api.settings.getSections).mockResolvedValue([]);
     vi.mocked(api.settings.getModels).mockResolvedValue([]);
-    vi.mocked(api.settings.getRuntimeProfiles).mockResolvedValue([]);
     vi.mocked(api.settings.getLlamaInventory).mockResolvedValue([]);
-    vi.mocked(api.settings.createRuntimeProfile).mockResolvedValue({
-      profileId: 'wizard_profile',
-      displayName: 'Wizard Profile',
-      description: 'Created from wizard',
-      providers: [],
-      combineSystemAndDeveloperMessages: false,
-      thoughtBlockPattern: '',
-      samplingParametersJson: '{}',
-      thinkingControlJson: '{}',
-      created: '2026-01-01T00:00:00Z',
-      updated: '2026-01-02T00:00:00Z',
-    });
   });
 
-  it('creates runtime profiles from the add-model wizard and closes it', async () => {
+  it('opens and closes the add-model wizard from Models & Runtime', async () => {
     const user = userEvent.setup();
 
     render(
@@ -163,16 +131,10 @@ describe('Settings add-model wizard integration', () => {
 
     await user.click(screen.getByRole('button', { name: /Models & Runtime/i }));
     await user.click(screen.getByRole('button', { name: 'open-wizard' }));
-    await user.click(screen.getByRole('button', { name: 'create-wizard-profile' }));
 
-    await waitFor(() => {
-      expect(api.settings.createRuntimeProfile).toHaveBeenCalledWith(
-        expect.objectContaining({ profileId: 'wizard_profile' }),
-      );
-      expect(api.settings.getRuntimeProfiles).toHaveBeenCalledTimes(2);
-    });
+    expect(screen.getByText('add-model-wizard')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'close-wizard' }));
-    expect(screen.queryByRole('button', { name: 'create-wizard-profile' })).not.toBeInTheDocument();
+    expect(screen.queryByText('add-model-wizard')).not.toBeInTheDocument();
   });
 });

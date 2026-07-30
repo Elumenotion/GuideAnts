@@ -3,7 +3,6 @@ import { api } from '../../../services/api';
 import type {
   AddModelErrorDto,
   LlamaRuntimeInventoryItemDto,
-  SettingsRuntimeProfileDto,
 } from '../../../types/settings';
 import {
   HUGGINGFACE_SECTION,
@@ -116,7 +115,12 @@ export type LocalAiInstallFormData = Pick<
   LocalAiModelDraft,
   | 'installSource'
   | 'routerModelId'
-  | 'runtimeProfileId'
+  | 'samplingParametersJson'
+  | 'reasoningChoicesJson'
+  | 'thinkingControlJson'
+  | 'requestFieldsWhenToolsPresentJson'
+  | 'combineSystemAndDeveloperMessages'
+  | 'thoughtBlockPattern'
   | 'existingAliasRouterModelId'
   | 'catalogModelId'
   | 'catalogDisplayName'
@@ -142,8 +146,6 @@ export interface UseLocalAiWizardStateResult {
   existingLocalModels: ReturnType<typeof toExistingLocalModels>;
   optionalForm: LocalAiOptionalServicesFormState;
   optionalErrors: Record<string, string>;
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
   inventoryLoading: boolean;
   installError: string | null;
@@ -202,8 +204,6 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
   });
   const [optionalErrors, setOptionalErrors] = useState<Record<string, string>>({});
 
-  const [profiles, setProfiles] = useState<SettingsRuntimeProfileDto[]>([]);
-  const [profilesLoading, setProfilesLoading] = useState(false);
   const [inventory, setInventory] = useState<LlamaRuntimeInventoryItemDto[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(false);
 
@@ -227,14 +227,6 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
   const readyForBasicChat = existingLocalModels.length > 0 || draftModels.some((d) => d.asyncStatus === 'completed');
 
   const loadRuntimeData = useCallback(() => {
-    setProfilesLoading(true);
-    void api.settings.getRuntimeProfiles().then((data) => {
-      setProfiles(data);
-      setProfilesLoading(false);
-    }).catch(() => {
-      setProfilesLoading(false);
-    });
-
     setInventoryLoading(true);
     void api.settings.getLlamaInventory().then((data) => {
       setInventory(data);
@@ -346,7 +338,12 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     const draft: LocalAiModelDraft = {
       installSource: formData.installSource,
       routerModelId: formData.routerModelId,
-      runtimeProfileId: formData.runtimeProfileId,
+      samplingParametersJson: formData.samplingParametersJson,
+      reasoningChoicesJson: formData.reasoningChoicesJson,
+      thinkingControlJson: formData.thinkingControlJson,
+      requestFieldsWhenToolsPresentJson: formData.requestFieldsWhenToolsPresentJson,
+      combineSystemAndDeveloperMessages: formData.combineSystemAndDeveloperMessages,
+      thoughtBlockPattern: formData.thoughtBlockPattern,
       huggingFaceRepository: formData.huggingFaceRepository ?? '',
       huggingFaceResolvedRevision: formData.huggingFaceResolvedRevision ?? '',
       huggingFaceArtifactGroupId: formData.huggingFaceArtifactGroupId ?? '',
@@ -443,7 +440,12 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
       localId,
       installSource: 'curated',
       routerModelId: input.routerModelId,
-      runtimeProfileId: '',
+      samplingParametersJson: '{}',
+      reasoningChoicesJson: '',
+      thinkingControlJson: '{}',
+      requestFieldsWhenToolsPresentJson: '{}',
+      combineSystemAndDeveloperMessages: true,
+      thoughtBlockPattern: '',
       huggingFaceRepository: '',
       huggingFaceResolvedRevision: '',
       huggingFaceArtifactGroupId: '',
@@ -642,8 +644,6 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     existingLocalModels,
     optionalForm,
     optionalErrors,
-    profiles,
-    profilesLoading,
     inventory,
     inventoryLoading,
     installError,

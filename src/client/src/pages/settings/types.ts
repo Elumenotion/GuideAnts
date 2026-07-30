@@ -64,8 +64,12 @@ export interface AddModelWizardState {
   catalogDescription: string;
   catalogDisplayOrder: string;
   catalogIsActive: boolean;
-  /** Runtime profile ID — applies to all providers. */
-  runtimeProfileId: string;
+  samplingParametersJson: string;
+  reasoningChoicesJson: string;
+  thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson: string;
+  combineSystemAndDeveloperMessages: boolean;
+  thoughtBlockPattern: string;
   llamaInstallSource: 'huggingface' | 'existingAlias';
   llamaRouterModelId: string;
   llamaHuggingFaceRepository: string;
@@ -86,7 +90,12 @@ export interface CatalogEditState {
   description: string;
   displayOrder: string;
   isActive: boolean;
-  runtimeProfileId: string;
+  samplingParametersJson: string;
+  reasoningChoicesJson: string;
+  thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson: string;
+  combineSystemAndDeveloperMessages: boolean;
+  thoughtBlockPattern: string;
 }
 
 export interface ActiveAddOperationState {
@@ -102,17 +111,4 @@ export interface CanonicalLocalRuntimeConfig {
   parallelToolCalls?: boolean;
   routerContextSize?: number;
   routerCacheRamMib?: number;
-}
-
-export interface ProfileFormState {
-  profileId: string;
-  displayName: string;
-  description: string;
-  combineSystemAndDeveloperMessages: boolean;
-  thoughtBlockPattern: string;
-  samplingParametersJson: string;
-  thinkingControlJson: string;
-  requestFieldsWhenToolsPresentJson: string;
-  /** Provider IDs this profile applies to, e.g. ["llama-cpp"] or ["openai-chat","azure-openai-chat"]. */
-  providers: string[];
 }
