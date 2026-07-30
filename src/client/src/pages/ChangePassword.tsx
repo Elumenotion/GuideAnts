@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { FaKey, FaSignOutAlt, FaSpinner } from 'react-icons/fa';
 import { TextActionButton } from './settings/components/shared/ActionButtons';
 import { useAuth } from '../contexts/AuthContext';

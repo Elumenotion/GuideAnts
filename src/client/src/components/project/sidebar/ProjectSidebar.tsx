@@ -1,6 +1,6 @@
 import { ProjectDetailsDto, SelectedItem, SectionType, FolderTreeDto, CreateFolderDto, ProjectNotebook, NotebookTemplateSummaryDto } from '../../../types/project';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router';
 import { FolderTree } from './FolderTree';
 import { UploadFilesDialog } from '../dialogs/UploadFilesDialog';
 import { createPortal } from 'react-dom';

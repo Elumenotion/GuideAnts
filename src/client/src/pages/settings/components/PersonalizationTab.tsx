@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FaKey, FaRedo, FaSave, FaSignOutAlt, FaSpinner } from 'react-icons/fa';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import LoadingSpinner from '../../../components/LoadingSpinner';
 import { useToast } from '../../../components/common/Toast';
 import { api } from '../../../services/api';

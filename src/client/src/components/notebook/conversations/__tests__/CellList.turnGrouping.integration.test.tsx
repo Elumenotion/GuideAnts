@@ -5,7 +5,7 @@ import CellList from '../CellList';
 import { MessageDto } from '../../../../types/conversation';
 import { NotebookProvider } from '../../../../contexts/NotebookContext';
 import { ConversationProvider } from '../../../../contexts/ConversationContext';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter } from 'react-router';
 import { ToastProvider } from '../../../common/Toast';
 
 // Mock all the services

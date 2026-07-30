@@ -2,7 +2,7 @@ import { useState } from 'react';
 import RecentConversationsList from './RecentConversationsList';
 import RecentProjectsList from './RecentProjectsList';
 import { UserConversationsQuery } from '../../types/conversation';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 interface ProjectSummary {
   id: string;

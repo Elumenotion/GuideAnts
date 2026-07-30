@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNotebook } from '../../../contexts/NotebookContext';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import { notebookFilesApi } from '../../../services/notebookFiles';
 import UserAvatar from '../../common/UserAvatar';
 import FullScreenEditor from './FullScreenEditor';

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import { guideUsageApi } from '../services/guideUsageApi';
 import { api } from '../services/api';
 import type {

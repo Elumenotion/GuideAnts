@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { FaSpinner, FaUserPlus } from 'react-icons/fa';
 import { TextActionButton } from './settings/components/shared/ActionButtons';
 import { getErrorMessage } from './settings/utils';

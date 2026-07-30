@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { FileLineageEvent } from '../../../types/fileLineage';
 import { FaDownload, FaUpload, FaCopy, FaArrowUp, FaArrowsAlt, FaEdit, FaFileAlt } from 'react-icons/fa';
 import { useDownloadLineage } from '../../../hooks/useDownloadLineage';

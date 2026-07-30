@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { scheduledJobsApi } from '../../../services/scheduledJobs';
 import type {
   ProjectScheduledJobDetailDto,

@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router';
 import NewProject from '../pages/NewProject';
 import EditProject from '../pages/EditProject';
 import EditNotebook from '../pages/EditNotebook';
@@ -7,7 +7,7 @@ import NotebookDetails from '../pages/NotebookDetails';
 import Projects from '../pages/Projects';
 import Conversations from '../pages/Conversations';
 import { ProjectProvider } from '../contexts/ProjectContext';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import Home from '../pages/Home';
 import Usage from '../pages/Usage';
 import Terms from '@/pages/Terms';

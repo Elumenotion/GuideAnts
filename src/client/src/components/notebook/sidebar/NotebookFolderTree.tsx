@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useLayoutEffect, createContext, useContext, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { FileIcon } from '../../common/FileIcon';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import { notebookFilesApi } from '../../../services/notebookFiles';
 import { api } from '../../../services/api';
 import FullScreenEditor from '../../notebook/conversations/FullScreenEditor';

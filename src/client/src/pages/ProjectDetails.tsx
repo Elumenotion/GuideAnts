@@ -1,4 +1,4 @@
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router';
 import { useProject } from '../contexts/ProjectContext';
 import { useFolderOperations } from '../hooks/useFolderOperations';
 import { ProjectLayout } from '../components/layouts/ProjectLayout';

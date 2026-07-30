@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { matchPath, useLocation, useNavigate } from 'react-router-dom';
+import { matchPath, useLocation, useNavigate } from 'react-router';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/api';

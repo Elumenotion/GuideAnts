@@ -5,10 +5,10 @@ import userEvent from '@testing-library/user-event';
 import EditNotebook from '../EditNotebook';
 import { api } from '../../services/api';
 
-// Mock react-router-dom
+// Mock react-router
 const mockNavigate = vi.fn();
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
   return {
     ...actual,
     useParams: () => ({ projectId: 'test-project-id', notebookId: 'test-notebook-id' }),

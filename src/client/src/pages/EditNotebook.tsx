@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import { api } from '../services/api';
 import { ProjectNotebook } from '../types/project';
 import { useProject } from '../contexts/ProjectContext';

@@ -1,6 +1,6 @@
 import React, { FC } from 'react';
 import { vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { ConversationProvider } from '../contexts/ConversationContext';
 import { ToastProvider } from '../components/common/Toast';
 import { MessageDto } from '../types/conversation';

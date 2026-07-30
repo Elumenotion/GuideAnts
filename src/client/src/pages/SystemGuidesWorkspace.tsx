@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { ProjectProvider } from '../contexts/ProjectContext';
 import ProjectDetails from './ProjectDetails';

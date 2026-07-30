@@ -4,7 +4,7 @@ import { render as rtlRender, screen, waitFor, fireEvent, act } from '@testing-l
 // Prevent global ConversationContext stub from overriding this file's provider mock.
 vi.mock('../../test/enableConversationContextStub', () => ({}));
 import { render, renderWithNotebookRoute } from '@/test/test-utils';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { ToastProvider } from '../../components/common/Toast';
 
 import NotebookDetails from '../NotebookDetails';
@@ -37,8 +37,8 @@ const mockRefreshProject = vi.fn();
 const mockNavigate = vi.fn();
 const capturedTourSteps: Record<string, { onHighlight?: () => void; onDeselect?: () => void }[]> = {};
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
+vi.mock('react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router')>();
   return {
     ...actual,
     useNavigate: () => mockNavigate,
