@@ -3,13 +3,13 @@ import type { ProviderEditorStateDto, ServiceEditorStateDto } from '../../../../
 import { api } from '../../../../services/api';
 import { resolveParameterSurfaceSeed } from '../../../../pages/settings/parameterSurfaceSeeds';
 import {
-  GEMINI_FLASH_RUNTIME_PROFILE_ID,
-  GEMINI_PRO_RUNTIME_PROFILE_ID,
-  HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
-  OPENAI_CHAT_RUNTIME_PROFILE_ID,
-  OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+  GEMINI_FLASH_PARAMETER_SURFACE_SEED,
+  GEMINI_PRO_PARAMETER_SURFACE_SEED,
+  HUGGINGFACE_DEFAULT_PARAMETER_SURFACE_SEED,
+  OPENAI_CHAT_PARAMETER_SURFACE_SEED,
+  OPENAI_RESPONSES_PARAMETER_SURFACE_SEED,
   OPENROUTER_CHAT_MODEL_PROVIDER_ID,
-  OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID,
+  OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED,
   OPENROUTER_SECTION,
   OPENROUTER_SERVICE_PROVIDER_IDS,
   LOCAL_AI_SERVICE_PROVIDER_IDS,
@@ -290,7 +290,7 @@ describe('addAiServicesWizard utils', () => {
 
   it('builds hf add-model request with row-owned parameter surface', () => {
     const request = buildAddHuggingFaceModelRequest('zai-org/GLM-5.2');
-    const surface = resolveParameterSurfaceSeed(HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID);
+    const surface = resolveParameterSurfaceSeed(HUGGINGFACE_DEFAULT_PARAMETER_SURFACE_SEED);
     expect(request.provider).toBe(HUGGINGFACE_CHAT_MODEL_PROVIDER_ID);
     expect(request.providerConfig).toEqual({
       samplingParametersJson: surface.samplingParametersJson,
@@ -321,7 +321,7 @@ describe('addAiServicesWizard utils', () => {
 
   it('builds openrouter add-model request with row-owned parameter surface', () => {
     const request = buildAddOpenRouterModelRequest('minimax/minimax-m3');
-    const surface = resolveParameterSurfaceSeed(OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID);
+    const surface = resolveParameterSurfaceSeed(OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED);
     expect(request.provider).toBe(OPENROUTER_CHAT_MODEL_PROVIDER_ID);
     expect(request.providerConfig).toEqual({
       samplingParametersJson: surface.samplingParametersJson,
@@ -329,8 +329,8 @@ describe('addAiServicesWizard utils', () => {
   });
 
   it('builds Foundry add-model requests with provider-specific parameter surfaces', () => {
-    const chatSurface = resolveParameterSurfaceSeed(OPENAI_CHAT_RUNTIME_PROFILE_ID);
-    const responsesSurface = resolveParameterSurfaceSeed(OPENAI_RESPONSES_RUNTIME_PROFILE_ID);
+    const chatSurface = resolveParameterSurfaceSeed(OPENAI_CHAT_PARAMETER_SURFACE_SEED);
+    const responsesSurface = resolveParameterSurfaceSeed(OPENAI_RESPONSES_PARAMETER_SURFACE_SEED);
     expect(buildAddModelRequest('gpt-4o', 'Completions').providerConfig).toEqual({
       samplingParametersJson: chatSurface.samplingParametersJson,
     });
@@ -341,8 +341,8 @@ describe('addAiServicesWizard utils', () => {
   });
 
   it('builds OpenAI add-model requests with provider-specific parameter surfaces', () => {
-    const chatSurface = resolveParameterSurfaceSeed(OPENAI_CHAT_RUNTIME_PROFILE_ID);
-    const responsesSurface = resolveParameterSurfaceSeed(OPENAI_RESPONSES_RUNTIME_PROFILE_ID);
+    const chatSurface = resolveParameterSurfaceSeed(OPENAI_CHAT_PARAMETER_SURFACE_SEED);
+    const responsesSurface = resolveParameterSurfaceSeed(OPENAI_RESPONSES_PARAMETER_SURFACE_SEED);
     expect(buildAddOpenAiModelRequest('gpt-4.1-mini', 'Completions').providerConfig).toEqual({
       samplingParametersJson: chatSurface.samplingParametersJson,
     });
@@ -353,8 +353,8 @@ describe('addAiServicesWizard utils', () => {
   });
 
   it('builds Gemini add-model requests with model-aware parameter surfaces', () => {
-    const flashSurface = resolveParameterSurfaceSeed(GEMINI_FLASH_RUNTIME_PROFILE_ID);
-    const proSurface = resolveParameterSurfaceSeed(GEMINI_PRO_RUNTIME_PROFILE_ID);
+    const flashSurface = resolveParameterSurfaceSeed(GEMINI_FLASH_PARAMETER_SURFACE_SEED);
+    const proSurface = resolveParameterSurfaceSeed(GEMINI_PRO_PARAMETER_SURFACE_SEED);
     expect(buildAddGeminiModelRequest('gemini-2.5-flash').providerConfig).toEqual({
       samplingParametersJson: flashSurface.samplingParametersJson,
       reasoningChoicesJson: flashSurface.reasoningChoicesJson,
