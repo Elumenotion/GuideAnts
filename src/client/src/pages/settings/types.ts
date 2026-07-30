@@ -89,10 +89,18 @@ export interface CatalogEditState {
   runtimeProfileId: string;
 }
 
-export interface ActiveAddOperationState {
+/** Long-running local-model operations the settings page tracks page-level. */
+export type ActiveModelOperationKind = 'add' | 'changeQuant';
+
+/** Status endpoint the operation's id is valid against. */
+export type ActiveModelOperationPollRoute = 'operations' | 'downloads';
+
+export interface ActiveModelOperationState {
   operationId: string;
   routerModelId: string;
   catalogModelId: string;
+  kind: ActiveModelOperationKind;
+  pollRoute: ActiveModelOperationPollRoute;
 }
 
 export interface CanonicalLocalRuntimeConfig {

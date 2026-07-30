@@ -30,7 +30,8 @@ const baseProps = {
   onRequestDeleteModel: vi.fn(),
   onCatalogEdited: vi.fn(),
   onOpenAddModelWizard: vi.fn(),
-  activeAddOperation: null,
+  activeModelOperation: null,
+  onModelOperationStarted: vi.fn(),
 };
 
 describe('ModelsRuntimeWorkspace', () => {

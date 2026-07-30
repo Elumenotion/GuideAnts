@@ -61,7 +61,7 @@ const baseProps = {
     throw new Error('not used');
   }),
   onCatalogChanged: vi.fn(async () => {}),
-  onSetActiveAddOperation: vi.fn(),
+  onSetActiveModelOperation: vi.fn(),
 };
 
 describe('AddModelWizard flow', () => {
@@ -123,7 +123,7 @@ describe('AddModelWizard flow', () => {
 
   it('starts async operation and shows progress step', async () => {
     const user = userEvent.setup();
-    const onSetActiveAddOperation = vi.fn();
+    const onSetActiveModelOperation = vi.fn();
 
     mockApi.settings.addModel.mockResolvedValue({
       operationId: 'op-1',
@@ -134,7 +134,7 @@ describe('AddModelWizard flow', () => {
       <AddModelWizard
         {...baseProps}
         providerPreselect="openai-chat"
-        onSetActiveAddOperation={onSetActiveAddOperation}
+        onSetActiveModelOperation={onSetActiveModelOperation}
       />
     );
 
@@ -147,8 +147,13 @@ describe('AddModelWizard flow', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Queued')).toBeInTheDocument();
-      expect(onSetActiveAddOperation).toHaveBeenCalledWith(
-        expect.objectContaining({ operationId: 'op-1', catalogModelId: 'async-model' }),
+      expect(onSetActiveModelOperation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operationId: 'op-1',
+          catalogModelId: 'async-model',
+          kind: 'add',
+          pollRoute: 'downloads',
+        }),
       );
     });
   });
@@ -319,7 +324,7 @@ describe('AddModelWizard flow', () => {
   it('refreshes catalog when async operation completes and supports poll failure', async () => {
     const user = userEvent.setup();
     const onCatalogChanged = vi.fn(async () => {});
-    const onSetActiveAddOperation = vi.fn();
+    const onSetActiveModelOperation = vi.fn();
     let onTerminal: ((op: { status: string }) => void) | undefined;
     let onPollFailureThreshold: (() => void) | undefined;
     mockUseOperation.mockImplementation((opts) => {
@@ -336,7 +341,7 @@ describe('AddModelWizard flow', () => {
         {...baseProps}
         providerPreselect="openai-chat"
         onCatalogChanged={onCatalogChanged}
-        onSetActiveAddOperation={onSetActiveAddOperation}
+        onSetActiveModelOperation={onSetActiveModelOperation}
       />
     );
 
@@ -351,7 +356,7 @@ describe('AddModelWizard flow', () => {
     onTerminal?.({ status: 'completed' });
     await waitFor(() => {
       expect(onCatalogChanged).toHaveBeenCalled();
-      expect(onSetActiveAddOperation).toHaveBeenCalledWith(null);
+      expect(onSetActiveModelOperation).toHaveBeenCalledWith(null);
     });
 
     onPollFailureThreshold?.();

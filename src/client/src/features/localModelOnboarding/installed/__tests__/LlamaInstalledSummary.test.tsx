@@ -41,7 +41,7 @@ describe('LlamaInstalledSummary', () => {
   });
 
   it('renders layer 2 and layer 3 panels without management-mode box', async () => {
-    render(<LlamaInstalledSummary modelId="llama/qwen" />);
+    render(<LlamaInstalledSummary modelId="llama/qwen" onOperationStarted={vi.fn()} />);
 
     expect(await screen.findByTestId('alias-preset-save-panel')).toBeInTheDocument();
     expect(screen.getByTestId('model-chat-behavior-panel')).toBeInTheDocument();

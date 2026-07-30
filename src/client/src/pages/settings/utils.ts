@@ -13,7 +13,15 @@ import {
   UpdateRuntimeProfileRequest,
   UpdateSettingsModelRequest,
 } from '../../types/settings';
-import { AddModelWizardState, CanonicalLocalRuntimeConfig, CatalogEditState, ProfileFormState } from './types';
+import {
+  ActiveModelOperationKind,
+  ActiveModelOperationPollRoute,
+  ActiveModelOperationState,
+  AddModelWizardState,
+  CanonicalLocalRuntimeConfig,
+  CatalogEditState,
+  ProfileFormState,
+} from './types';
 import { getServiceProviderDisplayName } from './constants/displayLabels';
 import {
   buildLocalModelAddModelRequest,
@@ -21,6 +29,50 @@ import {
 import { mapSettingsAddModelStateToOnboardingDraft } from '../../features/localModelOnboarding/mapDraft';
 
 export const SECRET_MASK = '********';
+
+const ACTIVE_MODEL_OPERATION_KINDS: ActiveModelOperationKind[] = ['add', 'changeQuant'];
+const ACTIVE_MODEL_OPERATION_POLL_ROUTES: ActiveModelOperationPollRoute[] = ['operations', 'downloads'];
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * Reads a persisted active-operation record. Anything that does not carry a
+ * complete, recognized shape is discarded rather than guessed at, so a stale
+ * record cannot be polled against the wrong status endpoint.
+ */
+export function parseActiveModelOperation(raw: string): ActiveModelOperationState | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return null;
+  }
+  const candidate = parsed as Record<string, unknown>;
+  if (!isNonEmptyString(candidate.operationId) || !isNonEmptyString(candidate.catalogModelId)) {
+    return null;
+  }
+  if (typeof candidate.routerModelId !== 'string') {
+    return null;
+  }
+  if (!ACTIVE_MODEL_OPERATION_KINDS.includes(candidate.kind as ActiveModelOperationKind)) {
+    return null;
+  }
+  if (!ACTIVE_MODEL_OPERATION_POLL_ROUTES.includes(candidate.pollRoute as ActiveModelOperationPollRoute)) {
+    return null;
+  }
+  return {
+    operationId: candidate.operationId,
+    routerModelId: candidate.routerModelId,
+    catalogModelId: candidate.catalogModelId,
+    kind: candidate.kind as ActiveModelOperationKind,
+    pollRoute: candidate.pollRoute as ActiveModelOperationPollRoute,
+  };
+}
 
 export function createEmptyProfileForm(): ProfileFormState {
   return {
@@ -264,6 +316,47 @@ export function getErrorMessage(error: unknown, fallback: string): string {
   }
 
   return fallback;
+}
+
+/** Readable fields of an RFC 9457 problem-details error body. */
+export interface ApiProblemDetails {
+  title?: string;
+  detail?: string;
+  code?: string;
+  remediation?: string;
+  status?: number;
+}
+
+/**
+ * Extracts the human-readable fields from a problem-details error body so
+ * callers can render them as text instead of dumping the raw payload.
+ */
+export function parseProblemDetails(error: unknown): ApiProblemDetails | null {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+  const body = (error as { body?: unknown }).body;
+  if (!body || typeof body !== 'object') {
+    return null;
+  }
+  const candidate = body as Record<string, unknown>;
+  const text = (key: string): string | undefined => {
+    const value = candidate[key];
+    return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+  };
+  const details: ApiProblemDetails = {
+    title: text('title'),
+    // `detail` is the problem-details field; `message` is the shape our own
+    // handlers emit for the same purpose.
+    detail: text('detail') ?? text('message'),
+    code: text('code'),
+    remediation: text('remediation'),
+    status: typeof candidate.status === 'number' ? candidate.status : undefined,
+  };
+  if (!details.title && !details.detail && !details.code && !details.remediation) {
+    return null;
+  }
+  return details;
 }
 
 export function formatDateTime(value?: string): string {

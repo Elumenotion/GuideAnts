@@ -3,6 +3,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Settings;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
@@ -239,24 +240,24 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
     {
         if (Guid.TryParse(operationId, out var operationGuid))
         {
-            var curated = await _operationService
-                .GetStatusAsync(operationGuid, cancellationToken)
-                .ConfigureAwait(false);
-            if (curated is not null)
-            {
-                return MapCuratedToLegacyDownloadDto(curated);
-            }
+            var kind = await LoadOperationKindAsync(operationGuid, cancellationToken).ConfigureAwait(false);
 
-            try
+            if (IsCuratedInstall(kind))
+            {
+                var curated = await _operationService
+                    .GetStatusAsync(operationGuid, cancellationToken)
+                    .ConfigureAwait(false);
+                if (curated is not null)
+                {
+                    return MapCuratedToLegacyDownloadDto(curated);
+                }
+            }
+            else if (kind is not null)
             {
                 var lifecycleStatus = await _lifecycleOperationService
                     .ReconcileLifecycleOperationAsync(operationGuid, cancellationToken)
                     .ConfigureAwait(false);
                 return MapCuratedToLegacyDownloadDto(lifecycleStatus);
-            }
-            catch (InvalidOperationException)
-            {
-                // Fall through to legacy download journal.
             }
         }
 
@@ -267,27 +268,39 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
         Guid operationId,
         CancellationToken cancellationToken = default)
     {
-        var curated = await _operationService
-            .GetStatusAsync(operationId, cancellationToken)
-            .ConfigureAwait(false);
-        if (curated is not null)
-        {
-            return await _operationService
-                .ReconcileAndGetStatusAsync(operationId, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        try
-        {
-            return await _lifecycleOperationService
-                .ReconcileLifecycleOperationAsync(operationId, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (InvalidOperationException)
+        var kind = await LoadOperationKindAsync(operationId, cancellationToken).ConfigureAwait(false);
+        if (kind is null)
         {
             return null;
         }
+
+        return IsCuratedInstall(kind)
+            ? await _operationService
+                .ReconcileAndGetStatusAsync(operationId, cancellationToken)
+                .ConfigureAwait(false)
+            : await _lifecycleOperationService
+                .ReconcileLifecycleOperationAsync(operationId, cancellationToken)
+                .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Selects the state machine that owns an operation. Dispatch must key off
+    /// <see cref="LocalModelOperation.OperationKind"/>: the curated lookup matches rows of
+    /// every kind, so probing it first sent lifecycle operations (change quant, repair,
+    /// custom install) into the curated-install state machine, which stamped them with a
+    /// curated-only status that no lifecycle sweep could advance and that blocked the
+    /// alias permanently.
+    /// </summary>
+    private async Task<string?> LoadOperationKindAsync(Guid operationId, CancellationToken cancellationToken) =>
+        await _db.LocalModelOperations
+            .AsNoTracking()
+            .Where(o => o.OperationId == operationId)
+            .Select(o => o.OperationKind)
+            .SingleOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+    private static bool IsCuratedInstall(string? kind) =>
+        string.Equals(kind, LocalModelOperationKinds.CuratedInstall, StringComparison.Ordinal);
 
     private async Task<LocalModelOnboardingResult> OnboardCustomExplicitAsync(
         AddModelRequest request,

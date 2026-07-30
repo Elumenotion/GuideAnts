@@ -112,7 +112,9 @@ async function callApi<T>(endpoint: string, options: RequestInit = {}): Promise<
             let rawText: string | null = null;
             try {
                 const contentType = response.headers.get('content-type') || '';
-                if (contentType.includes('application/json')) {
+                // Matches application/json and the +json suffix family, notably
+                // application/problem+json used for RFC 9457 error payloads.
+                if (contentType.includes('json')) {
                     parsed = await response.json();
                 } else {
                     rawText = await response.text();
@@ -121,7 +123,7 @@ async function callApi<T>(endpoint: string, options: RequestInit = {}): Promise<
                 // ignore parse errors
             }
 
-            const message = (parsed && (parsed.message || parsed.error || parsed.title))
+            const message = (parsed && (parsed.message || parsed.error || parsed.detail || parsed.title))
                 || rawText
                 || `API call failed: ${response.statusText}`;
 

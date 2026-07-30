@@ -400,8 +400,7 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             .AsNoTracking()
             .AnyAsync(
                 o => o.RouterModelId == routerModelId
-                     && o.Status != "completed"
-                     && o.Status != "failed",
+                     && !LocalModelOperationStatuses.Terminal.Contains(o.Status),
                 cancellationToken)
             .ConfigureAwait(false);
 

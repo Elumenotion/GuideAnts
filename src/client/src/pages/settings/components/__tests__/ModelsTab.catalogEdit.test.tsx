@@ -101,7 +101,8 @@ describe('ModelsTab catalog edit modal', () => {
           profilesLoading={false}
           onCatalogEdited={onCatalogEdited}
           onOpenAddModel={vi.fn()}
-          activeAddOperation={null}
+          activeModelOperation={null}
+          onModelOperationStarted={vi.fn()}
         />
       </ToastProvider>,
     );

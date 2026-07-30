@@ -57,7 +57,8 @@ function renderModelsTab(overrides: Partial<React.ComponentProps<typeof ModelsTa
         profilesLoading={false}
         onCatalogEdited={vi.fn().mockResolvedValue(undefined)}
         onOpenAddModel={vi.fn()}
-        activeAddOperation={null}
+        activeModelOperation={null}
+        onModelOperationStarted={vi.fn()}
         {...overrides}
       />
     </ToastProvider>,
@@ -119,7 +120,8 @@ describe('ModelsTab', () => {
           profilesLoading={false}
           onCatalogEdited={vi.fn()}
           onOpenAddModel={vi.fn()}
-          activeAddOperation={null}
+          activeModelOperation={null}
+          onModelOperationStarted={vi.fn()}
         />
       </ToastProvider>,
     );
@@ -157,10 +159,12 @@ describe('ModelsTab', () => {
 
     renderModelsTab({
       orderedModels: [cloudModel, llamaModel, loadedLlama, invalidLlama],
-      activeAddOperation: {
+      activeModelOperation: {
         operationId: 'op-1',
         routerModelId: 'alias-1',
         catalogModelId: 'llama/local',
+        kind: 'add',
+        pollRoute: 'downloads',
       },
       llamaInventory: [
         {

@@ -17,7 +17,7 @@ describe('AddModelWizard provider options', () => {
           throw new Error('not used');
         })}
         onCatalogChanged={vi.fn(async () => {})}
-        onSetActiveAddOperation={vi.fn()}
+        onSetActiveModelOperation={vi.fn()}
       />
     );
 

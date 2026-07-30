@@ -8,7 +8,7 @@ import {
   SettingsModelDto,
   SettingsRuntimeProfileDto,
 } from '../../../types/settings';
-import { ActiveAddOperationState } from '../types';
+import { ActiveModelOperationState } from '../types';
 import { getCatalogProviderDisplayName } from '../constants/displayLabels';
 import { formatDateTime, parseCanonicalLocalRuntimeJson, parseRuntimeProfileId } from '../utils';
 import { IconActionButton, TextActionButton } from './shared/ActionButtons';
@@ -27,7 +27,8 @@ interface ModelsTabProps {
   profilesLoading: boolean;
   onCatalogEdited: () => Promise<void>;
   onOpenAddModel: (providerPreselect?: string) => void;
-  activeAddOperation: ActiveAddOperationState | null;
+  activeModelOperation: ActiveModelOperationState | null;
+  onModelOperationStarted: (operation: ActiveModelOperationState) => void;
   /** Phase F (R-6.*): deep-link target; the row with this model id scrolls
    * into view and highlights for ~2s. Mirrors the Phase E
    * `InfrastructureTab.focusedRuntimeKey` pattern. */
@@ -143,7 +144,8 @@ export function ModelsTab({
   profilesLoading,
   onCatalogEdited,
   onOpenAddModel,
-  activeAddOperation,
+  activeModelOperation,
+  onModelOperationStarted,
   focusedModelId,
 }: ModelsTabProps) {
   const [readinessByModel, setReadinessByModel] = useState<Record<string, ChatTargetReadinessDto>>({});
@@ -219,8 +221,11 @@ export function ModelsTab({
   }, [orderedModels]);
 
   function localLlamaBadge(model: SettingsModelDto): { label: string; tone: 'ok' | 'warn' | 'err' | 'pending' | 'neutral' } | null {
-    if (activeAddOperation?.catalogModelId === model.modelId) {
-      return { label: 'Installing…', tone: 'pending' };
+    if (activeModelOperation?.catalogModelId === model.modelId) {
+      return {
+        label: activeModelOperation.kind === 'changeQuant' ? 'Changing quant…' : 'Installing…',
+        tone: 'pending',
+      };
     }
     if (model.provider !== 'llama-cpp') {
       return null;
@@ -276,9 +281,10 @@ export function ModelsTab({
             Add Model
           </TextActionButton>
         </div>
-        {activeAddOperation ? (
+        {activeModelOperation ? (
           <div className="mx-6 mt-4 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-            Add operation in progress for <span className="font-mono">{activeAddOperation.catalogModelId}</span>.
+            {activeModelOperation.kind === 'changeQuant' ? 'Quant change' : 'Add operation'} in progress for{' '}
+            <span className="font-mono">{activeModelOperation.catalogModelId}</span>.
           </div>
         ) : null}
 
@@ -438,6 +444,7 @@ export function ModelsTab({
         isOpen={editingModel !== null}
         onClose={() => setEditingModel(null)}
         onSaved={onCatalogEdited}
+        onOperationStarted={onModelOperationStarted}
       />
     </>
   );

@@ -8,7 +8,7 @@ import {
   LlamaRuntimeInventoryItemDto,
   SettingsRuntimeProfileDto,
 } from '../../../../types/settings';
-import { ActiveAddOperationState, AddModelProvider, AddModelWizardState } from '../../types';
+import { ActiveModelOperationState, AddModelProvider, AddModelWizardState } from '../../types';
 import { buildAddModelRequest, createAttachAliasWizardState, createEmptyAddModelWizardState, getErrorMessage } from '../../utils';
 import { getCatalogProviderDisplayName } from '../../constants/displayLabels';
 import { HIDDEN_CHAT_MODEL_PROVIDERS } from '../../constants/connectionSections';
@@ -102,7 +102,7 @@ interface AddModelWizardProps {
   onCreateRuntimeProfileTemplate: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => Promise<void>;
   onCreateCustomRuntimeProfile: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>;
   onCatalogChanged: () => Promise<void>;
-  onSetActiveAddOperation: (value: ActiveAddOperationState | null) => void;
+  onSetActiveModelOperation: (value: ActiveModelOperationState | null) => void;
 }
 
 function renderProviderForm(
@@ -248,7 +248,7 @@ export function AddModelWizard({
   onCreateRuntimeProfileTemplate,
   onCreateCustomRuntimeProfile,
   onCatalogChanged,
-  onSetActiveAddOperation,
+  onSetActiveModelOperation,
 }: AddModelWizardProps) {
   const [step, setStep] = useState<WizardStep>('provider');
   const [value, setValue] = useState<AddModelWizardState>(() => createEmptyAddModelWizardState(providerPreselect));
@@ -303,11 +303,11 @@ export function AddModelWizard({
   }, []);
 
   const handleOperationTerminal = useCallback((op: { status: string }) => {
-    onSetActiveAddOperation(null);
+    onSetActiveModelOperation(null);
     if (op.status === 'completed') {
       void onCatalogChanged();
     }
-  }, [onCatalogChanged, onSetActiveAddOperation]);
+  }, [onCatalogChanged, onSetActiveModelOperation]);
 
   const handleOperationPollFailureThreshold = useCallback(() => {
     setOperationError({
@@ -375,7 +375,7 @@ export function AddModelWizard({
       const response = (await api.settings.addModel(request)) as AddModelResponse;
       if (response.addOperation.kind === 'sync') {
         await onCatalogChanged();
-        onSetActiveAddOperation(null);
+        onSetActiveModelOperation(null);
         onClose();
         return;
       }
@@ -388,17 +388,19 @@ export function AddModelWizard({
             ? value.llamaExistingAliasRouterModelId.trim()
             : value.llamaRouterModelId.trim()
           : '';
-      const activeState: ActiveAddOperationState = {
+      const activeState: ActiveModelOperationState = {
         operationId: response.operationId,
         routerModelId,
         catalogModelId: value.catalogModelId.trim(),
+        kind: 'add',
+        pollRoute: 'downloads',
       };
       setOperationId(response.operationId);
       setStep('progress');
       setOperationStatus(response.addOperation.status || 'downloading');
       setOperationProgress(null);
       setOperationError(response.addOperation.error ?? null);
-      onSetActiveAddOperation(activeState);
+      onSetActiveModelOperation(activeState);
     } catch (error) {
       const structured = parseAddModelError(error);
       if (structured) {
@@ -608,10 +610,12 @@ export function AddModelWizard({
                   llamaRouterModelId: meta.routerModelId,
                 }));
                 setStep('progress');
-                onSetActiveAddOperation({
+                onSetActiveModelOperation({
                   operationId: nextOperationId,
                   routerModelId: meta.routerModelId,
                   catalogModelId: meta.catalogModelId,
+                  kind: 'add',
+                  pollRoute: 'downloads',
                 });
               }}
               onCuratedCompleted={(result) => {
@@ -620,7 +624,7 @@ export function AddModelWizard({
                   catalogModelId: result.catalogModelId || previous.catalogModelId,
                 }));
                 void onCatalogChanged();
-                onSetActiveAddOperation(null);
+                onSetActiveModelOperation(null);
               }}
               onSetDefault={async (catalogModelId) => {
                 const chatDefaults = await api.settings.chatDefaults.get();

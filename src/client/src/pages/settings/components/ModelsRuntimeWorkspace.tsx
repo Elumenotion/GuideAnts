@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LlamaRuntimeInventoryItemDto, SettingsModelDto, SettingsRuntimeProfileDto } from '../../../types/settings';
-import { ActiveAddOperationState, ModelsRuntimeSubTab, OpenAddModelWizardHandler } from '../types';
+import { ActiveModelOperationState, ModelsRuntimeSubTab, OpenAddModelWizardHandler } from '../types';
 import { LocalLlamaRuntimeTab } from './LocalLlamaRuntimeTab';
 import { ModelsTab } from './ModelsTab';
 
@@ -30,7 +30,8 @@ interface ModelsRuntimeWorkspaceProps {
   onRequestDeleteModel: (modelId: string) => void;
   onCatalogEdited: () => Promise<void>;
   onOpenAddModelWizard: OpenAddModelWizardHandler;
-  activeAddOperation: ActiveAddOperationState | null;
+  activeModelOperation: ActiveModelOperationState | null;
+  onModelOperationStarted: (operation: ActiveModelOperationState) => void;
 }
 
 const subTabs: Array<{ key: ModelsRuntimeSubTab; label: string }> = [
@@ -89,7 +90,8 @@ export function ModelsRuntimeWorkspace(props: ModelsRuntimeWorkspaceProps) {
           profilesLoading={props.profilesLoading}
           onCatalogEdited={props.onCatalogEdited}
           onOpenAddModel={props.onOpenAddModelWizard}
-          activeAddOperation={props.activeAddOperation}
+          activeModelOperation={props.activeModelOperation}
+          onModelOperationStarted={props.onModelOperationStarted}
         />
       )}
 
