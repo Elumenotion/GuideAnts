@@ -66,13 +66,42 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
         var sawFailureEvent = false;
         var distributedLockReleased = false;
 
+        async Task ReleaseStreamLockIfHeldAsync()
+        {
+            if (distributedLockReleased)
+            {
+                return;
+            }
+
+            distributedLockReleased = await lockHandle.ReleaseAsync(CancellationToken.None);
+            if (lockHandle.ConversationLockEventSent && distributedLockReleased)
+            {
+                try
+                {
+                    await policy.OnUnlockAsync(context.ConversationId, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast conversation unlock for {ConversationId}", context.ConversationId);
+                }
+            }
+        }
+
         try
         {
             await foreach (var ev in channel.Reader.ReadAllAsync(externalCt))
             {
-                if (ev.EventType == StreamingEventTypes.PendingClientTool)
+                if (ev.EventType == StreamingEventTypes.ExternalToolCall && policy.SupportsExternalToolResume)
+                {
+                    // guideants-chat resumes on external_tool_call (before pending_client_tool). Release
+                    // here so a parallel tool-calls/results?resume=true can acquire the lock.
+                    await ReleaseStreamLockIfHeldAsync();
+                }
+                else if (ev.EventType == StreamingEventTypes.PendingClientTool)
                 {
                     sawPendingClientTool = true;
+                    // Belt-and-suspenders for clients that wait for pending_client_tool.
+                    await ReleaseStreamLockIfHeldAsync();
                 }
                 else if (ev.EventType == StreamingEventTypes.Cancelled || ev.EventType == StreamingEventTypes.Error)
                 {
@@ -105,18 +134,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 }
             }
 
-            distributedLockReleased = await lockHandle.ReleaseAsync(CancellationToken.None);
-            if (lockHandle.ConversationLockEventSent && distributedLockReleased)
-            {
-                try
-                {
-                    await policy.OnUnlockAsync(context.ConversationId, CancellationToken.None);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to broadcast conversation unlock for {ConversationId}", context.ConversationId);
-                }
-            }
+            await ReleaseStreamLockIfHeldAsync();
         }
 
         if (streamingSucceeded && (distributedLockReleased || !lockHandle.ConversationLockEventSent))
@@ -213,15 +231,10 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     return;
                 }
 
-                if (string.Equals(e.Role, "assistant_thinking", StringComparison.OrdinalIgnoreCase))
+                var isThinking = string.Equals(e.Role, "assistant_thinking", StringComparison.OrdinalIgnoreCase);
+                if (isThinking)
                 {
                     thinkingEmittedInStream = true;
-                    if (policy.SupportsExternalToolResume)
-                    {
-                        var thinkingPayload = new { role = "assistant", content = e.ContentDelta, timestamp = DateTime.UtcNow };
-                        TryWrite(new StreamingEvent(StreamingEventTypes.AssistantMessage, JsonSerializer.Serialize(thinkingPayload, JsonOptions)));
-                        return;
-                    }
                 }
 
                 if (currentAssistantMessageId == null)
@@ -240,47 +253,50 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     assistantMessageIds.Add(msgId);
                 }
 
-                currentAssistantContent.Append(e.ContentDelta);
-                flushCounter++;
-
-                if (flushCounter % flushInterval == 0)
+                if (!isThinking)
                 {
-                    try
-                    {
-                        if (currentAssistantMessageId != null)
-                        {
-                            _persistence.AppendOrFinalizeAssistantMessageAsync(
-                                new AssistantMessageUpdateRequest(
-                                    currentAssistantMessageId.Value,
-                                    context.DbTurn.Id,
-                                    currentAssistantContent.ToString(),
-                                    Finalize: false),
-                                CancellationToken.None).GetAwaiter().GetResult();
-                        }
+                    currentAssistantContent.Append(e.ContentDelta);
+                    flushCounter++;
 
-                        if (!policy.SupportsExternalToolResume)
-                        {
-                            _ = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    await policy.BroadcastStreamingProgressAsync(
-                                        context.ConversationId,
-                                        context.User,
-                                        currentAssistantContent.Length,
-                                        flushCounter,
-                                        CancellationToken.None);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "Failed to broadcast streaming progress");
-                                }
-                            });
-                        }
-                    }
-                    catch
+                    if (flushCounter % flushInterval == 0)
                     {
-                        // logged on finalization
+                        try
+                        {
+                            if (currentAssistantMessageId != null)
+                            {
+                                _persistence.AppendOrFinalizeAssistantMessageAsync(
+                                    new AssistantMessageUpdateRequest(
+                                        currentAssistantMessageId.Value,
+                                        context.DbTurn.Id,
+                                        currentAssistantContent.ToString(),
+                                        Finalize: false),
+                                    CancellationToken.None).GetAwaiter().GetResult();
+                            }
+
+                            if (!policy.SupportsExternalToolResume)
+                            {
+                                _ = Task.Run(async () =>
+                                {
+                                    try
+                                    {
+                                        await policy.BroadcastStreamingProgressAsync(
+                                            context.ConversationId,
+                                            context.User,
+                                            currentAssistantContent.Length,
+                                            flushCounter,
+                                            CancellationToken.None);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Failed to broadcast streaming progress");
+                                    }
+                                });
+                            }
+                        }
+                        catch
+                        {
+                            // logged on finalization
+                        }
                     }
                 }
 
@@ -418,6 +434,17 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 if (output?.Status != null
                     && output.Status.Equals("pending_client_tool", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (currentAssistantMessageId != null)
+                    {
+                        await _persistence.FinalizeStreamingAssistantMessageIfStillStreamingAsync(
+                            currentAssistantMessageId.Value,
+                            context.DbTurn.Id,
+                            currentAssistantContent.ToString(),
+                            noneCt);
+                    }
+
+                    await _persistence.PersistThinkingBlocksAsync(output, assistantMessageIds, noneCt);
+
                     await _persistence.SetTurnStatusAsync(context.DbTurn.Id, "streaming", ct: noneCt);
                     await PersistTraceSegmentAsync("partial", ct: noneCt);
                     TryWrite(new StreamingEvent(StreamingEventTypes.PendingClientTool, "{}"));
@@ -684,18 +711,24 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
         try
         {
-            _persistence.CreateToolMessageAsync(
+            var result = _persistence.CreateToolMessageAsync(
                 new CreateToolMessageRequest(
                     context.Conversation.Id,
                     context.DbTurn.Id,
                     context.TurnIndex,
-                    currentMessageSequence++,
+                    currentMessageSequence,
                     sanitizedContent,
                     e.ToolCallId,
                     e.FunctionName,
                     context.AssistantId,
                     context.AssistantName),
                 CancellationToken.None).GetAwaiter().GetResult();
+
+            // Replacements (e.g. context-overflow unwind) update in place and must not consume a sequence.
+            if (result.Created)
+            {
+                currentMessageSequence++;
+            }
 
             policy.UpdateFilenameUrlMapFromToolMessage(
                 sanitizedContent,

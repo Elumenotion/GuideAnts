@@ -99,4 +99,41 @@ public sealed class PublishedAssistantHistoryBuilderTests
         leadingDeveloper.Should().BeEmpty();
         conversationalPrefix.Should().BeEmpty();
     }
+
+    [TestMethod]
+    public void IndexToolMessagesByCallId_keeps_latest_when_duplicate_tool_call_ids_exist()
+    {
+        var callId = "VPdXFuP7bh7TOJTjlUOlXHpTYosVnuE3";
+        var hugeId = Guid.NewGuid();
+        var abortId = Guid.NewGuid();
+        var messages = new List<NotebookConversationMessage>
+        {
+            new()
+            {
+                Id = hugeId,
+                Role = DataModelChatRole.Tool,
+                ToolCallId = callId,
+                FunctionName = "QueryData",
+                Content = new string('x', 1000),
+                MessageSequence = 5,
+                Created = DateTime.UtcNow.AddSeconds(-2)
+            },
+            new()
+            {
+                Id = abortId,
+                Role = DataModelChatRole.Tool,
+                ToolCallId = callId,
+                FunctionName = "QueryData",
+                Content = "[Message aborted due to size restrictions]",
+                MessageSequence = 6,
+                Created = DateTime.UtcNow.AddSeconds(-1)
+            }
+        };
+
+        var indexed = ConversationHistoryBuilder.IndexToolMessagesByCallId(messages);
+
+        indexed.Should().ContainSingle();
+        indexed[callId].Id.Should().Be(abortId);
+        indexed[callId].Content.Should().StartWith("[Message aborted");
+    }
 }

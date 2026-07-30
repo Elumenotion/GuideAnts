@@ -80,7 +80,6 @@ export function ConversationDetailPanel({
     });
 
   const totalTokens = (conversation?.promptTokens ?? 0)
-    + (conversation?.cachedTokens ?? 0)
     + (conversation?.reasoningTokens ?? 0)
     + (conversation?.completionTokens ?? 0);
 
@@ -174,7 +173,6 @@ export function ConversationDetailPanel({
                     <div className="text-xs text-gray-500">Input Tokens</div>
                     <div className="text-lg font-semibold">
                       {formatNumber(conversation.promptTokens
-                        + conversation.cachedTokens
                         + conversation.reasoningTokens)}
                     </div>
                   </div>

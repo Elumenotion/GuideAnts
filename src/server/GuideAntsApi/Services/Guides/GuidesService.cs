@@ -1302,6 +1302,23 @@ public class GuidesService(
                 string.IsNullOrWhiteSpace(samplingParametersJson) ? null : samplingParametersJson);
         }
 
+        var catalogProfile = await TryResolveCatalogRuntimeProfileAsync(model);
+        if (catalogProfile != null)
+        {
+            ValidateSamplingParameters(model.ModelId, catalogProfile, temperature, topP, samplingOverrides);
+
+            if (!string.IsNullOrWhiteSpace(reasoningEffort))
+            {
+                ValidateReasoningEffortChoice(model.ModelId, model.ReasoningChoicesJson, catalogProfile, reasoningEffort);
+            }
+
+            return new NormalizedModelParameters(
+                temperature,
+                topP,
+                NormalizeReasoningEffort(reasoningEffort),
+                string.IsNullOrWhiteSpace(samplingParametersJson) ? null : samplingParametersJson);
+        }
+
         if (!string.IsNullOrWhiteSpace(reasoningEffort))
         {
             ValidateCatalogReasoningEffortChoice(model.ModelId, model.ReasoningChoicesJson, reasoningEffort);
@@ -1312,6 +1329,33 @@ public class GuidesService(
             TopP: null,
             ReasoningEffort: NormalizeReasoningEffort(reasoningEffort),
             SamplingParametersJson: null);
+    }
+
+    private async Task<RuntimeProfileData?> TryResolveCatalogRuntimeProfileAsync(Model model)
+    {
+        if (string.IsNullOrWhiteSpace(model.RuntimeConfigJson))
+        {
+            return null;
+        }
+
+        ModelRuntimeConfigDto? runtimeConfig;
+        try
+        {
+            runtimeConfig = JsonSerializer.Deserialize<ModelRuntimeConfigDto>(
+                model.RuntimeConfigJson,
+                JsonCaseInsensitiveOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(runtimeConfig?.RuntimeProfileId))
+        {
+            return null;
+        }
+
+        return await _runtimeProfileResolver.ResolveAsync(runtimeConfig.RuntimeProfileId);
     }
 
     private static string? NormalizeReasoningEffort(string? reasoningEffort)

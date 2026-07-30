@@ -1083,8 +1083,8 @@ public class GuideUsageService : IGuideUsageService
                 from,
                 to,
                 dailyBuckets.Count,
-                dailyBuckets.Sum(b => b.PromptTokens + b.CachedTokens + b.ReasoningTokens + b.CompletionTokens),
-                dailyBuckets.Sum(b => b.PromptTokensWithCrew + b.CachedTokensWithCrew + b.ReasoningTokensWithCrew + b.CompletionTokensWithCrew),
+                dailyBuckets.Sum(b => b.PromptTokens + b.ReasoningTokens + b.CompletionTokens),
+                dailyBuckets.Sum(b => b.PromptTokensWithCrew + b.ReasoningTokensWithCrew + b.CompletionTokensWithCrew),
                 dailyBuckets.Sum(b => b.DirectCost),
                 dailyBuckets.Sum(b => b.TotalCost),
                 conversationSummaries.Count);

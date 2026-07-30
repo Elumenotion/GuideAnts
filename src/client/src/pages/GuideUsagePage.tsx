@@ -345,11 +345,11 @@ export default function GuideUsagePage() {
     if (!report?.dailyBuckets) return [];
     return report.dailyBuckets.map((bucket: DailyUsageBucketDto) => ({
       date: formatDate(bucket.date),
-      directPromptTokens: bucket.promptTokens,
+      directPromptTokens: Math.max(0, bucket.promptTokens - bucket.cachedTokens),
       directCachedTokens: bucket.cachedTokens,
       directReasoningTokens: bucket.reasoningTokens,
       directCompletionTokens: bucket.completionTokens,
-      totalPromptTokens: bucket.promptTokensWithCrew,
+      totalPromptTokens: Math.max(0, bucket.promptTokensWithCrew - bucket.cachedTokensWithCrew),
       totalCachedTokens: bucket.cachedTokensWithCrew,
       totalReasoningTokens: bucket.reasoningTokensWithCrew,
       totalCompletionTokens: bucket.completionTokensWithCrew,
@@ -408,13 +408,11 @@ export default function GuideUsagePage() {
 
   const directTotalTokens =
     (report?.totalPromptTokens ?? 0) +
-    (report?.totalCachedTokens ?? 0) +
     (report?.totalReasoningTokens ?? 0) +
     (report?.totalCompletionTokens ?? 0);
 
   const totalTokensWithCrew =
     (report?.totalPromptTokensWithCrew ?? 0) +
-    (report?.totalCachedTokensWithCrew ?? 0) +
     (report?.totalReasoningTokensWithCrew ?? 0) +
     (report?.totalCompletionTokensWithCrew ?? 0);
 
@@ -673,8 +671,8 @@ export default function GuideUsagePage() {
                             }}
                             formatter={(value: number, name: string) => [
                               formatTokens(value),
-                              name === 'promptTokens' ? 'Input Tokens' : 
-                              name === 'cachedTokens' ? 'Cached Tokens' :
+                              name === 'promptTokens' ? 'Uncached Input' : 
+                              name === 'cachedTokens' ? 'Cached Input' :
                               name === 'reasoningTokens' ? 'Reasoning Tokens' : 'Output Tokens'
                             ]}
                           />
@@ -723,11 +721,11 @@ export default function GuideUsagePage() {
                   <div className="px-4 pb-3 flex items-center gap-4 text-xs">
                     <div className="flex items-center gap-1.5">
                       <div className="w-3 h-3 rounded bg-blue-500"></div>
-                      <span className="text-gray-600">Input Tokens</span>
+                      <span className="text-gray-600">Uncached Input</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <div className="w-3 h-3 rounded bg-violet-500"></div>
-                      <span className="text-gray-600">Cached Tokens</span>
+                      <span className="text-gray-600">Cached Input</span>
                     </div>
                     {hasReasoningTokens && (
                       <div className="flex items-center gap-1.5">
@@ -1012,7 +1010,6 @@ export default function GuideUsagePage() {
                       {report.conversations.map((conv) => {
                         const totalIn =
                           conv.promptTokens +
-                          conv.cachedTokens +
                           conv.reasoningTokens;
                         const totalOut = conv.completionTokens;
                         return (

@@ -222,6 +222,183 @@ public sealed class PublishedConversationStreamingTests : BaseEndpointTest
     }
 
     [TestMethod]
+    public async Task SendMessageStream_WithExternalToolCall_ReleasesLock_AllowingResumeWhileStreamOpen()
+    {
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.ToolCallThenReply;
+        FakeChatCompletionBehavior.Instance.ToolFunctionName = "ClientLookup";
+
+        SeededConversation seeded;
+        using (var seedScope = SharedFactory!.Services.CreateScope())
+        {
+            var seedDb = seedScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            seeded = await SeedConversationAsync(seedDb);
+        }
+
+        var clientToolDefinitions = new List<ChatToolDefinition>
+        {
+            new(new ChatFunctionDefinition(
+                "ClientLookup",
+                "Look up data in the client",
+                JsonNode.Parse("""{"type":"object","properties":{"query":{"type":"string"}}}""")))
+        };
+
+        using var runScope = SharedFactory!.Services.CreateScope();
+        var svc = ResolveService(runScope);
+        var db = runScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var request = new SendMessageRequest
+        {
+            Instructions = "Use a client tool",
+            ModelDeploymentId = ModelId,
+            ClientToolDefinitions = clientToolDefinitions
+        };
+
+        var sawExternalToolCall = false;
+        List<StreamingEvent> resumeEvents = [];
+
+        await foreach (var ev in svc.SendMessageStreamAsync(
+                           seeded.ConversationId,
+                           request,
+                           publisherId: null,
+                           externalUserIdentity: null))
+        {
+            if (!string.Equals(ev.EventType, StreamingEventTypes.ExternalToolCall, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            sawExternalToolCall = true;
+
+            (await db.ConversationLocks.AnyAsync(l =>
+                l.ConversationId == seeded.ConversationId && l.ExpiresAt > DateTime.UtcNow))
+                .Should().BeFalse("lock must be released before external_tool_call is yielded");
+
+            db.NotebookConversationMessages.Add(new NotebookConversationMessage
+            {
+                NotebookConversationId = seeded.ConversationId,
+                TurnIndex = 1,
+                MessageSequence = 3,
+                Role = DataModelChatRole.Tool,
+                Content = """{"status":"ok"}""",
+                ToolCallId = FakeChatCompletionBehavior.Instance.ToolCallId,
+                FunctionName = "ClientLookup",
+                Created = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+
+            resumeEvents = await CollectAsync(svc.ResumeAfterExternalToolResultsStreamAsync(
+                seeded.ConversationId,
+                publisherId: null,
+                externalUserIdentity: null,
+                clientToolDefinitions: clientToolDefinitions));
+            break;
+        }
+
+        sawExternalToolCall.Should().BeTrue();
+        resumeEvents.Select(e => e.EventType).Should().Contain(StreamingEventTypes.Complete);
+    }
+
+    [TestMethod]
+    public async Task ResumeAfterExternalToolResults_WithSecondClientToolRound_ReleasesLockOnEachExternalToolCall()
+    {
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.RepeatedToolCalls;
+        FakeChatCompletionBehavior.Instance.ToolFunctionName = "ClientLookup";
+
+        SeededConversation seeded;
+        using (var seedScope = SharedFactory!.Services.CreateScope())
+        {
+            var seedDb = seedScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            seeded = await SeedConversationAsync(seedDb);
+        }
+
+        var clientToolDefinitions = new List<ChatToolDefinition>
+        {
+            new(new ChatFunctionDefinition(
+                "ClientLookup",
+                "Look up data in the client",
+                JsonNode.Parse("""{"type":"object","properties":{"query":{"type":"string"}}}""")))
+        };
+
+        using var runScope = SharedFactory!.Services.CreateScope();
+        var svc = ResolveService(runScope);
+        var db = runScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var request = new SendMessageRequest
+        {
+            Instructions = "Use client tools twice",
+            ModelDeploymentId = ModelId,
+            ClientToolDefinitions = clientToolDefinitions
+        };
+
+        var firstToolCallId = FakeChatCompletionBehavior.Instance.ToolCallId + "_1";
+        var secondToolCallId = FakeChatCompletionBehavior.Instance.ToolCallId + "_2";
+        List<StreamingEvent> secondResumeEvents = [];
+
+        await foreach (var ev in svc.SendMessageStreamAsync(
+                           seeded.ConversationId,
+                           request,
+                           publisherId: null,
+                           externalUserIdentity: null))
+        {
+            if (!string.Equals(ev.EventType, StreamingEventTypes.ExternalToolCall, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            db.NotebookConversationMessages.Add(new NotebookConversationMessage
+            {
+                NotebookConversationId = seeded.ConversationId,
+                TurnIndex = 1,
+                MessageSequence = 3,
+                Role = DataModelChatRole.Tool,
+                Content = """{"status":"ok","round":1}""",
+                ToolCallId = firstToolCallId,
+                FunctionName = "ClientLookup",
+                Created = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+
+            await foreach (var resumeEv in svc.ResumeAfterExternalToolResultsStreamAsync(
+                               seeded.ConversationId,
+                               publisherId: null,
+                               externalUserIdentity: null,
+                               clientToolDefinitions: clientToolDefinitions))
+            {
+                if (!string.Equals(resumeEv.EventType, StreamingEventTypes.ExternalToolCall, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                (await db.ConversationLocks.AnyAsync(l =>
+                    l.ConversationId == seeded.ConversationId && l.ExpiresAt > DateTime.UtcNow))
+                    .Should().BeFalse("lock must be released before a follow-up external_tool_call is yielded");
+
+                db.NotebookConversationMessages.Add(new NotebookConversationMessage
+                {
+                    NotebookConversationId = seeded.ConversationId,
+                    TurnIndex = 1,
+                    MessageSequence = 4,
+                    Role = DataModelChatRole.Tool,
+                    Content = """{"status":"ok","round":2}""",
+                    ToolCallId = secondToolCallId,
+                    FunctionName = "ClientLookup",
+                    Created = DateTime.UtcNow
+                });
+                await db.SaveChangesAsync();
+
+                secondResumeEvents = await CollectAsync(svc.ResumeAfterExternalToolResultsStreamAsync(
+                    seeded.ConversationId,
+                    publisherId: null,
+                    externalUserIdentity: null,
+                    clientToolDefinitions: clientToolDefinitions));
+                break;
+            }
+
+            break;
+        }
+
+        secondResumeEvents.Select(e => e.EventType).Should().NotContain(StreamingEventTypes.Error);
+    }
+
+    [TestMethod]
     public async Task SendMessageStream_Throws_ArgumentException_when_instructions_blank_and_no_attachments()
     {
         SeededConversation seeded;

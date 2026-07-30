@@ -1266,7 +1266,8 @@ namespace AntRunner.Chat
                 replacement.GetText(),
                 replacement.ToolCallId,
                 replacement.FunctionName,
-                null));
+                toolCallsJson: null,
+                isReplacement: true));
 
             return true;
         }

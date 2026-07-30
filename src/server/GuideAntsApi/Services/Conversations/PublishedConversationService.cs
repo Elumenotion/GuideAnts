@@ -469,23 +469,23 @@ public class PublishedConversationService : IPublishedConversationService
             }
             else if (e.Role.Equals("tool", StringComparison.OrdinalIgnoreCase))
             {
-                var toolMessage = new NotebookConversationMessage
+                var result = _persistence.CreateToolMessageAsync(
+                    new CreateToolMessageRequest(
+                        dbConversation.Id,
+                        dbTurn.Id,
+                        dbTurn.TurnIndex,
+                        sequence,
+                        e.Message ?? string.Empty,
+                        e.ToolCallId,
+                        e.FunctionName,
+                        publishedAssistantId,
+                        assistantName),
+                    CancellationToken.None).GetAwaiter().GetResult();
+
+                if (result.Created)
                 {
-                    NotebookConversationId = dbConversation.Id,
-                    TurnIndex = dbTurn.TurnIndex,
-                    MessageSequence = sequence++,
-                    Role = DataModelChatRole.Tool,
-                    AssistantId = publishedAssistantId,
-                    Content = e.Message,
-                    ToolCallId = e.ToolCallId,
-                    FunctionName = e.FunctionName,
-                    IsStreaming = false,
-                    Created = DateTime.UtcNow
-                };
-                db.NotebookConversationMessages.Add(toolMessage);
-                var turn = db.ConversationTurns.First(t => t.Id == dbTurn.Id);
-                turn.LastUpdated = DateTime.UtcNow;
-                db.SaveChanges();
+                    sequence++;
+                }
             }
         };
 

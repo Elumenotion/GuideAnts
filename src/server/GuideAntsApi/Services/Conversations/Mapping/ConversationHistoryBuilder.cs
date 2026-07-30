@@ -433,9 +433,14 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         using (var scope = _scopeFactory.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var toolById = historyMessages
-                .Where(x => x.Role == DataModelChatRole.Tool && x.ToolCallId != null && x.FunctionName != null)
-                .ToDictionary(x => x.ToolCallId!, x => x, StringComparer.OrdinalIgnoreCase);
+            var toolById = IndexToolMessagesByCallId(historyMessages);
+            var retainedToolMessageIds = new HashSet<Guid>(toolById.Values.Select(x => x.Id));
+            historyMessages = historyMessages
+                .Where(m =>
+                    m.Role != DataModelChatRole.Tool ||
+                    m.ToolCallId == null ||
+                    retainedToolMessageIds.Contains(m.Id))
+                .ToList();
             var emittedToolCallIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var m in historyMessages)
@@ -521,6 +526,7 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                     if (emittedToolCallIds.Contains(m.ToolCallId)) continue;
                     var toolMsgContent = string.IsNullOrEmpty(m.Content) ? Array.Empty<ChatContent>() : new[] { new ChatContent(m.Content) };
                     list.Add(new ChatMessage(m.ToolCallId, m.FunctionName, toolMsgContent));
+                    emittedToolCallIds.Add(m.ToolCallId);
                     continue;
                 }
 
@@ -588,6 +594,22 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         {
             conversationalClientPrefix.Add(clientMessages[index]);
         }
+    }
+
+    /// <summary>
+    /// One tool result per call id. When duplicates exist (e.g. pre-fix overflow unwind inserts),
+    /// keep the latest sequence so the model sees the replacement notice, not the oversized payload.
+    /// </summary>
+    internal static Dictionary<string, NotebookConversationMessage> IndexToolMessagesByCallId(
+        IEnumerable<NotebookConversationMessage> historyMessages)
+    {
+        return historyMessages
+            .Where(x => x.Role == DataModelChatRole.Tool && x.ToolCallId != null && x.FunctionName != null)
+            .GroupBy(x => x.ToolCallId!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(x => x.MessageSequence).ThenByDescending(x => x.Created).First(),
+                StringComparer.OrdinalIgnoreCase);
     }
 
     private static HashSet<string> CollectValidToolCallIds(
