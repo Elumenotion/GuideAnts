@@ -13,13 +13,26 @@ namespace AntRunner.Chat
         public string? FunctionName { get; }
         public string? ToolCallsJson { get; }
 
-        public MessageAddedEventArgs(string role, string newMessage, string? toolCallId = null, string? functionName = null, string? toolCallsJson = null)
+        /// <summary>
+        /// True when this event replaces content already present for the same tool/assistant
+        /// message (e.g. context-overflow unwind). Persistence must update in place, not insert.
+        /// </summary>
+        public bool IsReplacement { get; }
+
+        public MessageAddedEventArgs(
+            string role,
+            string newMessage,
+            string? toolCallId = null,
+            string? functionName = null,
+            string? toolCallsJson = null,
+            bool isReplacement = false)
         {
             Message = newMessage;
             Role = role;
             ToolCallId = toolCallId;
             FunctionName = functionName;
             ToolCallsJson = toolCallsJson;
+            IsReplacement = isReplacement;
         }
     }
 

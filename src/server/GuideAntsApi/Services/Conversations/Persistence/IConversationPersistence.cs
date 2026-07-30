@@ -55,6 +55,16 @@ public sealed record CreateToolMessageRequest(
     Guid? AssistantId,
     string? AssistantName);
 
+/// <summary>
+/// Result of creating or replacing a tool message.
+/// </summary>
+/// <param name="MessageId">Persisted message id (existing row when updated in place).</param>
+/// <param name="Created">
+/// True when a new row was inserted. False when an existing tool row for the same
+/// <c>ToolCallId</c> was updated in place (and any duplicate rows removed).
+/// </param>
+public sealed record CreateToolMessageResult(Guid MessageId, bool Created);
+
 public sealed record AppendTurnTraceSegmentRequest(
     Guid TurnId,
     Guid ConversationId,
@@ -83,7 +93,7 @@ public interface IConversationPersistence
         string content,
         CancellationToken ct = default);
 
-    Task<Guid> CreateToolMessageAsync(CreateToolMessageRequest request, CancellationToken ct = default);
+    Task<CreateToolMessageResult> CreateToolMessageAsync(CreateToolMessageRequest request, CancellationToken ct = default);
 
     Task PersistRunOutputAsync(Guid turnId, ChatRunOutput? output, CancellationToken ct = default);
 

@@ -209,10 +209,57 @@ public sealed class ConversationPersistence : IConversationPersistence
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<Guid> CreateToolMessageAsync(CreateToolMessageRequest request, CancellationToken ct = default)
+    public async Task<CreateToolMessageResult> CreateToolMessageAsync(
+        CreateToolMessageRequest request,
+        CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        // One tool result per ToolCallId. Context-overflow unwind (and retries) must update
+        // in place — inserting a second row with the same id breaks history rebuild.
+        if (!string.IsNullOrWhiteSpace(request.ToolCallId))
+        {
+            var existingForCall = await db.NotebookConversationMessages
+                .Where(m =>
+                    m.NotebookConversationId == request.ConversationId &&
+                    m.Role == DataModelChatRole.Tool &&
+                    m.ToolCallId == request.ToolCallId)
+                .OrderBy(m => m.MessageSequence)
+                .ThenBy(m => m.Created)
+                .ToListAsync(ct);
+
+            if (existingForCall.Count > 0)
+            {
+                var keep = existingForCall[0];
+                keep.Content = request.Content;
+                if (!string.IsNullOrEmpty(request.FunctionName))
+                {
+                    keep.FunctionName = request.FunctionName;
+                }
+
+                if (request.AssistantId.HasValue)
+                {
+                    keep.AssistantId = request.AssistantId;
+                }
+
+                if (!string.IsNullOrEmpty(request.AssistantName))
+                {
+                    keep.AssistantName = request.AssistantName;
+                }
+
+                keep.IsStreaming = false;
+
+                for (var i = 1; i < existingForCall.Count; i++)
+                {
+                    db.NotebookConversationMessages.Remove(existingForCall[i]);
+                }
+
+                TouchTurn(db, request.TurnId);
+                await db.SaveChangesAsync(ct);
+                return new CreateToolMessageResult(keep.Id, Created: false);
+            }
+        }
 
         var toolMessage = new NotebookConversationMessage
         {
@@ -232,7 +279,7 @@ public sealed class ConversationPersistence : IConversationPersistence
         db.NotebookConversationMessages.Add(toolMessage);
         TouchTurn(db, request.TurnId);
         await db.SaveChangesAsync(ct);
-        return toolMessage.Id;
+        return new CreateToolMessageResult(toolMessage.Id, Created: true);
     }
 
     public async Task PersistRunOutputAsync(Guid turnId, ChatRunOutput? output, CancellationToken ct = default)

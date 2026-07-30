@@ -184,6 +184,59 @@ public sealed class GuidesServiceDeepTests
     }
 
     [TestMethod]
+    public async Task CreateGuideAsync_CatalogModelWithRuntimeProfile_persists_temperature_and_topP()
+    {
+        await using var context = NewContext("catalog-profile-temp");
+        context.Models.Add(new Model
+        {
+            ModelId = "gpt-x",
+            DisplayName = "GPT X",
+            Provider = "openai-chat",
+            RuntimeConfigJson = """{"runtimeProfileId":"openai_chat_standard"}"""
+        });
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolverWithOpenAiChatStandardProfile("openai_chat_standard");
+        var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver);
+
+        var dto = MinimalCreateGuideDto("Guide") with { ModelId = "gpt-x", Temperature = 0.6f, TopP = 0.7 };
+
+        var created = await service.CreateGuideAsync(dto);
+
+        var details = await service.GetGuideAsync(created.Id);
+        details!.Temperature.Should().BeApproximately(0.6f, 0.0001f);
+        details.TopP.Should().BeApproximately(0.7, 0.0001);
+    }
+
+    [TestMethod]
+    public async Task UpdateGuideAsync_CatalogModelWithRuntimeProfile_persists_temperature_and_topP()
+    {
+        await using var context = NewContext("catalog-profile-update-temp");
+        context.Models.Add(new Model
+        {
+            ModelId = "gpt-x",
+            DisplayName = "GPT X",
+            Provider = "openai-chat",
+            RuntimeConfigJson = """{"runtimeProfileId":"openai_chat_standard"}"""
+        });
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolverWithOpenAiChatStandardProfile("openai_chat_standard");
+        var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver);
+
+        var created = await service.CreateGuideAsync(
+            MinimalCreateGuideDto("Guide") with { ModelId = "gpt-x", Temperature = 0.5f, TopP = 0.8 });
+
+        await service.UpdateGuideAsync(
+            created.Id,
+            MinimalUpdateGuideDto("Guide") with { ModelId = "gpt-x", Temperature = 0.6f, TopP = 0.7 });
+
+        var details = await service.GetGuideAsync(created.Id);
+        details!.Temperature.Should().BeApproximately(0.6f, 0.0001f);
+        details.TopP.Should().BeApproximately(0.7, 0.0001);
+    }
+
+    [TestMethod]
     public async Task CreateGuideAsync_LocalModel_accepts_in_range_sampling_parameters()
     {
         await using var context = NewContext("local-sampling-ok");
@@ -496,6 +549,24 @@ public sealed class GuidesServiceDeepTests
                 SamplingParameters: new Dictionary<string, SamplingParameterDefinition>
                 {
                     ["temperature"] = new("temperature", "Temperature", "", min, max, 0.1, 0.7, 0, true)
+                },
+                ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
+                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
+        return resolver.Object;
+    }
+
+    private static IRuntimeProfileResolver CreateResolverWithOpenAiChatStandardProfile(string profileId)
+    {
+        var resolver = new Mock<IRuntimeProfileResolver>();
+        resolver.Setup(r => r.ResolveAsync(profileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RuntimeProfileData(
+                profileId,
+                CombineSystemAndDeveloperMessages: false,
+                ThoughtBlockPattern: null,
+                SamplingParameters: new Dictionary<string, SamplingParameterDefinition>
+                {
+                    ["temperature"] = new("temperature", "Temperature", "", 0, 2, 0.1, 1.0, 0, true),
+                    ["top_p"] = new("top_p", "Top P", "", 0, 1, 0.05, 1.0, 1, true)
                 },
                 ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
                 RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));

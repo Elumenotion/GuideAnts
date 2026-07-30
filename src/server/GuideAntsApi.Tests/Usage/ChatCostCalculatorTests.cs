@@ -26,7 +26,21 @@ public sealed class ChatCostCalculatorTests
 
         var cost = ChatCostCalculator.CalculateCost(metrics, "gpt-5-mini");
 
-        cost.Should().Be(4.275m);
+        cost.Should().Be(4.025m);
+    }
+
+    [TestMethod]
+    public void CalculateCost_Bills_cached_tokens_once_for_partial_cache_hit()
+    {
+        var metrics = new UsageMetrics(
+            ValueInput: 1_000,
+            ValueCachedInput: 800,
+            ValueOutput: 100);
+
+        var cost = ChatCostCalculator.CalculateCost(metrics, "gpt-5-mini");
+
+        // 200 non-cached @ $0.25/1M + 800 cached @ $0.025/1M + 100 output @ $2/1M
+        cost.Should().Be(0.00027m);
     }
 
     [TestMethod]

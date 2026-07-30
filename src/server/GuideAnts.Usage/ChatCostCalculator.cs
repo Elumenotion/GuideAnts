@@ -20,8 +20,11 @@ public static class ChatCostCalculator
 
         var pricing = GetModelPricing(modelDeploymentId);
 
-        var inputCost = (metrics.ValueInput * pricing.InputPricePerToken) +
-                       (metrics.ValueCachedInput * pricing.CachedInputPricePerToken);
+        // Cached tokens are a subset of prompt/input tokens from providers — bill each token once.
+        var cachedInputTokens = Math.Min(metrics.ValueCachedInput, metrics.ValueInput);
+        var nonCachedInputTokens = metrics.ValueInput - cachedInputTokens;
+        var inputCost = (nonCachedInputTokens * pricing.InputPricePerToken) +
+                       (cachedInputTokens * pricing.CachedInputPricePerToken);
         var reasoningCost = metrics.ValueReasoning * pricing.ReasoningPricePerToken;
         var outputCost = metrics.ValueOutput * pricing.OutputPricePerToken;
 
