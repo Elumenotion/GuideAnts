@@ -17,7 +17,7 @@ import { useNotebook } from '../../../contexts/NotebookContext';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
 import { useConversationListPolling } from '../../../hooks/useConversationListPolling';
 import { useNotebookFilesPolling } from '../../../hooks/useNotebookFilesPolling';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import { useMultiSelect } from '../../../hooks/useMultiSelect';
 import { useListKeyboardNavigation } from '../../../hooks/useListKeyboardNavigation';
 import { useSidebarKeyboardShortcuts } from '../../../hooks/useSidebarKeyboardShortcuts';

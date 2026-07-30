@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createElement } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router';
 import { api } from '../services/api';
 import { API_BASE_URL } from '../config/apiConfig';
 

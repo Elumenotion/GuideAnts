@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { useProject } from '../contexts/ProjectContext';
 import { api } from '../services/api';
 import type { GuideDto, AssistantDto, PublishedGuideDto, PublishGuideDto, UpdatePublishedGuideDto } from '../types/guides';

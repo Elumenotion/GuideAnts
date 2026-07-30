@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { HashRouter, BrowserRouter } from 'react-router-dom';
+import { HashRouter, BrowserRouter } from 'react-router';
 import AppContent from './components/AppContent';
 import ZoomControl from './components/ZoomControl';
 import ErrorBoundary from './components/ErrorBoundary';

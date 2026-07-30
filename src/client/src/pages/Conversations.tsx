@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router';
 import { UserConversationDto, UserConversationsQuery } from '../types/conversation';
 import { api } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';

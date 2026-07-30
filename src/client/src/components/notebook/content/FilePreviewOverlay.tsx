@@ -4,7 +4,7 @@ import { notebookFilesApi } from '../../../services/notebookFiles';
 import { NotebookFileMarkdownShadowDto, MarkdownExtractionStatus } from '../../../types/api';
 import { isMarkdownExtractionSupported } from '../../../utils/markdownUtils';
 import { resolveHtmlResources, cleanupBlobUrls } from '../../../utils/htmlResourceResolver';
-import { useHref } from 'react-router-dom';
+import { useHref } from 'react-router';
 import { VscChromeClose, VscLinkExternal } from 'react-icons/vsc';
 import { ImageViewer } from '../../common/ImageViewer';
 import PdfViewer from '../../common/PdfViewer';

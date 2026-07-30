@@ -4,7 +4,7 @@ vi.unmock('../ConversationContext');
 
 import { render, renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { ConversationProvider } from '../ConversationContext';
 import { ToastProvider } from '../../components/common/Toast';
 import { NotebookProvider } from '../NotebookContext';

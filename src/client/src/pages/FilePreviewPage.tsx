@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router';
 import { notebookFilesApi } from '../services/notebookFiles';
 import { NotebookFileDto, NotebookFolderTreeDto } from '../types/notebook';
 import { FilePreviewOverlay } from '../components/notebook/content/FilePreviewOverlay';

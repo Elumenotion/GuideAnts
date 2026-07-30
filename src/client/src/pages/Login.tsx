@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { FaSignInAlt, FaSpinner } from 'react-icons/fa';
 import { textButtonClassName } from './settings/components/shared/ActionButtons';
 import { getErrorMessage } from './settings/utils';

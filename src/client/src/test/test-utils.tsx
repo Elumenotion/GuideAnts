@@ -1,7 +1,7 @@
 import './enableConversationContextStub';
 import React from 'react';
 import { render as rtlRender, type RenderOptions as RTLRenderOptions } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { ToastProvider } from '../components/common/Toast';

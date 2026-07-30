@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 import { useToast } from './common/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { AUTH_EXPIRED_EVENT, type AuthExpiredDetail } from '../services/authEvents';

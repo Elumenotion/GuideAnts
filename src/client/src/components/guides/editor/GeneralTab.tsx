@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { BasicInfo } from './BasicInfo';
 import LexicalEditor from '../../notebook/conversations/LexicalEditor';
 import type { LexicalEditorRef } from '../../notebook/conversations/LexicalEditor';

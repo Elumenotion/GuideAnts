@@ -1,4 +1,4 @@
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { ToolsSelector } from './ToolsSelector';
 import { OpenApiSchemas } from './OpenApiSchemas';
 import { ToolExecutionLimitsSection } from './toolLimits/ToolExecutionLimitsSection';

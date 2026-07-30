@@ -5,7 +5,7 @@ import {
   useState,
 } from 'react';
 import type { GuideantsChatElement } from 'guideants';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { API_BASE_URL, getApiOrigin } from '../../config/apiConfig';
 import { registerGuideAntsAppBridge } from './guideantsAppBridge';
 import { useGuideAntsGuide } from './GuideAntsGuideProvider';

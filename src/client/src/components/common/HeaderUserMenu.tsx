@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FaSignOutAlt, FaUserCircle } from 'react-icons/fa';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { textButtonClassName } from '../../pages/settings/components/shared/ActionButtons';
 

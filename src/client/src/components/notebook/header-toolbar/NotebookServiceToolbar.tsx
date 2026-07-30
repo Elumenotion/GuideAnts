@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { FaCommentDots, FaEye, FaSpinner, FaSyncAlt } from 'react-icons/fa';
 import { GiHumanEar, GiLips } from 'react-icons/gi';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';

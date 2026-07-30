@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';

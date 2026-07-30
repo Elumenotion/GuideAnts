@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { FaCheck, FaSpinner, FaTimes, FaTerminal } from 'react-icons/fa';
 import { TextActionButton } from './settings/components/shared/ActionButtons';
 import { getErrorMessage } from './settings/utils';
