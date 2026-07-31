@@ -1,0 +1,122 @@
+services:
+  guideants-ai:
+    image: ${GA_AI_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-cpu:main}
+    platform: linux/amd64
+    pull_policy: missing
+    container_name: guideants-ai
+    cap_drop:
+      - SYS_PTRACE
+    shm_size: "8gb"
+    volumes:
+      - ai_local_models:/models-local
+      - script_agent_admin_state:/var/lib/guideants/script-agent-admin
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
+        target: /app/ContentFiles
+    environment:
+      - FILE_STORAGE_ROOT=/app/ContentFiles
+      - HF_TOKEN=${HF_TOKEN:-}
+      - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
+      - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
+      - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
+      - GA_LLAMA_MODELS_PRESET=/models-local/router-models.ini
+      - GA_LLAMA_MODEL_DIR=/models-local/llama
+      - GA_LLAMA_ADMIN_PORT=8086
+      - GA_LLAMA_MODELS_MAX=${GA_LLAMA_MODELS_MAX:-1}
+      - GA_LLAMA_NO_AUTOLOAD=${GA_LLAMA_NO_AUTOLOAD:-1}
+      - GA_LLAMA_CTX_SIZE=262144
+      - GA_LLAMA_CACHE_RAM=8192
+      - GA_LLAMA_JINJA=${GA_LLAMA_JINJA:-1}
+      - GA_LLAMA_CONT_BATCH=${GA_LLAMA_CONT_BATCH:-1}
+      - GA_LLAMA_KV_UNIFIED=${GA_LLAMA_KV_UNIFIED:-1}
+      - GA_LLAMA_FLASH_ATTN=${GA_LLAMA_FLASH_ATTN:-on}
+      - GA_LLAMA_NO_MMAP=${GA_LLAMA_NO_MMAP:-0}
+      - GA_LLAMA_THREADS=${GA_LLAMA_THREADS:-}
+      - GA_LLAMA_PARALLEL=${GA_LLAMA_PARALLEL:-}
+      - GA_LLAMA_GPU_LAYERS=${GA_LLAMA_GPU_LAYERS:-}
+      - GA_LLAMA_KV_OFFLOAD=${GA_LLAMA_KV_OFFLOAD:-}
+      - GA_LLAMA_CACHE_TYPE_K=${GA_LLAMA_CACHE_TYPE_K:-}
+      - GA_LLAMA_CACHE_TYPE_V=${GA_LLAMA_CACHE_TYPE_V:-}
+      - GA_LLAMA_TENSOR_SPLIT=${GA_LLAMA_TENSOR_SPLIT:-}
+      - GA_ASR_HOST=127.0.0.1
+      - GA_ASR_PORT=8082
+      - GA_ASR_MODEL_DIR=/models-local/asr
+      - GA_ASR_DEFAULT_MODEL_PATH=Qwen3-ASR-0.6B
+      - GA_ASR_DEFAULT_MODEL_ID=Qwen/Qwen3-ASR-0.6B
+      - GA_ASR_WAIT_FOR_READY_ON_STARTUP=${GA_ASR_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_ASR_READY_TIMEOUT_SECONDS=${GA_ASR_READY_TIMEOUT_SECONDS:-1800}
+      - GA_ASR_DEVICE_MAP=auto
+      - GA_ASR_BACKEND=cpu
+      - GA_ASR_DTYPE=bfloat16
+      - GA_ASR_MAX_INFERENCE_BATCH_SIZE=8
+      - GA_ASR_MAX_NEW_TOKENS=512
+      - GA_ASR_WARMUP_ON_LOAD=${GA_ASR_WARMUP_ON_LOAD:-1}
+      - GA_ASR_WARMUP_AUDIO_PATH=${GA_ASR_WARMUP_AUDIO_PATH:-/app/asr-service/warmup.webm}
+      - GA_ASR_WARMUP_LANGUAGE=${GA_ASR_WARMUP_LANGUAGE:-}
+      - GA_TTS_HOST=127.0.0.1
+      - GA_TTS_PORT=8084
+      - GA_TTS_MODEL_DIR=/models-local/tts
+      - GA_TTS_DEFAULT_MODEL_PATH=chatterbox
+      - GA_TTS_DEFAULT_MODEL_ID=chatterbox
+      - GA_TTS_WAIT_FOR_READY_ON_STARTUP=${GA_TTS_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_TTS_READY_TIMEOUT_SECONDS=${GA_TTS_READY_TIMEOUT_SECONDS:-1800}
+      - GA_TTS_DEVICE_MAP=auto
+      - GA_TTS_BACKEND=cpu
+      - GA_TTS_DTYPE=float32
+      - GA_TTS_TIMEOUT_SECONDS=${GA_TTS_TIMEOUT_SECONDS:-300}
+      - GA_TTS_MAX_NEW_TOKENS=512
+      - GA_TTS_SAMPLE_RATE=24000
+      - GA_TTS_VOICE=af_alloy
+      - GA_TTS_LANG_CODE=a
+      - GA_TTS_SPEED=1.0
+      - GA_EMB_HOST=127.0.0.1
+      - GA_EMB_PORT=8085
+      - GA_EMB_MODEL_DIR=/models-local/emb
+      - GA_EMB_DEFAULT_MODEL_PATH=${GA_EMB_DEFAULT_MODEL_PATH}
+      - GA_EMB_DEVICE=${GA_EMB_DEVICE:-cpu}
+      - GA_EMB_FIX_MISTRAL_REGEX=${GA_EMB_FIX_MISTRAL_REGEX:-1}
+      - GA_EMB_WARMUP_ON_LOAD=${GA_EMB_WARMUP_ON_LOAD}
+      - GA_EMB_WAIT_FOR_READY_ON_STARTUP=${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_EMB_READY_TIMEOUT_SECONDS=${GA_EMB_READY_TIMEOUT_SECONDS:-1800}
+      - GA_MEDIA_HOST=127.0.0.1
+      - GA_MEDIA_PORT=8087
+      - GA_SD_HOST=127.0.0.1
+      - GA_SD_PORT=8083
+      - GA_SD_MODEL_DIR=/models-local/sd
+      - GA_SD_TIMEOUT_SECONDS=${GA_SD_TIMEOUT_SECONDS:-900}
+      - GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=${GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS:-120}
+      - GA_SD_STRENGTH=0.75
+      - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
+      - "GA_SD_BACKEND=${GA_SD_BACKEND:-}"
+      - "GA_SD_PARAMS_BACKEND=${GA_SD_PARAMS_BACKEND:-}"
+      - "GA_SD_SPLIT_MODE=${GA_SD_SPLIT_MODE:-}"
+      - "GA_SD_MAX_VRAM=${GA_SD_MAX_VRAM:-}"
+      - GA_SD_AUTO_FIT=${GA_SD_AUTO_FIT:-0}
+      - GA_SD_DIFFUSION_FA=1
+      - GA_SD_WARMUP_PROMPT=${GA_SD_WARMUP_PROMPT:-startup-warmup}
+      - GA_SD_WARMUP_SIZE=${GA_SD_WARMUP_SIZE:-512x512}
+      - GA_SD_WARMUP_STEPS=${GA_SD_WARMUP_STEPS:-1}
+      - GA_SD_WARMUP_OUTPUT_FORMAT=${GA_SD_WARMUP_OUTPUT_FORMAT:-png}
+      - GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS=${GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS:-180}
+      - GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP=${GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP:-1}
+      - GA_SD_WAIT_FOR_READY_ON_STARTUP=${GA_SD_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_SD_READY_TIMEOUT_SECONDS=${GA_SD_READY_TIMEOUT_SECONDS:-1800}
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  guideants-webapi-ui:
+    depends_on:
+      guideants-ai:
+        condition: service_started
+    environment:
+      - LocalServiceHosts__SpeechTranscriptionBaseUrl=http://guideants-ai:80
+      - LocalServiceHosts__SpeechSynthesisBaseUrl=http://guideants-ai:80
+      - LocalServiceHosts__ImageGenerationBaseUrl=http://guideants-ai:80
+      - LocalServiceHosts__EmbeddingsBaseUrl=http://guideants-ai:80
+      - LocalServiceHosts__MediaBaseUrl=http://guideants-ai:80
+      - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
+      - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox

@@ -8,13 +8,13 @@ What it does, in order:
   1. Detects your OS / shell environment.
   2. Checks Docker is installed and running.
   3. Reports memory and disk (warns if low, never blocks).
-  4. Walks you through which backend to use (cpu / cuda13 / rocm / slim / vulkan).
-  5. Checks the registry for newer images and asks before updating.
+  4. Walks you through database layout, AI backend, and optional services.
+  5. Pulls each selected image sequentially before starting the stack.
   6. Starts the stack, waits for health, opens your browser.
 
 Flags:
   --doctor                 Run checks only; change nothing.
-  --backend <cpu|cuda13|rocm|slim|vulkan>   Skip the backend prompt.
+  --backend <none|cpu|cuda13|rocm|slim|vulkan>   Skip the AI backend prompt.
   --compose <ghcr|local>   Use GHCR images (default) or local build images.
   --mount <path>           Mount a host folder into a project (requires prior login).
   --unmount                Interactively remove a host folder mount (requires prior login).
@@ -29,6 +29,11 @@ $ErrorActionPreference = 'Stop'
 
 $script:RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $script:RootDir 'scripts/rocm-probe.ps1')
+. (Join-Path $script:RootDir 'scripts/installer-wizard.ps1')
+$script:InstallerLogFn = ${function:Write-Log}
+$script:InstallerWarnFn = ${function:Write-WarnLog}
+$script:InstallerDockerInvokeFn = ${function:Invoke-External}
+$script:InstallerDockerCaptureFn = ${function:Invoke-ExternalCapture}
 $script:DockerDir = Join-Path $script:RootDir 'docker'
 $script:EnvFile = Join-Path $script:DockerDir '.env'
 $script:StateFile = Join-Path $script:RootDir '.installer_state.env'
@@ -48,6 +53,11 @@ $script:InstallRocmWsl = $false
 $script:MountPath = ''
 $script:Unmount = $false
 $script:SelectedBackend = ''
+$script:SelectedDbLayout = 'bundled'
+$script:SelectedAiBackend = 'slim'
+$script:SelectedComponents = @()
+$script:SelectedComposeFragments = @()
+$script:ComposeArgs = @()
 $script:ComposeFile = ''
 $script:LowRam = $false
 $script:Recommended = ''
@@ -95,13 +105,13 @@ What it does, in order:
   1. Detects your OS / shell environment.
   2. Checks Docker is installed and running.
   3. Reports memory and disk (warns if low, never blocks).
-  4. Walks you through which backend to use (cpu / cuda13 / rocm / slim / vulkan).
-  5. Checks the registry for newer images and asks before updating.
+  4. Walks you through database layout, AI backend, and optional services.
+  5. Pulls each selected image sequentially before starting the stack.
   6. Starts the stack, waits for health, opens your browser.
 
 Flags:
   --doctor                 Run checks only; change nothing.
-  --backend <cpu|cuda13|rocm|slim|vulkan>   Skip the backend prompt.
+  --backend <none|cpu|cuda13|rocm|slim|vulkan>   Skip the AI backend prompt.
   --compose <ghcr|local>   Use GHCR images (default) or local build images.
   --mount <path>           Mount a host folder into a project (requires prior login).
   --unmount                Interactively remove a host folder mount (requires prior login).
@@ -202,8 +212,8 @@ function Parse-Arguments {
         }
     }
 
-    if ($script:BackendOverride -ne '' -and $script:BackendOverride -notmatch '^(cpu|cuda13|rocm|slim|vulkan)$') {
-        Stop-WithError '--backend must be cpu, cuda13, rocm, slim, or vulkan'
+    if ($script:BackendOverride -ne '' -and $script:BackendOverride -notmatch '^(none|cpu|cuda13|rocm|slim|vulkan)$') {
+        Stop-WithError '--backend must be none, cpu, cuda13, rocm, slim, or vulkan'
     }
 
     if ($script:ComposeMode -notin @('ghcr', 'local')) {
@@ -836,20 +846,29 @@ function Add-ComposeOverrideIfValid {
         [Parameter(Mandatory = $true)][string]$OverrideFile
     )
 
-    if (-not (Test-Path -LiteralPath $OverrideFile)) { return $ComposeArgs }
+    $overridePath = Join-Path $script:DockerDir $OverrideFile
+    if (-not (Test-Path -LiteralPath $overridePath)) { return $ComposeArgs }
 
-    $configCheck = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('compose', '-f', $script:ComposeFile, '-f', $OverrideFile, '--env-file', $script:EnvFile, 'config') -IgnoreErrors
+    $configCheck = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('-f', $overridePath, '--env-file', $script:EnvFile, 'config')) -IgnoreErrors
     if ($configCheck.ExitCode -eq 0) {
         Write-Log "Including compose override: $OverrideFile"
-        return @($ComposeArgs + @('-f', $OverrideFile))
+        return @($ComposeArgs + @('-f', $overridePath))
     }
 
     Write-WarnLog "Ignoring invalid compose override docker/$OverrideFile."
     return $ComposeArgs
 }
 
+function Build-ComposeArgs {
+    $args = @(Resolve-InstallerComposeArgs -DockerDir $script:DockerDir -FragmentFiles $script:SelectedComposeFragments)
+    $args = Add-ComposeOverrideIfValid -ComposeArgs $args -OverrideFile $script:HostMountOverrideFile
+    $args = Add-ComposeOverrideIfValid -ComposeArgs $args -OverrideFile $script:RocmRuntimeOverrideFile
+    $args = Add-ComposeOverrideIfValid -ComposeArgs $args -OverrideFile $script:VoicePackOverrideFile
+    return $args
+}
+
 function Select-RocmRuntime {
-    if ($script:SelectedBackend -ne 'rocm') {
+    if ($script:SelectedAiBackend -ne 'rocm') {
         $override = Join-Path $script:DockerDir $script:RocmRuntimeOverrideFile
         if (Test-Path -LiteralPath $override) {
             Remove-Item -LiteralPath $override -Force
@@ -858,11 +877,11 @@ function Select-RocmRuntime {
     }
 
     $helper = Join-Path $script:RootDir 'scripts/rocm-runtime-compose.ps1'
-    & $helper -DockerDir $script:DockerDir -Backend $script:SelectedBackend -RootDir $script:RootDir
+    & $helper -DockerDir $script:DockerDir -Backend $script:SelectedAiBackend -RootDir $script:RootDir
 }
 
 function Select-VulkanRuntime {
-    if ($script:SelectedBackend -ne 'vulkan') { return }
+    if ($script:SelectedAiBackend -ne 'vulkan') { return }
 
     $dockerOs = (Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('info', '--format', '{{.OperatingSystem}}') -IgnoreErrors).Output | Select-Object -First 1
     if ([string]$dockerOs -match 'Docker Desktop') {
@@ -1555,19 +1574,14 @@ function Open-Browser {
 }
 
 function Save-State {
-    $epoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    $lines = @(
-        "BACKEND=$($script:SelectedBackend)",
-        "COMPOSE_MODE=$($script:ComposeMode)",
-        "COMPOSE_FILE=$($script:ComposeFile)",
-        "HOST_MOUNT_OVERRIDE_FILE=$($script:HostMountOverrideFile)",
-        "VOICE_PACK_OVERRIDE_FILE=$($script:VoicePackOverrideFile)",
-        "DOCKER_DIRECTORY=$($script:DockerDirectory)",
-        'START_COMMAND=guideants.ps1',
-        "LAST_RUN_EPOCH=$epoch"
-    )
-    $text = ($lines -join "`n") + "`n"
-    [System.IO.File]::WriteAllText($script:StateFile, $text, [System.Text.UTF8Encoding]::new($false))
+    Save-InstallerState `
+        -StateFile $script:StateFile `
+        -DbLayout $script:SelectedDbLayout `
+        -AiBackend $script:SelectedAiBackend `
+        -Components $script:SelectedComponents `
+        -ComposeFiles $script:SelectedComposeFragments `
+        -ComposeMode $script:ComposeMode `
+        -StartCommand 'guideants.ps1'
 }
 
 function Ensure-ShellScriptsUseLf {
@@ -1635,27 +1649,18 @@ function Start-GuideAntsStack {
     }
 
     Ensure-ShellScriptsUseLf
+    Set-InstallerLocalImageEnv -ComposeMode $script:ComposeMode
+    $script:ComposeArgs = @(Build-ComposeArgs)
 
     Push-Location $script:DockerDir
     try {
-        $composeArgs = @('-f', $script:ComposeFile)
-        $composeArgs = Add-ComposeOverrideIfValid -ComposeArgs $composeArgs -OverrideFile $script:HostMountOverrideFile
-        $composeArgs = Add-ComposeOverrideIfValid -ComposeArgs $composeArgs -OverrideFile $script:RocmRuntimeOverrideFile
-        $composeArgs = Add-ComposeOverrideIfValid -ComposeArgs $composeArgs -OverrideFile $script:VoicePackOverrideFile
-
-        if ($script:UpdateDecision -eq 'pull') {
-            if ($script:PullMissingServices.Count -gt 0) {
-                Write-Log "Pulling missing images: $($script:PullMissingServices -join ' ')"
-                Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $composeArgs + @('--env-file', $script:EnvFile, 'pull') + $script:PullMissingServices)
-            }
-            if ($script:PullAlwaysServices.Count -gt 0) {
-                Write-Log "Pulling updates for: $($script:PullAlwaysServices -join ' ')"
-                Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $composeArgs + @('--env-file', $script:EnvFile, 'pull', '--policy', 'always') + $script:PullAlwaysServices)
-            }
-        }
+        Invoke-InstallerProgressivePull -ComposeArgs $script:ComposeArgs -EnvFile $script:EnvFile -AssumeYes:$script:AssumeYes
 
         Write-Log 'Starting the stack...'
-        Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $composeArgs + @('--env-file', $script:EnvFile, 'up', '-d'))
+        Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $script:ComposeArgs + @('--env-file', $script:EnvFile, 'up', '-d'))
+
+        $active = @(Get-InstallerActiveServices -DbLayout $script:SelectedDbLayout -AiBackend $script:SelectedAiBackend -Components $script:SelectedComponents)
+        Invoke-InstallerPruneDeselected -ComposeArgs $script:ComposeArgs -EnvFile $script:EnvFile -KeepServices $active
     }
     finally {
         Pop-Location
@@ -1680,38 +1685,30 @@ function Invoke-Main {
         Invoke-InstallRocmWsl
     }
     Report-Resources
-    Choose-Backend
-    $script:ComposeFile = Get-ComposeFileForBackend -Backend $script:SelectedBackend
-    Write-Log "Selected backend: $($script:SelectedBackend)  ->  docker/$($script:ComposeFile)"
+
+    $aiOverride = if ($script:BackendOverride -ne '') { $script:BackendOverride } else { '' }
+    Invoke-InstallerWizard `
+        -StateFile $script:StateFile `
+        -Reconfigure:$script:Reconfigure `
+        -AiBackendOverride $aiOverride `
+        -AssumeYes:$script:AssumeYes
+
+    $script:SelectedBackend = $script:SelectedAiBackend
+    Write-Log "DB layout: $($script:SelectedDbLayout)   AI: $($script:SelectedAiBackend)   Optionals: $($script:SelectedComponents -join ', ')"
+    Write-Log "Compose fragments: $($script:SelectedComposeFragments -join ', ')"
 
     Select-VulkanRuntime
     Select-RocmRuntime
-    Check-GpuDrivers -Backend $script:SelectedBackend
+    Check-GpuDrivers -Backend $script:SelectedAiBackend
 
     Detect-PriorInstall
-    if ($script:ComposeMode -eq 'ghcr') {
-        Plan-Pull -ComposeFileName $script:ComposeFile
-    }
-    else {
-        Write-Log 'Local compose mode - skipping registry update check.'
-        $script:UpdateDecision = 'skip'
-    }
 
     if ($script:Mode -eq 'doctor') {
         Write-HRule
         Write-Log 'Doctor mode complete. No changes were made.'
-        $wouldStart = "docker compose -f docker/$($script:ComposeFile)"
-        if (Test-Path -LiteralPath (Join-Path $script:DockerDir $script:HostMountOverrideFile)) {
-            $wouldStart += " -f docker/$($script:HostMountOverrideFile)"
-        }
-        if (Test-Path -LiteralPath (Join-Path $script:DockerDir $script:RocmRuntimeOverrideFile)) {
-            $wouldStart += " -f docker/$($script:RocmRuntimeOverrideFile)"
-        }
-        if (Test-Path -LiteralPath (Join-Path $script:DockerDir $script:VoicePackOverrideFile)) {
-            $wouldStart += " -f docker/$($script:VoicePackOverrideFile)"
-        }
-        Write-Log "Would start: $wouldStart up -d"
-        Write-Log "Update decision: $($script:UpdateDecision)"
+        $wouldArgs = @(Build-ComposeArgs)
+        $wouldStart = 'docker compose ' + (($wouldArgs | ForEach-Object { if ($_ -like '*\*' -or $_ -like '*/*') { "-f `"$_`"" } else { $_ } }) -join ' ')
+        Write-Log "Would start: $wouldStart --env-file docker/.env up -d"
         return
     }
 
@@ -1726,7 +1723,7 @@ function Invoke-Main {
         Open-Browser
     }
     else {
-        Write-WarnLog "Health check timed out. Inspect with: docker compose -f docker/$($script:ComposeFile) ps"
+        Write-WarnLog "Health check timed out. Inspect with: docker compose $($script:ComposeArgs -join ' ') ps"
         if (-not [string]::IsNullOrWhiteSpace($script:MountPath) -or $script:Unmount) {
             Write-WarnLog 'Skipping mount/unmount operations because the health check failed.'
         }

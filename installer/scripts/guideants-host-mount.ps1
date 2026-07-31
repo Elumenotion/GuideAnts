@@ -15,10 +15,10 @@ param(
     [string]$ProjectId
 )
 
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ScriptDir 'installer-wizard.ps1')
 $RootDir = Split-Path -Parent $ScriptDir
 $StateFile = Join-Path $RootDir '.installer_state.env'
 $DefaultApiBase = 'http://localhost:5107'
@@ -50,37 +50,21 @@ function Get-InstallerState {
         Stop-WithError "Missing $StateFile. Run a start_* launcher first."
     }
 
-    $state = @{
-        ComposeFile = $null
+    $built = Build-InstallerComposeArgsFromState `
+        -RootDir $RootDir `
+        -StateFile $StateFile `
+        -IncludeHostMountOverride `
+        -IncludeVoicePackOverride
+
+    $selection = $built.Selection
+    return [pscustomobject]@{
+        ComposeArgs = $built.ComposeArgs
+        DbLayout = $selection.DbLayout
+        AiBackend = $selection.AiBackend
+        Components = @($selection.Components)
         HostMountOverrideFile = 'docker-compose.host-mounts.generated.yml'
         DockerDirectory = 'docker'
     }
-
-    foreach ($line in Get-Content -LiteralPath $StateFile) {
-        $trimmed = $line.Trim()
-        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) {
-            continue
-        }
-
-        $separatorIndex = $trimmed.IndexOf('=')
-        if ($separatorIndex -lt 1) {
-            continue
-        }
-
-        $key = $trimmed.Substring(0, $separatorIndex).Trim()
-        $value = $trimmed.Substring($separatorIndex + 1).Trim()
-        switch ($key) {
-            'COMPOSE_FILE' { $state.ComposeFile = $value }
-            'HOST_MOUNT_OVERRIDE_FILE' { $state.HostMountOverrideFile = $value }
-            'DOCKER_DIRECTORY' { $state.DockerDirectory = $value }
-        }
-    }
-
-    if ([string]::IsNullOrWhiteSpace($state.ComposeFile)) {
-        Stop-WithError "COMPOSE_FILE is missing from $StateFile. Run a start_* launcher first."
-    }
-
-    return $state
 }
 
 function Get-SafeMountKey {
@@ -339,22 +323,19 @@ function Invoke-RemoveMount {
 function Restart-AffectedServices {
     param([Parameter(Mandatory = $true)][object]$InstallerState)
 
-    $overridePath = Join-Path $RootDir (Join-Path $InstallerState.DockerDirectory $InstallerState.HostMountOverrideFile)
-    $composeArgs = @('-f', $InstallerState.ComposeFile)
-    if (Test-Path -LiteralPath $overridePath) {
-        $composeArgs += @('-f', $InstallerState.HostMountOverrideFile)
+    $candidateServices = @('guideants-webapi-ui')
+    if ($InstallerState.AiBackend -ne 'none') {
+        $candidateServices += 'guideants-ai'
+    }
+    if ($InstallerState.Components -contains 'plantuml') {
+        $candidateServices += 'plantuml'
     }
 
-    $voicePackOverridePath = Join-Path $RootDir (Join-Path $InstallerState.DockerDirectory $VoicePackOverrideFile)
-    if (Test-Path -LiteralPath $voicePackOverridePath) {
-        $composeArgs += @('-f', $VoicePackOverrideFile)
-    }
-
-    $services = $Script:AffectedMountServiceNames
-    Write-Log "Restarting affected services (--no-deps): $($services -join ' ')"
+    $composeArgs = @($InstallerState.ComposeArgs)
+    Write-Log "Restarting affected services (--no-deps): $($candidateServices -join ' ')"
     Push-Location (Join-Path $RootDir $InstallerState.DockerDirectory)
     try {
-        & docker compose @composeArgs up -d --no-deps @services
+        & docker compose @composeArgs up -d --no-deps @candidateServices
         if ($LASTEXITCODE -ne 0) {
             throw "docker compose exited with code $LASTEXITCODE"
         }

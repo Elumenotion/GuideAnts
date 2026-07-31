@@ -5,6 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 STATE_FILE="$ROOT_DIR/.installer_state.env"
+# shellcheck source=scripts/installer-wizard.sh
+. "$SCRIPT_DIR/installer-wizard.sh"
 DEFAULT_API_BASE="http://localhost:5107"
 API_PLAN_PATH="/api/internal/host-folder-mounts"
 AFFECTED_MOUNT_SERVICE_NAMES=(guideants-webapi-ui guideants-ai plantuml)
@@ -34,33 +36,18 @@ trim() {
 }
 
 load_installer_state() {
-  COMPOSE_FILE=""
   HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
   DOCKER_DIRECTORY="docker"
+  DB_LAYOUT=""
+  AI_BACKEND=""
+  COMPONENTS=""
 
   if [[ ! -f "$STATE_FILE" ]]; then
     fail "Missing $STATE_FILE. Run a start_* launcher first."
   fi
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="$(trim "$line")"
-    [[ -z "$line" || "$line" == \#* ]] && continue
-    if [[ "$line" != *=* ]]; then
-      continue
-    fi
-    key="${line%%=*}"
-    value="${line#*=}"
-    value="$(trim "$value")"
-    case "$key" in
-      COMPOSE_FILE) COMPOSE_FILE="$value" ;;
-      HOST_MOUNT_OVERRIDE_FILE) HOST_MOUNT_OVERRIDE_FILE="$value" ;;
-      DOCKER_DIRECTORY) DOCKER_DIRECTORY="$value" ;;
-    esac
-  done <"$STATE_FILE"
-
-  if [[ -z "$COMPOSE_FILE" ]]; then
-    fail "COMPOSE_FILE is missing from $STATE_FILE. Run a start_* launcher first."
-  fi
+  installer_legacy_state
+  installer_build_compose_args_from_state "$ROOT_DIR" "$STATE_FILE" 1 1 0
 }
 
 sanitize_mount_key() {
@@ -354,20 +341,14 @@ remove_mount() {
 }
 
 restart_affected_services() {
-  local override_path="$ROOT_DIR/$DOCKER_DIRECTORY/$HOST_MOUNT_OVERRIDE_FILE"
-  local voice_pack_override_path="$ROOT_DIR/$DOCKER_DIRECTORY/$VOICE_PACK_OVERRIDE_FILE"
-  local compose_args=(-f "$COMPOSE_FILE")
-  if [[ -f "$override_path" ]]; then
-    compose_args+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
-  fi
-  if [[ -f "$voice_pack_override_path" ]]; then
-    compose_args+=(-f "$VOICE_PACK_OVERRIDE_FILE")
-  fi
+  local comp_array=() services=()
+  [[ -n "${COMPONENTS:-}" ]] && IFS=',' read -r -a comp_array <<< "$COMPONENTS"
+  mapfile -t services < <(installer_mount_restart_services "$DB_LAYOUT" "$AI_BACKEND" "${comp_array[@]}")
 
-  log "Restarting affected services (--no-deps): ${AFFECTED_MOUNT_SERVICE_NAMES[*]}"
+  log "Restarting affected services (--no-deps): ${services[*]}"
   (
     cd "$ROOT_DIR/$DOCKER_DIRECTORY"
-    docker compose "${compose_args[@]}" up -d --no-deps "${AFFECTED_MOUNT_SERVICE_NAMES[@]}"
+    docker compose "${COMPOSE_ARGS[@]}" up -d --no-deps "${services[@]}"
   )
 }
 

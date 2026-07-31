@@ -9,13 +9,13 @@
 #   1. Detects your OS / shell environment.
 #   2. Checks Docker is installed and running.
 #   3. Reports memory and disk (warns if low, never blocks).
-#   4. Walks you through which backend to use (cpu / cuda13 / rocm / slim / vulkan).
-#   5. Checks the registry for newer images and asks before updating.
+#   4. Walks you through database layout, AI backend, and optional services.
+#   5. Pulls each selected image sequentially before starting the stack.
 #   6. Starts the stack, waits for health, opens your browser.
 #
 # Flags:
 #   --doctor                 Run checks only; change nothing.
-#   --backend <cpu|cuda13|rocm|slim|vulkan>   Skip the backend prompt.
+#   --backend <none|cpu|cuda13|rocm|slim|vulkan>   Skip the AI backend prompt.
 #   --compose <ghcr|local>   Use GHCR images (default) or local build images.
 #   --mount <path>           Mount a host folder into a project (requires prior login).
 #   --unmount                Interactively remove a host folder mount (requires prior login).
@@ -56,6 +56,9 @@ hr()   { printf '%s\n' "--------------------------------------------------------
 export ROCM_RUNTIME_LOG_FN=log
 export ROCM_RUNTIME_WARN_FN=warn
 
+# shellcheck source=scripts/installer-wizard.sh
+. "$ROOT_DIR/scripts/installer-wizard.sh"
+
 usage() {
   sed -n '3,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
@@ -83,8 +86,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" =~ ^(cpu|cuda13|rocm|slim|vulkan)$ ]] \
-  || fail "--backend must be cpu, cuda13, rocm, slim, or vulkan"
+[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" =~ ^(none|cpu|cuda13|rocm|slim|vulkan)$ ]] \
+  || fail "--backend must be none, cpu, cuda13, rocm, slim, or vulkan"
 [[ "$COMPOSE_MODE" == "ghcr" || "$COMPOSE_MODE" == "local" ]] \
   || fail "--compose must be ghcr or local"
 
@@ -485,7 +488,7 @@ choose_backend() {
 # compose defaults win. VK_DRIVER_FILES is always pinned to one ICD so llvmpipe (CPU) is
 # never selected; a host with no usable GPU degrades to CPU (warned), never silently.
 select_vulkan_runtime() {
-  [[ "$SELECTED_BACKEND" == "vulkan" ]] || return 0
+  [[ "$SELECTED_AI_BACKEND" == "vulkan" ]] || return 0
 
   if docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
     log "Vulkan: Docker Desktop → Mesa dzn over D3D12 (/dev/dxg). Using compose defaults."
@@ -1131,16 +1134,9 @@ open_browser() {
 }
 
 save_state() {
-  cat > "$STATE_FILE" <<EOF
-BACKEND=${SELECTED_BACKEND:-}
-COMPOSE_MODE=${COMPOSE_MODE}
-COMPOSE_FILE=${COMPOSE_FILE}
-HOST_MOUNT_OVERRIDE_FILE=${HOST_MOUNT_OVERRIDE_FILE}
-VOICE_PACK_OVERRIDE_FILE=${VOICE_PACK_OVERRIDE_FILE}
-DOCKER_DIRECTORY=${DOCKER_DIRECTORY}
-START_COMMAND=guideants.sh
-LAST_RUN_EPOCH=$(date +%s)
-EOF
+  local components_csv; components_csv="$(IFS=,; echo "${SELECTED_COMPONENTS[*]}")"
+  local fragments_csv; fragments_csv="$(IFS=,; echo "${SELECTED_COMPOSE_FRAGMENTS[*]}")"
+  installer_save_state "$SELECTED_DB_LAYOUT" "$SELECTED_AI_BACKEND" "$components_csv" "$fragments_csv" "$COMPOSE_MODE" "guideants.sh"
 }
 
 # =============================================================================
@@ -1162,33 +1158,29 @@ if [[ "$INSTALL_ROCM_WSL" == "1" ]]; then
   install_rocm_wsl_from_host "$ROOT_DIR"
 fi
 report_resources
-choose_backend
-COMPOSE_FILE="$(compose_file_for "$SELECTED_BACKEND")"
-log "Selected backend: $SELECTED_BACKEND  ->  docker/$COMPOSE_FILE"
+AI_BACKEND_OVERRIDE="$BACKEND_OVERRIDE"
+installer_run_wizard
+SELECTED_BACKEND="$SELECTED_AI_BACKEND"
+log "DB layout: $SELECTED_DB_LAYOUT   AI: $SELECTED_AI_BACKEND   Optionals: ${SELECTED_COMPONENTS[*]:-none}"
+log "Compose fragments: ${SELECTED_COMPOSE_FRAGMENTS[*]}"
 
 select_vulkan_runtime
 
 select_rocm_runtime "$DOCKER_DIR" "$ROOT_DIR"
 
-check_gpu_drivers "$SELECTED_BACKEND"
+check_gpu_drivers "$SELECTED_AI_BACKEND"
 
 detect_prior_install
-if [[ "$COMPOSE_MODE" == "ghcr" ]]; then
-  plan_pull "$COMPOSE_FILE"
-else
-  log "Local compose mode — skipping registry update check."
-  UPDATE_DECISION="skip"
-fi
 
 if [[ "$MODE" == "doctor" ]]; then
   hr
   log "Doctor mode complete. No changes were made."
-  would_start="docker compose -f docker/$COMPOSE_FILE"
+  installer_compose_args
+  would_start="docker compose ${COMPOSE_ARGS[*]}"
   [[ -f "$DOCKER_DIR/$HOST_MOUNT_OVERRIDE_FILE" ]] && would_start+=" -f docker/$HOST_MOUNT_OVERRIDE_FILE"
   [[ -f "$DOCKER_DIR/$VOICE_PACK_OVERRIDE_FILE" ]] && would_start+=" -f docker/$VOICE_PACK_OVERRIDE_FILE"
-  [[ -f "$DOCKER_DIR/$ROCM_RUNTIME_OVERRIDE_FILE" ]] && would_start+=" -f docker/$ROCM_RUNTIME_OVERRIDE_FILE"
-  log "Would start: $would_start up -d"
-  log "Update decision: ${UPDATE_DECISION:-skip}"
+  [[ -f "$DOCKER_DIR/$ROCM_RUNTIME_OVERRIDE_FILE" && "$SELECTED_AI_BACKEND" == "rocm" ]] && would_start+=" -f docker/$ROCM_RUNTIME_OVERRIDE_FILE"
+  log "Would start: $would_start --env-file docker/.env up -d"
   exit 0
 fi
 
@@ -1198,43 +1190,36 @@ fi
 find "$DOCKER_DIR/build" -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
 cd "$DOCKER_DIR"
-compose_args=(-f "$COMPOSE_FILE")
+installer_set_local_image_env
+installer_compose_args
 if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
-  if docker compose -f "$COMPOSE_FILE" -f "$HOST_MOUNT_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
-    compose_args+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
+  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$HOST_MOUNT_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    COMPOSE_ARGS+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
     log "Including host mount override: $HOST_MOUNT_OVERRIDE_FILE"
   else
     warn "Ignoring invalid host mount override docker/$HOST_MOUNT_OVERRIDE_FILE. Recreate mounts to regenerate it."
   fi
 fi
 if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
-  if docker compose -f "$COMPOSE_FILE" -f "$ROCM_RUNTIME_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
-    compose_args+=(-f "$ROCM_RUNTIME_OVERRIDE_FILE")
+  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$ROCM_RUNTIME_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    COMPOSE_ARGS+=(-f "$ROCM_RUNTIME_OVERRIDE_FILE")
     log "Including ROCm runtime override: $ROCM_RUNTIME_OVERRIDE_FILE"
   else
     warn "Ignoring invalid ROCm runtime override docker/$ROCM_RUNTIME_OVERRIDE_FILE."
   fi
 fi
 if [[ -f "$VOICE_PACK_OVERRIDE_FILE" ]]; then
-  if docker compose -f "$COMPOSE_FILE" -f "$VOICE_PACK_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
-    compose_args+=(-f "$VOICE_PACK_OVERRIDE_FILE")
+  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$VOICE_PACK_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    COMPOSE_ARGS+=(-f "$VOICE_PACK_OVERRIDE_FILE")
     log "Including voice pack override: $VOICE_PACK_OVERRIDE_FILE"
   else
     warn "Ignoring invalid voice pack override docker/$VOICE_PACK_OVERRIDE_FILE."
   fi
 fi
-if [[ "${UPDATE_DECISION:-skip}" == "pull" ]]; then
-  if [[ ${#PULL_MISSING_SERVICES[@]} -gt 0 ]]; then
-    log "Pulling missing images: ${PULL_MISSING_SERVICES[*]}"
-    docker compose "${compose_args[@]}" --env-file "$ENV_FILE" pull "${PULL_MISSING_SERVICES[@]}"
-  fi
-  if [[ ${#PULL_ALWAYS_SERVICES[@]} -gt 0 ]]; then
-    log "Pulling updates for: ${PULL_ALWAYS_SERVICES[*]}"
-    docker compose "${compose_args[@]}" --env-file "$ENV_FILE" pull --policy always "${PULL_ALWAYS_SERVICES[@]}"
-  fi
-fi
+installer_progressive_pull
 log "Starting the stack..."
-docker compose "${compose_args[@]}" --env-file "$ENV_FILE" up -d
+installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" up -d
+installer_prune_deselected
 cd "$ROOT_DIR"
 
 # Patch containers whose entrypoint scripts have Windows line endings (exit 127).
@@ -1266,7 +1251,7 @@ if wait_for_health; then
   remove_host_mount
   open_browser
 else
-  warn "Health check timed out. Inspect with: docker compose -f docker/$COMPOSE_FILE ps"
+  warn "Health check timed out. Inspect with: docker compose ${COMPOSE_ARGS[*]} ps"
   if [[ -n "$MOUNT_PATH" || "$UNMOUNT" == "1" ]]; then
     warn "Skipping mount/unmount operations because the health check failed."
   fi

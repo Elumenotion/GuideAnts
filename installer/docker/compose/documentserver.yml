@@ -1,0 +1,33 @@
+services:
+  documentserver:
+    image: ${GA_DOCUMENTSERVER_IMAGE:-documentserver:latest}
+    platform: linux/amd64
+    container_name: documentserver
+    environment:
+      - JWT_ENABLED=${GA_DOCUMENTSERVER_JWT_ENABLED:-false}
+      - JWT_SECRET=${DOCUMENTSERVER_JWT_SECRET:-}
+      - JWT_HEADER=${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}
+      - JWT_IN_BODY=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}
+      - ALLOW_PRIVATE_IP_ADDRESS=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/info/info.json"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+      timeout: 10s
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  guideants-webapi-ui:
+    depends_on:
+      documentserver:
+        condition: service_started
+    environment:
+      - DocumentServer__Enabled=${GA_DOCUMENTSERVER_ENABLED:-false}
+      - DocumentServer__InternalUrl=http://documentserver
+      - DocumentServer__ApiBaseUrl=http://guideants-webapi-ui:8080
+      - DocumentServer__JwtEnabled=${GA_DOCUMENTSERVER_JWT_ENABLED:-false}
+      - DocumentServer__JwtSecret=${DOCUMENTSERVER_JWT_SECRET:-}
+      - DocumentServer__JwtHeader=${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}
+      - DocumentServer__JwtInBody=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}

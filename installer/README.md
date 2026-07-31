@@ -2,8 +2,9 @@
 
 This is one universal bundle for every operating system. It contains launcher
 scripts (`guideants.sh` and `guideants.ps1`), stop scripts (`stop_guideants.sh` and
-`stop_guideants.ps1`), host-mount helper scripts, and the Docker Compose files. Docker downloads the actual
-application images on first run, so the download itself is tiny.
+`stop_guideants.ps1`), host-mount helper scripts, and Docker Compose **fragments**
+under `docker/compose/`. Docker downloads the actual application images on first
+run, so the download itself is tiny.
 
 > **Requirement:** Docker must be installed and running.
 >
@@ -30,7 +31,7 @@ xattr -d com.apple.quarantine guideants.sh
 ```
 
 > **Apple Silicon note:** Images run as `linux/amd64` under emulation. The
-> `slim` backend is recommended on Apple Silicon for best performance.
+> `slim` AI backend is recommended on Apple Silicon for best performance.
 
 **Windows (PowerShell)**
 
@@ -67,44 +68,69 @@ enabled for your distro (Settings → Resources → WSL integration).
 1. Detects your OS and shell environment (Linux, macOS, Windows/WSL, Git Bash).
 2. Checks Docker is installed and the daemon is running.
 3. Reports host and Docker engine memory and free disk (warns if Docker has < 16 GiB RAM).
-4. Walks you through which backend to use — auto-detects your GPU and recommends the best option.
-5. Validates GPU driver versions for CUDA and ROCm backends (see [GPU requirements](#gpu-driver-requirements)).
+4. **Asks what to install** — database layout, AI backend, and optional services. Hardware detection only **recommends**; your choices are saved in `.installer_state.env` and reused until `--reconfigure`.
+5. Validates GPU driver versions when a local GPU AI backend is selected (see [GPU requirements](#gpu-driver-requirements)).
 6. For the `rocm` backend, detects native Linux vs WSL ROCDXG and writes a generated
    runtime override (`docker-compose.rocm-runtime.generated.yml`) with the correct
    GPU device binds (see [AMD ROCm setup](#amd-rocm-setup)).
-7. Checks the registry for newer images and **asks before updating**.
-8. Starts the stack and waits for the health check at <http://localhost:5107/>.
-9. Opens your browser automatically.
+7. **Pulls each selected image sequentially** with per-image progress (not one monolithic `compose pull`).
+8. Starts only the selected services, then stops/removes containers you deselected on a prior reconfigure.
+9. Waits for the health check at <http://localhost:5107/> and opens your browser.
 
 On first load you'll be sent to `/register`; the first account becomes **Admin**.
 
-## Backends
+## Component wizard
 
-| Backend  | Use for | Approximate download |
-|----------|---------|----------------------|
-| `cuda13` | NVIDIA GPU (driver R580+, CUDA 13+) | Large |
-| `rocm`   | AMD GPU with ROCm 6.0+ (Linux / Windows via WSL2) | Large |
-| `vulkan` | Local AI on NVIDIA, AMD, or Intel GPUs through Vulkan | Large |
-| `cpu`    | Local AI, no GPU (slower) | ~60 GB |
-| `slim`   | Cloud AI providers only — no local model runtime | ~15 GB |
+The installer builds a custom stack from compose fragments. You choose:
 
-The launcher auto-detects your GPU and recommends a backend. `vulkan` is also
-available as a broad GPU path. If Docker has limited RAM (< 16 GiB) and no GPU
-is found, it recommends `slim`.
+### Database layout
 
-If the pre-built GHCR Vulkan image is not yet pullable, build it locally first:
+| Layout | Images | Approx. size | Notes |
+|--------|--------|--------------|-------|
+| **Bundled** | `guideants-webapi-ui-mssql` | ~7.3 GB | UI + SQL in one container. |
+| **Separate** | `guideants-webapi-ui-slim` + `mssql-express` | ~7.6 GB | Same features; SQL in its own container. |
 
-```powershell
-powershell -ExecutionPolicy Bypass -File ..\docker\build\build_guideants_ai.ps1 -Backend vulkan
-powershell -ExecutionPolicy Bypass -File .\guideants.ps1 --backend vulkan --compose local --reconfigure
-```
+Switching layout on `--reconfigure` **does not migrate data** between bundled and separate SQL (you are warned).
 
-Your backend choice is saved in `.installer_state.env` and reused on subsequent
-runs. Pass `--reconfigure` to re-prompt.
+### AI backend
+
+| Backend | Approx. size | What you get |
+|---------|--------------|--------------|
+| `none` | 0 | No AI container. Cloud chat that does not need the sandbox may still work. **Without AI:** sandbox/tool execution, scripted skills, sandboxed MCP servers, and local LLM/ASR/TTS/embeddings/image gen will not work. |
+| `slim` | ~4.3 GB | Sandbox for all providers, skills with script dependencies, and local sandboxed MCP servers — **no** large local model runtime. |
+| `cpu` | ~8.2 GB | Sandbox + local CPU model runtime. |
+| `cuda13` | ~14 GB | Sandbox + NVIDIA CUDA 13 local runtime. |
+| `rocm` | ~20 GB | Sandbox + AMD ROCm local runtime. |
+| `vulkan` | ~8.5 GB | Sandbox + Vulkan local runtime. |
+
+Image sizes do **not** include model weights downloaded later inside the AI container.
+
+**Start slim, add local AI later:** run the launcher again with `--reconfigure`, keep the same DB layout, and change only the AI backend. Only the AI image is pulled/recreated.
+
+### Optional services
+
+| Component | Approx. size | Without it |
+|-----------|--------------|------------|
+| DocLing | ~7.1 GB (CPU) / ~13.8 GB (with CUDA stack) | Document intelligence features will not work unless you configure Azure Document Intelligence in Settings. |
+| DocumentServer | ~7.2 GB | In-app Office open/edit will not work. |
+| PlantUML | ~0.7 GB | PlantUML generation/rendering will not work. |
+| SearXNG | ~4.2 GB | Web search / browser-render features will not work. |
+
+The wizard shows a **running total** of selected image sizes before pulls begin.
+
+### Example selections
+
+- Bundled core, no AI: `DB_LAYOUT=bundled`, `AI_BACKEND=none`
+- Separate SQL + slim AI: `DB_LAYOUT=separate`, `AI_BACKEND=slim`
+- Bundled core + CUDA later: keep `DB_LAYOUT=bundled`, reconfigure `AI_BACKEND` → `cuda13`
+
+Saved state (`.installer_state.env`) includes `DB_LAYOUT`, `AI_BACKEND`, `COMPONENTS`, and `COMPOSE_FILES`.
 
 ## GPU driver requirements
 
-**NVIDIA (cuda13 backend)**
+Driver checks run **only** for the local GPU backends you select (`cuda13`, `rocm`, `vulkan`). `none`, `slim`, and `cpu` skip NVIDIA/ROCm minimum checks (except where noted for CPU).
+
+**NVIDIA (`cuda13` backend)**
 
 The launcher inspects the CUDA container image for its `NVIDIA_REQUIRE_CUDA`
 label and validates your local driver against it. Fallback minimums if the
@@ -115,7 +141,7 @@ image can't be inspected:
 
 If your driver is too old the launcher will abort with upgrade instructions.
 
-**AMD (rocm backend)**
+**AMD (`rocm` backend)**
 
 - ROCm >= 6.0.0
 
@@ -147,7 +173,8 @@ Prerequisites:
 Launch:
 
 ```bash
-./guideants.sh --backend rocm
+./guideants.sh --reconfigure
+# choose rocm when prompted for AI backend
 ```
 
 The launcher detects native Linux and writes the KFD override automatically.
@@ -185,28 +212,16 @@ Or from the installer folder on Windows:
 .\guideants.ps1 --install-rocm-wsl
 ```
 
-This installs ROCm 7.2.4, `librocdxg` 1.2.0, and `/etc/profile.d/rocm-wsl.sh` (from
-`scripts/rocm-wsl.profile`), then verifies with `rocminfo`.
-
 **3. Confirm the GPU is visible in WSL:**
 
 ```powershell
 wsl -d Ubuntu-24.04 sh -lc "HSA_ENABLE_DXG_DETECTION=1 rocminfo | grep -A2 gfx"
 ```
 
-You should see your AMD GPU (e.g. `gfx1151` on Strix Halo).
+**4. Launch GuideAnts** with `rocm` selected in the wizard (or `--backend rocm --reconfigure`).
 
-**4. Launch GuideAnts:**
-
-```powershell
-.\guideants.ps1 --backend rocm
-```
-
-The launcher stages `librocdxg`, writes the WSL override, and starts the stack.
-
-Use `--doctor --backend rocm` to run all checks read-only and print the exact
-`docker compose ... up -d` command (including the runtime override) without starting
-anything.
+Use `--doctor` to run all checks read-only and print the exact
+`docker compose ... up -d` command without starting anything.
 
 ### ROCm troubleshooting (Windows)
 
@@ -217,36 +232,18 @@ anything.
 | GPU not detected on Windows | Probes ran in `docker-desktop` instead of your user distro — install ROCm in Ubuntu (or similar) |
 | `unable to find group render` | Expected on Docker Desktop — `group_add` is native-Linux-only in the generated override |
 
-Docker Desktop reports ~2.5 GiB of `/dev/dxg` VRAM overhead (WDDM virtualization); that
-is normal, not a GuideAnts issue.
-
-Verify GPU visibility inside the ROCm image (adjust paths to your install folder):
-
-```powershell
-docker run --rm --entrypoint sh `
-  -v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so:ro `
-  -v "C:/path/to/installer/docker/volumes/rocm-wsl/lib/librocdxg.so:/lib/librocdxg.so:ro" `
-  -v "C:/path/to/installer/docker/volumes/rocm-wsl/lib/librocdxg.so:/usr/lib/librocdxg.so:ro" `
-  --device /dev/dxg --cap-add SYS_PTRACE --security-opt seccomp=unconfined `
-  -e HSA_ENABLE_DXG_DETECTION=1 `
-  ghcr.io/elumenotion/guideants-ai-rocm:main `
-  -c "/app/llama-server --list-devices"
-```
-
-Expected output includes your AMD GPU under `ROCm0:`.
-
 ## Options
 
 | Flag | What it does |
 |------|--------------|
 | `--doctor` | Run all checks, change nothing. Prints the compose command that would be used. |
-| `--backend <cpu\|cuda13\|rocm\|slim\|vulkan>` | Skip the interactive backend prompt. |
+| `--backend <none\|cpu\|cuda13\|rocm\|slim\|vulkan>` | Skip the interactive AI backend prompt. |
 | `--compose <ghcr\|local>` | Use GHCR pre-built images (default) or local build images. |
 | `--mount /path/to/folder` | Mount a host folder into a project on startup (requires browser login). |
 | `--unmount` | Interactively remove a host folder mount (requires browser login). |
-| `--reconfigure` | Re-prompt for backend even if one was previously saved. |
+| `--reconfigure` | Re-prompt for DB layout, AI backend, and optionals even if saved. |
 | `--install-rocm-wsl` | Install ROCm + ROCDXG in a user WSL distro (Windows only), then continue. |
-| `--yes` / `-y` | Accept prompts automatically (use recommended backend, auto-accept updates). |
+| `--yes` / `-y` | Accept prompts automatically (bundled DB, slim AI, all optionals, auto-pull). |
 | `--help` / `-h` | Show help text. |
 
 ## Host folder mounting
@@ -257,13 +254,9 @@ filesystem and the running containers.
 
 **Mounting a folder:**
 
-Linux / macOS:
-
 ```bash
 ./guideants.sh --mount /path/to/your/folder
 ```
-
-Windows (PowerShell):
 
 ```powershell
 ./guideants.ps1 --mount C:/path/to/your/folder
@@ -273,31 +266,15 @@ Windows (PowerShell):
 2. After health check passes, a CLI authentication session is created.
 3. Your browser opens an authorization page — approve the request.
 4. You select which project (and optionally which notebook) to mount into.
-5. The folder is bind-mounted into the `guideants-webapi-ui`, `guideants-ai`,
-   and `plantuml` containers at `/app/HostMounts/<mount-key>`.
+5. The folder is bind-mounted into running services (`guideants-webapi-ui`, and
+   `guideants-ai` / `plantuml` only when those components are selected).
 6. Affected services restart automatically.
 
-**Unmounting a folder:**
-
-Linux / macOS:
-
-```bash
-./guideants.sh --unmount
-```
-
-Windows (PowerShell):
-
-```powershell
-./guideants.ps1 --unmount
-```
-
-Follows the same authentication flow, then lets you pick an active mount to
-remove.
+**Unmounting:** use `--unmount` with the same auth flow.
 
 Mount state is stored in `docker/docker-compose.host-mounts.generated.yml`
-(auto-generated, do not edit manually). The helper scripts in `scripts/`
-(`guideants-host-mount.sh` for bash, `guideants-host-mount.ps1` for
-PowerShell) handle writing this file and restarting services.
+(auto-generated, do not edit manually). Helper scripts in `scripts/` read the
+multi-file `COMPOSE_FILES` list from `.installer_state.env`.
 
 ## Compose modes
 
@@ -306,60 +283,38 @@ PowerShell) handle writing this file and restarting services.
 | `ghcr` (default) | Pulls pre-built images from GitHub Container Registry. |
 | `local` | Uses locally built images (for development). |
 
-Each mode has its own set of compose files:
-
-- GHCR: `docker-compose.ghcr-cpu.yml`, `docker-compose.ghcr-cuda13.yml`, `docker-compose.ghcr-rocm.yml`, `docker-compose.ghcr-slim.yml`, `docker-compose.ghcr-vulkan.yml`
-- Local: `docker-compose.cpu.yml`, `docker-compose.cuda.yml`, `docker-compose.rocm.yml`, `docker-compose.slim.yml`, `docker-compose.vulkan.yml`
+The launcher assembles `-f compose/base.yml -f compose/core-*.yml -f compose/ai-*.yml ...`
+from your selections. Legacy monolith files (`docker-compose.ghcr-*.yml`) remain for
+reference but are not used by the new wizard path.
 
 For the `rocm` backend, the launcher also layers
-`docker-compose.rocm-runtime.generated.yml` (auto-generated GPU wiring). An example
-of both native and WSL shapes is in the repo at
-`docker/docker-compose.rocm-runtime.generated.example.yml`.
+`docker-compose.rocm-runtime.generated.yml` (auto-generated GPU wiring).
 
 ## Stopping
-
-Use the stop script:
-
-Linux / macOS:
 
 ```bash
 ./stop_guideants.sh
 ```
 
-Windows (PowerShell):
-
 ```powershell
 ./stop_guideants.ps1
 ```
 
-It reads the saved backend from `.installer_state.env` and runs
-`docker compose down` on the correct compose file(s). You can also override:
-
-Linux / macOS:
-
-```bash
-./stop_guideants.sh --backend slim
-```
-
-Windows (PowerShell):
-
-```powershell
-./stop_guideants.ps1 --backend slim
-```
+Reads saved `COMPOSE_FILES` from `.installer_state.env` and runs `docker compose down`.
 
 ## Services
 
-The stack runs the following containers:
+Containers are included only when selected:
 
-| Container | Purpose |
-|-----------|---------|
-| `guideants-webapi-ui` | Web API and UI (port 5107) |
-| `guideants-ai` | AI services (LLM, ASR, TTS, embeddings, image generation) |
-| `mssql-express` | SQL Server database |
-| `docling-serve` | Document intelligence / conversion |
-| `documentserver` | Office document editing (DocumentServer, EuroOffice by default) |
-| `plantuml` | PlantUML diagram rendering |
-| `searxng` | Web search and browser rendering |
+| Container | When included |
+|-----------|----------------|
+| `guideants-webapi-ui` | Always (bundled or slim image depending on DB layout) |
+| `mssql-express` | `DB_LAYOUT=separate` |
+| `guideants-ai` | `AI_BACKEND` is not `none` |
+| `docling-serve` | DocLing optional selected |
+| `documentserver` | DocumentServer optional selected |
+| `plantuml` | PlantUML optional selected |
+| `readweb-searxng` | SearXNG optional selected |
 
 ## Data persistence
 
@@ -375,9 +330,11 @@ installer/
 ├── guideants.ps1                   # Main launcher (PowerShell)
 ├── stop_guideants.sh               # Stop script
 ├── stop_guideants.ps1              # Stop script (PowerShell)
-├── .installer_state.env            # Saved backend/compose state (auto-generated)
+├── .installer_state.env            # Saved selections (auto-generated)
 ├── README.md
 ├── scripts/
+│   ├── installer-wizard.sh         # Shared wizard (bash)
+│   ├── installer-wizard.ps1        # Shared wizard (PowerShell)
 │   ├── guideants-host-mount.sh     # Host mount helper (bash)
 │   ├── guideants-host-mount.ps1    # Host mount helper (PowerShell)
 │   ├── install-rocm-wsl.sh         # One-shot ROCm + ROCDXG install inside Ubuntu WSL
@@ -388,12 +345,17 @@ installer/
 │   └── rocm-runtime-compose.ps1    # ROCm runtime override + WSL library staging (Windows)
 └── docker/
     ├── .env                        # Compose environment variables
-    ├── docker-compose.ghcr-*.yml   # GHCR compose files (one per backend)
-    ├── docker-compose.*.yml        # Local build compose files
-    ├── docker-compose.host-mounts.generated.yml   # Auto-generated mount overrides
-    ├── docker-compose.rocm-runtime.generated.yml  # Auto-generated ROCm GPU wiring (rocm only)
+    ├── compose/                    # Fragment compose files (assembled by wizard)
+    │   ├── base.yml
+    │   ├── core-bundled.yml
+    │   ├── core-separate.yml
+    │   ├── ai-*.yml
+    │   └── *.yml                   # optional service fragments
+    ├── docker-compose.ghcr-*.yml   # Legacy monolith compose (compatibility)
+    ├── docker-compose.host-mounts.generated.yml
+    ├── docker-compose.rocm-runtime.generated.yml
     └── volumes/
-        ├── content-files/          # Project file storage (bind-mounted)
-        ├── rocm-wsl/               # Staged librocdxg for Docker Desktop binds (git-ignored)
-        └── searxng/                # SearXNG config and cache
+        ├── content-files/
+        ├── rocm-wsl/
+        └── searxng/
 ```
