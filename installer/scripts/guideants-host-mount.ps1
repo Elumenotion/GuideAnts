@@ -23,7 +23,6 @@ $RootDir = Split-Path -Parent $ScriptDir
 $StateFile = Join-Path $RootDir '.installer_state.env'
 $DefaultApiBase = 'http://localhost:5107'
 $ApiPlanPath = '/api/internal/host-folder-mounts'
-$VoicePackOverrideFile = 'docker-compose.voice-pack.local.yml'
 $AffectedMountServiceNames = @(
     'guideants-webapi-ui',
     'guideants-ai',
@@ -324,15 +323,23 @@ function Invoke-RemoveMount {
 function Restart-AffectedServices {
     param([Parameter(Mandatory = $true)][object]$InstallerState)
 
+    $rebuilt = Build-InstallerComposeArgsFromState `
+        -RootDir $RootDir `
+        -StateFile $StateFile `
+        -IncludeHostMountOverride `
+        -IncludeVoicePackOverride `
+        -IncludeRocmOverride
+    $selection = $rebuilt.Selection
+    $composeArgs = @($rebuilt.ComposeArgs)
+
     $candidateServices = @('guideants-webapi-ui')
-    if ($InstallerState.AiBackend -ne 'none') {
+    if ($selection.AiBackend -ne 'none') {
         $candidateServices += 'guideants-ai'
     }
-    if ($InstallerState.Components -contains 'plantuml') {
+    if ($selection.Components -contains 'plantuml') {
         $candidateServices += 'plantuml'
     }
 
-    $composeArgs = @($InstallerState.ComposeArgs)
     Write-Log "Restarting affected services (--no-deps): $($candidateServices -join ' ')"
     Push-Location (Join-Path $RootDir $InstallerState.DockerDirectory)
     try {

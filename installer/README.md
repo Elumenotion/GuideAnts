@@ -78,7 +78,7 @@ enabled for your distro (Settings → Resources → WSL integration).
 1. Detects your OS and shell environment (Linux, macOS, Windows/WSL, Git Bash).
 2. Checks Docker is installed and the daemon is running.
 3. Reports host and Docker engine memory and free disk (warns if Docker has < 16 GiB RAM).
-4. **Asks what to install** — database layout, AI backend, and optional services. Hardware detection only **recommends**; your choices are saved in `.installer_state.env` and reused until `--reconfigure`.
+4. **Asks what to install** — database layout (first install only), AI backend, and optional services. Hardware detection only **recommends**; choices are saved in `.installer_state.env`.
 5. Validates GPU driver versions when a local GPU AI backend is selected (see [GPU requirements](#gpu-driver-requirements)).
 6. For the `rocm` backend, detects native Linux vs WSL ROCDXG and writes a generated
    runtime override (`docker-compose.rocm-runtime.generated.yml`) with the correct
@@ -100,7 +100,7 @@ The installer builds a custom stack from compose fragments. You choose:
 | **Bundled** | `guideants-webapi-ui-mssql` | ~7.3 GB | UI + SQL in one container. |
 | **Separate** | `guideants-webapi-ui-slim` + `mssql-express` | ~7.6 GB | Same features; SQL in its own container. |
 
-Switching layout on `--reconfigure` **does not migrate data** between bundled and separate SQL (you are warned).
+After first install, `DB_LAYOUT` is fixed and is not prompted or changed on rerun/`--reconfigure`.
 
 ### AI backend
 
@@ -115,7 +115,7 @@ Switching layout on `--reconfigure` **does not migrate data** between bundled an
 
 Image sizes do **not** include model weights downloaded later inside the AI container.
 
-**Start slim, add local AI later:** run the launcher again with `--reconfigure`, keep the same DB layout, and change only the AI backend. Only the AI image is pulled/recreated.
+**Start slim, add local AI later:** run the launcher again with `--reconfigure` and change only the AI backend. `DB_LAYOUT` stays unchanged.
 
 ### Optional services
 
@@ -251,7 +251,7 @@ Use `--doctor` to run all checks read-only and print the exact
 | `--compose <ghcr\|local>` | Use GHCR pre-built images (default) or local build images. |
 | `--mount /path/to/folder` | Mount a host folder into a project on startup (requires browser login). |
 | `--unmount` | Interactively remove a host folder mount (requires browser login). |
-| `--reconfigure` | Re-prompt for DB layout, AI backend, and optionals even if saved. |
+| `--reconfigure` | Re-prompt AI backend and optionals only. `DB_LAYOUT` remains fixed from first install. |
 | `--install-rocm-wsl` | Install ROCm + ROCDXG in a user WSL distro (Windows only), then continue. |
 | `--yes` / `-y` | Accept prompts automatically (bundled DB, slim AI, all optionals, auto-pull). |
 | `--help` / `-h` | Show help text. |

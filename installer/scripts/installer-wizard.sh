@@ -157,8 +157,8 @@ installer_compose_args() {
 }
 
 installer_progressive_pull() {
-  local images img l r missing=0 stale=0 pull=0
-  local -a missing_images=() stale_images=() pull_images=()
+  local images img l r missing=0 stale=0
+  local -a missing_images=() stale_images=() pull_images=() pull_failures=()
   if ! images="$(installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" config --images 2>/dev/null)"; then
     fail "Could not resolve image list from compose fragments."
   fi
@@ -185,25 +185,6 @@ installer_progressive_pull() {
   fi
 
   if [[ "$missing" -gt 0 ]]; then
-    local -a unavailable=() rd
-    for img in "${missing_images[@]}"; do
-      rd="$(remote_digest "$img" 2>/dev/null || true)"
-      [[ -z "$rd" ]] && unavailable+=("$img")
-    done
-    if [[ ${#unavailable[@]} -gt 0 ]]; then
-      if [[ "$SELECTED_AI_BACKEND" == "vulkan" ]]; then
-        local has_vulkan=0 u
-        for u in "${unavailable[@]}"; do [[ "$u" == *guideants-ai-vulkan* ]] && has_vulkan=1; done
-        if [[ "$has_vulkan" == "1" ]]; then
-          warn "The GHCR Vulkan AI image is not currently pullable:"
-          printf '  - %s\n' "${unavailable[@]}" >&2
-          fail "Build locally, then rerun: ./docker/build/build_guideants_ai.sh --backend vulkan && ./installer/guideants.sh --backend vulkan --compose local --reconfigure"
-        fi
-      fi
-      warn "One or more Compose images are not pullable from the registry:"
-      printf '  - %s\n' "${unavailable[@]}" >&2
-      fail "If these are private images, run 'docker login' or switch to --compose local after building locally."
-    fi
     installer_log "$missing image(s) not present locally — will be downloaded."
     pull_images+=("${missing_images[@]}")
   fi
@@ -225,48 +206,55 @@ installer_progressive_pull() {
   for img in "${pull_images[@]}"; do
     [[ -n "$img" ]] || continue
     installer_log "  docker pull $img"
-    installer_docker pull "$img"
+    if ! installer_docker pull "$img"; then
+      pull_failures+=("$img")
+    fi
   done
+
+  if [[ ${#pull_failures[@]} -gt 0 ]]; then
+    if [[ "$SELECTED_AI_BACKEND" == "vulkan" ]]; then
+      local has_vulkan_failure=0 u
+      for u in "${pull_failures[@]}"; do [[ "$u" == *guideants-ai-vulkan* ]] && has_vulkan_failure=1; done
+      if [[ "$has_vulkan_failure" == "1" ]]; then
+        warn "The GHCR Vulkan AI image is not currently pullable:"
+        printf '  - %s\n' "${pull_failures[@]}" >&2
+        fail "Build locally, then rerun: ./docker/build/build_guideants_ai.sh --backend vulkan && ./installer/guideants.sh --backend vulkan --compose local --reconfigure"
+      fi
+    fi
+    warn "One or more Compose images failed to pull:"
+    printf '  - %s\n' "${pull_failures[@]}" >&2
+    fail "If these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
+  fi
 }
 
 installer_start_stack() {
   installer_active_services
-  installer_prune_deselected
   installer_progressive_pull
-  installer_log "Starting services: ${ACTIVE_SERVICES[*]}"
-  installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" up -d "${ACTIVE_SERVICES[@]}"
+  installer_log "Applying selected compose stack (remove-orphans): ${ACTIVE_SERVICES[*]}"
+  installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" up -d --remove-orphans
+}
+
+installer_services_for_selection() {
+  local db="$1" ai="$2"
+  shift 2
+  local components=("$@") services=()
+  [[ "$db" == "separate" ]] && services+=(mssql-express)
+  services+=(guideants-webapi-ui)
+  [[ "$ai" != "none" ]] && services+=(guideants-ai)
+  local c
+  for c in "${components[@]}"; do
+    case "$c" in
+      docling) services+=(docling-serve) ;;
+      documentserver) services+=(documentserver) ;;
+      plantuml) services+=(plantuml) ;;
+      searxng) services+=(searxng) ;;
+    esac
+  done
+  printf '%s\n' "${services[@]}"
 }
 
 installer_active_services() {
-  ACTIVE_SERVICES=()
-  [[ "$SELECTED_DB_LAYOUT" == "separate" ]] && ACTIVE_SERVICES+=(mssql-express)
-  ACTIVE_SERVICES+=(guideants-webapi-ui)
-  [[ "$SELECTED_AI_BACKEND" != "none" ]] && ACTIVE_SERVICES+=(guideants-ai)
-  local c
-  for c in "${SELECTED_COMPONENTS[@]}"; do
-    case "$c" in
-      docling) ACTIVE_SERVICES+=(docling-serve) ;;
-      documentserver) ACTIVE_SERVICES+=(documentserver) ;;
-      plantuml) ACTIVE_SERVICES+=(plantuml) ;;
-      searxng) ACTIVE_SERVICES+=(searxng) ;;
-    esac
-  done
-}
-
-installer_prune_deselected() {
-  SELECTED_DB_LAYOUT="${SELECTED_DB_LAYOUT:-bundled}"
-  installer_active_services
-  local all=(mssql-express guideants-webapi-ui guideants-ai docling-serve documentserver plantuml searxng)
-  local remove=() s keep=0
-  for s in "${all[@]}"; do
-    keep=0
-    for k in "${ACTIVE_SERVICES[@]}"; do [[ "$k" == "$s" ]] && keep=1; done
-    [[ "$keep" -eq 0 ]] && remove+=("$s")
-  done
-  [[ ${#remove[@]} -eq 0 ]] && return 0
-  installer_log "Stopping deselected services: ${remove[*]}"
-  installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" stop "${remove[@]}" >/dev/null 2>&1 || true
-  installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" rm -f "${remove[@]}" >/dev/null 2>&1 || true
+  mapfile -t ACTIVE_SERVICES < <(installer_services_for_selection "$SELECTED_DB_LAYOUT" "$SELECTED_AI_BACKEND" "${SELECTED_COMPONENTS[@]}")
 }
 
 installer_build_compose_args_from_state() {
@@ -360,18 +348,23 @@ installer_select_ai_backend() {
 }
 
 installer_run_wizard() {
-  local use_saved=0 prior_db="" prior_ai="" prior_components=""
+  local use_saved=0 prior_db="" prior_ai="" prior_components="" reconfigure_from_saved=0
+  local -a prior_components_list=()
   if [[ -f "$STATE_FILE" ]]; then
     installer_legacy_state
     prior_db="$DB_LAYOUT"; prior_ai="$AI_BACKEND"; prior_components="$COMPONENTS"
+    [[ -n "$prior_components" ]] && IFS=',' read -r -a prior_components_list <<< "$prior_components"
   fi
-  if [[ "$RECONFIGURE" == "0" && -f "$STATE_FILE" ]]; then use_saved=1; fi
 
-  if [[ -n "${DB_LAYOUT_OVERRIDE:-}" ]]; then
-    SELECTED_DB_LAYOUT="$DB_LAYOUT_OVERRIDE"
-  elif [[ "$use_saved" == "1" ]]; then
-    installer_legacy_state
-    SELECTED_DB_LAYOUT="$DB_LAYOUT"
+  if [[ "$RECONFIGURE" == "0" && -f "$STATE_FILE" ]]; then
+    use_saved=1
+  elif [[ -f "$STATE_FILE" ]]; then
+    reconfigure_from_saved=1
+  fi
+
+  # DB layout is first-install only and immutable afterwards.
+  if [[ -n "$prior_db" ]]; then
+    SELECTED_DB_LAYOUT="$prior_db"
     installer_log "Using saved DB layout: $SELECTED_DB_LAYOUT"
   else
     printf '\n  Database layout:\n'
@@ -386,9 +379,16 @@ installer_run_wizard() {
 
   if [[ -n "${AI_BACKEND_OVERRIDE:-}" ]]; then
     SELECTED_AI_BACKEND="$AI_BACKEND_OVERRIDE"
-  elif [[ "$use_saved" == "1" ]]; then
+  elif [[ "$use_saved" == "1" && -n "$prior_ai" ]]; then
     SELECTED_AI_BACKEND="$prior_ai"
     installer_log "Using saved AI backend: $SELECTED_AI_BACKEND"
+  elif [[ "$reconfigure_from_saved" == "1" && -n "$prior_ai" && "$ASSUME_YES" != "1" ]]; then
+    installer_log "Current AI backend: $prior_ai"
+    if ask_yes_no "Keep current AI backend ($prior_ai)? [Y/n]" "Y"; then
+      SELECTED_AI_BACKEND="$prior_ai"
+    else
+      SELECTED_AI_BACKEND="$(installer_select_ai_backend)"
+    fi
   else
     SELECTED_AI_BACKEND="$(installer_select_ai_backend)"
   fi
@@ -396,15 +396,20 @@ installer_run_wizard() {
   if [[ ${#COMPONENTS_OVERRIDE[@]:-0} -gt 0 ]]; then
     SELECTED_COMPONENTS=("${COMPONENTS_OVERRIDE[@]}")
   elif [[ "$use_saved" == "1" ]]; then
-    installer_legacy_state
-    IFS=',' read -r -a SELECTED_COMPONENTS <<< "$COMPONENTS"
+    IFS=',' read -r -a SELECTED_COMPONENTS <<< "$prior_components"
   else
     SELECTED_COMPONENTS=()
-    local c reply comp size impact
+    local reply comp size impact p is_selected default_component_choice prompt_hint
+    local running_total
     printf '\n  Optional components (y/n for each):\n'
+    running_total="$(installer_estimated_size_gb "$SELECTED_DB_LAYOUT" "$SELECTED_AI_BACKEND" "${SELECTED_COMPONENTS[@]}")"
+    installer_log "Current selected images ~ ${running_total} GB"
     for comp in "${INSTALLER_OPTIONAL_COMPONENTS[@]}"; do
       case "$comp" in
-        docling) size="~7.1 GB"; impact="Without DocLing and without Azure DI: document intelligence features will not work." ;;
+        docling)
+          if [[ "$SELECTED_AI_BACKEND" == "cuda13" ]]; then size="~13.8 GB"; else size="~7.1 GB"; fi
+          impact="Without DocLing and without Azure DI: document intelligence features will not work."
+          ;;
         documentserver) size="~7.2 GB"; impact="Without it: DocumentServer open/edit will not work." ;;
         plantuml) size="~0.7 GB"; impact="Without it: PlantUML generation/rendering will not work." ;;
         searxng) size="~4.2 GB"; impact="Without it: web search / browser-render features will not work." ;;
@@ -412,17 +417,32 @@ installer_run_wizard() {
       esac
       printf '\n  %s (%s)\n' "$comp" "$size"
       [[ -n "$impact" ]] && printf '    Without it: %s\n' "$impact"
-      if [[ "$ASSUME_YES" == "1" ]]; then SELECTED_COMPONENTS+=("$comp"); continue; fi
-      read -r -p "  Include $comp? [Y/n] " reply || reply=""
-      reply="${reply:-Y}"
-      [[ "$reply" =~ ^[Yy] ]] && SELECTED_COMPONENTS+=("$comp")
+      is_selected=0
+      if [[ "$reconfigure_from_saved" == "1" ]]; then
+        for p in "${prior_components_list[@]}"; do
+          p="${p#"${p%%[![:space:]]*}"}"
+          p="${p%"${p##*[![:space:]]}"}"
+          if [[ "$p" == "$comp" ]]; then is_selected=1; break; fi
+        done
+      fi
+      if [[ "$ASSUME_YES" == "1" ]]; then
+        SELECTED_COMPONENTS+=("$comp")
+      else
+        if [[ "$reconfigure_from_saved" == "1" && "$is_selected" -eq 0 ]]; then
+          default_component_choice="N"; prompt_hint="[y/N]"
+        else
+          default_component_choice="Y"; prompt_hint="[Y/n]"
+        fi
+        read -r -p "  Include $comp? $prompt_hint " reply || reply=""
+        reply="${reply:-$default_component_choice}"
+        [[ "$reply" =~ ^[Yy] ]] && SELECTED_COMPONENTS+=("$comp")
+      fi
+      running_total="$(installer_estimated_size_gb "$SELECTED_DB_LAYOUT" "$SELECTED_AI_BACKEND" "${SELECTED_COMPONENTS[@]}")"
+      installer_log "Current selected images ~ ${running_total} GB"
     done
   fi
 
   mapfile -t SELECTED_COMPOSE_FRAGMENTS < <(installer_compose_fragments "$SELECTED_DB_LAYOUT" "$SELECTED_AI_BACKEND" "${SELECTED_COMPONENTS[@]}")
-  if [[ -n "$prior_db" && "$prior_db" != "$SELECTED_DB_LAYOUT" ]]; then
-    installer_warn "DB layout changed. Data is not auto-migrated between bundled and separate SQL."
-  fi
   if [[ -n "$prior_ai" && "$prior_ai" != "$SELECTED_AI_BACKEND" ]]; then
     installer_log "AI backend changed: $prior_ai -> $SELECTED_AI_BACKEND"
   fi

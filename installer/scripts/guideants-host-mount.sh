@@ -341,6 +341,9 @@ remove_mount() {
 }
 
 restart_affected_services() {
+  # Rebuild compose args after writing/removing overrides so first-apply mounts
+  # are restarted with the newly generated host-mount file included.
+  installer_build_compose_args_from_state "$ROOT_DIR" "$STATE_FILE" 1 1 1
   local comp_array=() services=()
   [[ -n "${COMPONENTS:-}" ]] && IFS=',' read -r -a comp_array <<< "$COMPONENTS"
   mapfile -t services < <(installer_mount_restart_services "$DB_LAYOUT" "$AI_BACKEND" "${comp_array[@]}")

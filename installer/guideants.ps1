@@ -18,7 +18,7 @@ Flags:
   --compose <ghcr|local>   Use GHCR images (default) or local build images.
   --mount <path>           Mount a host folder into a project (requires prior login).
   --unmount                Interactively remove a host folder mount (requires prior login).
-  --reconfigure            Re-prompt for DB layout, AI backend, and optionals even if saved.
+  --reconfigure            Re-prompt AI backend and optionals (DB layout stays fixed after first install).
   --install-rocm-wsl       Install ROCm + ROCDXG in a user WSL distro (Windows).
   --yes                    Assume "yes" for prompts (auto-accept updates).
   --help                   Show this help.
@@ -115,7 +115,7 @@ Flags:
   --compose <ghcr|local>   Use GHCR images (default) or local build images.
   --mount <path>           Mount a host folder into a project (requires prior login).
   --unmount                Interactively remove a host folder mount (requires prior login).
-  --reconfigure            Re-prompt for DB layout, AI backend, and optionals even if saved.
+  --reconfigure            Re-prompt AI backend and optionals (DB layout stays fixed after first install).
   --install-rocm-wsl       Install ROCm + ROCDXG in a user WSL distro (Windows).
   --yes                    Assume "yes" for prompts (auto-accept updates).
   --help                   Show this help.

@@ -433,30 +433,6 @@ function Invoke-InstallerProgressivePull {
     }
 
     if ($missing.Count -gt 0) {
-        $unavailable = New-Object System.Collections.Generic.List[string]
-        foreach ($image in $missing) {
-            $remoteDigest = Invoke-InstallerGetRemoteDigest -ImageRef $image
-            if ([string]::IsNullOrWhiteSpace($remoteDigest)) {
-                $unavailable.Add($image) | Out-Null
-            }
-        }
-
-        if ($unavailable.Count -gt 0) {
-            $imageList = ($unavailable | ForEach-Object { "  - $_" }) -join "`n"
-            if ($AiBackend -eq 'vulkan' -and ($unavailable | Where-Object { $_ -match 'guideants-ai-vulkan' })) {
-                $vulkanMessage = @(
-                    'The GHCR Vulkan AI image is not currently pullable:'
-                    $imageList
-                    'Build it locally, then rerun with local compose:'
-                    '  powershell -ExecutionPolicy Bypass -File ..\docker\build\build_guideants_ai.ps1 -Backend vulkan'
-                    '  powershell -ExecutionPolicy Bypass -File .\guideants.ps1 --backend vulkan --compose local --reconfigure'
-                    'Or choose a published backend such as cuda13, cpu, or slim.'
-                ) -join [Environment]::NewLine
-                Invoke-InstallerStop $vulkanMessage
-            }
-            Invoke-InstallerStop "One or more Compose images are not pullable from the registry:`n$imageList`nIf these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
-        }
-
         Write-InstallerLog "$($missing.Count) image(s) not present locally - will be downloaded."
     }
 
@@ -483,10 +459,33 @@ function Invoke-InstallerProgressivePull {
 
     if ($pullImages.Count -eq 0) { return }
 
+    $pullFailures = New-Object System.Collections.Generic.List[string]
     Write-InstallerLog "Pulling $($pullImages.Count) image(s) sequentially..."
     foreach ($image in $pullImages) {
         Write-InstallerLog "  docker pull $image"
-        Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $image)
+        try {
+            Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $image)
+        }
+        catch {
+            $pullFailures.Add($image) | Out-Null
+            Write-InstallerWarn "Pull failed: $image"
+        }
+    }
+
+    if ($pullFailures.Count -gt 0) {
+        $imageList = ($pullFailures | ForEach-Object { "  - $_" }) -join "`n"
+        if ($AiBackend -eq 'vulkan' -and ($pullFailures | Where-Object { $_ -match 'guideants-ai-vulkan' })) {
+            $vulkanMessage = @(
+                'The GHCR Vulkan AI image is not currently pullable:'
+                $imageList
+                'Build it locally, then rerun with local compose:'
+                '  powershell -ExecutionPolicy Bypass -File ..\docker\build\build_guideants_ai.ps1 -Backend vulkan'
+                '  powershell -ExecutionPolicy Bypass -File .\guideants.ps1 --backend vulkan --compose local --reconfigure'
+                'Or choose a published backend such as cuda13, cpu, or slim.'
+            ) -join [Environment]::NewLine
+            Invoke-InstallerStop $vulkanMessage
+        }
+        Invoke-InstallerStop "One or more Compose images failed to pull:`n$imageList`nIf these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
     }
 }
 
@@ -502,10 +501,9 @@ function Invoke-InstallerStartStack {
     )
 
     $active = @(Get-InstallerActiveServices -DbLayout $DbLayout -AiBackend $AiBackend -Components $Components)
-    Invoke-InstallerPruneDeselected -ComposeArgs $ComposeArgs -EnvFile $EnvFile -KeepServices $active
     Invoke-InstallerProgressivePull -ComposeArgs $ComposeArgs -EnvFile $EnvFile -AiBackend $AiBackend -ComposeMode $ComposeMode -AssumeYes:$AssumeYes
-    Write-InstallerLog "Starting services: $($active -join ', ')"
-    Invoke-InstallerDocker -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $EnvFile, 'up', '-d') + $active)
+    Write-InstallerLog "Applying selected compose stack (remove-orphans): $($active -join ', ')"
+    Invoke-InstallerDocker -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $EnvFile, 'up', '-d', '--remove-orphans'))
 }
 
 function Invoke-InstallerGetLocalDigest {
@@ -552,14 +550,12 @@ function Invoke-InstallerWizard {
     if (Test-Path -LiteralPath $StateFile) {
         $prior = Get-InstallerSelectionFromState -StateFile $StateFile
     }
-    $saved = if ($Reconfigure) { $null } else { $prior }
+    $useSaved = ($null -ne $prior -and -not $Reconfigure)
+    $reconfigureFromSaved = ($null -ne $prior -and $Reconfigure)
 
-    # DB layout
-    if (-not [string]::IsNullOrWhiteSpace($DbLayoutOverride)) {
-        $script:SelectedDbLayout = $DbLayoutOverride
-    }
-    elseif ($null -ne $saved) {
-        $script:SelectedDbLayout = $saved.DbLayout
+    # DB layout is first-install only and immutable afterwards.
+    if ($null -ne $prior -and -not [string]::IsNullOrWhiteSpace($prior.DbLayout)) {
+        $script:SelectedDbLayout = $prior.DbLayout
         Write-InstallerLog "Using saved DB layout: $($script:SelectedDbLayout)"
     }
     else {
@@ -581,9 +577,18 @@ function Invoke-InstallerWizard {
     if (-not [string]::IsNullOrWhiteSpace($AiBackendOverride)) {
         $script:SelectedAiBackend = $AiBackendOverride
     }
-    elseif ($null -ne $saved) {
-        $script:SelectedAiBackend = $saved.AiBackend
+    elseif ($useSaved -and $null -ne $prior -and -not [string]::IsNullOrWhiteSpace($prior.AiBackend)) {
+        $script:SelectedAiBackend = $prior.AiBackend
         Write-InstallerLog "Using saved AI backend: $($script:SelectedAiBackend)"
+    }
+    elseif ($reconfigureFromSaved -and $null -ne $prior -and -not [string]::IsNullOrWhiteSpace($prior.AiBackend) -and -not $AssumeYes) {
+        Write-InstallerLog "Current AI backend: $($prior.AiBackend)"
+        if (Invoke-InstallerAskYesNo -Prompt "Keep current AI backend ($($prior.AiBackend))? [Y/n]" -Default 'Y') {
+            $script:SelectedAiBackend = $prior.AiBackend
+        }
+        else {
+            $script:SelectedAiBackend = Invoke-InstallerSelectAiBackend -Catalog $catalog -AssumeYes:$AssumeYes
+        }
     }
     else {
         $script:SelectedAiBackend = Invoke-InstallerSelectAiBackend -Catalog $catalog -AssumeYes:$AssumeYes
@@ -593,35 +598,41 @@ function Invoke-InstallerWizard {
     if ($ComponentsOverride.Count -gt 0) {
         $script:SelectedComponents = @($ComponentsOverride)
     }
-    elseif ($null -ne $saved) {
-        $script:SelectedComponents = @($saved.Components)
+    elseif ($useSaved -and $null -ne $prior) {
+        $script:SelectedComponents = @($prior.Components)
         Write-InstallerLog "Using saved optional components: $($script:SelectedComponents -join ', ')"
     }
     else {
         $script:SelectedComponents = New-Object System.Collections.Generic.List[string]
         Write-Host ''
         Write-Host '  Optional components (y/n for each):'
+        $runningTotal = Get-InstallerEstimatedSizeGb -DbLayout $script:SelectedDbLayout -AiBackend $script:SelectedAiBackend -Components @()
+        Write-InstallerLog "Current selected images ~ $runningTotal GB"
         foreach ($component in $script:InstallerOptionalComponents) {
             $meta = $catalog[$component]
+            $sizeDisplay = [double]$meta.SizeGb
+            if ($component -eq 'docling' -and $script:SelectedAiBackend -eq 'cuda13') { $sizeDisplay = 13.8 }
             Write-Host ''
-            Write-Host ('  {0} (~{1} GB)' -f $meta.Label, $meta.SizeGb)
+            Write-Host ('  {0} (~{1} GB)' -f $meta.Label, $sizeDisplay)
             Write-Host ('    {0}' -f $meta.Summary)
             if ($meta.Missing) { Write-Host ('    Without it: {0}' -f $meta.Missing) }
-            $default = 'Y'
+            $priorSelected = ($reconfigureFromSaved -and $null -ne $prior -and ($prior.Components -contains $component))
             if ($AssumeYes) {
                 $script:SelectedComponents.Add($component) | Out-Null
-                continue
             }
-            $reply = Read-Host "  Include $component? [Y/n]"
-            if ([string]::IsNullOrWhiteSpace($reply)) { $reply = $default }
-            if ($reply -match '^[Yy]') { $script:SelectedComponents.Add($component) | Out-Null }
+            else {
+                $default = if ($reconfigureFromSaved -and -not $priorSelected) { 'N' } else { 'Y' }
+                $hint = if ($default -eq 'Y') { '[Y/n]' } else { '[y/N]' }
+                $reply = Read-Host "  Include $($component)? $hint"
+                if ([string]::IsNullOrWhiteSpace($reply)) { $reply = $default }
+                if ($reply -match '^[Yy]') { $script:SelectedComponents.Add($component) | Out-Null }
+            }
+            $runningTotal = Get-InstallerEstimatedSizeGb -DbLayout $script:SelectedDbLayout -AiBackend $script:SelectedAiBackend -Components @($script:SelectedComponents)
+            Write-InstallerLog "Current selected images ~ $runningTotal GB"
         }
         $script:SelectedComponents = @($script:SelectedComponents)
     }
 
-    if ($null -ne $prior -and $prior.DbLayout -ne $script:SelectedDbLayout) {
-        Write-InstallerWarn 'DB layout changed. Data is not auto-migrated between bundled and separate SQL.'
-    }
     if ($null -ne $prior -and $prior.AiBackend -ne $script:SelectedAiBackend) {
         Write-InstallerLog "AI backend changed: $($prior.AiBackend) -> $($script:SelectedAiBackend)"
     }
@@ -635,22 +646,6 @@ function Invoke-InstallerWizard {
     $script:SelectedComposeFragments = @(Get-InstallerComposeFragments -DbLayout $script:SelectedDbLayout -AiBackend $script:SelectedAiBackend -Components $script:SelectedComponents)
     $est = Get-InstallerEstimatedSizeGb -DbLayout $script:SelectedDbLayout -AiBackend $script:SelectedAiBackend -Components $script:SelectedComponents
     Write-InstallerLog "Selected images ~ $est GB (not including model weights downloaded later inside the AI container)."
-}
-
-function Invoke-InstallerPruneDeselected {
-    param(
-        [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
-        [Parameter(Mandatory = $true)][string]$EnvFile,
-        [Parameter(Mandatory = $true)][string[]]$KeepServices
-    )
-
-    $allServices = @('mssql-express', 'guideants-webapi-ui', 'guideants-ai', 'docling-serve', 'documentserver', 'plantuml', 'searxng')
-    $remove = @($allServices | Where-Object { $KeepServices -notcontains $_ })
-    if ($remove.Count -eq 0) { return }
-
-    Write-InstallerLog "Stopping deselected services: $($remove -join ', ')"
-    Invoke-InstallerDockerCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $EnvFile, 'stop') + $remove) -IgnoreErrors | Out-Null
-    Invoke-InstallerDockerCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $EnvFile, 'rm', '-f') + $remove) -IgnoreErrors | Out-Null
 }
 
 function Get-InstallerActiveServices {
