@@ -24,7 +24,7 @@ services:
       documentserver:
         condition: service_started
     environment:
-      - DocumentServer__Enabled=${GA_DOCUMENTSERVER_ENABLED:-false}
+      - DocumentServer__Enabled=true
       - DocumentServer__InternalUrl=http://documentserver
       - DocumentServer__ApiBaseUrl=http://guideants-webapi-ui:8080
       - DocumentServer__JwtEnabled=${GA_DOCUMENTSERVER_JWT_ENABLED:-false}

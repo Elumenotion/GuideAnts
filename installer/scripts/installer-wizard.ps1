@@ -298,6 +298,244 @@ function Save-InstallerState {
     [System.IO.File]::WriteAllText($StateFile, ($lines -join "`n") + "`n", [System.Text.UTF8Encoding]::new($false))
 }
 
+function Invoke-InstallerSelectAiBackend {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Catalog,
+        [switch]$AssumeYes
+    )
+
+    $slimMeta = $Catalog['ai_slim']
+    $noneMeta = $Catalog['ai_none']
+
+    Write-Host ''
+    Write-Host '  AI intent:'
+    Write-Host ('    1) Cloud providers only — {0} (~{1} GB)' -f $slimMeta.Label, $slimMeta.SizeGb)
+    Write-Host ('        {0}' -f $slimMeta.Summary)
+    Write-Host ('    2) No AI container (~{0} GB)' -f $noneMeta.SizeGb)
+    Write-Host ('        {0}' -f $noneMeta.Summary)
+    Write-Host '    3) Local model runtime (pick CPU/GPU backend next)'
+    Write-Host ''
+
+    if ($AssumeYes) { return 'slim' }
+
+    $intent = Read-Host 'Enter 1-3 [1=cloud/slim]'
+    switch ($intent) {
+        '2' { return 'none' }
+        '3' { break }
+        default { return 'slim' }
+    }
+
+    $options = $null
+    if ($null -ne $script:InstallerLocalAiOptionsFn) {
+        $options = & $script:InstallerLocalAiOptionsFn
+    }
+    if ($null -eq $options) {
+        $options = [pscustomobject]@{
+            Recommended = 'cpu'
+            Reason = 'No hardware probe available.'
+            BackendKeys = @('cuda13', 'rocm', 'vulkan', 'cpu')
+            BackendLabels = @(
+                'cuda13  NVIDIA CUDA 13 local runtime (~14 GB)',
+                'rocm    AMD ROCm local runtime (~20 GB)',
+                'vulkan  Vulkan local runtime (~8.5 GB)',
+                'cpu     CPU local runtime (~8.2 GB)'
+            )
+        }
+    }
+
+    Write-InstallerLog "Recommended local backend: $($options.Recommended)"
+    Write-InstallerLog "  ($($options.Reason))"
+    Write-Host ''
+    Write-Host '  Local AI backend:'
+    for ($i = 0; $i -lt $options.BackendKeys.Count; $i++) {
+        $key = $options.BackendKeys[$i]
+        $meta = $Catalog["ai_$key"]
+        $marker = if ($key -eq $options.Recommended) { ' (recommended)' } else { '' }
+        Write-Host ('    {0}) {1}{2}' -f ($i + 1), $options.BackendLabels[$i], $marker)
+        if ($meta.Summary) { Write-Host ('        {0}' -f $meta.Summary) }
+    }
+    Write-Host ''
+
+    $choice = Read-Host "Enter 1-$($options.BackendKeys.Count), or press Enter for recommended [$($options.Recommended)]"
+    if ([string]::IsNullOrWhiteSpace($choice)) { return $options.Recommended }
+    if ($choice -match '^[0-9]+$' -and [int]$choice -ge 1 -and [int]$choice -le $options.BackendKeys.Count) {
+        return $options.BackendKeys[[int]$choice - 1]
+    }
+
+    Write-InstallerWarn "Unrecognized choice '$choice'; using recommended ($($options.Recommended))."
+    return $options.Recommended
+}
+
+function Invoke-InstallerProgressivePull {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
+        [Parameter(Mandatory = $true)][string]$EnvFile,
+        [Parameter(Mandatory = $true)][string]$AiBackend,
+        [string]$ComposeMode = 'ghcr',
+        [switch]$AssumeYes
+    )
+
+    $config = Invoke-InstallerDockerCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $EnvFile, 'config', '--images')) -IgnoreErrors
+    if ($config.ExitCode -ne 0) {
+        Invoke-InstallerStop 'Could not resolve image list from compose fragments. Check compose files and docker/.env.'
+    }
+
+    $images = @($config.Output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -ne '' } | Select-Object -Unique)
+    if ($images.Count -eq 0) {
+        Invoke-InstallerStop 'Compose resolved zero images to pull.'
+    }
+
+    Write-InstallerLog 'Checking for image updates (reads registry metadata only until pull)...'
+    $missing = New-Object System.Collections.Generic.List[string]
+    $stale = New-Object System.Collections.Generic.List[string]
+    $current = New-Object System.Collections.Generic.List[string]
+
+    if ($ComposeMode -eq 'local') {
+        foreach ($image in $images) {
+            $localDigest = Invoke-InstallerGetLocalDigest -ImageRef $image
+            if ([string]::IsNullOrWhiteSpace($localDigest)) {
+                $missing.Add($image) | Out-Null
+            }
+            else {
+                $current.Add($image) | Out-Null
+            }
+        }
+    }
+    else {
+    foreach ($image in $images) {
+        $localDigest = Invoke-InstallerGetLocalDigest -ImageRef $image
+        if ([string]::IsNullOrWhiteSpace($localDigest)) {
+            $missing.Add($image) | Out-Null
+            continue
+        }
+
+        $remoteDigest = Invoke-InstallerGetRemoteDigest -ImageRef $image
+        if (-not [string]::IsNullOrWhiteSpace($remoteDigest) -and $remoteDigest -ne $localDigest) {
+            $stale.Add($image) | Out-Null
+        }
+        else {
+            $current.Add($image) | Out-Null
+        }
+    }
+    }
+
+    if ($ComposeMode -eq 'local') {
+        if ($missing.Count -eq 0) {
+            Write-InstallerLog 'All local images are present.'
+            return
+        }
+        Write-InstallerLog "Pulling $($missing.Count) missing local image(s)..."
+        foreach ($image in $missing) {
+            Write-InstallerLog "  docker pull $image"
+            Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $image)
+        }
+        return
+    }
+
+    if ($missing.Count -gt 0) {
+        $unavailable = New-Object System.Collections.Generic.List[string]
+        foreach ($image in $missing) {
+            $remoteDigest = Invoke-InstallerGetRemoteDigest -ImageRef $image
+            if ([string]::IsNullOrWhiteSpace($remoteDigest)) {
+                $unavailable.Add($image) | Out-Null
+            }
+        }
+
+        if ($unavailable.Count -gt 0) {
+            $imageList = ($unavailable | ForEach-Object { "  - $_" }) -join "`n"
+            if ($AiBackend -eq 'vulkan' -and ($unavailable | Where-Object { $_ -match 'guideants-ai-vulkan' })) {
+                Invoke-InstallerStop @"
+The GHCR Vulkan AI image is not currently pullable:
+$imageList
+Build it locally, then rerun with local compose:
+  powershell -ExecutionPolicy Bypass -File ..\docker\build\build_guideants_ai.ps1 -Backend vulkan
+  powershell -ExecutionPolicy Bypass -File .\guideants.ps1 --backend vulkan --compose local --reconfigure
+Or choose a published backend such as cuda13, cpu, or slim.
+"@
+            }
+            Invoke-InstallerStop "One or more Compose images are not pullable from the registry:`n$imageList`nIf these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
+        }
+
+        Write-InstallerLog "$($missing.Count) image(s) not present locally — will be downloaded."
+    }
+
+    $pullImages = New-Object System.Collections.Generic.List[string]
+    foreach ($image in $missing) { $pullImages.Add($image) | Out-Null }
+
+    if ($stale.Count -gt 0) {
+        Write-InstallerLog "Updates available for $($stale.Count) image(s)."
+        $doUpdate = $AssumeYes.IsPresent
+        if (-not $doUpdate) {
+            $doUpdate = Invoke-InstallerAskYesNo -Prompt 'Update now before starting? [Y/n]' -Default 'Y'
+        }
+        if ($doUpdate) {
+            foreach ($image in $stale) { $pullImages.Add($image) | Out-Null }
+        }
+        else {
+            Write-InstallerLog 'Keeping current images for stale entries.'
+        }
+    }
+
+    if ($current.Count -gt 0 -and $pullImages.Count -eq 0) {
+        Write-InstallerLog 'All images are up to date.'
+    }
+
+    if ($pullImages.Count -eq 0) { return }
+
+    Write-InstallerLog "Pulling $($pullImages.Count) image(s) sequentially..."
+    foreach ($image in $pullImages) {
+        Write-InstallerLog "  docker pull $image"
+        Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $image)
+    }
+}
+
+function Invoke-InstallerStartStack {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
+        [Parameter(Mandatory = $true)][string]$EnvFile,
+        [Parameter(Mandatory = $true)][string]$DbLayout,
+        [Parameter(Mandatory = $true)][string]$AiBackend,
+        [Parameter(Mandatory = $true)][string[]]$Components,
+        [string]$ComposeMode = 'ghcr',
+        [switch]$AssumeYes
+    )
+
+    $active = @(Get-InstallerActiveServices -DbLayout $DbLayout -AiBackend $AiBackend -Components $Components)
+    Invoke-InstallerPruneDeselected -ComposeArgs $ComposeArgs -EnvFile $EnvFile -KeepServices $active
+    Invoke-InstallerProgressivePull -ComposeArgs $ComposeArgs -EnvFile $EnvFile -AiBackend $AiBackend -ComposeMode $ComposeMode -AssumeYes:$AssumeYes
+    Write-InstallerLog "Starting services: $($active -join ', ')"
+    Invoke-InstallerDocker -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $EnvFile, 'up', '-d') + $active)
+}
+
+function Invoke-InstallerGetLocalDigest {
+    param([Parameter(Mandatory = $true)][string]$ImageRef)
+    if ($null -ne $script:InstallerGetLocalDigestFn) { return & $script:InstallerGetLocalDigestFn $ImageRef }
+    return $null
+}
+
+function Invoke-InstallerGetRemoteDigest {
+    param([Parameter(Mandatory = $true)][string]$ImageRef)
+    if ($null -ne $script:InstallerGetRemoteDigestFn) { return & $script:InstallerGetRemoteDigestFn $ImageRef }
+    return $null
+}
+
+function Invoke-InstallerAskYesNo {
+    param(
+        [Parameter(Mandatory = $true)][string]$Prompt,
+        [string]$Default = 'Y'
+    )
+    if ($null -ne $script:InstallerAskYesNoFn) { return & $script:InstallerAskYesNoFn $Prompt $Default }
+    $reply = Read-Host $Prompt
+    if ([string]::IsNullOrWhiteSpace($reply)) { $reply = $Default }
+    return ($reply -match '^[Yy]')
+}
+
+function Invoke-InstallerStop {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    if ($null -ne $script:InstallerStopFn) { & $script:InstallerStopFn $Message }
+    throw $Message
+}
+
 function Invoke-InstallerWizard {
     param(
         [Parameter(Mandatory = $true)][string]$StateFile,
@@ -309,10 +547,11 @@ function Invoke-InstallerWizard {
     )
 
     $catalog = Get-InstallerComponentCatalog
-    $saved = $null
-    if ((Test-Path -LiteralPath $StateFile) -and -not $Reconfigure) {
-        $saved = Get-InstallerSelectionFromState -StateFile $StateFile
+    $prior = $null
+    if (Test-Path -LiteralPath $StateFile) {
+        $prior = Get-InstallerSelectionFromState -StateFile $StateFile
     }
+    $saved = if ($Reconfigure) { $null } else { $prior }
 
     # DB layout
     if (-not [string]::IsNullOrWhiteSpace($DbLayoutOverride)) {
@@ -337,7 +576,7 @@ function Invoke-InstallerWizard {
         }
     }
 
-    # AI backend
+    # AI backend (intent: cloud / none / local)
     if (-not [string]::IsNullOrWhiteSpace($AiBackendOverride)) {
         $script:SelectedAiBackend = $AiBackendOverride
     }
@@ -346,30 +585,7 @@ function Invoke-InstallerWizard {
         Write-InstallerLog "Using saved AI backend: $($script:SelectedAiBackend)"
     }
     else {
-        Write-Host ''
-        Write-Host '  AI container (sandbox, skills, local MCP servers, local models):'
-        $aiOptions = @(
-            @{ Key = 'none'; Num = 1 },
-            @{ Key = 'slim'; Num = 2 },
-            @{ Key = 'cpu'; Num = 3 },
-            @{ Key = 'cuda13'; Num = 4 },
-            @{ Key = 'rocm'; Num = 5 },
-            @{ Key = 'vulkan'; Num = 6 }
-        )
-        foreach ($opt in $aiOptions) {
-            $meta = $catalog["ai_$($opt.Key)"]
-            Write-Host ('    {0}) {1} (~{2} GB)' -f $opt.Num, $meta.Label, $meta.SizeGb)
-            Write-Host ('        {0}' -f $meta.Summary)
-        }
-        Write-Host ''
-        if ($AssumeYes) {
-            $script:SelectedAiBackend = 'slim'
-        }
-        else {
-            $choice = Read-Host 'Enter 1-6 [2=slim]'
-            $picked = $aiOptions | Where-Object { [string]$_.Num -eq $choice } | Select-Object -First 1
-            $script:SelectedAiBackend = if ($null -ne $picked) { $picked.Key } elseif ([string]::IsNullOrWhiteSpace($choice)) { 'slim' } else { 'slim' }
-        }
+        $script:SelectedAiBackend = Invoke-InstallerSelectAiBackend -Catalog $catalog -AssumeYes:$AssumeYes
     }
 
     # Optional components
@@ -402,35 +618,22 @@ function Invoke-InstallerWizard {
         $script:SelectedComponents = @($script:SelectedComponents)
     }
 
-    $prev = if ($null -ne $saved) { $saved } else { $null }
-    if ($null -ne $prev -and $prev.DbLayout -ne $script:SelectedDbLayout) {
+    if ($null -ne $prior -and $prior.DbLayout -ne $script:SelectedDbLayout) {
         Write-InstallerWarn 'DB layout changed. Data is not auto-migrated between bundled and separate SQL.'
+    }
+    if ($null -ne $prior -and $prior.AiBackend -ne $script:SelectedAiBackend) {
+        Write-InstallerLog "AI backend changed: $($prior.AiBackend) -> $($script:SelectedAiBackend)"
+    }
+    if ($null -ne $prior) {
+        $removed = @($prior.Components | Where-Object { $script:SelectedComponents -notcontains $_ })
+        if ($removed.Count -gt 0) {
+            Write-InstallerLog "Deselected components: $($removed -join ', ')"
+        }
     }
 
     $script:SelectedComposeFragments = @(Get-InstallerComposeFragments -DbLayout $script:SelectedDbLayout -AiBackend $script:SelectedAiBackend -Components $script:SelectedComponents)
     $est = Get-InstallerEstimatedSizeGb -DbLayout $script:SelectedDbLayout -AiBackend $script:SelectedAiBackend -Components $script:SelectedComponents
     Write-InstallerLog "Selected images ~ $est GB (not including model weights downloaded later inside the AI container)."
-}
-
-function Invoke-InstallerProgressivePull {
-    param(
-        [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
-        [Parameter(Mandatory = $true)][string]$EnvFile,
-        [switch]$AssumeYes
-    )
-
-    $config = Invoke-InstallerDockerCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $EnvFile, 'config', '--images')) -IgnoreErrors
-    if ($config.ExitCode -ne 0) {
-        Write-InstallerWarn 'Could not resolve image list from compose fragments.'
-        return
-    }
-
-    $images = @($config.Output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -ne '' } | Select-Object -Unique)
-    Write-InstallerLog "Pulling $($images.Count) image(s) sequentially..."
-    foreach ($image in $images) {
-        Write-InstallerLog "  docker pull $image"
-        Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $image)
-    }
 }
 
 function Invoke-InstallerPruneDeselected {
@@ -440,7 +643,7 @@ function Invoke-InstallerPruneDeselected {
         [Parameter(Mandatory = $true)][string[]]$KeepServices
     )
 
-    $allServices = @('mssql-express', 'guideants-webapi-ui', 'guideants-ai', 'docling-serve', 'documentserver', 'plantuml', 'readweb-searxng')
+    $allServices = @('mssql-express', 'guideants-webapi-ui', 'guideants-ai', 'docling-serve', 'documentserver', 'plantuml', 'searxng')
     $remove = @($allServices | Where-Object { $KeepServices -notcontains $_ })
     if ($remove.Count -eq 0) { return }
 
@@ -463,7 +666,7 @@ function Get-InstallerActiveServices {
     if ($Components -contains 'docling') { $services.Add('docling-serve') | Out-Null }
     if ($Components -contains 'documentserver') { $services.Add('documentserver') | Out-Null }
     if ($Components -contains 'plantuml') { $services.Add('plantuml') | Out-Null }
-    if ($Components -contains 'searxng') { $services.Add('readweb-searxng') | Out-Null }
+    if ($Components -contains 'searxng') { $services.Add('searxng') | Out-Null }
     return @($services)
 }
 
@@ -515,6 +718,8 @@ function Build-InstallerComposeArgsFromState {
         Selection = $selection
     }
 }
+
+function Write-InstallerLog {
     param([string]$Message)
     if ($null -ne $script:InstallerLogFn) { & $script:InstallerLogFn $Message } else { Write-Host "[guideants] $Message" }
 }

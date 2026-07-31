@@ -119,11 +119,14 @@ installer_set_local_image_env() {
   [[ "$COMPOSE_MODE" == "local" ]] || return 0
   [[ -n "${GA_WEBAPI_UI_MSSQL_IMAGE:-}" ]] && export GA_WEBAPI_UI_MSSQL_GHCR_IMAGE="$GA_WEBAPI_UI_MSSQL_IMAGE"
   [[ -n "${GA_WEBAPI_UI_SLIM_IMAGE:-}" ]] && export GA_WEBAPI_UI_SLIM_GHCR_IMAGE="$GA_WEBAPI_UI_SLIM_IMAGE"
+  [[ -n "${GA_MSSQL_IMAGE:-}" ]] && export GA_MSSQL_IMAGE="$GA_MSSQL_IMAGE"
   [[ -n "${GA_AI_SLIM_IMAGE:-}" ]] && export GA_AI_SLIM_GHCR_IMAGE="$GA_AI_SLIM_IMAGE"
+  [[ -n "${GA_PLANTUML_IMAGE:-}" ]] && export GA_PLANTUML_GHCR_IMAGE="$GA_PLANTUML_IMAGE"
+  [[ -n "${GA_SEARXNG_IMAGE:-}" ]] && export GA_SEARXNG_GHCR_IMAGE="$GA_SEARXNG_IMAGE"
   case "$SELECTED_AI_BACKEND" in
     cpu) [[ -n "${GA_AI_CPU_IMAGE:-}" ]] && export GA_AI_GHCR_IMAGE="$GA_AI_CPU_IMAGE" ;;
     cuda13) [[ -n "${GA_AI_CUDA_IMAGE:-}" ]] && export GA_AI_GHCR_IMAGE="$GA_AI_CUDA_IMAGE" ;;
-    rocm) [[ -n "${GA_AI_ROCM_IMAGE:-}" ]] && export GA_AI_GHCR_IMAGE="$GA_AI_ROCM_IMAGE" ;;
+    rocm) [[ -n "${GA_AI_ROCM_IMAGE:-}" ]] && export GA_AI_ROCM_IMAGE="$GA_AI_ROCM_IMAGE" && export GA_AI_GHCR_IMAGE="$GA_AI_ROCM_IMAGE" ;;
     vulkan) [[ -n "${GA_AI_VULKAN_IMAGE:-}" ]] && export GA_AI_GHCR_IMAGE="$GA_AI_VULKAN_IMAGE" ;;
   esac
 }
@@ -140,14 +143,84 @@ installer_compose_args() {
 }
 
 installer_progressive_pull() {
-  local images img
-  mapfile -t images < <(installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" config --images 2>/dev/null | sed '/^$/d' | sort -u)
-  installer_log "Pulling ${#images[@]} image(s) sequentially..."
-  for img in "${images[@]}"; do
+  local images img l r missing=0 stale=0 pull=0
+  local -a missing_images=() stale_images=() pull_images=()
+  if ! images="$(installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" config --images 2>/dev/null)"; then
+    fail "Could not resolve image list from compose fragments."
+  fi
+  installer_log "Checking for image updates (reads registry metadata only until pull)..."
+  while IFS= read -r img; do
+    [[ -n "$img" ]] || continue
+    l="$(local_digest "$img" 2>/dev/null || true)"
+    if [[ -z "$l" ]]; then
+      missing=$((missing+1)); missing_images+=("$img"); continue
+    fi
+    if [[ "$COMPOSE_MODE" == "local" ]]; then continue; fi
+    r="$(remote_digest "$img" 2>/dev/null || true)"
+    if [[ -n "$r" && "$r" != "$l" ]]; then stale=$((stale+1)); stale_images+=("$img"); fi
+  done <<< "$images"
+
+  if [[ "$COMPOSE_MODE" == "local" ]]; then
+    if [[ "$missing" -eq 0 ]]; then installer_log "All local images are present."; return 0; fi
+    installer_log "Pulling $missing missing local image(s)..."
+    for img in "${missing_images[@]}"; do
+      installer_log "  docker pull $img"
+      installer_docker pull "$img"
+    done
+    return 0
+  fi
+
+  if [[ "$missing" -gt 0 ]]; then
+    local -a unavailable=() rd
+    for img in "${missing_images[@]}"; do
+      rd="$(remote_digest "$img" 2>/dev/null || true)"
+      [[ -z "$rd" ]] && unavailable+=("$img")
+    done
+    if [[ ${#unavailable[@]} -gt 0 ]]; then
+      if [[ "$SELECTED_AI_BACKEND" == "vulkan" ]]; then
+        local has_vulkan=0 u
+        for u in "${unavailable[@]}"; do [[ "$u" == *guideants-ai-vulkan* ]] && has_vulkan=1; done
+        if [[ "$has_vulkan" == "1" ]]; then
+          warn "The GHCR Vulkan AI image is not currently pullable:"
+          printf '  - %s\n' "${unavailable[@]}" >&2
+          fail "Build locally, then rerun: ./docker/build/build_guideants_ai.sh --backend vulkan && ./installer/guideants.sh --backend vulkan --compose local --reconfigure"
+        fi
+      fi
+      warn "One or more Compose images are not pullable from the registry:"
+      printf '  - %s\n' "${unavailable[@]}" >&2
+      fail "If these are private images, run 'docker login' or switch to --compose local after building locally."
+    fi
+    installer_log "$missing image(s) not present locally — will be downloaded."
+    pull_images+=("${missing_images[@]}")
+  fi
+
+  if [[ "$stale" -gt 0 ]]; then
+    installer_log "Updates available for $stale image(s)."
+    if [[ "$ASSUME_YES" == "1" ]] || ask_yes_no "Update now before starting? [Y/n]" "Y"; then
+      pull_images+=("${stale_images[@]}")
+    else
+      installer_log "Keeping current images for stale entries."
+    fi
+  fi
+
+  if [[ ${#pull_images[@]} -eq 0 ]]; then
+    installer_log "All images are up to date."
+    return 0
+  fi
+  installer_log "Pulling ${#pull_images[@]} image(s) sequentially..."
+  for img in "${pull_images[@]}"; do
     [[ -n "$img" ]] || continue
     installer_log "  docker pull $img"
     installer_docker pull "$img"
   done
+}
+
+installer_start_stack() {
+  installer_active_services
+  installer_prune_deselected
+  installer_progressive_pull
+  installer_log "Starting services: ${ACTIVE_SERVICES[*]}"
+  installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" up -d "${ACTIVE_SERVICES[@]}"
 }
 
 installer_active_services() {
@@ -161,7 +234,7 @@ installer_active_services() {
       docling) ACTIVE_SERVICES+=(docling-serve) ;;
       documentserver) ACTIVE_SERVICES+=(documentserver) ;;
       plantuml) ACTIVE_SERVICES+=(plantuml) ;;
-      searxng) ACTIVE_SERVICES+=(readweb-searxng) ;;
+      searxng) ACTIVE_SERVICES+=(searxng) ;;
     esac
   done
 }
@@ -169,7 +242,7 @@ installer_active_services() {
 installer_prune_deselected() {
   SELECTED_DB_LAYOUT="${SELECTED_DB_LAYOUT:-bundled}"
   installer_active_services
-  local all=(mssql-express guideants-webapi-ui guideants-ai docling-serve documentserver plantuml readweb-searxng)
+  local all=(mssql-express guideants-webapi-ui guideants-ai docling-serve documentserver plantuml searxng)
   local remove=() s keep=0
   for s in "${all[@]}"; do
     keep=0
@@ -222,7 +295,6 @@ installer_mount_restart_services() {
   local db="$1" ai="$2"
   shift 2
   local components=("$@") services=(guideants-webapi-ui) c
-  [[ "$db" == "separate" ]] && services=(mssql-express "${services[@]}")
   [[ "$ai" != "none" ]] && services+=(guideants-ai)
   for c in "${components[@]}"; do
     case "$c" in
@@ -232,8 +304,53 @@ installer_mount_restart_services() {
   printf '%s\n' "${services[@]}"
 }
 
+installer_select_ai_backend() {
+  local intent c i n rec
+  printf '\n  AI intent:\n'
+  printf '    1) Cloud providers only — slim sandbox (~4.3 GB)\n'
+  printf '    2) No AI container (~0 GB)\n'
+  printf '    3) Local model runtime (pick CPU/GPU backend next)\n\n'
+  if [[ "$ASSUME_YES" == "1" ]]; then echo slim; return 0; fi
+  read -r -p 'Enter 1-3 [1=cloud/slim]: ' intent || intent=""
+  case "$intent" in
+    2) echo none; return 0 ;;
+    3) ;;
+    *) echo slim; return 0 ;;
+  esac
+  if declare -F recommend_backend >/dev/null 2>&1; then recommend_backend; rec="$RECOMMENDED"; else rec=cpu; fi
+  installer_log "Recommended local backend: $rec"
+  [[ -n "${REASON:-}" ]] && installer_log "  ($REASON)"
+  local -a keys=() labels=()
+  local major
+  if major="$(nvidia_driver_major 2>/dev/null || true)" && [[ "$major" =~ ^[0-9]+$ && "$major" -ge 580 ]]; then
+    keys+=(cuda13); labels+=("cuda13  NVIDIA CUDA 13 local runtime (~14 GB)")
+  fi
+  if declare -F amd_gpu_detected >/dev/null 2>&1 && amd_gpu_detected; then
+    keys+=(rocm); labels+=("rocm    AMD ROCm local runtime (~20 GB)")
+  fi
+  keys+=(vulkan cpu)
+  labels+=("vulkan  Vulkan local runtime (~8.5 GB)" "cpu     CPU local runtime (~8.2 GB)")
+  n=${#keys[@]}
+  printf '\n  Local AI backend:\n'
+  for i in $(seq 0 $((n-1))); do
+    printf '    %d) %s' "$((i+1))" "${labels[$i]}"
+    [[ "${keys[$i]}" == "$rec" ]] && printf ' (recommended)'
+    printf '\n'
+  done
+  printf '\n'
+  read -r -p "Enter 1-${n}, or press Enter for recommended [$rec]: " c || c=""
+  if [[ -z "$c" ]]; then echo "$rec"; return 0; fi
+  if [[ "$c" =~ ^[0-9]+$ && "$c" -ge 1 && "$c" -le "$n" ]]; then echo "${keys[$((c-1))]}"; return 0; fi
+  installer_warn "Unrecognized choice '$c'; using recommended ($rec)."
+  echo "$rec"
+}
+
 installer_run_wizard() {
-  local use_saved=0
+  local use_saved=0 prior_db="" prior_ai="" prior_components=""
+  if [[ -f "$STATE_FILE" ]]; then
+    installer_legacy_state
+    prior_db="$DB_LAYOUT"; prior_ai="$AI_BACKEND"; prior_components="$COMPONENTS"
+  fi
   if [[ "$RECONFIGURE" == "0" && -f "$STATE_FILE" ]]; then use_saved=1; fi
 
   if [[ -n "$DB_LAYOUT_OVERRIDE" ]]; then
@@ -256,26 +373,10 @@ installer_run_wizard() {
   if [[ -n "$AI_BACKEND_OVERRIDE" ]]; then
     SELECTED_AI_BACKEND="$AI_BACKEND_OVERRIDE"
   elif [[ "$use_saved" == "1" ]]; then
-    installer_legacy_state
-    SELECTED_AI_BACKEND="$AI_BACKEND"
+    SELECTED_AI_BACKEND="$prior_ai"
     installer_log "Using saved AI backend: $SELECTED_AI_BACKEND"
   else
-    printf '\n  AI container (sandbox, skills, local MCP servers, local models):\n'
-    printf '    1) none (~0 GB)\n'
-    printf '    2) slim (~4.3 GB) — sandbox only, no local model runtime\n'
-    printf '    3) cpu (~8.2 GB)\n    4) cuda13 (~14 GB)\n    5) rocm (~20 GB)\n    6) vulkan (~8.5 GB)\n\n'
-    if [[ "$ASSUME_YES" == "1" ]]; then SELECTED_AI_BACKEND=slim
-    else
-      local c; read -r -p 'Enter 1-6 [2=slim]: ' c || c=""
-      case "$c" in
-        1) SELECTED_AI_BACKEND=none ;;
-        3) SELECTED_AI_BACKEND=cpu ;;
-        4) SELECTED_AI_BACKEND=cuda13 ;;
-        5) SELECTED_AI_BACKEND=rocm ;;
-        6) SELECTED_AI_BACKEND=vulkan ;;
-        *) SELECTED_AI_BACKEND=slim ;;
-      esac
-    fi
+    SELECTED_AI_BACKEND="$(installer_select_ai_backend)"
   fi
 
   if [[ ${#COMPONENTS_OVERRIDE[@]} -gt 0 ]]; then
@@ -305,6 +406,12 @@ installer_run_wizard() {
   fi
 
   mapfile -t SELECTED_COMPOSE_FRAGMENTS < <(installer_compose_fragments "$SELECTED_DB_LAYOUT" "$SELECTED_AI_BACKEND" "${SELECTED_COMPONENTS[@]}")
+  if [[ -n "$prior_db" && "$prior_db" != "$SELECTED_DB_LAYOUT" ]]; then
+    installer_warn "DB layout changed. Data is not auto-migrated between bundled and separate SQL."
+  fi
+  if [[ -n "$prior_ai" && "$prior_ai" != "$SELECTED_AI_BACKEND" ]]; then
+    installer_log "AI backend changed: $prior_ai -> $SELECTED_AI_BACKEND"
+  fi
   local est; est="$(installer_estimated_size_gb "$SELECTED_DB_LAYOUT" "$SELECTED_AI_BACKEND" "${SELECTED_COMPONENTS[@]}")"
   installer_log "Selected images ~ ${est} GB (not including model weights downloaded later inside the AI container)."
 }

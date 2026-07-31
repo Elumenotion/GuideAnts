@@ -31,5 +31,4 @@ services:
         condition: service_started
     environment:
       - LocalServiceHosts__MediaBaseUrl=http://guideants-ai:80
-      - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
       - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox

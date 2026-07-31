@@ -54,7 +54,8 @@ function Get-InstallerState {
         -RootDir $RootDir `
         -StateFile $StateFile `
         -IncludeHostMountOverride `
-        -IncludeVoicePackOverride
+        -IncludeVoicePackOverride `
+        -IncludeRocmOverride
 
     $selection = $built.Selection
     return [pscustomobject]@{

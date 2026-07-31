@@ -314,7 +314,7 @@ Containers are included only when selected:
 | `docling-serve` | DocLing optional selected |
 | `documentserver` | DocumentServer optional selected |
 | `plantuml` | PlantUML optional selected |
-| `readweb-searxng` | SearXNG optional selected |
+| `searxng` | SearXNG optional selected |
 
 ## Data persistence
 

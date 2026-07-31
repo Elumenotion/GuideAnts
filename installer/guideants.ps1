@@ -18,7 +18,7 @@ Flags:
   --compose <ghcr|local>   Use GHCR images (default) or local build images.
   --mount <path>           Mount a host folder into a project (requires prior login).
   --unmount                Interactively remove a host folder mount (requires prior login).
-  --reconfigure            Re-prompt for backend even if one was saved.
+  --reconfigure            Re-prompt for DB layout, AI backend, and optionals even if saved.
   --install-rocm-wsl       Install ROCm + ROCDXG in a user WSL distro (Windows).
   --yes                    Assume "yes" for prompts (auto-accept updates).
   --help                   Show this help.
@@ -34,6 +34,11 @@ $script:InstallerLogFn = ${function:Write-Log}
 $script:InstallerWarnFn = ${function:Write-WarnLog}
 $script:InstallerDockerInvokeFn = ${function:Invoke-External}
 $script:InstallerDockerCaptureFn = ${function:Invoke-ExternalCapture}
+$script:InstallerGetLocalDigestFn = ${function:Get-LocalDigest}
+$script:InstallerGetRemoteDigestFn = ${function:Get-RemoteDigest}
+$script:InstallerAskYesNoFn = ${function:Ask-YesNo}
+$script:InstallerStopFn = ${function:Stop-WithError}
+$script:InstallerLocalAiOptionsFn = ${function:Get-GuideAntsLocalAiOptions}
 $script:DockerDir = Join-Path $script:RootDir 'docker'
 $script:EnvFile = Join-Path $script:DockerDir '.env'
 $script:StateFile = Join-Path $script:RootDir '.installer_state.env'
@@ -115,7 +120,7 @@ Flags:
   --compose <ghcr|local>   Use GHCR images (default) or local build images.
   --mount <path>           Mount a host folder into a project (requires prior login).
   --unmount                Interactively remove a host folder mount (requires prior login).
-  --reconfigure            Re-prompt for backend even if one was saved.
+  --reconfigure            Re-prompt for DB layout, AI backend, and optionals even if saved.
   --install-rocm-wsl       Install ROCm + ROCDXG in a user WSL distro (Windows).
   --yes                    Assume "yes" for prompts (auto-accept updates).
   --help                   Show this help.
@@ -458,10 +463,10 @@ function Test-VersionGte {
     return $true
 }
 
-function Resolve-CudaImageRef {
-    param([Parameter(Mandatory = $true)][string]$ComposePath)
+function Resolve-CudaImageRefFromComposeArgs {
+    param([Parameter(Mandatory = $true)][string[]]$ComposeArgs)
 
-    $result = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('compose', '-f', $ComposePath, '--env-file', $script:EnvFile, 'config', '--format', 'json') -IgnoreErrors
+    $result = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $script:EnvFile, 'config', '--format', 'json')) -IgnoreErrors
     if ($result.ExitCode -ne 0) { return $null }
 
     try {
@@ -475,6 +480,33 @@ function Resolve-CudaImageRef {
     }
 
     return $null
+}
+
+function Get-GuideAntsLocalAiOptions {
+    Recommend-Backend
+
+    $backendKeys = New-Object System.Collections.Generic.List[string]
+    $backendLabels = New-Object System.Collections.Generic.List[string]
+    $major = Get-NvidiaDriverMajor
+    if ($major -match '^[0-9]+$' -and [int]$major -ge 580) {
+        $backendKeys.Add('cuda13') | Out-Null
+        $backendLabels.Add('cuda13  NVIDIA CUDA 13 local runtime (~14 GB)') | Out-Null
+    }
+    if (Test-AmdGpuDetected -OsName $script:OsName -IsWsl $script:IsWsl) {
+        $backendKeys.Add('rocm') | Out-Null
+        $backendLabels.Add('rocm    AMD ROCm local runtime (~20 GB)') | Out-Null
+    }
+    $backendKeys.Add('vulkan') | Out-Null
+    $backendLabels.Add('vulkan  Vulkan local runtime (~8.5 GB)') | Out-Null
+    $backendKeys.Add('cpu') | Out-Null
+    $backendLabels.Add('cpu     CPU local runtime (~8.2 GB)') | Out-Null
+
+    return [pscustomobject]@{
+        Recommended = $script:Recommended
+        Reason = $script:RecommendationReason
+        BackendKeys = @($backendKeys)
+        BackendLabels = @($backendLabels)
+    }
 }
 
 function Invoke-Http {
@@ -624,8 +656,8 @@ function Check-GpuDrivers {
         Write-HRule
         Write-Log 'Checking NVIDIA / CUDA driver versions...'
 
-        $composePath = Join-Path $script:DockerDir (Get-ComposeFileForBackend -Backend $Backend)
-        $cudaImageRef = Resolve-CudaImageRef -ComposePath $composePath
+        $fragArgs = @(Resolve-InstallerComposeArgs -DockerDir $script:DockerDir -FragmentFiles $script:SelectedComposeFragments)
+        $cudaImageRef = Resolve-CudaImageRefFromComposeArgs -ComposeArgs $fragArgs
         if (-not [string]::IsNullOrWhiteSpace($cudaImageRef)) {
             Write-Log "CUDA image: $cudaImageRef"
             Detect-CudaRequirements -ImageRef $cudaImageRef
@@ -756,90 +788,6 @@ function Recommend-Backend {
     }
 }
 
-function Get-InstallerStateValue {
-    param([Parameter(Mandatory = $true)][string]$Key)
-
-    if (-not (Test-Path -LiteralPath $script:StateFile)) { return $null }
-    foreach ($line in Get-Content -LiteralPath $script:StateFile) {
-        $trimmed = $line.Trim()
-        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) { continue }
-        $separatorIndex = $trimmed.IndexOf('=')
-        if ($separatorIndex -lt 1) { continue }
-        $lineKey = $trimmed.Substring(0, $separatorIndex).Trim()
-        if ($lineKey -eq $Key) {
-            return $trimmed.Substring($separatorIndex + 1).Trim()
-        }
-    }
-
-    return $null
-}
-
-function Choose-Backend {
-    if (-not [string]::IsNullOrWhiteSpace($script:BackendOverride)) {
-        $script:SelectedBackend = $script:BackendOverride
-        Write-Log "Backend forced via --backend: $($script:SelectedBackend)"
-        return
-    }
-
-    if (-not $script:Reconfigure -and (Test-Path -LiteralPath $script:StateFile)) {
-        $savedBackend = Get-InstallerStateValue -Key 'BACKEND'
-        if ($savedBackend -match '^(cpu|cuda13|rocm|slim|vulkan)$') {
-            $script:SelectedBackend = $savedBackend
-            Write-Log "Using previously saved backend: $($script:SelectedBackend) (run with --reconfigure to change)"
-            return
-        }
-    }
-
-    Recommend-Backend
-    Write-HRule
-    Write-Log "Recommended backend: $($script:Recommended)"
-    Write-Log "  ($($script:RecommendationReason))"
-
-    $backendKeys = New-Object System.Collections.Generic.List[string]
-    $backendLabels = New-Object System.Collections.Generic.List[string]
-    $major = Get-NvidiaDriverMajor
-    if ($major -match '^[0-9]+$' -and [int]$major -ge 580) {
-        $backendKeys.Add('cuda13') | Out-Null
-        $backendLabels.Add("cuda13  Local AI on NVIDIA GPU (R$major driver detected, ~50 GB disk)") | Out-Null
-    }
-    if (Test-AmdGpuDetected -OsName $script:OsName -IsWsl $script:IsWsl) {
-        $backendKeys.Add('rocm') | Out-Null
-        $backendLabels.Add('rocm    Local AI on AMD GPU (ROCm device detected, ~50 GB disk)') | Out-Null
-    }
-
-    $backendKeys.Add('vulkan') | Out-Null
-    $backendLabels.Add('vulkan  Local AI on any GPU via Vulkan (NVIDIA/AMD/Intel, ~30 GB disk)') | Out-Null
-    $backendKeys.Add('cpu') | Out-Null
-    $backendLabels.Add('cpu     Local AI, no GPU (slower, ~25 GB disk)') | Out-Null
-    $backendKeys.Add('slim') | Out-Null
-    $backendLabels.Add('slim    No local model runtime; use cloud AI providers (lightest, ~20 GB disk)') | Out-Null
-
-    Write-Host ''
-    Write-Host '  Choose a backend:'
-    for ($i = 0; $i -lt $backendKeys.Count; $i++) {
-        Write-Host ('    {0}) {1}' -f ($i + 1), $backendLabels[$i])
-    }
-    Write-Host ''
-
-    if ($script:AssumeYes) {
-        $script:SelectedBackend = $script:Recommended
-        Write-Log "--yes: using recommended backend ($($script:SelectedBackend))."
-        return
-    }
-
-    $choice = Read-Host "Enter 1-$($backendKeys.Count), or press Enter for recommended [$($script:Recommended)]"
-    if ([string]::IsNullOrWhiteSpace($choice)) {
-        $script:SelectedBackend = $script:Recommended
-    }
-    elseif ($choice -match '^[0-9]+$' -and [int]$choice -ge 1 -and [int]$choice -le $backendKeys.Count) {
-        $script:SelectedBackend = $backendKeys[[int]$choice - 1]
-    }
-    else {
-        Write-WarnLog "Unrecognized choice '$choice'; using recommended."
-        $script:SelectedBackend = $script:Recommended
-    }
-}
-
 function Add-ComposeOverrideIfValid {
     param(
         [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
@@ -927,28 +875,6 @@ function Select-VulkanRuntime {
     }
 }
 
-function Get-ComposeFileForBackend {
-    param([Parameter(Mandatory = $true)][string]$Backend)
-
-    if ($script:ComposeMode -eq 'local') {
-        switch ($Backend) {
-            'slim' { return 'docker-compose.slim.yml' }
-            'cuda13' { return 'docker-compose.cuda.yml' }
-            'rocm' { return 'docker-compose.rocm.yml' }
-            'vulkan' { return 'docker-compose.vulkan.yml' }
-            default { return 'docker-compose.cpu.yml' }
-        }
-    }
-
-    switch ($Backend) {
-        'slim' { return 'docker-compose.ghcr-slim.yml' }
-        'cuda13' { return 'docker-compose.ghcr-cuda13.yml' }
-        'rocm' { return 'docker-compose.ghcr-rocm.yml' }
-        'vulkan' { return 'docker-compose.ghcr-vulkan.yml' }
-        default { return 'docker-compose.ghcr-cpu.yml' }
-    }
-}
-
 function Get-RemoteDigest {
     param([Parameter(Mandatory = $true)][string]$ImageRef)
 
@@ -988,121 +914,6 @@ function Get-LocalDigest {
     }
 
     return $null
-}
-
-function Get-ServicesForImages {
-    param(
-        [Parameter(Mandatory = $true)][string]$ComposePath,
-        [string[]]$Images = @()
-    )
-
-    if ($Images.Count -eq 0) { return @() }
-
-    $result = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('compose', '-f', $ComposePath, '--env-file', $script:EnvFile, 'config', '--format', 'json') -IgnoreErrors
-    if ($result.ExitCode -ne 0) { return @() }
-
-    try {
-        $services = New-Object System.Collections.Generic.List[string]
-        $config = ($result.Output -join "`n") | ConvertFrom-Json
-        foreach ($property in $config.services.PSObject.Properties) {
-            $serviceName = $property.Name
-            $image = [string]$property.Value.image
-            if ($Images -contains $image) {
-                $services.Add($serviceName) | Out-Null
-            }
-        }
-
-        return @($services)
-    }
-    catch {
-        return @()
-    }
-}
-
-function Plan-Pull {
-    param([Parameter(Mandatory = $true)][string]$ComposeFileName)
-
-    $composePath = Join-Path $script:DockerDir $ComposeFileName
-    $script:PullAlwaysServices = @()
-    $script:PullMissingServices = @()
-
-    $imagesResult = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('compose', '-f', $composePath, '--env-file', $script:EnvFile, 'config', '--images') -IgnoreErrors
-    if ($imagesResult.ExitCode -ne 0) {
-        Write-WarnLog "Could not resolve image list; will let Compose pull what's missing."
-        $script:UpdateDecision = 'skip'
-        return
-    }
-
-    Write-Log 'Checking for image updates (this reads the registry, downloads nothing)...'
-    $missing = 0
-    $stale = 0
-    $missingImages = New-Object System.Collections.Generic.List[string]
-    $staleImages = New-Object System.Collections.Generic.List[string]
-
-    foreach ($imageLine in $imagesResult.Output) {
-        $image = ([string]$imageLine).Trim()
-        if ([string]::IsNullOrWhiteSpace($image)) { continue }
-
-        $localDigest = Get-LocalDigest -ImageRef $image
-        if ([string]::IsNullOrWhiteSpace($localDigest)) {
-            $missing++
-            $missingImages.Add($image) | Out-Null
-            continue
-        }
-
-        $remoteDigest = Get-RemoteDigest -ImageRef $image
-        if (-not [string]::IsNullOrWhiteSpace($remoteDigest) -and $remoteDigest -ne $localDigest) {
-            $stale++
-            $staleImages.Add($image) | Out-Null
-        }
-    }
-
-    if ($missing -gt 0) {
-        $unavailableImages = New-Object System.Collections.Generic.List[string]
-        foreach ($missingImage in $missingImages) {
-            $remoteDigest = Get-RemoteDigest -ImageRef $missingImage
-            if ([string]::IsNullOrWhiteSpace($remoteDigest)) {
-                $unavailableImages.Add($missingImage) | Out-Null
-            }
-        }
-
-        if ($unavailableImages.Count -gt 0) {
-            $imageList = ($unavailableImages | ForEach-Object { "  - $_" }) -join "`n"
-            if ($script:SelectedBackend -eq 'vulkan' -and ($unavailableImages | Where-Object { $_ -match 'guideants-ai-vulkan' })) {
-                Stop-WithError "The GHCR Vulkan AI image is not currently pullable:`n$imageList`nBuild it locally, then rerun with local compose:`n  powershell -ExecutionPolicy Bypass -File .\docker\build\build_guideants_ai.ps1 -Backend vulkan`n  powershell -ExecutionPolicy Bypass -File .\installer\guideants.ps1 --backend vulkan --compose local --reconfigure`nOr choose a published backend such as cuda13, cpu, or slim."
-            }
-
-            Stop-WithError "One or more Compose images are not pullable from the registry:`n$imageList`nIf these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
-        }
-
-        Write-Log "$missing image(s) not present locally - they will be downloaded on first start."
-    }
-
-    if ($stale -gt 0) {
-        Write-HRule
-        Write-Log "Updates available for $stale image(s) ($($script:SelectedBackend))."
-        if (Ask-YesNo -Prompt 'Update now before starting? [Y/n]' -Default 'Y') {
-            $script:PullAlwaysServices = @(Get-ServicesForImages -ComposePath $composePath -Images @($staleImages))
-        }
-        else {
-            Write-Log 'Keeping current images.'
-        }
-    }
-
-    if ($missing -gt 0) {
-        $script:PullMissingServices = @(Get-ServicesForImages -ComposePath $composePath -Images @($missingImages))
-    }
-
-    if ($script:PullAlwaysServices.Count -gt 0 -or $script:PullMissingServices.Count -gt 0) {
-        $script:UpdateDecision = 'pull'
-    }
-    elseif ($stale -eq 0 -and $missing -eq 0) {
-        Write-Log 'All images are up to date.'
-        $script:UpdateDecision = 'skip'
-    }
-    else {
-        $script:UpdateDecision = 'skip'
-    }
 }
 
 function Detect-PriorInstall {
@@ -1654,13 +1465,17 @@ function Start-GuideAntsStack {
 
     Push-Location $script:DockerDir
     try {
-        Invoke-InstallerProgressivePull -ComposeArgs $script:ComposeArgs -EnvFile $script:EnvFile -AssumeYes:$script:AssumeYes
-
-        Write-Log 'Starting the stack...'
-        Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $script:ComposeArgs + @('--env-file', $script:EnvFile, 'up', '-d'))
-
-        $active = @(Get-InstallerActiveServices -DbLayout $script:SelectedDbLayout -AiBackend $script:SelectedAiBackend -Components $script:SelectedComponents)
-        Invoke-InstallerPruneDeselected -ComposeArgs $script:ComposeArgs -EnvFile $script:EnvFile -KeepServices $active
+        if ($script:ComposeMode -eq 'local') {
+            Write-Log 'Local compose mode — pulling only images missing locally.'
+        }
+        Invoke-InstallerStartStack `
+            -ComposeArgs $script:ComposeArgs `
+            -EnvFile $script:EnvFile `
+            -DbLayout $script:SelectedDbLayout `
+            -AiBackend $script:SelectedAiBackend `
+            -Components $script:SelectedComponents `
+            -ComposeMode $script:ComposeMode `
+            -AssumeYes:$script:AssumeYes
     }
     finally {
         Pop-Location
@@ -1707,7 +1522,7 @@ function Invoke-Main {
         Write-HRule
         Write-Log 'Doctor mode complete. No changes were made.'
         $wouldArgs = @(Build-ComposeArgs)
-        $wouldStart = 'docker compose ' + (($wouldArgs | ForEach-Object { if ($_ -like '*\*' -or $_ -like '*/*') { "-f `"$_`"" } else { $_ } }) -join ' ')
+        $wouldStart = 'docker compose ' + ($wouldArgs -join ' ')
         Write-Log "Would start: $wouldStart --env-file docker/.env up -d"
         return
     }

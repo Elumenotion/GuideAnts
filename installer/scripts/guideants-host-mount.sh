@@ -47,7 +47,7 @@ load_installer_state() {
   fi
 
   installer_legacy_state
-  installer_build_compose_args_from_state "$ROOT_DIR" "$STATE_FILE" 1 1 0
+  installer_build_compose_args_from_state "$ROOT_DIR" "$STATE_FILE" 1 1 1
 }
 
 sanitize_mount_key() {

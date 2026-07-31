@@ -217,6 +217,21 @@ FALLBACK_MIN_NVIDIA_DRIVER="580.0"
 FALLBACK_MIN_CUDA_VERSION="13.0"
 MIN_ROCM_VERSION="6.0.0"
 
+resolve_cuda_image_ref_from_fragments() {
+  local -a args=() f rel
+  for f in "${SELECTED_COMPOSE_FRAGMENTS[@]}"; do
+    rel="$DOCKER_DIR/$INSTALLER_COMPOSE_DIR/$f"
+    args+=(-f "$rel")
+  done
+  docker compose "${args[@]}" --env-file "$ENV_FILE" config --format json 2>/dev/null \
+    | python3 -c "
+import json,sys
+svc = json.load(sys.stdin).get('services',{}).get('guideants-ai',{})
+img = svc.get('image','')
+if img: print(img)
+" 2>/dev/null
+}
+
 # Resolve the guideants-ai image reference from a compose file.
 resolve_cuda_image_ref() {
   local compose_path="$1"
@@ -298,9 +313,8 @@ check_gpu_drivers() {
     hr
     log "Checking NVIDIA / CUDA driver versions..."
 
-    local compose_path="$DOCKER_DIR/$(compose_file_for "$backend")"
     local cuda_image_ref
-    cuda_image_ref="$(resolve_cuda_image_ref "$compose_path" || true)"
+    cuda_image_ref="$(resolve_cuda_image_ref_from_fragments || true)"
     if [[ -n "$cuda_image_ref" ]]; then
       log "CUDA image: $cuda_image_ref"
       detect_cuda_requirements "$cuda_image_ref"
@@ -1216,10 +1230,7 @@ if [[ -f "$VOICE_PACK_OVERRIDE_FILE" ]]; then
     warn "Ignoring invalid voice pack override docker/$VOICE_PACK_OVERRIDE_FILE."
   fi
 fi
-installer_progressive_pull
-log "Starting the stack..."
-installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" up -d
-installer_prune_deselected
+installer_start_stack
 cd "$ROOT_DIR"
 
 # Patch containers whose entrypoint scripts have Windows line endings (exit 127).

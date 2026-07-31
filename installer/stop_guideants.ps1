@@ -93,10 +93,6 @@ function Invoke-Main {
         if (Test-Path -LiteralPath $helper) {
             & $helper -DockerDir $script:DockerDir -Backend 'rocm' -RootDir $script:RootDir
         }
-        $rocmPath = Join-Path $script:DockerDir 'docker-compose.rocm-runtime.generated.yml'
-        if (Test-Path -LiteralPath $rocmPath) {
-            $built.ComposeArgs += @('-f', $rocmPath)
-        }
     }
 
     Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $built.ComposeArgs + @('--env-file', $script:EnvFile, 'down'))
