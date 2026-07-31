@@ -37,7 +37,10 @@ VOICE_PACK_OVERRIDE_FILE="docker-compose.voice-pack.local.yml"
 DOCKER_DIRECTORY="docker"
 
 MODE="install"            # install | doctor
-BACKEND_OVERRIDE=""       # cpu | cuda13 | rocm | slim | vulkan
+BACKEND_OVERRIDE=""       # none | cpu | cuda13 | rocm | slim | vulkan
+AI_BACKEND_OVERRIDE=""
+DB_LAYOUT_OVERRIDE=""
+COMPONENTS_OVERRIDE=()
 COMPOSE_MODE="ghcr"       # ghcr | local
 ASSUME_YES="0"            # 0 | 1
 RECONFIGURE="0"           # 0 | 1
@@ -433,68 +436,6 @@ recommend_backend() {
   fi
 }
 
-choose_backend() {
-  if [[ -n "$BACKEND_OVERRIDE" ]]; then
-    SELECTED_BACKEND="$BACKEND_OVERRIDE"
-    log "Backend forced via --backend: $SELECTED_BACKEND"
-    return
-  fi
-  if [[ "$RECONFIGURE" == "0" && -f "$STATE_FILE" ]]; then
-    local saved_backend
-    saved_backend="$(. "$STATE_FILE" && echo "${BACKEND:-}")"
-    if [[ "$saved_backend" =~ ^(cpu|cuda13|rocm|slim|vulkan)$ ]]; then
-      SELECTED_BACKEND="$saved_backend"
-      log "Using previously saved backend: $SELECTED_BACKEND (run with --reconfigure to change)"
-      return
-    fi
-  fi
-  recommend_backend
-  hr
-  log "Recommended backend: $RECOMMENDED"
-  log "  ($REASON)"
-
-  local -a backend_keys=() backend_labels=()
-  local major
-  if major="$(nvidia_driver_major)" && [[ "$major" =~ ^[0-9]+$ && "$major" -ge 580 ]]; then
-    backend_keys+=("cuda13")
-    backend_labels+=("cuda13  Local AI on NVIDIA GPU (R${major} driver detected, ~50 GB disk)")
-  fi
-  if amd_gpu_detected; then
-    backend_keys+=("rocm")
-    backend_labels+=("rocm    Local AI on AMD GPU (ROCm device detected, ~50 GB disk)")
-  fi
-  backend_keys+=("vulkan")
-  backend_labels+=("vulkan  Local AI on any GPU via Vulkan (NVIDIA/AMD/Intel, ~30 GB disk)")
-  backend_keys+=("cpu")
-  backend_labels+=("cpu     Local AI, no GPU (slower, ~25 GB disk)")
-  backend_keys+=("slim")
-  backend_labels+=("slim    No local model runtime; use cloud AI providers (lightest, ~20 GB disk)")
-
-  local n=${#backend_keys[@]}
-  printf '\n  Choose a backend:\n'
-  local i
-  for i in $(seq 0 $((n-1))); do
-    printf '    %d) %s\n' "$((i+1))" "${backend_labels[$i]}"
-  done
-  printf '\n'
-
-  if [[ "$ASSUME_YES" == "1" ]]; then
-    SELECTED_BACKEND="$RECOMMENDED"
-    log "--yes: using recommended backend ($SELECTED_BACKEND)."
-    return
-  fi
-  local choice
-  read -r -p "Enter 1-${n}, or press Enter for recommended [$RECOMMENDED]: " choice || choice=""
-  if [[ -z "$choice" ]]; then
-    SELECTED_BACKEND="$RECOMMENDED"
-  elif [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le "$n" ]]; then
-    SELECTED_BACKEND="${backend_keys[$((choice-1))]}"
-  else
-    warn "Unrecognized choice '$choice'; using recommended."
-    SELECTED_BACKEND="$RECOMMENDED"
-  fi
-}
-
 # Vulkan is ONE image that reaches the GPU differently per host. docker-compose.vulkan.yml
 # defaults to the Windows / Docker Desktop dzn (Vulkan-on-D3D12) path; on native Linux we
 # export GA_VULKAN_* so the SAME file uses /dev/dri + in-image Mesa (AMD/Intel) or the
@@ -547,145 +488,6 @@ select_vulkan_runtime() {
     warn "Vulkan: native Linux with no nvidia runtime and no /dev/dri — no GPU device found."
     warn "        LLM and image generation will run on CPU. Install Mesa (AMD/Intel) or the nvidia-container-toolkit (NVIDIA)."
   fi
-}
-
-compose_file_for() {
-  if [[ "$COMPOSE_MODE" == "local" ]]; then
-    case "$1" in
-      slim)   echo "docker-compose.slim.yml" ;;
-      cuda13) echo "docker-compose.cuda.yml" ;;
-      rocm)   echo "docker-compose.rocm.yml" ;;
-      vulkan) echo "docker-compose.vulkan.yml" ;;
-      *)      echo "docker-compose.cpu.yml" ;;
-    esac
-  else
-    case "$1" in
-      slim)   echo "docker-compose.ghcr-slim.yml" ;;
-      cuda13) echo "docker-compose.ghcr-cuda13.yml" ;;
-      rocm)   echo "docker-compose.ghcr-rocm.yml" ;;
-      vulkan) echo "docker-compose.ghcr-vulkan.yml" ;;
-      *)      echo "docker-compose.ghcr-cpu.yml" ;;
-    esac
-  fi
-}
-
-# =============================================================================
-# 5. Automatic update check (read-only) + prompt
-# =============================================================================
-remote_digest() {
-  local ref="$1" d
-  if docker buildx version >/dev/null 2>&1; then
-    d="$(docker buildx imagetools inspect "$ref" 2>/dev/null \
-         | awk '/^Digest:/{print $2; exit}')"
-    [[ -n "$d" ]] && { echo "$d"; return 0; }
-  fi
-  docker manifest inspect -v "$ref" 2>/dev/null \
-    | grep -m1 -o '"digest": *"sha256:[a-f0-9]*"' | grep -o 'sha256:[a-f0-9]*'
-}
-
-local_digest() {
-  local ref="$1" rd
-  rd="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" 2>/dev/null | head -n1)"
-  [[ "$rd" == *@* ]] && echo "${rd##*@}"
-}
-
-# Sets UPDATE_DECISION = pull | skip
-# When pull, PULL_ALWAYS_SERVICES and/or PULL_MISSING_SERVICES name what to fetch.
-plan_pull() {
-  local compose_path="$DOCKER_DIR/$1"
-  local images missing=0 stale=0 img r l
-  PULL_ALWAYS_SERVICES=()
-  PULL_MISSING_SERVICES=()
-  local -a missing_images=()
-  if ! images="$(docker compose -f "$compose_path" --env-file "$ENV_FILE" config --images 2>/dev/null)"; then
-    warn "Could not resolve image list; will let Compose pull what's missing."
-    UPDATE_DECISION="skip"; return
-  fi
-  log "Checking for image updates (this reads the registry, downloads nothing)..."
-  local -a stale_images=()
-  while IFS= read -r img; do
-    [[ -n "$img" ]] || continue
-    l="$(local_digest "$img" || true)"
-    if [[ -z "$l" ]]; then
-      missing=$((missing+1))
-      missing_images+=("$img")
-      continue
-    fi
-    r="$(remote_digest "$img" || true)"
-    if [[ -n "$r" && "$r" != "$l" ]]; then
-      stale=$((stale+1))
-      stale_images+=("$img")
-    fi
-  done <<< "$images"
-
-  if [[ "$missing" -gt 0 ]]; then
-    local -a unavailable_images=()
-    for img in "${missing_images[@]}"; do
-      r="$(remote_digest "$img" || true)"
-      if [[ -z "$r" ]]; then
-        unavailable_images+=("$img")
-      fi
-    done
-    if [[ ${#unavailable_images[@]} -gt 0 ]]; then
-      if [[ "$SELECTED_BACKEND" == "vulkan" ]]; then
-        local has_vulkan=0
-        for img in "${unavailable_images[@]}"; do
-          [[ "$img" == *guideants-ai-vulkan* ]] && has_vulkan=1
-        done
-        if [[ "$has_vulkan" == "1" ]]; then
-          warn "The GHCR Vulkan AI image is not currently pullable:"
-          printf '  - %s\n' "${unavailable_images[@]}" >&2
-          fail "Build it locally, then rerun: ./docker/build/build_guideants_ai.sh --backend vulkan && ./installer/guideants.sh --backend vulkan --compose local --reconfigure"
-        fi
-      fi
-      warn "One or more Compose images are not pullable from the registry:"
-      printf '  - %s\n' "${unavailable_images[@]}" >&2
-      fail "If these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
-    fi
-    log "$missing image(s) not present locally — they will be downloaded on first start."
-  fi
-  if [[ "$stale" -gt 0 ]]; then
-    hr
-    log "Updates available for $stale image(s) ($SELECTED_BACKEND)."
-    if ask_yes_no "Update now before starting? [Y/n]" "Y"; then
-      mapfile -t PULL_ALWAYS_SERVICES < <(services_for_images "$compose_path" "${stale_images[@]}")
-    else
-      log "Keeping current images."
-    fi
-  fi
-  if [[ "$missing" -gt 0 ]]; then
-    mapfile -t PULL_MISSING_SERVICES < <(services_for_images "$compose_path" "${missing_images[@]}")
-  fi
-  if [[ ${#PULL_ALWAYS_SERVICES[@]} -gt 0 || ${#PULL_MISSING_SERVICES[@]} -gt 0 ]]; then
-    UPDATE_DECISION="pull"
-  elif [[ "$stale" -eq 0 && "$missing" -eq 0 ]]; then
-    log "All images are up to date."
-    UPDATE_DECISION="skip"
-  else
-    UPDATE_DECISION="skip"
-  fi
-}
-
-services_for_images() {
-  local compose_path="$1"; shift
-  local -a imgs=("$@")
-  local mapping svc img svc_img
-  [[ ${#imgs[@]} -gt 0 ]] || return 0
-  mapping="$(docker compose -f "$compose_path" --env-file "$ENV_FILE" config --format json 2>/dev/null \
-    | python3 -c "
-import json,sys
-for svc,conf in json.load(sys.stdin).get('services',{}).items():
-    print(svc+'='+conf.get('image',''))
-" 2>/dev/null || true)"
-  [[ -n "$mapping" ]] || return 0
-  while IFS='=' read -r svc svc_img; do
-    for img in "${imgs[@]}"; do
-      if [[ "$svc_img" == "$img" ]]; then
-        echo "$svc"
-        break
-      fi
-    done
-  done <<< "$mapping"
 }
 
 detect_prior_install() {

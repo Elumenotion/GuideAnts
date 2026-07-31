@@ -74,25 +74,39 @@ installer_state_get() {
     [[ -n "$line" ]] || continue
     k="${line%%=*}"
     v="${line#*=}"
-    [[ "$k" == "$key" ]] && { printf '%s' "$v"; return 0; }
+    if [[ "$k" == "$key" ]]; then
+      printf '%s' "$v"
+      return 0
+    fi
   done < "$file"
 }
 
 installer_legacy_state() {
+  local cf
   DB_LAYOUT="$(installer_state_get DB_LAYOUT "$STATE_FILE")"
   AI_BACKEND="$(installer_state_get AI_BACKEND "$STATE_FILE")"
   COMPONENTS="$(installer_state_get COMPONENTS "$STATE_FILE")"
   COMPOSE_MODE="$(installer_state_get COMPOSE_MODE "$STATE_FILE")"
   COMPOSE_FILES="$(installer_state_get COMPOSE_FILES "$STATE_FILE")"
-  [[ -n "$DB_LAYOUT" ]] || {
-    local cf; cf="$(installer_state_get COMPOSE_FILE "$STATE_FILE")"
+  if [[ -z "$DB_LAYOUT" ]]; then
+    cf="$(installer_state_get COMPOSE_FILE "$STATE_FILE")"
     if [[ "$cf" == *ghcr-slim* || "$cf" == *docker-compose.slim* ]]; then DB_LAYOUT=bundled; else DB_LAYOUT=separate; fi
-  }
-  [[ -n "$AI_BACKEND" ]] || {
+  fi
+  if [[ -z "$AI_BACKEND" ]]; then
     AI_BACKEND="$(installer_state_get BACKEND "$STATE_FILE")"
-    [[ "$AI_BACKEND" =~ ^(none|slim|cpu|cuda13|rocm|vulkan)$ ]] || AI_BACKEND=slim
-  }
+    if [[ ! "$AI_BACKEND" =~ ^(none|slim|cpu|cuda13|rocm|vulkan)$ ]]; then
+      AI_BACKEND=slim
+    fi
+  fi
   [[ -n "$COMPONENTS" ]] || COMPONENTS="docling,documentserver,plantuml,searxng"
+  if [[ -z "$COMPOSE_FILES" ]]; then
+    cf="$(installer_state_get COMPOSE_FILE "$STATE_FILE")"
+    if [[ -n "$cf" ]]; then
+      IFS=',' read -r -a comp_array <<< "$COMPONENTS"
+      mapfile -t _legacy_fragments < <(installer_compose_fragments "$DB_LAYOUT" "$AI_BACKEND" "${comp_array[@]}")
+      COMPOSE_FILES="$(IFS=,; echo "${_legacy_fragments[*]}")"
+    fi
+  fi
   [[ -n "$COMPOSE_MODE" ]] || COMPOSE_MODE=ghcr
 }
 
@@ -353,7 +367,7 @@ installer_run_wizard() {
   fi
   if [[ "$RECONFIGURE" == "0" && -f "$STATE_FILE" ]]; then use_saved=1; fi
 
-  if [[ -n "$DB_LAYOUT_OVERRIDE" ]]; then
+  if [[ -n "${DB_LAYOUT_OVERRIDE:-}" ]]; then
     SELECTED_DB_LAYOUT="$DB_LAYOUT_OVERRIDE"
   elif [[ "$use_saved" == "1" ]]; then
     installer_legacy_state
@@ -370,7 +384,7 @@ installer_run_wizard() {
     fi
   fi
 
-  if [[ -n "$AI_BACKEND_OVERRIDE" ]]; then
+  if [[ -n "${AI_BACKEND_OVERRIDE:-}" ]]; then
     SELECTED_AI_BACKEND="$AI_BACKEND_OVERRIDE"
   elif [[ "$use_saved" == "1" ]]; then
     SELECTED_AI_BACKEND="$prior_ai"
@@ -379,7 +393,7 @@ installer_run_wizard() {
     SELECTED_AI_BACKEND="$(installer_select_ai_backend)"
   fi
 
-  if [[ ${#COMPONENTS_OVERRIDE[@]} -gt 0 ]]; then
+  if [[ ${#COMPONENTS_OVERRIDE[@]:-0} -gt 0 ]]; then
     SELECTED_COMPONENTS=("${COMPONENTS_OVERRIDE[@]}")
   elif [[ "$use_saved" == "1" ]]; then
     installer_legacy_state

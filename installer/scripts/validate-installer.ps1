@@ -1,4 +1,4 @@
-# Validates installer PowerShell parse + compose fragment merges.
+# Validates installer PowerShell parse, bash syntax, and compose fragment merges.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
@@ -20,6 +20,40 @@ foreach ($path in $psFiles) {
     Write-Host "PASS parse: $(Split-Path -Leaf $path)"
 }
 
+$bash = Get-Command bash -ErrorAction SilentlyContinue
+if ($null -eq $bash) {
+    Write-Host 'SKIP bash -n: bash not found on PATH'
+}
+else {
+    Push-Location $root
+    try {
+        foreach ($rel in @(
+            'guideants.sh',
+            'stop_guideants.sh',
+            'scripts/installer-wizard.sh',
+            'scripts/guideants-host-mount.sh',
+            'scripts/rocm-runtime-compose.sh',
+            'scripts/rocm-probe.sh',
+            'scripts/install-rocm-wsl.sh',
+            'scripts/validate-installer.sh'
+        )) {
+            $path = Join-Path $root $rel
+            if (-not (Test-Path -LiteralPath $path)) {
+                Write-Host "FAIL missing: $rel"
+                exit 1
+            }
+            & bash -n $rel
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "FAIL bash -n: $rel"
+                exit 1
+            }
+            Write-Host "PASS bash -n: $rel"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
 $dockerDir = Join-Path $root 'docker'
 Push-Location $dockerDir
 try {

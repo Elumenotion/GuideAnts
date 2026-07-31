@@ -15,7 +15,17 @@ run, so the download itself is tiny.
 > runs `wsl --status` and warns if WSL2 is not confirmed. Install or upgrade WSL:
 > [Microsoft WSL install guide](https://learn.microsoft.com/windows/wsl/install).
 
-## How to run
+### Validation
+
+```powershell
+.\scripts\validate-installer.ps1   # PowerShell parse + bash -n + compose config (Windows)
+```
+
+```bash
+./scripts/validate-installer.sh    # bash -n + compose config (Linux/macOS/WSL)
+```
+
+Both check all launcher `.ps1` / `.sh` files under `installer/` and merge representative compose fragment stacks.
 
 **Linux / macOS**
 

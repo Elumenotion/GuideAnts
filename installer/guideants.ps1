@@ -57,19 +57,14 @@ $script:Reconfigure = $false
 $script:InstallRocmWsl = $false
 $script:MountPath = ''
 $script:Unmount = $false
-$script:SelectedBackend = ''
 $script:SelectedDbLayout = 'bundled'
 $script:SelectedAiBackend = 'slim'
 $script:SelectedComponents = @()
 $script:SelectedComposeFragments = @()
 $script:ComposeArgs = @()
-$script:ComposeFile = ''
 $script:LowRam = $false
 $script:Recommended = ''
 $script:RecommendationReason = ''
-$script:UpdateDecision = 'skip'
-$script:PullAlwaysServices = @()
-$script:PullMissingServices = @()
 $script:AuthToken = ''
 $script:FallbackMinNvidiaDriver = '580.0'
 $script:FallbackMinCudaVersion = '13.0'
@@ -1508,7 +1503,6 @@ function Invoke-Main {
         -AiBackendOverride $aiOverride `
         -AssumeYes:$script:AssumeYes
 
-    $script:SelectedBackend = $script:SelectedAiBackend
     Write-Log "DB layout: $($script:SelectedDbLayout)   AI: $($script:SelectedAiBackend)   Optionals: $($script:SelectedComponents -join ', ')"
     Write-Log "Compose fragments: $($script:SelectedComposeFragments -join ', ')"
 

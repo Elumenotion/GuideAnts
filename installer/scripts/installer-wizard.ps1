@@ -309,7 +309,7 @@ function Invoke-InstallerSelectAiBackend {
 
     Write-Host ''
     Write-Host '  AI intent:'
-    Write-Host ('    1) Cloud providers only — {0} (~{1} GB)' -f $slimMeta.Label, $slimMeta.SizeGb)
+    Write-Host ('    1) Cloud providers only - {0} (~{1} GB)' -f $slimMeta.Label, $slimMeta.SizeGb)
     Write-Host ('        {0}' -f $slimMeta.Summary)
     Write-Host ('    2) No AI container (~{0} GB)' -f $noneMeta.SizeGb)
     Write-Host ('        {0}' -f $noneMeta.Summary)
@@ -444,19 +444,20 @@ function Invoke-InstallerProgressivePull {
         if ($unavailable.Count -gt 0) {
             $imageList = ($unavailable | ForEach-Object { "  - $_" }) -join "`n"
             if ($AiBackend -eq 'vulkan' -and ($unavailable | Where-Object { $_ -match 'guideants-ai-vulkan' })) {
-                Invoke-InstallerStop @"
-The GHCR Vulkan AI image is not currently pullable:
-$imageList
-Build it locally, then rerun with local compose:
-  powershell -ExecutionPolicy Bypass -File ..\docker\build\build_guideants_ai.ps1 -Backend vulkan
-  powershell -ExecutionPolicy Bypass -File .\guideants.ps1 --backend vulkan --compose local --reconfigure
-Or choose a published backend such as cuda13, cpu, or slim.
-"@
+                $vulkanMessage = @(
+                    'The GHCR Vulkan AI image is not currently pullable:'
+                    $imageList
+                    'Build it locally, then rerun with local compose:'
+                    '  powershell -ExecutionPolicy Bypass -File ..\docker\build\build_guideants_ai.ps1 -Backend vulkan'
+                    '  powershell -ExecutionPolicy Bypass -File .\guideants.ps1 --backend vulkan --compose local --reconfigure'
+                    'Or choose a published backend such as cuda13, cpu, or slim.'
+                ) -join [Environment]::NewLine
+                Invoke-InstallerStop $vulkanMessage
             }
             Invoke-InstallerStop "One or more Compose images are not pullable from the registry:`n$imageList`nIf these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
         }
 
-        Write-InstallerLog "$($missing.Count) image(s) not present locally — will be downloaded."
+        Write-InstallerLog "$($missing.Count) image(s) not present locally - will be downloaded."
     }
 
     $pullImages = New-Object System.Collections.Generic.List[string]
