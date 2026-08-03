@@ -9,17 +9,17 @@
 #   1. Detects your OS / shell environment.
 #   2. Checks Docker is installed and running.
 #   3. Reports memory and disk (warns if low, never blocks).
-#   4. Walks you through which backend to use (cpu / cuda13 / rocm / slim / vulkan).
-#   5. Checks the registry for newer images and asks before updating.
+#   4. Walks you through database layout, AI backend, and optional services.
+#   5. Pulls each selected image sequentially before starting the stack.
 #   6. Starts the stack, waits for health, opens your browser.
 #
 # Flags:
 #   --doctor                 Run checks only; change nothing.
-#   --backend <cpu|cuda13|rocm|slim|vulkan>   Skip the backend prompt.
+#   --backend <none|cpu|cuda13|rocm|slim|vulkan>   Skip the AI backend prompt.
 #   --compose <ghcr|local>   Use GHCR images (default) or local build images.
 #   --mount <path>           Mount a host folder into a project (requires prior login).
 #   --unmount                Interactively remove a host folder mount (requires prior login).
-#   --reconfigure            Re-prompt for backend even if one was saved.
+#   --reconfigure            Re-prompt AI backend + optionals (DB layout is fixed from first install).
 #   --install-rocm-wsl       Install ROCm + ROCDXG in a user WSL distro (Windows).
 #   --yes                    Assume "yes" for prompts (auto-accept updates).
 #   --help                   Show this help.
@@ -37,7 +37,10 @@ VOICE_PACK_OVERRIDE_FILE="docker-compose.voice-pack.local.yml"
 DOCKER_DIRECTORY="docker"
 
 MODE="install"            # install | doctor
-BACKEND_OVERRIDE=""       # cpu | cuda13 | rocm | slim | vulkan
+BACKEND_OVERRIDE=""       # none | cpu | cuda13 | rocm | slim | vulkan
+AI_BACKEND_OVERRIDE=""
+DB_LAYOUT_OVERRIDE=""
+COMPONENTS_OVERRIDE=()
 COMPOSE_MODE="ghcr"       # ghcr | local
 ASSUME_YES="0"            # 0 | 1
 RECONFIGURE="0"           # 0 | 1
@@ -55,6 +58,9 @@ hr()   { printf '%s\n' "--------------------------------------------------------
 . "$ROOT_DIR/scripts/rocm-runtime-compose.sh"
 export ROCM_RUNTIME_LOG_FN=log
 export ROCM_RUNTIME_WARN_FN=warn
+
+# shellcheck source=scripts/installer-wizard.sh
+. "$ROOT_DIR/scripts/installer-wizard.sh"
 
 usage() {
   sed -n '3,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -83,8 +89,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" =~ ^(cpu|cuda13|rocm|slim|vulkan)$ ]] \
-  || fail "--backend must be cpu, cuda13, rocm, slim, or vulkan"
+[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" =~ ^(none|cpu|cuda13|rocm|slim|vulkan)$ ]] \
+  || fail "--backend must be none, cpu, cuda13, rocm, slim, or vulkan"
 [[ "$COMPOSE_MODE" == "ghcr" || "$COMPOSE_MODE" == "local" ]] \
   || fail "--compose must be ghcr or local"
 
@@ -214,6 +220,21 @@ FALLBACK_MIN_NVIDIA_DRIVER="580.0"
 FALLBACK_MIN_CUDA_VERSION="13.0"
 MIN_ROCM_VERSION="6.0.0"
 
+resolve_cuda_image_ref_from_fragments() {
+  local -a args=() f rel
+  for f in "${SELECTED_COMPOSE_FRAGMENTS[@]}"; do
+    rel="$DOCKER_DIR/$INSTALLER_COMPOSE_DIR/$f"
+    args+=(-f "$rel")
+  done
+  docker compose "${args[@]}" --env-file "$ENV_FILE" config --format json 2>/dev/null \
+    | python3 -c "
+import json,sys
+svc = json.load(sys.stdin).get('services',{}).get('guideants-ai',{})
+img = svc.get('image','')
+if img: print(img)
+" 2>/dev/null
+}
+
 # Resolve the guideants-ai image reference from a compose file.
 resolve_cuda_image_ref() {
   local compose_path="$1"
@@ -295,9 +316,8 @@ check_gpu_drivers() {
     hr
     log "Checking NVIDIA / CUDA driver versions..."
 
-    local compose_path="$DOCKER_DIR/$(compose_file_for "$backend")"
     local cuda_image_ref
-    cuda_image_ref="$(resolve_cuda_image_ref "$compose_path" || true)"
+    cuda_image_ref="$(resolve_cuda_image_ref_from_fragments || true)"
     if [[ -n "$cuda_image_ref" ]]; then
       log "CUDA image: $cuda_image_ref"
       detect_cuda_requirements "$cuda_image_ref"
@@ -416,68 +436,6 @@ recommend_backend() {
   fi
 }
 
-choose_backend() {
-  if [[ -n "$BACKEND_OVERRIDE" ]]; then
-    SELECTED_BACKEND="$BACKEND_OVERRIDE"
-    log "Backend forced via --backend: $SELECTED_BACKEND"
-    return
-  fi
-  if [[ "$RECONFIGURE" == "0" && -f "$STATE_FILE" ]]; then
-    local saved_backend
-    saved_backend="$(. "$STATE_FILE" && echo "${BACKEND:-}")"
-    if [[ "$saved_backend" =~ ^(cpu|cuda13|rocm|slim|vulkan)$ ]]; then
-      SELECTED_BACKEND="$saved_backend"
-      log "Using previously saved backend: $SELECTED_BACKEND (run with --reconfigure to change)"
-      return
-    fi
-  fi
-  recommend_backend
-  hr
-  log "Recommended backend: $RECOMMENDED"
-  log "  ($REASON)"
-
-  local -a backend_keys=() backend_labels=()
-  local major
-  if major="$(nvidia_driver_major)" && [[ "$major" =~ ^[0-9]+$ && "$major" -ge 580 ]]; then
-    backend_keys+=("cuda13")
-    backend_labels+=("cuda13  Local AI on NVIDIA GPU (R${major} driver detected, ~50 GB disk)")
-  fi
-  if amd_gpu_detected; then
-    backend_keys+=("rocm")
-    backend_labels+=("rocm    Local AI on AMD GPU (ROCm device detected, ~50 GB disk)")
-  fi
-  backend_keys+=("vulkan")
-  backend_labels+=("vulkan  Local AI on any GPU via Vulkan (NVIDIA/AMD/Intel, ~30 GB disk)")
-  backend_keys+=("cpu")
-  backend_labels+=("cpu     Local AI, no GPU (slower, ~25 GB disk)")
-  backend_keys+=("slim")
-  backend_labels+=("slim    No local model runtime; use cloud AI providers (lightest, ~20 GB disk)")
-
-  local n=${#backend_keys[@]}
-  printf '\n  Choose a backend:\n'
-  local i
-  for i in $(seq 0 $((n-1))); do
-    printf '    %d) %s\n' "$((i+1))" "${backend_labels[$i]}"
-  done
-  printf '\n'
-
-  if [[ "$ASSUME_YES" == "1" ]]; then
-    SELECTED_BACKEND="$RECOMMENDED"
-    log "--yes: using recommended backend ($SELECTED_BACKEND)."
-    return
-  fi
-  local choice
-  read -r -p "Enter 1-${n}, or press Enter for recommended [$RECOMMENDED]: " choice || choice=""
-  if [[ -z "$choice" ]]; then
-    SELECTED_BACKEND="$RECOMMENDED"
-  elif [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le "$n" ]]; then
-    SELECTED_BACKEND="${backend_keys[$((choice-1))]}"
-  else
-    warn "Unrecognized choice '$choice'; using recommended."
-    SELECTED_BACKEND="$RECOMMENDED"
-  fi
-}
-
 # Vulkan is ONE image that reaches the GPU differently per host. docker-compose.vulkan.yml
 # defaults to the Windows / Docker Desktop dzn (Vulkan-on-D3D12) path; on native Linux we
 # export GA_VULKAN_* so the SAME file uses /dev/dri + in-image Mesa (AMD/Intel) or the
@@ -485,7 +443,7 @@ choose_backend() {
 # compose defaults win. VK_DRIVER_FILES is always pinned to one ICD so llvmpipe (CPU) is
 # never selected; a host with no usable GPU degrades to CPU (warned), never silently.
 select_vulkan_runtime() {
-  [[ "$SELECTED_BACKEND" == "vulkan" ]] || return 0
+  [[ "$SELECTED_AI_BACKEND" == "vulkan" ]] || return 0
 
   if docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
     log "Vulkan: Docker Desktop → Mesa dzn over D3D12 (/dev/dxg). Using compose defaults."
@@ -530,145 +488,6 @@ select_vulkan_runtime() {
     warn "Vulkan: native Linux with no nvidia runtime and no /dev/dri — no GPU device found."
     warn "        LLM and image generation will run on CPU. Install Mesa (AMD/Intel) or the nvidia-container-toolkit (NVIDIA)."
   fi
-}
-
-compose_file_for() {
-  if [[ "$COMPOSE_MODE" == "local" ]]; then
-    case "$1" in
-      slim)   echo "docker-compose.slim.yml" ;;
-      cuda13) echo "docker-compose.cuda.yml" ;;
-      rocm)   echo "docker-compose.rocm.yml" ;;
-      vulkan) echo "docker-compose.vulkan.yml" ;;
-      *)      echo "docker-compose.cpu.yml" ;;
-    esac
-  else
-    case "$1" in
-      slim)   echo "docker-compose.ghcr-slim.yml" ;;
-      cuda13) echo "docker-compose.ghcr-cuda13.yml" ;;
-      rocm)   echo "docker-compose.ghcr-rocm.yml" ;;
-      vulkan) echo "docker-compose.ghcr-vulkan.yml" ;;
-      *)      echo "docker-compose.ghcr-cpu.yml" ;;
-    esac
-  fi
-}
-
-# =============================================================================
-# 5. Automatic update check (read-only) + prompt
-# =============================================================================
-remote_digest() {
-  local ref="$1" d
-  if docker buildx version >/dev/null 2>&1; then
-    d="$(docker buildx imagetools inspect "$ref" 2>/dev/null \
-         | awk '/^Digest:/{print $2; exit}')"
-    [[ -n "$d" ]] && { echo "$d"; return 0; }
-  fi
-  docker manifest inspect -v "$ref" 2>/dev/null \
-    | grep -m1 -o '"digest": *"sha256:[a-f0-9]*"' | grep -o 'sha256:[a-f0-9]*'
-}
-
-local_digest() {
-  local ref="$1" rd
-  rd="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" 2>/dev/null | head -n1)"
-  [[ "$rd" == *@* ]] && echo "${rd##*@}"
-}
-
-# Sets UPDATE_DECISION = pull | skip
-# When pull, PULL_ALWAYS_SERVICES and/or PULL_MISSING_SERVICES name what to fetch.
-plan_pull() {
-  local compose_path="$DOCKER_DIR/$1"
-  local images missing=0 stale=0 img r l
-  PULL_ALWAYS_SERVICES=()
-  PULL_MISSING_SERVICES=()
-  local -a missing_images=()
-  if ! images="$(docker compose -f "$compose_path" --env-file "$ENV_FILE" config --images 2>/dev/null)"; then
-    warn "Could not resolve image list; will let Compose pull what's missing."
-    UPDATE_DECISION="skip"; return
-  fi
-  log "Checking for image updates (this reads the registry, downloads nothing)..."
-  local -a stale_images=()
-  while IFS= read -r img; do
-    [[ -n "$img" ]] || continue
-    l="$(local_digest "$img" || true)"
-    if [[ -z "$l" ]]; then
-      missing=$((missing+1))
-      missing_images+=("$img")
-      continue
-    fi
-    r="$(remote_digest "$img" || true)"
-    if [[ -n "$r" && "$r" != "$l" ]]; then
-      stale=$((stale+1))
-      stale_images+=("$img")
-    fi
-  done <<< "$images"
-
-  if [[ "$missing" -gt 0 ]]; then
-    local -a unavailable_images=()
-    for img in "${missing_images[@]}"; do
-      r="$(remote_digest "$img" || true)"
-      if [[ -z "$r" ]]; then
-        unavailable_images+=("$img")
-      fi
-    done
-    if [[ ${#unavailable_images[@]} -gt 0 ]]; then
-      if [[ "$SELECTED_BACKEND" == "vulkan" ]]; then
-        local has_vulkan=0
-        for img in "${unavailable_images[@]}"; do
-          [[ "$img" == *guideants-ai-vulkan* ]] && has_vulkan=1
-        done
-        if [[ "$has_vulkan" == "1" ]]; then
-          warn "The GHCR Vulkan AI image is not currently pullable:"
-          printf '  - %s\n' "${unavailable_images[@]}" >&2
-          fail "Build it locally, then rerun: ./docker/build/build_guideants_ai.sh --backend vulkan && ./installer/guideants.sh --backend vulkan --compose local --reconfigure"
-        fi
-      fi
-      warn "One or more Compose images are not pullable from the registry:"
-      printf '  - %s\n' "${unavailable_images[@]}" >&2
-      fail "If these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
-    fi
-    log "$missing image(s) not present locally — they will be downloaded on first start."
-  fi
-  if [[ "$stale" -gt 0 ]]; then
-    hr
-    log "Updates available for $stale image(s) ($SELECTED_BACKEND)."
-    if ask_yes_no "Update now before starting? [Y/n]" "Y"; then
-      mapfile -t PULL_ALWAYS_SERVICES < <(services_for_images "$compose_path" "${stale_images[@]}")
-    else
-      log "Keeping current images."
-    fi
-  fi
-  if [[ "$missing" -gt 0 ]]; then
-    mapfile -t PULL_MISSING_SERVICES < <(services_for_images "$compose_path" "${missing_images[@]}")
-  fi
-  if [[ ${#PULL_ALWAYS_SERVICES[@]} -gt 0 || ${#PULL_MISSING_SERVICES[@]} -gt 0 ]]; then
-    UPDATE_DECISION="pull"
-  elif [[ "$stale" -eq 0 && "$missing" -eq 0 ]]; then
-    log "All images are up to date."
-    UPDATE_DECISION="skip"
-  else
-    UPDATE_DECISION="skip"
-  fi
-}
-
-services_for_images() {
-  local compose_path="$1"; shift
-  local -a imgs=("$@")
-  local mapping svc img svc_img
-  [[ ${#imgs[@]} -gt 0 ]] || return 0
-  mapping="$(docker compose -f "$compose_path" --env-file "$ENV_FILE" config --format json 2>/dev/null \
-    | python3 -c "
-import json,sys
-for svc,conf in json.load(sys.stdin).get('services',{}).items():
-    print(svc+'='+conf.get('image',''))
-" 2>/dev/null || true)"
-  [[ -n "$mapping" ]] || return 0
-  while IFS='=' read -r svc svc_img; do
-    for img in "${imgs[@]}"; do
-      if [[ "$svc_img" == "$img" ]]; then
-        echo "$svc"
-        break
-      fi
-    done
-  done <<< "$mapping"
 }
 
 detect_prior_install() {
@@ -1131,16 +950,9 @@ open_browser() {
 }
 
 save_state() {
-  cat > "$STATE_FILE" <<EOF
-BACKEND=${SELECTED_BACKEND:-}
-COMPOSE_MODE=${COMPOSE_MODE}
-COMPOSE_FILE=${COMPOSE_FILE}
-HOST_MOUNT_OVERRIDE_FILE=${HOST_MOUNT_OVERRIDE_FILE}
-VOICE_PACK_OVERRIDE_FILE=${VOICE_PACK_OVERRIDE_FILE}
-DOCKER_DIRECTORY=${DOCKER_DIRECTORY}
-START_COMMAND=guideants.sh
-LAST_RUN_EPOCH=$(date +%s)
-EOF
+  local components_csv; components_csv="$(IFS=,; echo "${SELECTED_COMPONENTS[*]}")"
+  local fragments_csv; fragments_csv="$(IFS=,; echo "${SELECTED_COMPOSE_FRAGMENTS[*]}")"
+  installer_save_state "$SELECTED_DB_LAYOUT" "$SELECTED_AI_BACKEND" "$components_csv" "$fragments_csv" "$COMPOSE_MODE" "guideants.sh"
 }
 
 # =============================================================================
@@ -1162,33 +974,29 @@ if [[ "$INSTALL_ROCM_WSL" == "1" ]]; then
   install_rocm_wsl_from_host "$ROOT_DIR"
 fi
 report_resources
-choose_backend
-COMPOSE_FILE="$(compose_file_for "$SELECTED_BACKEND")"
-log "Selected backend: $SELECTED_BACKEND  ->  docker/$COMPOSE_FILE"
+AI_BACKEND_OVERRIDE="$BACKEND_OVERRIDE"
+installer_run_wizard
+SELECTED_BACKEND="$SELECTED_AI_BACKEND"
+log "DB layout: $SELECTED_DB_LAYOUT   AI: $SELECTED_AI_BACKEND   Optionals: ${SELECTED_COMPONENTS[*]:-none}"
+log "Compose fragments: ${SELECTED_COMPOSE_FRAGMENTS[*]}"
 
 select_vulkan_runtime
 
 select_rocm_runtime "$DOCKER_DIR" "$ROOT_DIR"
 
-check_gpu_drivers "$SELECTED_BACKEND"
+check_gpu_drivers "$SELECTED_AI_BACKEND"
 
 detect_prior_install
-if [[ "$COMPOSE_MODE" == "ghcr" ]]; then
-  plan_pull "$COMPOSE_FILE"
-else
-  log "Local compose mode — skipping registry update check."
-  UPDATE_DECISION="skip"
-fi
 
 if [[ "$MODE" == "doctor" ]]; then
   hr
   log "Doctor mode complete. No changes were made."
-  would_start="docker compose -f docker/$COMPOSE_FILE"
+  installer_compose_args
+  would_start="docker compose ${COMPOSE_ARGS[*]}"
   [[ -f "$DOCKER_DIR/$HOST_MOUNT_OVERRIDE_FILE" ]] && would_start+=" -f docker/$HOST_MOUNT_OVERRIDE_FILE"
   [[ -f "$DOCKER_DIR/$VOICE_PACK_OVERRIDE_FILE" ]] && would_start+=" -f docker/$VOICE_PACK_OVERRIDE_FILE"
-  [[ -f "$DOCKER_DIR/$ROCM_RUNTIME_OVERRIDE_FILE" ]] && would_start+=" -f docker/$ROCM_RUNTIME_OVERRIDE_FILE"
-  log "Would start: $would_start up -d"
-  log "Update decision: ${UPDATE_DECISION:-skip}"
+  [[ -f "$DOCKER_DIR/$ROCM_RUNTIME_OVERRIDE_FILE" && "$SELECTED_AI_BACKEND" == "rocm" ]] && would_start+=" -f docker/$ROCM_RUNTIME_OVERRIDE_FILE"
+  log "Would start: $would_start --env-file docker/.env up -d"
   exit 0
 fi
 
@@ -1198,43 +1006,33 @@ fi
 find "$DOCKER_DIR/build" -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
 cd "$DOCKER_DIR"
-compose_args=(-f "$COMPOSE_FILE")
+installer_set_local_image_env
+installer_compose_args
 if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
-  if docker compose -f "$COMPOSE_FILE" -f "$HOST_MOUNT_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
-    compose_args+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
+  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$HOST_MOUNT_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    COMPOSE_ARGS+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
     log "Including host mount override: $HOST_MOUNT_OVERRIDE_FILE"
   else
     warn "Ignoring invalid host mount override docker/$HOST_MOUNT_OVERRIDE_FILE. Recreate mounts to regenerate it."
   fi
 fi
 if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
-  if docker compose -f "$COMPOSE_FILE" -f "$ROCM_RUNTIME_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
-    compose_args+=(-f "$ROCM_RUNTIME_OVERRIDE_FILE")
+  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$ROCM_RUNTIME_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    COMPOSE_ARGS+=(-f "$ROCM_RUNTIME_OVERRIDE_FILE")
     log "Including ROCm runtime override: $ROCM_RUNTIME_OVERRIDE_FILE"
   else
     warn "Ignoring invalid ROCm runtime override docker/$ROCM_RUNTIME_OVERRIDE_FILE."
   fi
 fi
 if [[ -f "$VOICE_PACK_OVERRIDE_FILE" ]]; then
-  if docker compose -f "$COMPOSE_FILE" -f "$VOICE_PACK_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
-    compose_args+=(-f "$VOICE_PACK_OVERRIDE_FILE")
+  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$VOICE_PACK_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    COMPOSE_ARGS+=(-f "$VOICE_PACK_OVERRIDE_FILE")
     log "Including voice pack override: $VOICE_PACK_OVERRIDE_FILE"
   else
     warn "Ignoring invalid voice pack override docker/$VOICE_PACK_OVERRIDE_FILE."
   fi
 fi
-if [[ "${UPDATE_DECISION:-skip}" == "pull" ]]; then
-  if [[ ${#PULL_MISSING_SERVICES[@]} -gt 0 ]]; then
-    log "Pulling missing images: ${PULL_MISSING_SERVICES[*]}"
-    docker compose "${compose_args[@]}" --env-file "$ENV_FILE" pull "${PULL_MISSING_SERVICES[@]}"
-  fi
-  if [[ ${#PULL_ALWAYS_SERVICES[@]} -gt 0 ]]; then
-    log "Pulling updates for: ${PULL_ALWAYS_SERVICES[*]}"
-    docker compose "${compose_args[@]}" --env-file "$ENV_FILE" pull --policy always "${PULL_ALWAYS_SERVICES[@]}"
-  fi
-fi
-log "Starting the stack..."
-docker compose "${compose_args[@]}" --env-file "$ENV_FILE" up -d
+installer_start_stack
 cd "$ROOT_DIR"
 
 # Patch containers whose entrypoint scripts have Windows line endings (exit 127).
@@ -1266,7 +1064,7 @@ if wait_for_health; then
   remove_host_mount
   open_browser
 else
-  warn "Health check timed out. Inspect with: docker compose -f docker/$COMPOSE_FILE ps"
+  warn "Health check timed out. Inspect with: docker compose ${COMPOSE_ARGS[*]} ps"
   if [[ -n "$MOUNT_PATH" || "$UNMOUNT" == "1" ]]; then
     warn "Skipping mount/unmount operations because the health check failed."
   fi

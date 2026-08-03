@@ -1,0 +1,23 @@
+services:
+  plantuml:
+    image: ${GA_PLANTUML_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}
+    platform: linux/amd64
+    pull_policy: missing
+    container_name: plantuml
+    environment:
+      - FILE_STORAGE_ROOT=/app/ContentFiles
+      - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
+      - PLANTUML_LIMIT_SIZE=8192
+    volumes:
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
+        target: /app/ContentFiles
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  guideants-webapi-ui:
+    environment:
+      - ServiceRouting__Containers__plantuml__BaseUrl=http://plantuml:80
