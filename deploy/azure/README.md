@@ -87,7 +87,7 @@ Images pulled (no local build):
 | AI sandbox | `ghcr.io/{owner}/guideants-ai-slim:{tag}` |
 | PlantUML | `ghcr.io/{owner}/guideants-plantuml:{tag}` |
 | SearXNG | `ghcr.io/{owner}/guideants-searxng:{tag}` |
-| Docling | `quay.io/docling-project/docling-serve-cpu:v1.21.0` |
+| Docling | `quay.io/docling-project/docling-serve-cpu:v1.29.0` |
 | DocumentServer | `ghcr.io/euro-office/documentserver:latest` |
 
 ## Custom domain

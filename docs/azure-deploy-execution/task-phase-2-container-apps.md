@@ -68,7 +68,7 @@ Parameters:
 |---------|-------|
 | webapi-ui | `ghcr.io/{owner}/guideants-webapi-ui-slim:{tag}` |
 | guideants-ai | `ghcr.io/{owner}/guideants-ai-slim:{tag}` |
-| docling | `quay.io/docling-project/docling-serve-cpu:v1.21.0` |
+| docling | `quay.io/docling-project/docling-serve-cpu:v1.29.0` |
 | plantuml | `ghcr.io/{owner}/guideants-plantuml:{tag}` |
 | searxng | `ghcr.io/{owner}/guideants-searxng:{tag}` |
 | documentserver | `ghcr.io/euro-office/documentserver:latest` |

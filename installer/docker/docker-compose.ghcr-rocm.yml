@@ -136,7 +136,7 @@ services:
     # ROCm GPU devices are supplied by docker-compose.rocm-runtime.generated.yml
     # (native Linux: /dev/kfd + /dev/dri + group_add; WSL ROCDXG: /dev/dxg + librocdxg binds).
     # Default image is CPU; set DOCLING_SERVE_ROCM_IMAGE to a local docling-serve-rocm72 build for GPU.
-    image: ${DOCLING_SERVE_ROCM_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.26.0}
+    image: ${DOCLING_SERVE_ROCM_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.29.0}
     pull_policy: always
     container_name: docling-serve
     environment:

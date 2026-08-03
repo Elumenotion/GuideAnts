@@ -201,7 +201,7 @@
             "aiImage": "[format('ghcr.io/{0}/guideants-ai-slim:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
             "plantumlImage": "[format('ghcr.io/{0}/guideants-plantuml:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
             "searxngImage": "[format('ghcr.io/{0}/guideants-searxng:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
-            "doclingImage": "quay.io/docling-project/docling-serve-cpu:v1.21.0",
+            "doclingImage": "quay.io/docling-project/docling-serve-cpu:v1.29.0",
             "documentServerImage": "ghcr.io/euro-office/documentserver:latest",
             "sharedSecrets": [
               {

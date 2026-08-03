@@ -72,7 +72,7 @@ Rules:
 |----------|-------|---------|
 | `guideants-webapi-ui` | `ghcr.io/elumenotion/guideants-webapi-ui-slim:{tag}` | External :8080 |
 | `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-slim:{tag}` | Internal |
-| `docling-serve` | `quay.io/docling-project/docling-serve-cpu:v1.21.0` | Internal |
+| `docling-serve` | `quay.io/docling-project/docling-serve-cpu:v1.29.0` | Internal |
 | `plantuml` | `ghcr.io/elumenotion/guideants-plantuml:{tag}` | Internal |
 | `searxng` | `ghcr.io/elumenotion/guideants-searxng:{tag}` | Internal |
 | `documentserver` | `ghcr.io/euro-office/documentserver:latest` | Internal |

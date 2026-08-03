@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
 
   docling-serve:
-    image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.21.0}
+    image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.29.0}
     pull_policy: always
     container_name: docling-serve
     environment:
