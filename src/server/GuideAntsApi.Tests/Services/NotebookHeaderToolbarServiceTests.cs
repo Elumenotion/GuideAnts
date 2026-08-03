@@ -775,6 +775,73 @@ public sealed class NotebookHeaderToolbarServiceTests
     }
 
     [TestMethod]
+    public async Task GetToolbarAsync_CloudProvidersDoNotPresentSavedLocalModelsAsActive()
+    {
+        await using var db = CreateDb();
+        var notebook = await SeedNotebookAsync(db);
+
+        var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
+        settings
+            .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<SettingsModelDto>());
+        settings
+            .Setup(x => x.GetServiceEditorStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string serviceId, CancellationToken _) => serviceId switch
+            {
+                RoutedServiceNames.ImageGeneration => CreateCloudServiceStateWithLocalMode(
+                    serviceId,
+                    ServiceProviderIds.ImageGenerationLocalSdHttp,
+                    "LocalServiceHosts:ImageGenerationBaseUrl"),
+                RoutedServiceNames.SpeechSynthesis => CreateCloudServiceStateWithLocalMode(
+                    serviceId,
+                    ServiceProviderIds.SpeechSynthesisLocalTtsHttp,
+                    "LocalServiceHosts:SpeechSynthesisBaseUrl"),
+                RoutedServiceNames.SpeechTranscription => CreateCloudServiceStateWithLocalMode(
+                    serviceId,
+                    ServiceProviderIds.SpeechTranscriptionLocalAsrHttp,
+                    "LocalServiceHosts:SpeechTranscriptionBaseUrl"),
+                _ => CreateReadyServiceState(serviceId),
+            });
+
+        var sut = CreateSut(
+            db,
+            notebook.Id,
+            settings.Object,
+            httpClientFactory: CreateHttpClientFactory(request =>
+            {
+                if (request.RequestUri?.AbsolutePath.Contains("/admin/bundles", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return JsonResponse(
+                        HttpStatusCode.OK,
+                        """{"items":[{"bundleId":"saved-bundle","complete":true,"loaded":false}]}""");
+                }
+
+                if (request.RequestUri?.AbsolutePath.Contains("/admin/models", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return JsonResponse(
+                        HttpStatusCode.OK,
+                        """[{"modelRef":"saved-model","complete":true,"activeModel":false}]""");
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }));
+
+        var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
+
+        foreach (var service in toolbar.Services)
+        {
+            service.ActiveProviderId.Should().Be("google");
+            service.SupportsLocalRuntimePower.Should().BeFalse();
+            service.LocalRuntimeOn.Should().BeFalse();
+            service.Selection.Should().BeNull();
+            service.LocalModelOptions.Should().ContainSingle();
+            service.LocalModelOptions[0].IsActive.Should().BeFalse();
+            service.LocalModelOptions[0].DisplayLabel.Should().NotContain("(active)");
+        }
+    }
+
+    [TestMethod]
     public async Task GetToolbarAsync_CloudOnlyImage_DoesNotFailWhenSdReportsBundle()
     {
         await using var db = CreateDb();
@@ -820,8 +887,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         var image = toolbar.Services.Single(service => service.Kind == "image");
 
         image.LocalModelOptions.Should().BeEmpty();
-        image.Selection.Should().NotBeNull();
-        image.Selection!.ResourceId.Should().BeNull();
+        image.Selection.Should().BeNull();
         settings.Verify(
             x => x.SetServiceModeModelIdAsync(
                 It.IsAny<string>(),
@@ -1025,6 +1091,32 @@ public sealed class NotebookHeaderToolbarServiceTests
                 Status: "ready",
                 Blockers: Array.Empty<string>(),
                 Warnings: Array.Empty<string>()));
+    }
+
+    private static ServiceEditorStateDto CreateCloudServiceStateWithLocalMode(
+        string serviceId,
+        string localProviderId,
+        string localProviderSection)
+    {
+        var cloud = CreateReadyServiceState(serviceId);
+        var local = new ProviderEditorStateDto(
+            ProviderId: localProviderId,
+            ProviderKind: "LocalHttp",
+            ProviderSection: localProviderSection,
+            ModeId: "local",
+            HasExplicitMode: true,
+            IsDefaultMode: false,
+            ConnectionConfigured: true,
+            ConnectionMissingFields: Array.Empty<string>(),
+            CanActivate: true,
+            ActivationBlockers: Array.Empty<string>(),
+            Fields: new Dictionary<string, ProviderFieldValueDto>(),
+            RuntimeDependencies: Array.Empty<RuntimeKeyDto>(),
+            OperativeFields: Array.Empty<string>(),
+            DiagnosticFields: Array.Empty<string>(),
+            FieldMetadata: Array.Empty<ProviderFieldMetadataDto>());
+
+        return cloud with { Providers = [.. cloud.Providers, local] };
     }
 
     private static ApplicationDbContext CreateDb()

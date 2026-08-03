@@ -79,7 +79,7 @@ public sealed class LocalAiStartupWarmupServiceTests
     }
 
     [TestMethod]
-    public async Task SyncDesiredAndApplyAsync_SkipsImageGenerationBundleProjectionWhenServiceIsNotWarmDesired()
+    public async Task SyncDesiredAndApplyAsync_ProjectsImageBundlesWhenLocalModeIsConfiguredButCloudIsActive()
     {
         string? capturedIni = null;
         var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
@@ -113,13 +113,33 @@ public sealed class LocalAiStartupWarmupServiceTests
             RequestPresetJson: null,
             Enabled: true,
             IsDefault: true);
+        var localImageGenerationMode = new ServiceMode(
+            ModeId: "local",
+            ProviderSection: "LocalServiceHosts:ImageGenerationBaseUrl",
+            ModelId: "saved-bundle",
+            RequestPresetJson: null,
+            Enabled: true,
+            IsDefault: false);
         var modeResolver = new FakeServiceModeResolver(
-            (RoutedServiceNames.ImageGeneration, cloudImageGenerationMode));
+            (RoutedServiceNames.ImageGeneration, cloudImageGenerationMode),
+            (RoutedServiceNames.ImageGeneration, localImageGenerationMode));
 
         var (settingsMock, _) = CreateSettingsMock(
             (RoutedServiceNames.ImageGeneration, cloudImageGenerationMode));
+        settingsMock
+            .Setup(s => s.GetServiceModesAsync(
+                RoutedServiceNames.ImageGeneration,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                ToServiceModeDto(RoutedServiceNames.ImageGeneration, cloudImageGenerationMode),
+                ToServiceModeDto(RoutedServiceNames.ImageGeneration, localImageGenerationMode),
+            ]);
 
         var bundleBootstrapper = new Mock<IImageGenerationBundleDefinitionBootstrapper>(MockBehavior.Strict);
+        bundleBootstrapper
+            .Setup(b => b.ProjectAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
@@ -144,12 +164,12 @@ public sealed class LocalAiStartupWarmupServiceTests
         capturedIni.Should().Contain("enabled = off");
         bundleBootstrapper.Verify(
             b => b.ProjectAsync(It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
         orchestration.VerifyAll();
     }
 
     [TestMethod]
-    public async Task SyncDesiredAndApplyAsync_ForceAuxiliaryIdle_SkipsImageGenerationBundleProjection()
+    public async Task SyncDesiredAndApplyAsync_ForceAuxiliaryIdle_ProjectsConfiguredImageBundlesWithoutLoadingThem()
     {
         string? capturedIni = null;
         var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
@@ -190,6 +210,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             (RoutedServiceNames.ImageGeneration, imageGenerationMode));
 
         var bundleBootstrapper = new Mock<IImageGenerationBundleDefinitionBootstrapper>(MockBehavior.Strict);
+        bundleBootstrapper
+            .Setup(b => b.ProjectAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
@@ -214,7 +237,7 @@ public sealed class LocalAiStartupWarmupServiceTests
         capturedIni.Should().NotBeNullOrWhiteSpace();
         bundleBootstrapper.Verify(
             b => b.ProjectAsync(It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
         orchestration.VerifyAll();
     }
 

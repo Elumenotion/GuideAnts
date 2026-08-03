@@ -143,7 +143,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
 
         try
         {
-            await ProjectImageGenerationBundlesIfConfiguredAsync(options, cancellationToken).ConfigureAwait(false);
+            await ProjectImageGenerationBundlesIfConfiguredAsync(cancellationToken).ConfigureAwait(false);
 
             await EnsureConfiguredLocalSelectionsSyncedAsync(cancellationToken).ConfigureAwait(false);
 
@@ -661,7 +661,6 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
     }
 
     private async Task ProjectImageGenerationBundlesIfConfiguredAsync(
-        WarmupDesiredBuildOptions? options,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(LocalServiceAdminRouting.ResolveAdminBase("ImageGeneration", _configuration)))
@@ -669,14 +668,16 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
             return;
         }
 
-        if (!await IsImageGenerationWarmDesiredAsync(options, cancellationToken).ConfigureAwait(false))
+        using var projectionScope = _scopeFactory.CreateScope();
+        var settings = projectionScope.ServiceProvider.GetService<IApplicationSettingsService>();
+        if (settings is null
+            || !await ConfiguredLocalServiceSelectionSync
+                .HasLocalServiceModeAsync(settings, RoutedServiceNames.ImageGeneration, cancellationToken)
+                .ConfigureAwait(false))
         {
-            _logger.LogDebug(
-                "Skipping ImageGeneration bundle projection: service is not warm-desired for this warmup sync.");
             return;
         }
 
-        using var projectionScope = _scopeFactory.CreateScope();
         var bootstrapper = projectionScope.ServiceProvider.GetService<IImageGenerationBundleDefinitionBootstrapper>();
         if (bootstrapper is null)
         {
@@ -685,27 +686,5 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
         }
 
         await bootstrapper.ProjectAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<bool> IsImageGenerationWarmDesiredAsync(
-        WarmupDesiredBuildOptions? options,
-        CancellationToken cancellationToken)
-    {
-        if (options?.ForceAuxiliaryIdle == true)
-        {
-            return false;
-        }
-
-        if (options?.ServiceDesiredOverrides is not null
-            && options.ServiceDesiredOverrides.TryGetValue(
-                RoutedServiceNames.ImageGeneration,
-                out var desiredOverride))
-        {
-            var normalized = desiredOverride.Trim().ToLowerInvariant();
-            return normalized is "warm" or "on";
-        }
-
-        return await IsLocalRoutingWarmAsync(RoutedServiceNames.ImageGeneration, cancellationToken)
-            .ConfigureAwait(false);
     }
 }
