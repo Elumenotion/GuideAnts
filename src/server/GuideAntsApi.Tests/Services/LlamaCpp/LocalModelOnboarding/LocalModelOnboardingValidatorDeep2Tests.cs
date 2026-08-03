@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Text.Json.Nodes;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.HuggingFace;
 using GuideAntsApi.Services.LlamaCpp;
@@ -319,7 +320,7 @@ public class LocalModelOnboardingValidatorDeep2Tests
                 Description: "",
                 DisplayOrder: null,
                 IsActive: true),
-            ProviderConfig: null,
+            ProviderConfig: CreateRowOwnedChatBehavior(),
             Install: new AddModelInstallDto(
                 Source: source,
                 RouterModelId: alias,
@@ -335,4 +336,7 @@ public class LocalModelOnboardingValidatorDeep2Tests
                     ? new AddModelInstallExistingAliasDto(alias)
                     : null));
     }
+
+    private static JsonObject CreateRowOwnedChatBehavior() =>
+        JsonNode.Parse("""{"samplingParametersJson":"{}","thinkingControlJson":"{}","requestFieldsWhenToolsPresentJson":"{}","combineSystemAndDeveloperMessages":true}""")!.AsObject();
 }

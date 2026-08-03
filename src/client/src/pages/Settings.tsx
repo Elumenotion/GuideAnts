@@ -6,13 +6,11 @@ import { TourStartButton } from '../tour/TourStartButton';
 import { useToast } from '../components/common/Toast';
 import { api } from '../services/api';
 import {
-  CreateRuntimeProfileRequest,
   EmbeddingsRebuildConflictResponse,
   EmbeddingsRebuildResponse,
   LlamaRuntimeInventoryItemDto,
   ModelDownloadOperationDto,
   SettingsModelDto,
-  SettingsRuntimeProfileDto,
   SettingsSectionSummaryDto,
 } from '../types/settings';
 import { ConnectionsTab } from './settings/components/ConnectionsTab';
@@ -104,9 +102,6 @@ export default function Settings() {
     }
   }, []);
 
-  const [profiles, setProfiles] = useState<SettingsRuntimeProfileDto[]>([]);
-  const [profilesLoading, setProfilesLoading] = useState(true);
-
   const [llamaInventory, setLlamaInventory] = useState<LlamaRuntimeInventoryItemDto[]>([]);
   const [llamaInventoryLoading, setLlamaInventoryLoading] = useState(true);
   const [llamaInventoryRefreshing, setLlamaInventoryRefreshing] = useState(false);
@@ -147,18 +142,6 @@ export default function Settings() {
     }
   }, []);
 
-  const loadProfiles = useCallback(async () => {
-    setProfilesLoading(true);
-    try {
-      const nextProfiles = await api.settings.getRuntimeProfiles();
-      setProfiles(nextProfiles);
-    } catch {
-      // Profiles load for wizard dropdowns only; failure is non-blocking for settings shell.
-    } finally {
-      setProfilesLoading(false);
-    }
-  }, []);
-
   const loadLlamaInventory = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'refresh') {
       setLlamaInventoryRefreshing(true);
@@ -194,16 +177,14 @@ export default function Settings() {
   useEffect(() => {
     if (!isAdmin) {
       setModelsLoading(false);
-      setProfilesLoading(false);
       setLlamaInventoryLoading(false);
       return;
     }
 
     void loadSectionSummaries();
     void loadModels();
-    void loadProfiles();
     void loadLlamaInventory();
-  }, [isAdmin, loadSectionSummaries, loadModels, loadProfiles, loadLlamaInventory]);
+  }, [isAdmin, loadSectionSummaries, loadModels, loadLlamaInventory]);
 
   useLocalModelOnboardingOperation({
     operationId: activeModelOperation?.operationId ?? null,
@@ -330,72 +311,6 @@ export default function Settings() {
       }
     },
     [loadLlamaInventory, loadModels, loadSectionSummaries, showToast]
-  );
-
-  const createRuntimeProfileFromTemplate = useCallback(
-    async (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => {
-      const templates: Record<'qwen3_5' | 'qwen3_6' | 'gemma4', CreateRuntimeProfileRequest> = {
-        qwen3_5: {
-          profileId: 'qwen3_5',
-          displayName: 'Qwen 3.5',
-          description: 'Template profile for Qwen 3.5 local runtime.',
-          combineSystemAndDeveloperMessages: true,
-          thoughtBlockPattern: '',
-          samplingParametersJson: '{"temperature":{"kind":"number","defaultValue":0.7}}',
-          thinkingControlJson: '{"defaultChoice":"medium","choiceActions":{"minimal":[],"low":[],"medium":[],"high":[]}}',
-        },
-        qwen3_6: {
-          profileId: 'qwen3_6',
-          displayName: 'Qwen 3.6',
-          description: 'Template profile for Qwen 3.6 local runtime.',
-          combineSystemAndDeveloperMessages: true,
-          thoughtBlockPattern: '',
-          samplingParametersJson: '{"temperature":{"kind":"number","defaultValue":0.7}}',
-          thinkingControlJson: '{"defaultChoice":"medium","choiceActions":{"minimal":[],"low":[],"medium":[],"high":[]}}',
-        },
-        gemma4: {
-          profileId: 'gemma4',
-          displayName: 'Gemma 4',
-          description: 'Template profile for Gemma 4 local runtime.',
-          combineSystemAndDeveloperMessages: true,
-          thoughtBlockPattern: '',
-          samplingParametersJson: '{"temperature":{"kind":"number","defaultValue":0.7}}',
-          thinkingControlJson: '{"defaultChoice":"medium","choiceActions":{"minimal":[],"low":[],"medium":[],"high":[]}}',
-        },
-      };
-      try {
-        await api.settings.createRuntimeProfile(templates[template]);
-        await loadProfiles();
-        showToast({ type: 'success', title: `Runtime profile ${templates[template].profileId} created` });
-      } catch (error) {
-        const message = getErrorMessage(error, 'Template creation failed.');
-        if (message.toLowerCase().includes('already exists')) {
-          await loadProfiles();
-          showToast({
-            type: 'success',
-            title: `Runtime profile ${templates[template].profileId} ready`,
-            message: 'Existing profile reused.',
-          });
-          return;
-        }
-        showToast({
-          type: 'error',
-          title: 'Failed to create runtime profile',
-          message,
-        });
-      }
-    },
-    [loadProfiles, showToast]
-  );
-
-  const createCustomRuntimeProfile = useCallback(
-    async (request: CreateRuntimeProfileRequest) => {
-      const created = await api.settings.createRuntimeProfile(request);
-      await loadProfiles();
-      showToast({ type: 'success', title: `Runtime profile ${created.profileId} created` });
-      return created;
-    },
-    [loadProfiles, showToast]
   );
 
   const handleLoadLlamaModel = useCallback(
@@ -634,8 +549,6 @@ export default function Settings() {
           onLoadLlamaModel={handleLoadLlamaModel}
           onRequestUnloadLlamaRouter={handleRequestUnloadLlamaRouter}
           onRequestDeleteLlamaRouter={handleRequestDeleteLlamaRouter}
-          profilesLoading={profilesLoading}
-          profiles={profiles}
           modelsLoading={modelsLoading}
           modelsError={modelsError}
           orderedModels={orderedModels}
@@ -676,16 +589,12 @@ export default function Settings() {
     llamaInventoryRefreshing,
     handleCatalogDataRefresh,
     loadModels,
-    loadProfiles,
     loadSectionSummaries,
     modelsError,
     modelsLoading,
     modelsRuntimeDeepLink,
     orderedModels,
-    profiles,
-    profilesLoading,
     refreshLlamaInventory,
-    createRuntimeProfileFromTemplate,
     sectionSummaries,
     sectionSummariesError,
   ]);
@@ -776,16 +685,12 @@ export default function Settings() {
           isOpen={wizardOpen}
           providerPreselect={wizardProviderPreselect}
           attachAliasPreselect={wizardAttachAliasPreselect}
-          profiles={profiles}
-          profilesLoading={profilesLoading}
           inventory={llamaInventory}
           inventoryError={llamaInventoryError}
           onClose={() => {
             setWizardOpen(false);
             setWizardAttachAliasPreselect(null);
           }}
-          onCreateRuntimeProfileTemplate={createRuntimeProfileFromTemplate}
-          onCreateCustomRuntimeProfile={createCustomRuntimeProfile}
           onCatalogChanged={handleCatalogDataRefresh}
           onSetActiveModelOperation={setActiveModelOperation}
         />

@@ -4,16 +4,14 @@ import { api } from '../../../../services/api';
 import {
   AddModelErrorDto,
   AddModelResponse,
-  CreateRuntimeProfileRequest,
   LlamaRuntimeInventoryItemDto,
-  SettingsRuntimeProfileDto,
 } from '../../../../types/settings';
 import { ActiveModelOperationState, AddModelProvider, AddModelWizardState } from '../../types';
 import { buildAddModelRequest, createAttachAliasWizardState, createEmptyAddModelWizardState, getErrorMessage } from '../../utils';
 import { getCatalogProviderDisplayName } from '../../constants/displayLabels';
 import { HIDDEN_CHAT_MODEL_PROVIDERS } from '../../constants/connectionSections';
 import { TextActionButton } from '../shared/ActionButtons';
-import { SettingsModal } from '../shared/SettingsModal';
+import { SettingsModal, type SettingsModalSize } from '../shared/SettingsModal';
 import { AnthropicAddForm } from './providers/AnthropicForm';
 import { AzureOpenAiChatAddForm } from './providers/AzureOpenAiChatForm';
 import { AzureOpenAiResponsesAddForm } from './providers/AzureOpenAiResponsesForm';
@@ -24,6 +22,8 @@ import { OpenAiChatAddForm } from './providers/OpenAiChatForm';
 import { OpenAiResponsesAddForm } from './providers/OpenAiResponsesForm';
 import { OpenRouterAddForm } from './providers/OpenRouterForm';
 import { KnownCloudModel, ModelIdTypeahead } from './ModelIdTypeahead';
+import { resolveParameterSurfaceSeed } from '../../parameterSurfaceSeeds';
+import { NonLocalModelParameterSurfaceEditor } from './NonLocalModelParameterSurfaceEditor';
 import {
   localModelOnboardingProgressStep,
 } from '../../../../features/localModelOnboarding/status';
@@ -94,13 +94,9 @@ interface AddModelWizardProps {
   isOpen: boolean;
   providerPreselect: string | null;
   attachAliasPreselect?: string | null;
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
   inventoryError?: string | null;
   onClose: () => void;
-  onCreateRuntimeProfileTemplate: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => Promise<void>;
-  onCreateCustomRuntimeProfile: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>;
   onCatalogChanged: () => Promise<void>;
   onSetActiveModelOperation: (value: ActiveModelOperationState | null) => void;
 }
@@ -108,22 +104,14 @@ interface AddModelWizardProps {
 function renderProviderForm(
   value: AddModelWizardState,
   onChange: (updates: Partial<AddModelWizardState>) => void,
-  profiles: SettingsRuntimeProfileDto[],
-  profilesLoading: boolean,
   inventory: LlamaRuntimeInventoryItemDto[],
-  inventoryError: string | null | undefined,
-  onCreateRuntimeProfileTemplate: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => Promise<void>,
-  onCreateCustomRuntimeProfile: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>
+  inventoryError: string | null | undefined
 ) {
   const props = {
     value,
     onChange,
-    profiles,
-    profilesLoading,
     inventory,
     inventoryError,
-    onCreateRuntimeProfile: onCreateRuntimeProfileTemplate,
-    onCreateCustomRuntimeProfile,
   };
   switch (value.provider) {
     case 'openai-chat':
@@ -240,13 +228,9 @@ export function AddModelWizard({
   isOpen,
   providerPreselect,
   attachAliasPreselect,
-  profiles,
-  profilesLoading,
   inventory,
   inventoryError,
   onClose,
-  onCreateRuntimeProfileTemplate,
-  onCreateCustomRuntimeProfile,
   onCatalogChanged,
   onSetActiveModelOperation,
 }: AddModelWizardProps) {
@@ -330,9 +314,14 @@ export function AddModelWizard({
   const isLlamaCuratedActive = skipCatalogStep;
   const hideWizardFooterForCurated =
     isLlamaCuratedActive && step === 'providerConfig' && !['completed', 'progress'].includes(curatedStep);
-  const wizardMaxWidthClass =
-    value.provider === 'llama-cpp' && (step === 'providerConfig' || step === 'progress') ? 'max-w-6xl' : 'max-w-3xl';
-
+  const modalSize: SettingsModalSize =
+    step === 'provider'
+      ? 'sm'
+      : step === 'providerConfig' && llamaOnboardingMode === 'curated'
+        ? 'xl'
+        : step === 'providerConfig'
+          ? 'lg'
+          : 'md';
   const canContinueFromProvider = value.provider.trim().length > 0;
   const canContinueFromCatalog = useMemo(() => {
     if (value.provider === 'llama-cpp' && llamaOnboardingMode === 'curated') {
@@ -419,7 +408,7 @@ export function AddModelWizard({
       isOpen={isOpen}
       title="Add Model"
       onClose={onClose}
-      maxWidthClass={wizardMaxWidthClass}
+      size={modalSize}
       disableDismiss={submitting}
       disableOverlayDismiss
       footer={
@@ -532,12 +521,14 @@ export function AddModelWizard({
               }}
               onSelectSuggestion={(suggestion: KnownCloudModel) => {
                 setModelIdError(null);
+                const seed = resolveParameterSurfaceSeed(suggestion.parameterSurfaceSeed);
                 setValue((previous) => ({
                   ...previous,
                   catalogModelId: suggestion.modelId,
                   catalogDisplayName: suggestion.displayName,
                   catalogDescription: suggestion.description ?? '',
-                  runtimeProfileId: suggestion.runtimeProfileId ?? '',
+                  samplingParametersJson: seed.samplingParametersJson,
+                  reasoningChoicesJson: seed.reasoningChoicesJson,
                 }));
               }}
               onBlur={() => void validateModelId()}
@@ -594,12 +585,8 @@ export function AddModelWizard({
               onboardingUi="settings"
               settingsValue={value}
               onSettingsChange={(updates) => setValue((previous) => ({ ...previous, ...updates }))}
-              profiles={profiles}
-              profilesLoading={profilesLoading}
               inventory={inventory}
               inventoryError={inventoryError}
-              onCreateRuntimeProfile={onCreateRuntimeProfileTemplate}
-              onCreateCustomRuntimeProfile={onCreateCustomRuntimeProfile}
               onCuratedStepChange={setCuratedStep}
               onCuratedOperationStarted={(nextOperationId, meta) => {
                 setOperationId(nextOperationId);
@@ -642,42 +629,18 @@ export function AddModelWizard({
             />
           ) : (
             <>
-              <div className="space-y-2">
-                <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime Profile</label>
-                <select
-                  value={value.runtimeProfileId}
-                  onChange={(event) => setValue((previous) => ({ ...previous, runtimeProfileId: event.target.value }))}
-                  disabled={profilesLoading}
-                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value="">
-                    {profilesLoading
-                      ? 'Loading profiles...'
-                      : profiles.filter((p) => p.providers.includes(value.provider)).length === 0
-                      ? `No profiles defined for ${value.provider}`
-                      : 'Select runtime profile'}
-                  </option>
-                  {profiles
-                    .filter((p) => p.providers.includes(value.provider))
-                    .map((profile) => (
-                      <option key={profile.profileId} value={profile.profileId}>
-                        {profile.displayName} ({profile.profileId})
-                      </option>
-                    ))}
-                </select>
-                <p className="text-[11px] text-gray-500">
-                  Assigns sampling parameter controls (Temperature, Top P) to this model in guide and assistant builders.
-                </p>
-              </div>
+              <NonLocalModelParameterSurfaceEditor
+                value={{
+                  samplingParametersJson: value.samplingParametersJson,
+                  reasoningChoicesJson: value.reasoningChoicesJson,
+                }}
+                onChange={(updates) => setValue((previous) => ({ ...previous, ...updates }))}
+              />
               {renderProviderForm(
                 value,
                 (updates) => setValue((previous) => ({ ...previous, ...updates })),
-                profiles,
-                profilesLoading,
                 inventory,
-                inventoryError,
-                onCreateRuntimeProfileTemplate,
-                onCreateCustomRuntimeProfile
+                inventoryError
               )}
             </>
           )}

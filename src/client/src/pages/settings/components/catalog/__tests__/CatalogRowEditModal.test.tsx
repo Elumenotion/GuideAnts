@@ -15,6 +15,9 @@ vi.mock('../../../../../services/api', () => ({
   },
 }));
 
+vi.mock('../NonLocalModelParameterSurfaceEditor', () => ({
+  NonLocalModelParameterSurfaceEditor: () => <div>parameter-surface-editor</div>,
+}));
 vi.mock('../providers/OpenAiChatForm', () => ({
   OpenAiChatEditForm: () => <div>openai-chat-form</div>,
 }));
@@ -101,6 +104,39 @@ describe('CatalogRowEditModal', () => {
     saveRouterPreset.mockResolvedValue(undefined);
   });
 
+  it('renders parameter surface editor for non-local models and saves row-owned fields', async () => {
+    const user = userEvent.setup();
+    const model: SettingsModelDto = {
+      ...openAiModel,
+      samplingParametersJson: '{"temperature":{"key":"temperature","label":"Temperature","description":"","min":0,"max":2,"step":0.1,"default":1,"displayOrder":0,"exposedInGuideBuilder":true}}',
+      reasoningChoicesJson: '["low","high"]',
+    };
+
+    render(
+      <CatalogRowEditModal
+        model={model}
+        orderedModels={[model]}
+        isOpen
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('parameter-surface-editor')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(api.settings.updateModel).toHaveBeenCalledWith(
+        'gpt-test',
+        expect.objectContaining({
+          samplingParametersJson: expect.stringContaining('temperature'),
+          reasoningChoicesJson: '["low","high"]',
+          runtimeConfigJson: undefined,
+        }),
+      );
+    });
+  });
+
   it('renders provider form and saves catalog edits', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
@@ -110,8 +146,6 @@ describe('CatalogRowEditModal', () => {
       <CatalogRowEditModal
         model={openAiModel}
         orderedModels={[openAiModel]}
-        profiles={[profile]}
-        profilesLoading={false}
         isOpen
         onClose={onClose}
         onSaved={onSaved}
@@ -149,8 +183,6 @@ describe('CatalogRowEditModal', () => {
       <CatalogRowEditModal
         model={llamaModel}
         orderedModels={[llamaModel]}
-        profiles={[]}
-        profilesLoading={false}
         isOpen
         onClose={vi.fn()}
         onSaved={vi.fn()}
@@ -181,8 +213,6 @@ describe('CatalogRowEditModal', () => {
       <CatalogRowEditModal
         model={openAiModel}
         orderedModels={[openAiModel]}
-        profiles={[profile]}
-        profilesLoading={false}
         isOpen
         onClose={vi.fn()}
         onSaved={vi.fn()}

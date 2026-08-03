@@ -65,7 +65,8 @@ public sealed class ApplicationSettingsServiceModelTests
             Provider: "hf-inference-chat",
             Description: null,
             ReasoningChoicesJson: null,
-            RuntimeConfigJson: "{\"runtimeProfileId\":\"huggingface_chat_standard\"}",
+            RuntimeConfigJson: null,
+            SamplingParametersJson: """{"temperature":{"key":"temperature","label":"Temperature","description":"","min":0,"max":2,"step":0.1,"default":1,"displayOrder":0,"exposedInGuideBuilder":true}}""",
             IsActive: true,
             DisplayOrder: null));
 
@@ -84,6 +85,26 @@ public sealed class ApplicationSettingsServiceModelTests
         updated.Should().NotBeNull();
         updated!.ModelId.Should().Be("zai-org/GLM-5.2");
         updated.DisplayName.Should().Be("DeepSeek Updated");
+    }
+
+    [TestMethod]
+    public async Task CreateModelAsync_RejectsNonLocalRuntimeProfilePointer()
+    {
+        await using var db = CreateDbContext();
+        var service = CreateService(db, BuildConfiguration());
+
+        var act = async () => await service.CreateModelAsync(new CreateSettingsModelRequest(
+            ModelId: "gpt-4o",
+            DisplayName: "GPT-4o",
+            Provider: "openai-chat",
+            Description: null,
+            ReasoningChoicesJson: null,
+            RuntimeConfigJson: """{"runtimeProfileId":"openai_chat_standard"}""",
+            IsActive: true,
+            DisplayOrder: null));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*cannot persist runtimeProfileId*");
     }
 
     private static ApplicationDbContext CreateDbContext()

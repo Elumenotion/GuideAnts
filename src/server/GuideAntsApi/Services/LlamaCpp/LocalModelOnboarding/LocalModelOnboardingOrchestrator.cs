@@ -1,4 +1,3 @@
-using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
@@ -148,11 +147,19 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
         CancellationToken cancellationToken)
     {
         var localRuntimeJson = BuildLlamaLocalRuntimeJson(command);
-        var profile = await _runtimeProfileResolver
-            .ResolveAsync(command.RuntimeProfileId.Trim(), cancellationToken)
-            .ConfigureAwait(false);
-        var reasoningChoicesJson = ModelChatBehavior.DeriveReasoningChoicesJson(
-            JsonSerializer.Serialize(profile.ThinkingControl));
+        var usesRowOwnedChatBehavior = string.Equals(
+            command.InstallSource,
+            LocalModelInstallSources.ExistingAlias,
+            StringComparison.OrdinalIgnoreCase);
+        var profile = usesRowOwnedChatBehavior
+            ? command.ToRowOwnedRuntimeProfileData()
+            : await _runtimeProfileResolver
+                .ResolveAsync(command.RuntimeProfileId.Trim(), cancellationToken)
+                .ConfigureAwait(false);
+        var reasoningChoicesJson = usesRowOwnedChatBehavior
+            ? command.ReasoningChoicesJson
+            : ModelChatBehavior.DeriveReasoningChoicesJson(
+                System.Text.Json.JsonSerializer.Serialize(profile.ThinkingControl));
 
         var createRequest = ModelChatBehavior.BuildCreateRequest(
             request.Catalog,

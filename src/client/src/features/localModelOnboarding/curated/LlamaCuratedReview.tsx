@@ -73,10 +73,6 @@ export function LlamaCuratedReview({
       {showTechnical ? (
         <div className="space-y-2 rounded border border-gray-200 bg-gray-50 px-3 py-3 text-xs text-gray-700">
           <div>
-            <div className="font-semibold uppercase tracking-wide text-gray-600">Runtime profile</div>
-            <div className="font-mono">{definition.defaults.runtimeProfileId}</div>
-          </div>
-          <div>
             <div className="font-semibold uppercase tracking-wide text-gray-600">Router preset</div>
             <pre className="mt-1 overflow-x-auto rounded bg-white p-2 font-mono text-[11px]">
               {JSON.stringify(definition.defaults.routerPreset, null, 2)}

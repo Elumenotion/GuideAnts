@@ -1,6 +1,16 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
+export type SettingsModalSize = 'sm' | 'md' | 'lg' | 'xl';
+
+/** Width only — height is always content-driven up to the viewport. */
+const SIZE_MAX_WIDTH: Record<SettingsModalSize, string> = {
+  sm: 'max-w-2xl',
+  md: 'max-w-4xl',
+  lg: 'max-w-6xl',
+  xl: 'max-w-[min(96rem,calc(100vw-1.5rem))]',
+};
+
 /**
  * Depth bookkeeping so Esc only closes the top-most dialog. Sequence numbers are
  * handed out during render, which runs parent-before-child, so a nested dialog
@@ -25,7 +35,15 @@ interface SettingsModalProps {
   children: ReactNode;
   /** Optional footer (typically Cancel + primary action buttons). */
   footer?: ReactNode;
-  /** Optional tailwind max-width class. Defaults to max-w-2xl. */
+  /**
+   * Width preset only. Height follows content up to the viewport.
+   * - sm: short steps (provider pick)
+   * - md: standard forms (default)
+   * - lg: multi-section editors
+   * - xl: dense grids (curated catalog)
+   */
+  size?: SettingsModalSize;
+  /** Escape hatch — overrides `size` when a one-off width is required. */
   maxWidthClass?: string;
   /** If true, Esc and overlay click are disabled (for commit-in-progress forms). */
   disableDismiss?: boolean;
@@ -34,10 +52,8 @@ interface SettingsModalProps {
 }
 
 /**
- * Small in-app dialog wrapper used by the service editor managers. The
- * intent is to keep local model download / load / confirmation flows inside
- * the app UI — browser `window.prompt` and `window.confirm` are explicitly
- * rejected for these flows.
+ * In-app dialog for Settings / onboarding.
+ * Width from `size`; height follows content (scrolls when taller than the viewport).
  */
 export function SettingsModal({
   isOpen,
@@ -45,7 +61,8 @@ export function SettingsModal({
   onClose,
   children,
   footer,
-  maxWidthClass = 'max-w-2xl',
+  size = 'md',
+  maxWidthClass,
   disableDismiss = false,
   disableOverlayDismiss = false,
 }: SettingsModalProps) {
@@ -87,9 +104,11 @@ export function SettingsModal({
     return null;
   }
 
+  const widthClass = maxWidthClass ?? SIZE_MAX_WIDTH[size];
+
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 px-4 py-10"
+      className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 px-4 py-6"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -99,7 +118,7 @@ export function SettingsModal({
         }
       }}
     >
-      <div className={`flex max-h-[calc(100vh-5rem)] w-full flex-col ${maxWidthClass} rounded-lg bg-white shadow-xl`}>
+      <div className={`my-auto flex max-h-[calc(100vh-3rem)] w-full flex-col ${widthClass} rounded-lg bg-white shadow-xl`}>
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-3">
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
           <button

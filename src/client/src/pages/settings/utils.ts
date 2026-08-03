@@ -1,8 +1,6 @@
 import {
   AddModelRequest,
-  CreateRuntimeProfileRequest,
   SettingsProviderDefinitionDto,
-  SettingsRuntimeProfileDto,
   SettingsReadinessDto,
   SettingsSchemaDto,
   SettingsModelDto,
@@ -10,7 +8,6 @@ import {
   SettingsSectionPropertyDefinitionDto,
   SettingsSectionSchemaDto,
   SettingsServiceReadinessDto,
-  UpdateRuntimeProfileRequest,
   UpdateSettingsModelRequest,
 } from '../../types/settings';
 import {
@@ -20,8 +17,8 @@ import {
   AddModelWizardState,
   CanonicalLocalRuntimeConfig,
   CatalogEditState,
-  ProfileFormState,
 } from './types';
+import { normalizeParameterSurface } from './parameterSurface';
 import { getServiceProviderDisplayName } from './constants/displayLabels';
 import {
   buildLocalModelAddModelRequest,
@@ -74,154 +71,6 @@ export function parseActiveModelOperation(raw: string): ActiveModelOperationStat
   };
 }
 
-export function createEmptyProfileForm(): ProfileFormState {
-  return {
-    profileId: '',
-    displayName: '',
-    description: '',
-    combineSystemAndDeveloperMessages: false,
-    thoughtBlockPattern: '',
-    samplingParametersJson: '{}',
-    thinkingControlJson: '{}',
-    requestFieldsWhenToolsPresentJson: '{}',
-    providers: [],
-  };
-}
-
-export function buildProfileCreateRequest(form: ProfileFormState): CreateRuntimeProfileRequest {
-  const profileId = form.profileId.trim();
-  const displayName = form.displayName.trim();
-
-  if (!profileId) {
-    throw new Error('Profile ID is required.');
-  }
-
-  if (!/^[a-z][a-z0-9_]*$/.test(profileId)) {
-    throw new Error('Profile ID must start with a lowercase letter and contain only lowercase letters, digits, and underscores.');
-  }
-
-  if (!displayName) {
-    throw new Error('Display name is required.');
-  }
-
-  JSON.parse(form.samplingParametersJson);
-  JSON.parse(form.thinkingControlJson);
-  JSON.parse(form.requestFieldsWhenToolsPresentJson);
-
-  return {
-    profileId,
-    displayName,
-    description: form.description.trim() || undefined,
-    combineSystemAndDeveloperMessages: form.combineSystemAndDeveloperMessages,
-    thoughtBlockPattern: form.thoughtBlockPattern.trim() || undefined,
-    samplingParametersJson: form.samplingParametersJson,
-    thinkingControlJson: form.thinkingControlJson,
-    requestFieldsWhenToolsPresentJson: form.requestFieldsWhenToolsPresentJson,
-    providers: form.providers,
-  };
-}
-
-export function buildProfileUpdateRequest(form: ProfileFormState): UpdateRuntimeProfileRequest {
-  const base = buildProfileCreateRequest(form);
-  return { ...base };
-}
-
-type RuntimeProfileContractShape = Pick<
-  SettingsRuntimeProfileDto,
-  | 'profileId'
-  | 'displayName'
-  | 'description'
-  | 'combineSystemAndDeveloperMessages'
-  | 'thoughtBlockPattern'
-  | 'samplingParametersJson'
-  | 'thinkingControlJson'
-  | 'requestFieldsWhenToolsPresentJson'
-  | 'providers'
->;
-
-export function createProfileFormFromContractShape(profile: RuntimeProfileContractShape): ProfileFormState {
-  return {
-    profileId: profile.profileId,
-    displayName: profile.displayName,
-    description: profile.description ?? '',
-    combineSystemAndDeveloperMessages: profile.combineSystemAndDeveloperMessages,
-    thoughtBlockPattern: profile.thoughtBlockPattern ?? '',
-    samplingParametersJson: profile.samplingParametersJson,
-    thinkingControlJson: profile.thinkingControlJson,
-    requestFieldsWhenToolsPresentJson: profile.requestFieldsWhenToolsPresentJson ?? '{}',
-    providers: profile.providers ?? [],
-  };
-}
-
-export function exportRuntimeProfile(profile: SettingsRuntimeProfileDto): string {
-  return JSON.stringify(profile, null, 2);
-}
-
-export function importRuntimeProfile(json: string): ProfileFormState {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    throw new Error('Runtime profile import file is not valid JSON.');
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Runtime profile import file must contain a single JSON object.');
-  }
-
-  const candidate = parsed as Record<string, unknown>;
-  if (typeof candidate.profileId !== 'string' || candidate.profileId.trim().length === 0) {
-    throw new Error('Runtime profile import file must include a non-empty string profileId.');
-  }
-  if (typeof candidate.displayName !== 'string' || candidate.displayName.trim().length === 0) {
-    throw new Error('Runtime profile import file must include a non-empty string displayName.');
-  }
-  if (typeof candidate.combineSystemAndDeveloperMessages !== 'boolean') {
-    throw new Error('Runtime profile import file must include a boolean combineSystemAndDeveloperMessages.');
-  }
-  if (typeof candidate.samplingParametersJson !== 'string') {
-    throw new Error('Runtime profile import file must include a string samplingParametersJson.');
-  }
-  if (typeof candidate.thinkingControlJson !== 'string') {
-    throw new Error('Runtime profile import file must include a string thinkingControlJson.');
-  }
-  if (
-    candidate.requestFieldsWhenToolsPresentJson !== undefined
-    && candidate.requestFieldsWhenToolsPresentJson !== null
-    && typeof candidate.requestFieldsWhenToolsPresentJson !== 'string'
-  ) {
-    throw new Error('Runtime profile import file requestFieldsWhenToolsPresentJson must be a string when present.');
-  }
-  if (candidate.description !== undefined && candidate.description !== null && typeof candidate.description !== 'string') {
-    throw new Error('Runtime profile import file description must be a string when present.');
-  }
-  if (
-    candidate.thoughtBlockPattern !== undefined
-    && candidate.thoughtBlockPattern !== null
-    && typeof candidate.thoughtBlockPattern !== 'string'
-  ) {
-    throw new Error('Runtime profile import file thoughtBlockPattern must be a string when present.');
-  }
-
-  const form = createProfileFormFromContractShape({
-    profileId: candidate.profileId,
-    displayName: candidate.displayName,
-    description: candidate.description ?? undefined,
-    combineSystemAndDeveloperMessages: candidate.combineSystemAndDeveloperMessages,
-    thoughtBlockPattern: candidate.thoughtBlockPattern ?? undefined,
-    samplingParametersJson: candidate.samplingParametersJson,
-    thinkingControlJson: candidate.thinkingControlJson,
-    requestFieldsWhenToolsPresentJson:
-      typeof candidate.requestFieldsWhenToolsPresentJson === 'string'
-        ? candidate.requestFieldsWhenToolsPresentJson
-        : '{}',
-    providers: Array.isArray(candidate.providers) ? (candidate.providers as string[]) : [],
-  });
-
-  buildProfileCreateRequest(form);
-  return form;
-}
-
 export function createEmptyAddModelWizardState(preselectedProvider?: string | null): AddModelWizardState {
   const provider = (preselectedProvider?.trim() ?? '') as AddModelWizardState['provider'];
   return {
@@ -231,7 +80,12 @@ export function createEmptyAddModelWizardState(preselectedProvider?: string | nu
     catalogDescription: '',
     catalogDisplayOrder: '',
     catalogIsActive: true,
-    runtimeProfileId: '',
+    samplingParametersJson: '{}',
+    reasoningChoicesJson: '',
+    thinkingControlJson: '{}',
+    requestFieldsWhenToolsPresentJson: '{}',
+    combineSystemAndDeveloperMessages: true,
+    thoughtBlockPattern: '',
     llamaInstallSource: 'huggingface',
     llamaRouterModelId: '',
     llamaHuggingFaceRepository: '',
@@ -244,30 +98,6 @@ export function createEmptyAddModelWizardState(preselectedProvider?: string | nu
     llamaHuggingFacePresetMode: 'replace',
     llamaExistingAliasRouterModelId: '',
   };
-}
-
-/** Guess a bootstrap runtime profile from a router alias label (operator may override). */
-export function suggestRuntimeProfileIdForRouterAlias(routerModelId: string): string {
-  const upper = routerModelId.toUpperCase();
-  if (upper.includes('QWEN3.6') || upper.includes('QWEN3_6')) {
-    return 'qwen3_6';
-  }
-  if (upper.includes('QWEN3.5') || upper.includes('QWEN3_5') || upper.includes('QWEN3-5')) {
-    return 'qwen3_5';
-  }
-  if (upper.includes('GEMMA')) {
-    return 'gemma4';
-  }
-  if (upper.includes('DEEPSEEK')) {
-    return 'deepseek_r1';
-  }
-  if (upper.includes('CODER')) {
-    return 'qwen3_coder';
-  }
-  if (upper.includes('GPT-OSS') || upper.includes('GPT_OSS')) {
-    return 'gpt_oss';
-  }
-  return '';
 }
 
 function humanizeRouterAliasForDisplay(routerModelId: string): string {
@@ -287,7 +117,6 @@ export function createAttachAliasWizardState(
   state.llamaExistingAliasRouterModelId = alias;
   state.catalogModelId = alias;
   state.catalogDisplayName = humanizeRouterAliasForDisplay(alias) || alias;
-  state.runtimeProfileId = suggestRuntimeProfileIdForRouterAlias(alias);
   return state;
 }
 
@@ -372,8 +201,8 @@ export function formatDateTime(value?: string): string {
   return parsed.toLocaleString();
 }
 
-function normalizeOptionalString(value: string): string | undefined {
-  const trimmed = value.trim();
+function normalizeOptionalString(value: string | undefined | null): string | undefined {
+  const trimmed = (value ?? '').trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
@@ -476,7 +305,12 @@ export function createCatalogEditStateFromModel(model: SettingsModelDto): Catalo
     description: model.description ?? '',
     displayOrder: model.displayOrder?.toString() ?? '',
     isActive: model.isActive,
-    runtimeProfileId: model.provider === 'llama-cpp' ? '' : parseRuntimeProfileId(model.runtimeConfigJson),
+    samplingParametersJson: model.samplingParametersJson ?? '{}',
+    reasoningChoicesJson: model.reasoningChoicesJson ?? '',
+    thinkingControlJson: model.thinkingControlJson ?? '{}',
+    requestFieldsWhenToolsPresentJson: model.requestFieldsWhenToolsPresentJson ?? '{}',
+    combineSystemAndDeveloperMessages: model.combineSystemAndDeveloperMessages ?? true,
+    thoughtBlockPattern: model.thoughtBlockPattern ?? '',
   };
 }
 
@@ -499,11 +333,15 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
   if (!displayName) {
     throw new Error('Catalog display name is required.');
   }
-  let providerConfig: Record<string, unknown> | undefined;
-  if (state.runtimeProfileId.trim()) {
-    providerConfig = {
-      runtimeProfileId: state.runtimeProfileId.trim(),
-    };
+  const parameterSurface = normalizeParameterSurface({
+    samplingParametersJson: state.samplingParametersJson,
+    reasoningChoicesJson: state.reasoningChoicesJson,
+  });
+  const providerConfig: Record<string, unknown> = {
+    samplingParametersJson: parameterSurface.samplingParametersJson,
+  };
+  if (parameterSurface.reasoningChoicesJson) {
+    providerConfig.reasoningChoicesJson = parameterSurface.reasoningChoicesJson;
   }
   return {
     provider,
@@ -518,41 +356,10 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
   };
 }
 
-/**
- * Derive the canonical reasoning-choices JSON for a llama-cpp catalog row from
- * the selected runtime profile's `thinkingControlJson`. Mirrors the server-side
- * derivation performed at install time by `HuggingFaceModelDownloadService`,
- * so saving a catalog-row edit preserves (rather than wipes) the reasoning
- * choices that dispatch relies on.
- *
- * Returns `undefined` when the profile exposes no choices; the server will
- * then persist `null`, which is the explicit "this profile has no reasoning
- * surface" contract.
- */
-function deriveReasoningChoicesJsonFromProfile(profileThinkingControlJson?: string): string | undefined {
-  if (!profileThinkingControlJson || profileThinkingControlJson.trim().length === 0) {
-    return undefined;
-  }
-  let parsed: { choiceActions?: Record<string, unknown> };
-  try {
-    parsed = JSON.parse(profileThinkingControlJson);
-  } catch {
-    return undefined;
-  }
-  if (!parsed.choiceActions || typeof parsed.choiceActions !== 'object') {
-    return undefined;
-  }
-  const choices = Object.keys(parsed.choiceActions)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-  return choices.length === 0 ? undefined : JSON.stringify(choices);
-}
-
 export function buildCatalogEditRequest(
   state: CatalogEditState,
   options?: {
     runtimeConfigJson?: string;
-    profileThinkingControlJson?: string;
     preserveModelBehavior?: Pick<
       SettingsModelDto,
       | 'combineSystemAndDeveloperMessages'
@@ -577,30 +384,23 @@ export function buildCatalogEditRequest(
     throw new Error('Display name is required.');
   }
 
-  const reasoningChoicesJson =
-    provider === 'llama-cpp'
-      ? options?.preserveModelBehavior?.reasoningChoicesJson
-      : deriveReasoningChoicesJsonFromProfile(options?.profileThinkingControlJson);
-
-  let runtimeConfigJson = options?.runtimeConfigJson;
-  if (provider !== 'llama-cpp' && state.runtimeProfileId.trim()) {
-    runtimeConfigJson = JSON.stringify({ runtimeProfileId: state.runtimeProfileId.trim() });
-  }
+  const parameterSurface = normalizeParameterSurface({
+    samplingParametersJson: state.samplingParametersJson,
+    reasoningChoicesJson: state.reasoningChoicesJson,
+  });
 
   return {
     modelId,
     displayName,
     provider,
     description: normalizeOptionalString(state.description),
-    reasoningChoicesJson,
-    runtimeConfigJson,
-    combineSystemAndDeveloperMessages:
-      options?.preserveModelBehavior?.combineSystemAndDeveloperMessages ?? true,
-    thoughtBlockPattern: options?.preserveModelBehavior?.thoughtBlockPattern,
-    samplingParametersJson: options?.preserveModelBehavior?.samplingParametersJson ?? '{}',
-    thinkingControlJson: options?.preserveModelBehavior?.thinkingControlJson ?? '{}',
-    requestFieldsWhenToolsPresentJson:
-      options?.preserveModelBehavior?.requestFieldsWhenToolsPresentJson ?? '{}',
+    reasoningChoicesJson: parameterSurface.reasoningChoicesJson || undefined,
+    runtimeConfigJson: options?.runtimeConfigJson,
+    combineSystemAndDeveloperMessages: state.combineSystemAndDeveloperMessages,
+    thoughtBlockPattern: normalizeOptionalString(state.thoughtBlockPattern),
+    samplingParametersJson: parameterSurface.samplingParametersJson,
+    thinkingControlJson: state.thinkingControlJson.trim() || '{}',
+    requestFieldsWhenToolsPresentJson: state.requestFieldsWhenToolsPresentJson.trim() || '{}',
     isActive: state.isActive,
     displayOrder: normalizeDisplayOrder(state.displayOrder),
   };

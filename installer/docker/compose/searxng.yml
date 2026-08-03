@@ -1,0 +1,27 @@
+services:
+  searxng:
+    image: ${GA_SEARXNG_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}
+    platform: linux/amd64
+    pull_policy: missing
+    container_name: readweb-searxng
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ${GA_SEARXNG_CONFIG_HOST_PATH:-./volumes/searxng/config}
+        target: /etc/searxng
+      - type: bind
+        source: ${GA_SEARXNG_DATA_HOST_PATH:-./volumes/searxng/data}
+        target: /var/cache/searxng
+    environment:
+      - FORCE_OWNERSHIP=true
+      - BROWSER_RENDER_PORT=3001
+    networks:
+      - guideants-network
+
+  guideants-webapi-ui:
+    depends_on:
+      searxng:
+        condition: service_started
+    environment:
+      - SearXngSearch__BaseUrl=http://searxng:8080
+      - BrowserRendering__BaseUrl=http://searxng:8080

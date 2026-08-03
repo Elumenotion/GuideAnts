@@ -18,7 +18,6 @@ vi.mock('../../services/api', () => ({
     settings: {
       getSections: vi.fn(),
       getModels: vi.fn(),
-      getRuntimeProfiles: vi.fn(),
       getLlamaInventory: vi.fn(),
     },
   },
@@ -109,7 +108,6 @@ describe('Settings admin tabs', () => {
     vi.clearAllMocks();
     vi.mocked(api.settings.getSections).mockResolvedValue([]);
     vi.mocked(api.settings.getModels).mockResolvedValue([]);
-    vi.mocked(api.settings.getRuntimeProfiles).mockResolvedValue([]);
     vi.mocked(api.settings.getLlamaInventory).mockResolvedValue([]);
   });
 
@@ -144,7 +142,6 @@ describe('Settings admin tabs', () => {
     await waitFor(() => {
       expect(api.settings.getSections).toHaveBeenCalled();
       expect(api.settings.getModels).toHaveBeenCalled();
-      expect(api.settings.getRuntimeProfiles).toHaveBeenCalled();
       expect(api.settings.getLlamaInventory).toHaveBeenCalled();
     });
   });

@@ -274,7 +274,12 @@ export interface LocalAiModelDraft {
   localId: string;
   installSource: LocalAiInstallSource;
   routerModelId: string;
-  runtimeProfileId: string;
+  samplingParametersJson: string;
+  reasoningChoicesJson: string;
+  thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson: string;
+  combineSystemAndDeveloperMessages: boolean;
+  thoughtBlockPattern: string;
   huggingFaceRepository: string;
   huggingFaceResolvedRevision: string;
   huggingFaceArtifactGroupId: string;

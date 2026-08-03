@@ -132,7 +132,12 @@ public sealed record CustomInstallImmutableInput(
     IReadOnlyList<string> ModelFiles,
     IReadOnlyList<string> MmprojFiles,
     string RouterModelId,
-    string RuntimeProfileId,
+    string SamplingParametersJson,
+    string? ReasoningChoicesJson,
+    string ThinkingControlJson,
+    string RequestFieldsWhenToolsPresentJson,
+    bool CombineSystemAndDeveloperMessages,
+    string? ThoughtBlockPattern,
     string TargetDirectory,
     IReadOnlyDictionary<string, string> RouterPreset,
     IReadOnlyList<CuratedArtifactMetadataInput>? ArtifactMetadata = null)

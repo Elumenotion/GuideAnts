@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderEditorStateDto, ServiceEditorStateDto } from '../../../../types/settings';
 import { api } from '../../../../services/api';
+import { resolveParameterSurfaceSeed } from '../../../../pages/settings/parameterSurfaceSeeds';
 import {
-  GEMINI_FLASH_RUNTIME_PROFILE_ID,
-  GEMINI_PRO_RUNTIME_PROFILE_ID,
-  HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
-  OPENAI_CHAT_RUNTIME_PROFILE_ID,
-  OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+  GEMINI_FLASH_PARAMETER_SURFACE_SEED,
+  GEMINI_PRO_PARAMETER_SURFACE_SEED,
+  HUGGINGFACE_DEFAULT_PARAMETER_SURFACE_SEED,
+  OPENAI_CHAT_PARAMETER_SURFACE_SEED,
+  OPENAI_RESPONSES_PARAMETER_SURFACE_SEED,
   OPENROUTER_CHAT_MODEL_PROVIDER_ID,
-  OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID,
+  OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED,
   OPENROUTER_SECTION,
   OPENROUTER_SERVICE_PROVIDER_IDS,
   LOCAL_AI_SERVICE_PROVIDER_IDS,
@@ -287,11 +288,12 @@ describe('addAiServicesWizard utils', () => {
     expect(models[0]?.modelId).toBe('zai-org/GLM-5.2');
   });
 
-  it('builds hf add-model request with runtime profile id', () => {
+  it('builds hf add-model request with row-owned parameter surface', () => {
     const request = buildAddHuggingFaceModelRequest('zai-org/GLM-5.2');
+    const surface = resolveParameterSurfaceSeed(HUGGINGFACE_DEFAULT_PARAMETER_SURFACE_SEED);
     expect(request.provider).toBe(HUGGINGFACE_CHAT_MODEL_PROVIDER_ID);
     expect(request.providerConfig).toEqual({
-      runtimeProfileId: HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
+      samplingParametersJson: surface.samplingParametersJson,
     });
   });
 
@@ -317,38 +319,49 @@ describe('addAiServicesWizard utils', () => {
     expect(models[0]?.modelId).toBe('minimax/minimax-m3');
   });
 
-  it('builds openrouter add-model request with runtime profile id', () => {
+  it('builds openrouter add-model request with row-owned parameter surface', () => {
     const request = buildAddOpenRouterModelRequest('minimax/minimax-m3');
+    const surface = resolveParameterSurfaceSeed(OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED);
     expect(request.provider).toBe(OPENROUTER_CHAT_MODEL_PROVIDER_ID);
     expect(request.providerConfig).toEqual({
-      runtimeProfileId: OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID,
+      samplingParametersJson: surface.samplingParametersJson,
     });
   });
 
-  it('builds Foundry add-model requests with provider-specific runtime profile ids', () => {
+  it('builds Foundry add-model requests with provider-specific parameter surfaces', () => {
+    const chatSurface = resolveParameterSurfaceSeed(OPENAI_CHAT_PARAMETER_SURFACE_SEED);
+    const responsesSurface = resolveParameterSurfaceSeed(OPENAI_RESPONSES_PARAMETER_SURFACE_SEED);
     expect(buildAddModelRequest('gpt-4o', 'Completions').providerConfig).toEqual({
-      runtimeProfileId: OPENAI_CHAT_RUNTIME_PROFILE_ID,
+      samplingParametersJson: chatSurface.samplingParametersJson,
     });
     expect(buildAddModelRequest('gpt-5.2-codex', 'Responses').providerConfig).toEqual({
-      runtimeProfileId: OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+      samplingParametersJson: responsesSurface.samplingParametersJson,
+      reasoningChoicesJson: responsesSurface.reasoningChoicesJson,
     });
   });
 
-  it('builds OpenAI add-model requests with provider-specific runtime profile ids', () => {
+  it('builds OpenAI add-model requests with provider-specific parameter surfaces', () => {
+    const chatSurface = resolveParameterSurfaceSeed(OPENAI_CHAT_PARAMETER_SURFACE_SEED);
+    const responsesSurface = resolveParameterSurfaceSeed(OPENAI_RESPONSES_PARAMETER_SURFACE_SEED);
     expect(buildAddOpenAiModelRequest('gpt-4.1-mini', 'Completions').providerConfig).toEqual({
-      runtimeProfileId: OPENAI_CHAT_RUNTIME_PROFILE_ID,
+      samplingParametersJson: chatSurface.samplingParametersJson,
     });
     expect(buildAddOpenAiModelRequest('gpt-5.2-codex', 'Responses').providerConfig).toEqual({
-      runtimeProfileId: OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+      samplingParametersJson: responsesSurface.samplingParametersJson,
+      reasoningChoicesJson: responsesSurface.reasoningChoicesJson,
     });
   });
 
-  it('builds Gemini add-model requests with model-aware runtime profile ids', () => {
+  it('builds Gemini add-model requests with model-aware parameter surfaces', () => {
+    const flashSurface = resolveParameterSurfaceSeed(GEMINI_FLASH_PARAMETER_SURFACE_SEED);
+    const proSurface = resolveParameterSurfaceSeed(GEMINI_PRO_PARAMETER_SURFACE_SEED);
     expect(buildAddGeminiModelRequest('gemini-2.5-flash').providerConfig).toEqual({
-      runtimeProfileId: GEMINI_FLASH_RUNTIME_PROFILE_ID,
+      samplingParametersJson: flashSurface.samplingParametersJson,
+      reasoningChoicesJson: flashSurface.reasoningChoicesJson,
     });
     expect(buildAddGeminiModelRequest('gemini-2.5-pro').providerConfig).toEqual({
-      runtimeProfileId: GEMINI_PRO_RUNTIME_PROFILE_ID,
+      samplingParametersJson: proSurface.samplingParametersJson,
+      reasoningChoicesJson: proSurface.reasoningChoicesJson,
     });
   });
 
@@ -546,7 +559,12 @@ describe('local model catalog helpers', () => {
         setAsGlobalDefault: false,
         installSource: 'huggingface',
         routerModelId: '',
-        runtimeProfileId: '',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',

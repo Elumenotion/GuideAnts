@@ -4,8 +4,6 @@ import { createEmptyAddModelWizardState } from '../../../utils';
 import { LlamaCppAddForm, LlamaCppEditForm } from '../providers/LlamaCppForm';
 import type { ProviderAddForm } from '../providers/types';
 import type { CatalogEditState } from '../../../types';
-import type { SettingsRuntimeProfileDto } from '../../../../../types/settings';
-
 vi.mock('../../../../../services/api', () => ({
   api: {
     settings: {
@@ -25,21 +23,6 @@ vi.mock('../../../../../features/localModelOnboarding/installed/LlamaInstalledSu
   ),
 }));
 
-function makeProfile(): SettingsRuntimeProfileDto {
-  return {
-    profileId: 'qwen3_5',
-    displayName: 'Qwen 3.5',
-    description: '',
-    combineSystemAndDeveloperMessages: false,
-    thoughtBlockPattern: '',
-    samplingParametersJson: '{}',
-    thinkingControlJson: '{}',
-    providers: ['llama-cpp'],
-    created: '2026-01-01T00:00:00Z',
-    updated: '2026-01-01T00:00:00Z',
-  };
-}
-
 function makeAddProps(overrides: Partial<ProviderAddForm> = {}): ProviderAddForm {
   return {
     value: {
@@ -48,8 +31,6 @@ function makeAddProps(overrides: Partial<ProviderAddForm> = {}): ProviderAddForm
       catalogModelId: 'custom-local',
     },
     onChange: vi.fn(),
-    profiles: [makeProfile()],
-    profilesLoading: false,
     inventory: [],
     ...overrides,
   };
@@ -63,7 +44,12 @@ function makeEditState(): CatalogEditState {
     description: '',
     displayOrder: '',
     isActive: true,
-    runtimeProfileId: '',
+    samplingParametersJson: '{}',
+    reasoningChoicesJson: '',
+    thinkingControlJson: '{}',
+    requestFieldsWhenToolsPresentJson: '{}',
+    combineSystemAndDeveloperMessages: true,
+    thoughtBlockPattern: '',
   };
 }
 

@@ -25,15 +25,11 @@ vi.mock('../../services/api', () => ({
     settings: {
       getSections: vi.fn(),
       getModels: vi.fn(),
-      getRuntimeProfiles: vi.fn(),
       getLlamaInventory: vi.fn(),
       deleteModel: vi.fn(),
-      deleteRuntimeProfile: vi.fn(),
       unloadLlamaModel: vi.fn(),
       deleteLlamaRouterEntry: vi.fn(),
       loadLlamaModel: vi.fn(),
-      createRuntimeProfile: vi.fn(),
-      updateRuntimeProfile: vi.fn(),
     },
   },
 }));
@@ -89,22 +85,12 @@ vi.mock('../settings/components/catalog/AddModelWizard', () => ({
 vi.mock('../settings/components/ModelsRuntimeWorkspace', () => ({
   ModelsRuntimeWorkspace: ({
     onLoadLlamaModel,
-    onSaveProfile,
-    onOpenCreateProfile,
   }: {
     onLoadLlamaModel: (routerModelId: string) => void;
-    onSaveProfile: () => void;
-    onOpenCreateProfile: () => void;
   }) => (
     <div>
       <button type="button" onClick={() => onLoadLlamaModel('alias-1')}>
         trigger-load-llama
-      </button>
-      <button type="button" onClick={onOpenCreateProfile}>
-        open-create-profile
-      </button>
-      <button type="button" onClick={onSaveProfile}>
-        save-empty-profile
       </button>
     </div>
   ),
@@ -148,21 +134,8 @@ describe('Settings operational flows', () => {
     window.sessionStorage.clear();
     vi.mocked(api.settings.getSections).mockResolvedValue([]);
     vi.mocked(api.settings.getModels).mockResolvedValue([]);
-    vi.mocked(api.settings.getRuntimeProfiles).mockResolvedValue([]);
     vi.mocked(api.settings.getLlamaInventory).mockResolvedValue([]);
     vi.mocked(api.settings.loadLlamaModel).mockResolvedValue(undefined as never);
-    vi.mocked(api.settings.createRuntimeProfile).mockResolvedValue({
-      profileId: 'new_profile',
-      displayName: 'New Profile',
-      description: '',
-      providers: [],
-      combineSystemAndDeveloperMessages: false,
-      thoughtBlockPattern: '',
-      samplingParametersJson: '{}',
-      thinkingControlJson: '{}',
-      created: '2026-01-01T00:00:00Z',
-      updated: '2026-01-02T00:00:00Z',
-    });
   });
 
   async function openModelsRuntime(user: ReturnType<typeof userEvent.setup>) {
@@ -265,16 +238,4 @@ describe('Settings operational flows', () => {
     });
   });
 
-  it('surfaces profile validation failures without calling the API', async () => {
-    const user = userEvent.setup();
-    renderSettingsAsAdmin();
-    await openModelsRuntime(user);
-
-    await user.click(screen.getByRole('button', { name: 'open-create-profile' }));
-    await user.click(screen.getByRole('button', { name: 'save-empty-profile' }));
-
-    await waitFor(() => {
-      expect(api.settings.createRuntimeProfile).not.toHaveBeenCalled();
-    });
-  });
 });

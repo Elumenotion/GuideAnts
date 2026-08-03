@@ -20,7 +20,6 @@ vi.mock('../../services/api', () => ({
     settings: {
       getSections: vi.fn().mockResolvedValue([]),
       getModels: vi.fn().mockResolvedValue([]),
-      getRuntimeProfiles: vi.fn().mockResolvedValue([]),
       getLlamaInventory: vi.fn().mockResolvedValue([]),
     },
     systemGuide: {

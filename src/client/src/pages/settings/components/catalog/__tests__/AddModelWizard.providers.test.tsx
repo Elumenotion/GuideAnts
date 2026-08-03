@@ -8,14 +8,8 @@ describe('AddModelWizard provider options', () => {
       <AddModelWizard
         isOpen
         providerPreselect={null}
-        profiles={[]}
-        profilesLoading={false}
         inventory={[]}
         onClose={vi.fn()}
-        onCreateRuntimeProfileTemplate={vi.fn(async () => {})}
-        onCreateCustomRuntimeProfile={vi.fn(async () => {
-          throw new Error('not used');
-        })}
         onCatalogChanged={vi.fn(async () => {})}
         onSetActiveModelOperation={vi.fn()}
       />

@@ -11,8 +11,6 @@ import type { ProviderAddForm, ProviderEditForm } from './types';
 export function LlamaCppAddForm({
   value,
   onChange,
-  profiles,
-  profilesLoading,
   inventory,
   inventoryError,
 }: ProviderAddForm) {
@@ -21,30 +19,20 @@ export function LlamaCppAddForm({
       <AttachAliasOnboardingForm
         value={value}
         onChange={onChange}
-        profiles={profiles}
-        profilesLoading={profilesLoading}
         inventory={inventory}
         inventoryError={inventoryError}
       />
     );
   }
 
-  return (
-    <CustomHfOnboardingForm
-      value={value}
-      onChange={onChange}
-      profiles={profiles}
-      profilesLoading={profilesLoading}
-      inventory={inventory}
-    />
-  );
+  return <CustomHfOnboardingForm value={value} onChange={onChange} inventory={inventory} />;
 }
 
 export type LlamaCppEditFormHandle = LlamaInstalledSummaryHandle;
 
 export const LlamaCppEditForm = forwardRef<
   LlamaCppEditFormHandle,
-  Omit<ProviderEditForm, 'profiles' | 'profilesLoading' | 'inventory'> & {
+  Omit<ProviderEditForm, 'inventory'> & {
     onDetailChanged?: () => Promise<void>;
     onOperationStarted: (operation: ActiveModelOperationState) => void;
   }

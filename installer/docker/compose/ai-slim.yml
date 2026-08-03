@@ -1,0 +1,34 @@
+services:
+  guideants-ai:
+    image: ${GA_AI_SLIM_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-slim:main}
+    platform: linux/amd64
+    pull_policy: missing
+    container_name: guideants-ai
+    cap_drop:
+      - SYS_PTRACE
+    volumes:
+      - script_agent_admin_state:/var/lib/guideants/script-agent-admin
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
+        target: /app/ContentFiles
+    environment:
+      - FILE_STORAGE_ROOT=/app/ContentFiles
+      - GA_MEDIA_HOST=127.0.0.1
+      - GA_MEDIA_PORT=8087
+      - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
+      - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
+      - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  guideants-webapi-ui:
+    depends_on:
+      guideants-ai:
+        condition: service_started
+    environment:
+      - LocalServiceHosts__MediaBaseUrl=http://guideants-ai:80
+      - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox

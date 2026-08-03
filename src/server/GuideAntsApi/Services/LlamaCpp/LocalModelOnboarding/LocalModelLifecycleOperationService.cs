@@ -47,7 +47,6 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
     private readonly IHuggingFaceTokenResolver _tokenResolver;
     private readonly ILlamaServerRuntimeClient _llamaClient;
     private readonly ILlamaRuntimeCoordinator _coordinator;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly ILogger<LocalModelLifecycleOperationService> _logger;
 
     public LocalModelLifecycleOperationService(
@@ -64,7 +63,6 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         _tokenResolver = tokenResolver;
         _llamaClient = llamaClient;
         _coordinator = coordinator;
-        _runtimeProfileResolver = runtimeProfileResolver;
         _logger = logger;
     }
 
@@ -430,7 +428,6 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
             return;
         }
 
-        var profile = await _runtimeProfileResolver.ResolveAsync(input.RuntimeProfileId, cancellationToken).ConfigureAwait(false);
         var now = DateTime.UtcNow;
         _db.Models.Add(new Model
         {
@@ -438,15 +435,14 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
             DisplayName = input.CatalogDisplayName,
             Provider = "llama-cpp",
             Description = input.CatalogDescription,
-            ReasoningChoicesJson = ModelChatBehavior.DeriveReasoningChoicesJson(
-                JsonSerializer.Serialize(profile.ThinkingControl)),
+            ReasoningChoicesJson = input.ReasoningChoicesJson,
             RuntimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
                 new LocalRuntimeConfiguration(input.RouterModelId)),
-            CombineSystemAndDeveloperMessages = profile.CombineSystemAndDeveloperMessages,
-            ThoughtBlockPattern = profile.ThoughtBlockPattern,
-            SamplingParametersJson = JsonSerializer.Serialize(profile.SamplingParameters),
-            ThinkingControlJson = JsonSerializer.Serialize(profile.ThinkingControl),
-            RequestFieldsWhenToolsPresentJson = JsonSerializer.Serialize(profile.RequestFieldsWhenToolsPresent),
+            CombineSystemAndDeveloperMessages = input.CombineSystemAndDeveloperMessages,
+            ThoughtBlockPattern = input.ThoughtBlockPattern,
+            SamplingParametersJson = input.SamplingParametersJson,
+            ThinkingControlJson = input.ThinkingControlJson,
+            RequestFieldsWhenToolsPresentJson = input.RequestFieldsWhenToolsPresentJson,
             IsActive = input.CatalogIsActive,
             DisplayOrder = input.CatalogDisplayOrder,
             Created = now,

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { api } from '../../../../services/api';
-import { LlamaRuntimeInventoryItemDto, SettingsModelDto, SettingsRuntimeProfileDto } from '../../../../types/settings';
+import { LlamaRuntimeInventoryItemDto, SettingsModelDto } from '../../../../types/settings';
 import { ActiveModelOperationState, CatalogEditState } from '../../types';
 import {
   buildCatalogEditRequest,
@@ -20,12 +20,12 @@ import { LlamaCppEditForm, type LlamaCppEditFormHandle } from './providers/Llama
 import { OpenAiChatEditForm } from './providers/OpenAiChatForm';
 import { OpenAiResponsesEditForm } from './providers/OpenAiResponsesForm';
 import { OpenRouterEditForm } from './providers/OpenRouterForm';
+import { NonLocalModelParameterSurfaceEditor } from './NonLocalModelParameterSurfaceEditor';
+import { LlamaModelChatBehaviorEditor } from './LlamaModelChatBehaviorEditor';
 
 interface CatalogRowEditModalProps {
   model: SettingsModelDto | null;
   orderedModels: SettingsModelDto[];
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   inventory?: LlamaRuntimeInventoryItemDto[];
   isOpen: boolean;
   onClose: () => void;
@@ -36,8 +36,6 @@ interface CatalogRowEditModalProps {
 function renderEditForm(
   value: CatalogEditState,
   onChange: (updates: Partial<CatalogEditState>) => void,
-  profiles: SettingsRuntimeProfileDto[],
-  profilesLoading: boolean,
   inventory: LlamaRuntimeInventoryItemDto[] | undefined,
   onOperationStarted: (operation: ActiveModelOperationState) => void,
   onDetailChanged?: () => Promise<void>,
@@ -46,8 +44,6 @@ function renderEditForm(
   const props = {
     value,
     onChange,
-    profiles,
-    profilesLoading,
     inventory,
   };
   switch (value.provider) {
@@ -92,8 +88,6 @@ function buildLlamaRuntimeConfigJson(model: SettingsModelDto): string {
 export function CatalogRowEditModal({
   model,
   orderedModels,
-  profiles,
-  profilesLoading,
   inventory,
   isOpen,
   onClose,
@@ -128,22 +122,9 @@ export function CatalogRowEditModal({
       if (value.provider === 'llama-cpp') {
         await llamaFormRef.current?.saveRouterPreset();
       }
-      const selectedProfile = profiles.find((profile) => profile.profileId === value.runtimeProfileId.trim());
       const request = buildCatalogEditRequest(value, {
         runtimeConfigJson:
-          value.provider === 'llama-cpp' ? buildLlamaRuntimeConfigJson(model) : model.runtimeConfigJson ?? undefined,
-        profileThinkingControlJson: value.provider === 'llama-cpp' ? undefined : selectedProfile?.thinkingControlJson,
-        preserveModelBehavior:
-          value.provider === 'llama-cpp'
-            ? {
-                combineSystemAndDeveloperMessages: model.combineSystemAndDeveloperMessages,
-                thoughtBlockPattern: model.thoughtBlockPattern,
-                samplingParametersJson: model.samplingParametersJson,
-                thinkingControlJson: model.thinkingControlJson,
-                requestFieldsWhenToolsPresentJson: model.requestFieldsWhenToolsPresentJson,
-                reasoningChoicesJson: model.reasoningChoicesJson,
-              }
-            : undefined,
+          value.provider === 'llama-cpp' ? buildLlamaRuntimeConfigJson(model) : undefined,
       });
       await api.settings.updateModel(model.modelId, request);
       await onSaved();
@@ -160,7 +141,7 @@ export function CatalogRowEditModal({
       isOpen={isOpen}
       title={model ? `Edit Catalog Row: ${model.modelId}` : 'Edit Catalog Row'}
       onClose={onClose}
-      maxWidthClass="max-w-2xl"
+      size={model?.provider === 'llama-cpp' ? 'xl' : 'lg'}
       disableDismiss={saving}
       footer={
         <>
@@ -236,8 +217,6 @@ export function CatalogRowEditModal({
             {renderEditForm(
               value,
               (updates) => setValue((previous) => (previous ? { ...previous, ...updates } : previous)),
-              profiles,
-              profilesLoading,
               inventory,
               onOperationStarted,
               onSaved,
@@ -245,32 +224,27 @@ export function CatalogRowEditModal({
             )}
           </div>
 
-          {value.provider !== 'llama-cpp' ? (
-            <div className="space-y-2">
-              <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime Profile</label>
-              <select
-                value={value.runtimeProfileId}
-                onChange={(event) => setValue((previous) => (previous ? { ...previous, runtimeProfileId: event.target.value } : previous))}
-                disabled={profilesLoading}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="">
-                  {profilesLoading
-                    ? 'Loading profiles...'
-                    : profiles.filter((p) => p.providers.includes(value.provider)).length === 0
-                    ? `No profiles defined for ${value.provider}`
-                    : 'Select runtime profile'}
-                </option>
-                {profiles
-                  .filter((p) => p.providers.includes(value.provider))
-                  .map((profile) => (
-                    <option key={profile.profileId} value={profile.profileId}>
-                      {profile.displayName} ({profile.profileId})
-                    </option>
-                  ))}
-              </select>
-            </div>
-          ) : null}
+          {value.provider === 'llama-cpp' ? (
+            <LlamaModelChatBehaviorEditor
+              value={{
+                samplingParametersJson: value.samplingParametersJson,
+                reasoningChoicesJson: value.reasoningChoicesJson,
+                thinkingControlJson: value.thinkingControlJson,
+                requestFieldsWhenToolsPresentJson: value.requestFieldsWhenToolsPresentJson,
+                combineSystemAndDeveloperMessages: value.combineSystemAndDeveloperMessages,
+                thoughtBlockPattern: value.thoughtBlockPattern,
+              }}
+              onChange={(updates) => setValue((previous) => (previous ? { ...previous, ...updates } : previous))}
+            />
+          ) : (
+            <NonLocalModelParameterSurfaceEditor
+              value={{
+                samplingParametersJson: value.samplingParametersJson,
+                reasoningChoicesJson: value.reasoningChoicesJson,
+              }}
+              onChange={(updates) => setValue((previous) => (previous ? { ...previous, ...updates } : previous))}
+            />
+          )}
 
           {error ? <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
         </div>

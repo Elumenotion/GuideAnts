@@ -1,5 +1,5 @@
 import { AddModelWizardState, CatalogEditState } from '../../../types';
-import { CreateRuntimeProfileRequest, LlamaRuntimeInventoryItemDto, SettingsRuntimeProfileDto } from '../../../../../types/settings';
+import { LlamaRuntimeInventoryItemDto } from '../../../../../types/settings';
 
 /**
  * Props shared by every provider-specific "edit" form used inside
@@ -10,8 +10,6 @@ import { CreateRuntimeProfileRequest, LlamaRuntimeInventoryItemDto, SettingsRunt
 export interface ProviderEditForm {
   value: CatalogEditState;
   onChange: (updates: Partial<CatalogEditState>) => void;
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   /**
    * Live Llama runtime inventory (only supplied for `llama-cpp` edit). Used to
    * show read-only backing details (GGUF/mmproj paths, runtime state, other
@@ -28,15 +26,7 @@ export interface ProviderEditForm {
 export interface ProviderAddForm {
   value: AddModelWizardState;
   onChange: (updates: Partial<AddModelWizardState>) => void;
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
   inventoryError?: string | null;
-  onCreateRuntimeProfile?: (
-    template: 'qwen3_5' | 'qwen3_6' | 'gemma4',
-    suggestedProfileId?: string
-  ) => Promise<void>;
-  onCreateCustomRuntimeProfile?: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>;
   hideInstallSourceSelector?: boolean;
 }
-

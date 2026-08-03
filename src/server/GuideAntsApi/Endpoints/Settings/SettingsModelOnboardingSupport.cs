@@ -100,79 +100,31 @@ internal static class SettingsModelOnboardingSupport
             runtimeConfigJson);
     }
 
-    public static async Task<CreateSettingsModelRequest> BuildCloudModelCreateRequestAsync(
-        AddModelRequest request,
-        string? reasoningChoicesJson,
-        string? runtimeConfigJson,
-        IRuntimeProfileResolver runtimeProfileResolver,
-        CancellationToken cancellationToken)
+    public static CreateSettingsModelRequest BuildCloudModelCreateRequest(AddModelRequest request)
     {
-        var runtimeProfileId = GetProviderConfigString(request.ProviderConfig, "runtimeProfileId");
-        if (string.IsNullOrWhiteSpace(runtimeProfileId))
-        {
-            return BuildModelCreateRequest(request, reasoningChoicesJson, runtimeConfigJson);
-        }
+        var samplingParametersJson = GetProviderConfigString(request.ProviderConfig, "samplingParametersJson");
+        var reasoningChoicesJson = GetProviderConfigString(request.ProviderConfig, "reasoningChoicesJson");
 
-        var profile = await runtimeProfileResolver.ResolveAsync(runtimeProfileId.Trim(), cancellationToken)
-            .ConfigureAwait(false);
-
-        return BuildModelCreateRequest(request, reasoningChoicesJson, runtimeConfigJson, profile);
+        return new CreateSettingsModelRequest(
+            ModelId: request.Catalog.ModelId.Trim(),
+            DisplayName: request.Catalog.DisplayName.Trim(),
+            Provider: request.Provider.Trim(),
+            Description: string.IsNullOrWhiteSpace(request.Catalog.Description) ? null : request.Catalog.Description.Trim(),
+            ReasoningChoicesJson: string.IsNullOrWhiteSpace(reasoningChoicesJson) ? null : reasoningChoicesJson.Trim(),
+            RuntimeConfigJson: null,
+            CombineSystemAndDeveloperMessages: true,
+            ThoughtBlockPattern: null,
+            SamplingParametersJson: string.IsNullOrWhiteSpace(samplingParametersJson) ? "{}" : samplingParametersJson.Trim(),
+            ThinkingControlJson: "{}",
+            RequestFieldsWhenToolsPresentJson: "{}",
+            IsActive: request.Catalog.IsActive,
+            DisplayOrder: request.Catalog.DisplayOrder);
     }
 
     public static string? BuildCloudRuntimeConfigJson(AddModelRequest request)
     {
-        if (request.ProviderConfig == null)
-        {
-            return null;
-        }
-
-        if (!request.ProviderConfig.TryGetPropertyValue("runtimeProfileId", out var profileIdNode)
-            || profileIdNode is null)
-        {
-            return null;
-        }
-
-        string? profileId = null;
-        if (profileIdNode is JsonValue strValue
-            && strValue.TryGetValue<string>(out var parsedStr))
-        {
-            profileId = parsedStr?.Trim();
-        }
-
-        if (string.IsNullOrWhiteSpace(profileId))
-        {
-            return null;
-        }
-
-        return JsonSerializer.Serialize(new { runtimeProfileId = profileId });
-    }
-
-    public static async Task<string?> DeriveCloudReasoningChoicesJsonAsync(
-        IRuntimeProfileResolver runtimeProfileResolver,
-        AddModelRequest request,
-        CancellationToken cancellationToken)
-    {
-        var runtimeProfileId = GetProviderConfigString(request.ProviderConfig, "runtimeProfileId");
-        if (string.IsNullOrWhiteSpace(runtimeProfileId))
-        {
-            return null;
-        }
-
-        var profile = await runtimeProfileResolver.ResolveAsync(runtimeProfileId.Trim(), cancellationToken)
-            .ConfigureAwait(false);
-
-        if (profile.ThinkingControl?.ChoiceActions is null)
-        {
-            return null;
-        }
-
-        var choices = profile.ThinkingControl.ChoiceActions.Keys
-            .Where(choice => !string.IsNullOrWhiteSpace(choice))
-            .Select(choice => choice.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        return choices.Count == 0 ? null : JsonSerializer.Serialize(choices);
+        _ = request;
+        return null;
     }
 
     public static string NormalizeRouteModelId(string modelId)

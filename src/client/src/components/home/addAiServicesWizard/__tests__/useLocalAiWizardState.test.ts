@@ -26,7 +26,6 @@ vi.mock('../../../../services/api', () => ({
       updateSection: vi.fn(),
       getModels: vi.fn(),
       addModel: vi.fn(),
-      getRuntimeProfiles: vi.fn(),
       getLlamaInventory: vi.fn(),
       chatDefaults: {
         get: vi.fn(),
@@ -48,17 +47,6 @@ vi.mock('../../../../features/localModelOnboarding/useOperationPolling', () => (
 describe('useLocalAiWizardState', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(api.settings.getRuntimeProfiles).mockResolvedValue([
-      {
-        profileId: 'qwen3_6',
-        displayName: 'Qwen 3.6',
-        providerKind: 'llama-cpp',
-        description: 'Test profile',
-        isDefault: true,
-        samplingParametersJson: null,
-        reasoningEffort: null,
-      },
-    ] as never);
     vi.mocked(api.settings.getLlamaInventory).mockResolvedValue([
       {
         routerModelId: 'qwen3-local',
@@ -108,15 +96,14 @@ describe('useLocalAiWizardState', () => {
     } as never);
   });
 
-  it('loads runtime profiles and inventory', async () => {
+  it('loads local runtime inventory', async () => {
     const { result } = renderHook(() => useLocalAiWizardState());
 
     act(() => {
       result.current.loadRuntimeData();
     });
 
-    await waitFor(() => expect(result.current.profilesLoading).toBe(false));
-    expect(result.current.profiles).toHaveLength(1);
+    await waitFor(() => expect(result.current.inventoryLoading).toBe(false));
     expect(result.current.inventory).toHaveLength(1);
   });
 
@@ -214,8 +201,7 @@ describe('useLocalAiWizardState', () => {
     expect(result.current.modelStepError).toBe('Install at least one local AI model to continue.');
   });
 
-  it('handles runtime profile and inventory load failures gracefully', async () => {
-    vi.mocked(api.settings.getRuntimeProfiles).mockRejectedValueOnce(new Error('profiles down'));
+  it('handles local runtime inventory load failures gracefully', async () => {
     vi.mocked(api.settings.getLlamaInventory).mockRejectedValueOnce(new Error('inventory down'));
 
     const { result } = renderHook(() => useLocalAiWizardState());
@@ -224,10 +210,8 @@ describe('useLocalAiWizardState', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.profilesLoading).toBe(false);
       expect(result.current.inventoryLoading).toBe(false);
     });
-    expect(result.current.profiles).toHaveLength(0);
     expect(result.current.inventory).toHaveLength(0);
   });
 
@@ -328,7 +312,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -368,7 +357,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -393,7 +387,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -540,7 +539,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -571,7 +575,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -598,7 +607,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'bad-model',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -658,7 +672,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -737,7 +756,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -775,7 +799,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -810,7 +839,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -834,7 +868,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'huggingFace',
         routerModelId: '',
-        runtimeProfileId: '',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',
@@ -870,7 +909,12 @@ describe('useLocalAiWizardState', () => {
       await result.current.startInstall({
         installSource: 'existingAlias',
         routerModelId: 'qwen3-local',
-        runtimeProfileId: 'qwen3_6',
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
         huggingFaceRepository: '',
         huggingFaceQuantIncludePattern: '',
         huggingFaceMmprojIncludePattern: '',

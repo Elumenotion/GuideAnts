@@ -1,0 +1,56 @@
+services:
+  guideants-webapi-ui:
+    image: ${GA_WEBAPI_UI_MSSQL_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-webapi-ui-mssql:main}
+    platform: linux/amd64
+    pull_policy: missing
+    container_name: guideants-webapi-ui
+    ports:
+      - "5107:8080"
+    volumes:
+      - guideants_slim_runtime_state:/var/opt/mssql
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
+        target: /app/ContentFiles
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_PID=Developer
+      - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
+      - MSSQL_DB_NAME=${GA_DB_NAME:-guideants-dev}
+      - ASPNETCORE_ENVIRONMENT=Development
+      # Idle session window (minutes). Default 30 days; the sliding renewal re-issues
+      # the cookie past the halfway point so active sessions never hard-expire.
+      - Jwt__LifetimeMinutes=${GA_JWT_LIFETIME_MINUTES:-43200}
+      - API_RUNTIME_CONTEXT=compose-installer-bundled
+      - ALLOWED_ORIGINS=*
+      - FileStorage__Path=/app/ContentFiles
+      - Ui__RootPath=/app/ui
+      - Ui__DevServerUrl=
+      - SearXngSearch__BaseUrl=http://127.0.0.1:9
+      - BrowserRendering__BaseUrl=http://127.0.0.1:9
+      - LocalServiceHosts__SpeechTranscriptionBaseUrl=http://127.0.0.1:9
+      - LocalServiceHosts__SpeechSynthesisBaseUrl=http://127.0.0.1:9
+      - LocalServiceHosts__ImageGenerationBaseUrl=http://127.0.0.1:9
+      - LocalServiceHosts__EmbeddingsBaseUrl=http://127.0.0.1:9
+      - LocalServiceHosts__MediaBaseUrl=http://127.0.0.1:9
+      - LocalServiceHosts__DocumentIntelligenceBaseUrl=http://127.0.0.1:9
+      - DocumentServer__Enabled=false
+      - DocumentServer__InternalUrl=http://127.0.0.1:9
+      - DocumentServer__ApiBaseUrl=http://guideants-webapi-ui:8080
+      - DocumentServer__JwtEnabled=${GA_DOCUMENTSERVER_JWT_ENABLED:-false}
+      - DocumentServer__JwtSecret=${DOCUMENTSERVER_JWT_SECRET:-}
+      - DocumentServer__JwtHeader=${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}
+      - DocumentServer__JwtInBody=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}
+      - ScriptExecution__AgentToken=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - ScriptExecution__AdminToken=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - ScriptExecution__TimeoutSeconds=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
+      - LlamaCpp__BaseUrl=http://127.0.0.1:9/llama-cpp
+      - LlamaCpp__TimeoutSeconds=${GA_LLAMA_CPP_TIMEOUT_SECONDS:-600}
+      - ServiceRouting__Containers__guideants-ai__BaseUrl=http://127.0.0.1:9
+      - ServiceRouting__Containers__plantuml__BaseUrl=http://127.0.0.1:9
+      - HF_TOKEN=${HF_TOKEN:-}
+      - SettingsSecrets__ActiveKeyId=local-dev
+      - SettingsSecrets__Keys__local-dev=MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
+    networks:
+      - guideants-network
+      - default
+    restart: unless-stopped

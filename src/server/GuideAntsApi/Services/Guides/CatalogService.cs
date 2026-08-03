@@ -9,17 +9,15 @@ namespace GuideAntsApi.Services.Guides;
 public class CatalogService : ICatalogService
 {
     private readonly ApplicationDbContext _context;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
 
     private static readonly JsonSerializerOptions JsonCaseInsensitive = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public CatalogService(ApplicationDbContext context, IRuntimeProfileResolver runtimeProfileResolver)
+    public CatalogService(ApplicationDbContext context)
     {
         _context = context;
-        _runtimeProfileResolver = runtimeProfileResolver;
     }
 
     public async Task<IEnumerable<ModelDto>> GetModelsAsync()
@@ -53,7 +51,8 @@ public class CatalogService : ICatalogService
             IReadOnlyList<string>? reasoningChoices = null;
             string? defaultReasoningChoice = null;
 
-            if (!string.IsNullOrEmpty(m.RuntimeConfigJson))
+            if (!string.IsNullOrEmpty(m.RuntimeConfigJson)
+                && string.Equals(m.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
             {
                 runtimeConfig = JsonSerializer.Deserialize<ModelRuntimeConfigDto>(m.RuntimeConfigJson, JsonCaseInsensitive);
             }
@@ -85,15 +84,7 @@ public class CatalogService : ICatalogService
                     }
                 }
 
-                samplingPolicy = profile.SamplingParameters
-                    .Values
-                    .Where(sp => sp.ExposedInGuideBuilder)
-                    .OrderBy(sp => sp.DisplayOrder)
-                    .Select(sp => new SamplingParameterPolicyDto(
-                        sp.Key, sp.Label, sp.Description,
-                        sp.Min, sp.Max, sp.Step, sp.Default, sp.DisplayOrder))
-                    .ToList();
-
+                samplingPolicy = BuildSamplingPolicy(profile);
                 var profileChoices = profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? [];
                 var modelChoices = ParseReasoningChoices(m.ReasoningChoicesJson);
                 reasoningChoices = modelChoices.Count > 0
@@ -101,32 +92,32 @@ public class CatalogService : ICatalogService
                     : profileChoices;
                 defaultReasoningChoice = profile.ThinkingControl.DefaultChoice;
             }
-            else if (runtimeConfig != null && !string.IsNullOrWhiteSpace(runtimeConfig.RuntimeProfileId))
+            else if (!string.Equals(m.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
             {
-                try
+                if (!string.IsNullOrWhiteSpace(m.SamplingParametersJson)
+                    && !string.Equals(m.SamplingParametersJson.Trim(), "{}", StringComparison.Ordinal))
                 {
-                    var profile = await _runtimeProfileResolver.ResolveAsync(runtimeConfig.RuntimeProfileId);
-
-                    samplingPolicy = profile.SamplingParameters
-                        .Values
-                        .Where(sp => sp.ExposedInGuideBuilder)
-                        .OrderBy(sp => sp.DisplayOrder)
-                        .Select(sp => new SamplingParameterPolicyDto(
-                            sp.Key, sp.Label, sp.Description,
-                            sp.Min, sp.Max, sp.Step, sp.Default, sp.DisplayOrder))
-                        .ToList();
-
-                    var profileChoices = profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? [];
-                    var modelChoices = ParseReasoningChoices(m.ReasoningChoicesJson);
-                    reasoningChoices = modelChoices.Count > 0
-                        ? profileChoices.Where(c => modelChoices.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList()
-                        : profileChoices;
-                    defaultReasoningChoice = profile.ThinkingControl.DefaultChoice;
+                    try
+                    {
+                        var profile = RuntimeProfileDataJson.FromJsonStrings(
+                            m.ModelId,
+                            m.CombineSystemAndDeveloperMessages,
+                            m.ThoughtBlockPattern,
+                            m.SamplingParametersJson,
+                            "{}",
+                            "{}",
+                            m.DisplayName,
+                            m.Description);
+                        samplingPolicy = BuildSamplingPolicy(profile);
+                    }
+                    catch
+                    {
+                        // Leave policy null when invalid.
+                    }
                 }
-                catch
-                {
-                    // Profile not found; leave policy/choices null
-                }
+
+                reasoningChoices = ParseReasoningChoices(m.ReasoningChoicesJson);
+                defaultReasoningChoice = reasoningChoices.Count > 0 ? reasoningChoices[0] : null;
             }
 
             results.Add(new ModelDto(
@@ -136,6 +127,20 @@ public class CatalogService : ICatalogService
         }
 
         return results;
+    }
+
+    private static IReadOnlyList<SamplingParameterPolicyDto>? BuildSamplingPolicy(RuntimeProfileData profile)
+    {
+        var policy = profile.SamplingParameters
+            .Values
+            .Where(sp => sp.ExposedInGuideBuilder)
+            .OrderBy(sp => sp.DisplayOrder)
+            .Select(sp => new SamplingParameterPolicyDto(
+                sp.Key, sp.Label, sp.Description,
+                sp.Min, sp.Max, sp.Step, sp.Default, sp.DisplayOrder))
+            .ToList();
+
+        return policy.Count == 0 ? null : policy;
     }
 
     private static List<string> ParseReasoningChoices(string? json)

@@ -9,7 +9,7 @@ const MODE_OPTIONS: Array<{ id: LocalModelOnboardingMode; title: string; descrip
   {
     id: 'custom',
     title: 'Custom Hugging Face',
-    description: 'Advanced install with explicit revision, artifact group, alias preset, and profile.',
+    description: 'Advanced install with explicit revision, artifact group, alias preset, and model chat behavior.',
   },
   {
     id: 'existingAlias',

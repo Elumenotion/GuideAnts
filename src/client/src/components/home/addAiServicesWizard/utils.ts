@@ -1,5 +1,6 @@
 import { api } from '../../../services/api';
 import { withSecretPreserved as withSecretPreservedFromSettings } from '../../../pages/settings/utils';
+import { resolveParameterSurfaceSeed } from '../../../pages/settings/parameterSurfaceSeeds';
 import type {
   AddModelRequest,
   ProviderEditorStateDto,
@@ -10,8 +11,8 @@ import type {
   SettingsSchemaDto,
 } from '../../../types/settings';
 import {
-  GEMINI_FLASH_RUNTIME_PROFILE_ID,
-  GEMINI_PRO_RUNTIME_PROFILE_ID,
+  GEMINI_FLASH_PARAMETER_SURFACE_SEED,
+  GEMINI_PRO_PARAMETER_SURFACE_SEED,
   FOUNDRY_CORE_SECTION,
   FOUNDRY_DOCUMENT_INTELLIGENCE_SECTION,
   FOUNDRY_EMBEDDINGS_SECTION,
@@ -23,7 +24,7 @@ import {
   GEMINI_SERVICE_PROVIDER_IDS,
   HUGGINGFACE_CHAT_MODEL_PROVIDER_ID,
   HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS,
-  HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
+  HUGGINGFACE_DEFAULT_PARAMETER_SURFACE_SEED,
   HUGGINGFACE_SECTION,
   HUGGINGFACE_SERVICE_PROVIDER_IDS,
   GEMINI_MODEL_PROVIDER_ID,
@@ -31,14 +32,14 @@ import {
   MODEL_PROVIDER_ID_TO_LABEL,
   MODEL_PROVIDER_LABEL_TO_ID,
   OPENAI_CORE_SECTION,
-  OPENAI_CHAT_RUNTIME_PROFILE_ID,
+  OPENAI_CHAT_PARAMETER_SURFACE_SEED,
   OPENAI_MODEL_PROVIDER_ID_TO_LABEL,
   OPENAI_MODEL_PROVIDER_LABEL_TO_ID,
   OPENAI_OPTIONAL_SERVICE_DEFAULTS,
-  OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+  OPENAI_RESPONSES_PARAMETER_SURFACE_SEED,
   OPENAI_SERVICE_PROVIDER_IDS,
   OPENROUTER_CHAT_MODEL_PROVIDER_ID,
-  OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID,
+  OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED,
   OPENROUTER_OPTIONAL_SERVICE_DEFAULTS,
   OPENROUTER_SECTION,
   OPENROUTER_SERVICE_PROVIDER_IDS,
@@ -241,37 +242,46 @@ export function hasModelId(models: readonly Pick<FoundryModelDraft, 'modelId'>[]
   return models.some((model) => model.modelId.trim().toLowerCase() === normalized);
 }
 
-function inferGeminiRuntimeProfileId(modelId: string): string {
+function inferGeminiParameterSurfaceSeed(modelId: string): string {
   const normalized = modelId.trim().toLowerCase();
   return normalized.includes('pro')
-    ? GEMINI_PRO_RUNTIME_PROFILE_ID
-    : GEMINI_FLASH_RUNTIME_PROFILE_ID;
+    ? GEMINI_PRO_PARAMETER_SURFACE_SEED
+    : GEMINI_FLASH_PARAMETER_SURFACE_SEED;
 }
 
-function inferCloudRuntimeProfileId(providerId: string, modelId: string): string | null {
+function inferCloudParameterSurfaceSeed(providerId: string, modelId: string): string | null {
   if (providerId === 'azure-openai-chat' || providerId === 'openai-chat') {
-    return OPENAI_CHAT_RUNTIME_PROFILE_ID;
+    return OPENAI_CHAT_PARAMETER_SURFACE_SEED;
   }
   if (providerId === 'azure-openai-responses' || providerId === 'openai-responses') {
-    return OPENAI_RESPONSES_RUNTIME_PROFILE_ID;
+    return OPENAI_RESPONSES_PARAMETER_SURFACE_SEED;
   }
   if (providerId === GEMINI_MODEL_PROVIDER_ID) {
-    return inferGeminiRuntimeProfileId(modelId);
+    return inferGeminiParameterSurfaceSeed(modelId);
   }
   if (providerId === HUGGINGFACE_CHAT_MODEL_PROVIDER_ID) {
-    return HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID;
+    return HUGGINGFACE_DEFAULT_PARAMETER_SURFACE_SEED;
   }
   if (providerId === OPENROUTER_CHAT_MODEL_PROVIDER_ID) {
-    return OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID;
+    return OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED;
   }
   return null;
 }
 
-function withRuntimeProfileProviderConfig(providerId: string, modelId: string): Pick<AddModelRequest, 'providerConfig'> {
-  const runtimeProfileId = inferCloudRuntimeProfileId(providerId, modelId);
-  return runtimeProfileId
-    ? { providerConfig: { runtimeProfileId } }
-    : {};
+function withParameterSurfaceProviderConfig(providerId: string, modelId: string): Pick<AddModelRequest, 'providerConfig'> {
+  const seedKey = inferCloudParameterSurfaceSeed(providerId, modelId);
+  if (!seedKey) {
+    return {};
+  }
+
+  const surface = resolveParameterSurfaceSeed(seedKey);
+  const providerConfig: Record<string, string> = {
+    samplingParametersJson: surface.samplingParametersJson,
+  };
+  if (surface.reasoningChoicesJson) {
+    providerConfig.reasoningChoicesJson = surface.reasoningChoicesJson;
+  }
+  return { providerConfig };
 }
 
 export function buildAddModelRequest(modelId: string, provider: FoundryModelProviderLabel): AddModelRequest {
@@ -284,7 +294,7 @@ export function buildAddModelRequest(modelId: string, provider: FoundryModelProv
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 
@@ -298,7 +308,7 @@ export function buildAddGeminiModelRequest(modelId: string): AddModelRequest {
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 
@@ -312,7 +322,7 @@ export function buildAddOpenAiModelRequest(modelId: string, provider: OpenAiMode
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 
@@ -326,7 +336,7 @@ export function buildAddHuggingFaceModelRequest(modelId: string): AddModelReques
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 
@@ -340,7 +350,7 @@ export function buildAddOpenRouterModelRequest(modelId: string): AddModelRequest
       displayName: trimmed,
       isActive: true,
     },
-    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+    ...withParameterSurfaceProviderConfig(providerId, trimmed),
   };
 }
 

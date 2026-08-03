@@ -1,0 +1,14 @@
+name: guideants
+
+volumes:
+  guideants_slim_runtime_state:
+  mssql_runtime_state:
+  mssql_data:
+  mssql_ftdata:
+  mssql_log:
+  ai_local_models:
+  script_agent_admin_state:
+
+networks:
+  guideants-network:
+    driver: bridge

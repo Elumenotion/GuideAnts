@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../../services/api';
-import type { LlamaRouterEntryDto, LlamaRuntimeInventoryItemDto, SettingsRuntimeProfileDto } from '../../../types/settings';
+import type { LlamaRouterEntryDto, LlamaRuntimeInventoryItemDto } from '../../../types/settings';
 import type { AddModelWizardState } from '../../../pages/settings/types';
+import { LlamaModelChatBehaviorEditor } from '../../../pages/settings/components/catalog/LlamaModelChatBehaviorEditor';
 import { selectAttachableAliases } from '../selectors';
 import { AliasPresetEditor } from './AliasPresetEditor';
 import { presetRowsFromRecord } from '../routerPreset';
@@ -10,8 +11,6 @@ import { getErrorMessage } from '../../../pages/settings/utils';
 export interface AttachAliasOnboardingFormProps {
   value: AddModelWizardState;
   onChange: (updates: Partial<AddModelWizardState>) => void;
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
   inventoryError?: string | null;
 }
@@ -19,8 +18,6 @@ export interface AttachAliasOnboardingFormProps {
 export function AttachAliasOnboardingForm({
   value,
   onChange,
-  profiles,
-  profilesLoading,
   inventory,
   inventoryError,
 }: AttachAliasOnboardingFormProps) {
@@ -53,7 +50,7 @@ export function AttachAliasOnboardingForm({
   return (
     <div className="space-y-4">
       <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-950">
-        Attach binds a catalog identity and runtime profile to an existing artifact-backed alias. The alias preset is
+        Attach binds a catalog identity and model chat behavior to an existing artifact-backed alias. The alias preset is
         not rewritten.
       </div>
 
@@ -83,22 +80,17 @@ export function AttachAliasOnboardingForm({
         </div>
       </div>
 
-      <div className="space-y-1">
-        <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime profile</label>
-        <select
-          value={value.runtimeProfileId}
-          onChange={(event) => onChange({ runtimeProfileId: event.target.value })}
-          disabled={profilesLoading}
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
-        >
-          <option value="">{profilesLoading ? 'Loading profiles…' : 'Select runtime profile'}</option>
-          {profiles.map((profile) => (
-            <option key={profile.profileId} value={profile.profileId}>
-              {profile.displayName} ({profile.profileId})
-            </option>
-          ))}
-        </select>
-      </div>
+      <LlamaModelChatBehaviorEditor
+        value={{
+          samplingParametersJson: value.samplingParametersJson,
+          reasoningChoicesJson: value.reasoningChoicesJson,
+          thinkingControlJson: value.thinkingControlJson,
+          requestFieldsWhenToolsPresentJson: value.requestFieldsWhenToolsPresentJson,
+          combineSystemAndDeveloperMessages: value.combineSystemAndDeveloperMessages,
+          thoughtBlockPattern: value.thoughtBlockPattern,
+        }}
+        onChange={onChange}
+      />
 
       <div className="space-y-1">
         <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Unbound alias</label>
@@ -119,7 +111,7 @@ export function AttachAliasOnboardingForm({
 
       {selectedEntry ? (
         <AliasPresetEditor
-          rows={presetRowsFromRecord(selectedEntry.preset)}
+          rows={presetRowsFromRecord(selectedEntry.preset ?? {})}
           onChange={() => undefined}
           alias={selectedEntry.alias}
           readOnly
