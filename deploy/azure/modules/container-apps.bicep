@@ -42,7 +42,7 @@ var webApiImage = 'ghcr.io/${ghcrOwner}/guideants-webapi-ui-slim:${imageTag}'
 var aiImage = 'ghcr.io/${ghcrOwner}/guideants-ai-slim:${imageTag}'
 var plantumlImage = 'ghcr.io/${ghcrOwner}/guideants-plantuml:${imageTag}'
 var searxngImage = 'ghcr.io/${ghcrOwner}/guideants-searxng:${imageTag}'
-var doclingImage = 'quay.io/docling-project/docling-serve-cpu:v1.21.0'
+var doclingImage = 'quay.io/docling-project/docling-serve-cpu:v1.29.0'
 var documentServerImage = 'ghcr.io/euro-office/documentserver:latest'
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {

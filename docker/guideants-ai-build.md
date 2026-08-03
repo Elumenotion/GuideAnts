@@ -323,8 +323,8 @@ docker compose --profile docling-cuda up
 Recommended image pin variables in `docker/.env`:
 
 ```dotenv
-DOCLING_SERVE_CPU_IMAGE=quay.io/docling-project/docling-serve-cpu:v1.21.0
-DOCLING_SERVE_CUDA_IMAGE=quay.io/docling-project/docling-serve-cu130:v1.21.0
+DOCLING_SERVE_CPU_IMAGE=quay.io/docling-project/docling-serve-cpu:v1.29.0
+DOCLING_SERVE_CUDA_IMAGE=quay.io/docling-project/docling-serve-cu130:v1.29.0
 DOCLING_SERVE_MAX_SYNC_WAIT=600
 DOCLING_SERVE_MAX_FILE_SIZE=524288000
 DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2
@@ -346,7 +346,7 @@ Infrastructure probes for `LocalServiceHosts:DocumentIntelligenceBaseUrl` hit `{
 
 ### Docling Models Included by `docling-serve` Images
 
-For `quay.io/docling-project/docling-serve-*:v1.21.0`, model artifacts are baked into the image under:
+For `quay.io/docling-project/docling-serve-*:v1.29.0`, model artifacts are baked into the image under:
 
 `/opt/app-root/src/.cache/docling/models`
 

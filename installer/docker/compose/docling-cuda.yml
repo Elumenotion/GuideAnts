@@ -1,6 +1,6 @@
 services:
   docling-serve:
-    image: ${DOCLING_SERVE_CUDA_IMAGE:-quay.io/docling-project/docling-serve-cu130:v1.21.0}
+    image: ${DOCLING_SERVE_CUDA_IMAGE:-quay.io/docling-project/docling-serve-cu130:v1.29.0}
     pull_policy: missing
     container_name: docling-serve
     environment:
