@@ -4,7 +4,7 @@
 **Target:** [INVENTORY.md](./INVENTORY.md) — 2 ASR + 5 TTS (shipped) + 3 emb  
 **Next work:** operator runtime verification of the `pending-operator` rows below (needs container + GPU + HF token). All code-complete criteria for Tasks 5–8 pass.
 
-Last updated: 2026-07-03
+Last updated: 2026-08-03
 
 **Legend:** `pass` = verified with evidence. `pending-operator` = code is complete and unit/contract-tested, but the load+inference proof requires the operator's container/GPU/HF token and has not been run here. `fail` = known broken.
 
@@ -72,6 +72,7 @@ Last updated: 2026-07-03
 | I7 Voice-pack API | **pass** | `GET /admin/voice-pack` (tts_service.py) + `.../local-models/voice-pack` proxy + `api.settings.localModels.voicePackOutcome` |
 | I7 Voice-pack baked + attribution | pass | COPY in Dockerfile + `check-voice-pack-attribution.py` (54 voices, `kokoro_synthetic`/CC0-1.0) |
 | I7 NOTICE aligned | **pass** | NOTICE rewritten for Kokoro-82M synthetic provenance; `sourceDataset` corrected `common_voice`→`kokoro_synthetic` |
+| Cloud-active local inventory reporting | **pass (code)** | Saved local selections no longer overwrite cloud routing or runtime inventory. Tests: `ServiceLocalModelListEnricherTests.ProxyAndEnrichImageBundlesAsync_ExposesSavedSelectionWithoutRewritingRuntimeState`, `NotebookHeaderToolbarServiceTests.GetToolbarAsync_CloudProvidersDoNotPresentSavedLocalModelsAsActive`, `LocalAiStartupWarmupServiceTests.SyncDesiredAndApplyAsync_ProjectsImageBundlesWhenLocalModeIsConfiguredButCloudIsActive` |
 | I10 CI drift script | **pass** | `scripts/native-ai-migration/verify-catalog-contract.ps1` — ASR 2/2, TTS 5/5 shipped, Emb 3/3, no hardcoded lists |
 
 ---

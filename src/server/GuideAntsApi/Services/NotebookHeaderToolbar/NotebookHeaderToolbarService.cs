@@ -560,7 +560,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         var hasLocalServiceMode = localProviderState?.HasExplicitMode ?? false;
 
         IReadOnlyList<NotebookToolbarLocalModelOptionDto> localModels;
-        string? selectedLocalRef;
+        string? selectedLocalRef = null;
         if (hasLocalServiceMode)
         {
             var inventory = await TryLoadLocalModelInventoryAsync(
@@ -570,18 +570,10 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
                 cancellationToken).ConfigureAwait(false);
             localModels = inventory.Models;
 
-            if (isImage)
-            {
-                selectedLocalRef = await ConfiguredLocalServiceSelectionSync.ResolveOrSyncImageBundleAsync(
-                        _settings,
-                        inventory.Root is null
-                            ? null
-                            : ServiceLocalModelListEnricher.ReadConfiguredActiveBundleId(inventory.Root.ToJsonString()),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                localModels = MarkImageBundleSelection(localModels, selectedLocalRef);
-            }
-            else
+            // A saved local selection is operational only while routing is local.
+            // When a cloud provider is active, retain raw inventory state but do
+            // not present the dormant ServiceModes value as an active model.
+            if (supportsPower)
             {
                 selectedLocalRef = await ConfiguredLocalServiceSelectionSync.TryReadPersistedLocalModelRefAsync(
                         _settings,
@@ -593,16 +585,19 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
                     selectedLocalRef = ResolveSelectedLocalModelRef(state, localProviderId);
                 }
 
-                localModels = MarkVoiceModelSelection(localModels, selectedLocalRef);
+                localModels = isImage
+                    ? MarkImageBundleSelection(localModels, selectedLocalRef)
+                    : MarkVoiceModelSelection(localModels, selectedLocalRef);
             }
         }
         else
         {
             localModels = Array.Empty<NotebookToolbarLocalModelOptionDto>();
-            selectedLocalRef = null;
         }
 
-        var selection = BuildSelectionForService(state, isImage, localModels, selectedLocalRef);
+        var selection = supportsPower
+            ? BuildSelectionForService(isImage, localModels, selectedLocalRef)
+            : null;
         var runtimeProbe = supportsPower
             ? await ProbeLocalRuntimeAsync(serviceId, isImage, cancellationToken).ConfigureAwait(false)
             : new LocalRuntimeProbe(false, false, false, false);
@@ -729,7 +724,6 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         string.Equals(readinessStatus, "ready", StringComparison.OrdinalIgnoreCase) ? "ready" : "blocked";
 
     private static NotebookToolbarSelectionDto? BuildSelectionForService(
-        ServiceEditorStateDto state,
         bool isImage,
         IReadOnlyList<NotebookToolbarLocalModelOptionDto> localModels,
         string? selectedLocalRef)

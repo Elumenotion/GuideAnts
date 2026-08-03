@@ -10,8 +10,8 @@ using Microsoft.AspNetCore.Http;
 namespace GuideAntsApi.Endpoints.Settings;
 
 /// <summary>
-/// Injects ServiceModes selection into proxied local inventory responses so UI
-/// and operators never treat engine disk markers as the selected model/bundle.
+/// Exposes the saved ServiceModes bundle selection without changing the local
+/// engine's marker, loaded state, or per-item runtime status.
 /// </summary>
 internal static class ServiceLocalModelListEnricher
 {
@@ -56,9 +56,9 @@ internal static class ServiceLocalModelListEnricher
                     statusCode: StatusCodes.Status502BadGateway);
             }
 
-            var selectedBundleId = await ConfiguredLocalServiceSelectionSync.ResolveOrSyncImageBundleAsync(
+            var selectedBundleId = await ConfiguredLocalServiceSelectionSync.TryReadPersistedLocalModelRefAsync(
                     settings,
-                    ServiceLocalModelListEnricher.ReadConfiguredActiveBundleId(body),
+                    RoutedServiceNames.ImageGeneration,
                     cancellationToken)
                 .ConfigureAwait(false);
             var enriched = ApplyImageBundleSelection(body, selectedBundleId);
@@ -86,24 +86,6 @@ internal static class ServiceLocalModelListEnricher
     {
         var root = JsonNode.Parse(upstreamBody) as JsonObject ?? new JsonObject();
         root["selectedBundleId"] = selectedBundleId;
-        root["activeBundleId"] = selectedBundleId;
-
-        if (root["items"] is JsonArray items)
-        {
-            foreach (var itemNode in items)
-            {
-                if (itemNode is not JsonObject item)
-                {
-                    continue;
-                }
-
-                var bundleId = item["bundleId"]?.GetValue<string>();
-                var isSelected = !string.IsNullOrWhiteSpace(selectedBundleId)
-                    && !string.IsNullOrWhiteSpace(bundleId)
-                    && string.Equals(bundleId, selectedBundleId, StringComparison.Ordinal);
-                item["active"] = isSelected;
-            }
-        }
 
         return root.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
     }
