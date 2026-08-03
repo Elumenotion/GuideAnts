@@ -11,7 +11,7 @@ describe('AddModelWizard provider options', () => {
         inventory={[]}
         onClose={vi.fn()}
         onCatalogChanged={vi.fn(async () => {})}
-        onSetActiveAddOperation={vi.fn()}
+        onSetActiveModelOperation={vi.fn()}
       />
     );
 

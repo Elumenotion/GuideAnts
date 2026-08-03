@@ -99,7 +99,8 @@ describe('ModelsTab catalog edit modal', () => {
           onRequestDeleteModel={vi.fn()}
           onCatalogEdited={onCatalogEdited}
           onOpenAddModel={vi.fn()}
-          activeAddOperation={null}
+          activeModelOperation={null}
+          onModelOperationStarted={vi.fn()}
         />
       </ToastProvider>,
     );

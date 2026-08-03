@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { api } from '../../../../services/api';
 import { LlamaRuntimeInventoryItemDto, SettingsModelDto } from '../../../../types/settings';
-import { CatalogEditState } from '../../types';
+import { ActiveModelOperationState, CatalogEditState } from '../../types';
 import {
   buildCatalogEditRequest,
   createCatalogEditStateFromModel,
@@ -30,12 +30,14 @@ interface CatalogRowEditModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
+  onOperationStarted: (operation: ActiveModelOperationState) => void;
 }
 
 function renderEditForm(
   value: CatalogEditState,
   onChange: (updates: Partial<CatalogEditState>) => void,
   inventory: LlamaRuntimeInventoryItemDto[] | undefined,
+  onOperationStarted: (operation: ActiveModelOperationState) => void,
   onDetailChanged?: () => Promise<void>,
   llamaFormRef?: RefObject<LlamaCppEditFormHandle | null>,
 ) {
@@ -56,7 +58,14 @@ function renderEditForm(
     case 'anthropic':
       return <AnthropicEditForm {...props} />;
     case 'llama-cpp':
-      return <LlamaCppEditForm ref={llamaFormRef} {...props} onDetailChanged={onDetailChanged} />;
+      return (
+        <LlamaCppEditForm
+          ref={llamaFormRef}
+          {...props}
+          onDetailChanged={onDetailChanged}
+          onOperationStarted={onOperationStarted}
+        />
+      );
     case 'google-gemini-chat':
       return <GoogleGeminiEditForm {...props} />;
     case 'hf-inference-chat':
@@ -83,6 +92,7 @@ export function CatalogRowEditModal({
   isOpen,
   onClose,
   onSaved,
+  onOperationStarted,
 }: CatalogRowEditModalProps) {
   void orderedModels;
   const [value, setValue] = useState<CatalogEditState | null>(null);
@@ -208,6 +218,7 @@ export function CatalogRowEditModal({
               value,
               (updates) => setValue((previous) => (previous ? { ...previous, ...updates } : previous)),
               inventory,
+              onOperationStarted,
               onSaved,
               llamaFormRef,
             )}

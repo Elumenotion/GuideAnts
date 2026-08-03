@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { api } from '../../../services/api';
 import type { LlamaInstallationDetailDto, LlamaRouterEntryDto } from '../../../types/settings';
+import type { ActiveModelOperationState } from '../../../pages/settings/types';
 import { getErrorMessage } from '../../../pages/settings/utils';
 import { formatBytes } from '../curated/format';
 import { ChangeQuantModal } from './ChangeQuantModal';
@@ -15,10 +16,12 @@ export interface LlamaInstalledSummaryHandle {
 export interface LlamaInstalledSummaryProps {
   modelId: string;
   onChanged?: () => Promise<void>;
+  /** Publishes a started change-quant download to the settings page's operation tracker. */
+  onOperationStarted: (operation: ActiveModelOperationState) => void;
 }
 
 export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, LlamaInstalledSummaryProps>(
-  function LlamaInstalledSummary({ modelId, onChanged }, ref) {
+  function LlamaInstalledSummary({ modelId, onChanged, onOperationStarted }, ref) {
   const presetPanelRef = useRef<AliasPresetSavePanelHandle>(null);
   const [detail, setDetail] = useState<LlamaInstallationDetailDto | null>(null);
   const [routerEntry, setRouterEntry] = useState<LlamaRouterEntryDto | null>(null);
@@ -91,7 +94,15 @@ export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, Lla
 
       <ModelChatBehaviorPanel detail={detail} onChanged={handleChanged} />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="text-sm text-gray-700">
+          Installed quant:{' '}
+          {detail.quantLabel ?? detail.quantId ? (
+            <span className="font-mono font-medium text-gray-900">{detail.quantLabel ?? detail.quantId}</span>
+          ) : (
+            <span className="text-gray-500">not recorded</span>
+          )}
+        </div>
         {isCurated ? (
           <TextActionButton tone="primary" onClick={() => setChangeQuantOpen(true)} title="Change quant">
             Change quant
@@ -156,10 +167,7 @@ export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, Lla
         isOpen={changeQuantOpen}
         detail={detail}
         onClose={() => setChangeQuantOpen(false)}
-        onCompleted={async () => {
-          setChangeQuantOpen(false);
-          await handleChanged();
-        }}
+        onOperationStarted={onOperationStarted}
       />
     </div>
   );

@@ -31,22 +31,6 @@ public interface ILocalModelOperationService
 
 public sealed class LocalModelOperationService : ILocalModelOperationService
 {
-    private static readonly HashSet<string> TerminalStatuses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "completed",
-        "failed",
-    };
-
-    private static readonly HashSet<string> InFlightStatuses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "queued",
-        "resolvingFiles",
-        "downloading",
-        "validating",
-        "registeringAlias",
-        "catalogFinalization",
-    };
-
     private readonly ApplicationDbContext _db;
     private readonly ILlamaRuntimeAdminClient _adminClient;
     private readonly IHuggingFaceTokenResolver _tokenResolver;
@@ -97,7 +81,8 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
     {
         var operations = await _db.LocalModelOperations
             .AsNoTracking()
-            .Where(o => o.OperationKind == "curatedInstall" && !TerminalStatuses.Contains(o.Status))
+            .Where(o => o.OperationKind == LocalModelOperationKinds.CuratedInstall
+                        && !LocalModelOperationStatuses.Terminal.Contains(o.Status))
             .OrderByDescending(o => o.CreatedUtc)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -156,7 +141,8 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
     public async Task ReconcileInFlightOperationsAsync(CancellationToken cancellationToken = default)
     {
         var operations = await _db.LocalModelOperations
-            .Where(o => o.OperationKind == "curatedInstall" && InFlightStatuses.Contains(o.Status))
+            .Where(o => o.OperationKind == LocalModelOperationKinds.CuratedInstall
+                        && !LocalModelOperationStatuses.Terminal.Contains(o.Status))
             .OrderBy(o => o.UpdatedUtc)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -181,7 +167,7 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
         LocalModelOperation operation,
         CancellationToken cancellationToken)
     {
-        if (TerminalStatuses.Contains(operation.Status))
+        if (LocalModelOperationStatuses.IsTerminal(operation.Status))
         {
             return null;
         }

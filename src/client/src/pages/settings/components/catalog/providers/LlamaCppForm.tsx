@@ -1,5 +1,5 @@
 import { forwardRef } from 'react';
-import type { CatalogEditState } from '../../../types';
+import type { ActiveModelOperationState, CatalogEditState } from '../../../types';
 import {
   LlamaInstalledSummary,
   type LlamaInstalledSummaryHandle,
@@ -34,14 +34,16 @@ export const LlamaCppEditForm = forwardRef<
   LlamaCppEditFormHandle,
   Omit<ProviderEditForm, 'inventory'> & {
     onDetailChanged?: () => Promise<void>;
+    onOperationStarted: (operation: ActiveModelOperationState) => void;
   }
->(function LlamaCppEditForm({ value, onChange, onDetailChanged }, ref) {
+>(function LlamaCppEditForm({ value, onChange, onDetailChanged, onOperationStarted }, ref) {
   void onChange;
   return (
     <LlamaInstalledSummary
       ref={ref}
       modelId={value.modelId}
       onChanged={onDetailChanged}
+      onOperationStarted={onOperationStarted}
     />
   );
 });

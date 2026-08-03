@@ -81,7 +81,7 @@ describe('LlamaCppAddForm', () => {
 
 describe('LlamaCppEditForm', () => {
   it('renders installed summary instead of legacy advanced fields', () => {
-    render(<LlamaCppEditForm value={makeEditState()} onChange={vi.fn()} />);
+    render(<LlamaCppEditForm value={makeEditState()} onChange={vi.fn()} onOperationStarted={vi.fn()} />);
     expect(screen.getByTestId('installed-summary')).toHaveTextContent('qwen-local');
     expect(screen.queryByText(/load params json/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/parallel tool calls/i)).not.toBeInTheDocument();

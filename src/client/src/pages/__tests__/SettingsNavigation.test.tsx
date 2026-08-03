@@ -157,10 +157,13 @@ describe('Settings navigation deep links', () => {
   it('shows the active add-model progress banner and open-progress action', async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem(
-      'guideants.settings.activeAddOperation',
+      'guideants.settings.activeModelOperation',
       JSON.stringify({
         operationId: 'op-1',
         catalogModelId: 'llama/local',
+        routerModelId: 'alias-1',
+        kind: 'add',
+        pollRoute: 'downloads',
       }),
     );
 

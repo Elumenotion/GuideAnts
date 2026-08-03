@@ -33,24 +33,6 @@ public interface ILocalModelLifecycleOperationService
 
 public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOperationService
 {
-    private static readonly HashSet<string> TerminalStatuses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "completed",
-        "failed",
-    };
-
-    private static readonly HashSet<string> InFlightStatuses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "queued",
-        "resolvingFiles",
-        "downloading",
-        "validating",
-        "registeringAlias",
-        "provenanceFinalization",
-        "obsoleteCleanup",
-        "loadRestore",
-    };
-
     private static readonly HashSet<string> ActiveDownloadStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
         "queued",
@@ -140,7 +122,7 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
     {
         var operations = await _db.LocalModelOperations
             .Where(o => o.OperationKind != LocalModelOperationKinds.CuratedInstall
-                        && InFlightStatuses.Contains(o.Status))
+                        && !LocalModelOperationStatuses.Terminal.Contains(o.Status))
             .OrderBy(o => o.UpdatedUtc)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -190,7 +172,7 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
 
     private async Task<OperationJournalSnapshot?> ReconcileOperationAsync(LocalModelOperation operation, CancellationToken cancellationToken)
     {
-        if (TerminalStatuses.Contains(operation.Status))
+        if (LocalModelOperationStatuses.IsTerminal(operation.Status))
         {
             return null;
         }

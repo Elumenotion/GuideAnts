@@ -158,8 +158,14 @@ describe('Settings operational flows', () => {
 
   it('clears the add-model banner after a completed onboarding operation', async () => {
     window.sessionStorage.setItem(
-      'guideants.settings.activeAddOperation',
-      JSON.stringify({ operationId: 'op-1', catalogModelId: 'llama/local' }),
+      'guideants.settings.activeModelOperation',
+      JSON.stringify({
+        operationId: 'op-1',
+        catalogModelId: 'llama/local',
+        routerModelId: 'alias-1',
+        kind: 'add',
+        pollRoute: 'downloads',
+      }),
     );
 
     renderSettingsAsAdmin();
@@ -174,15 +180,21 @@ describe('Settings operational flows', () => {
     });
 
     await waitFor(() => {
-      expect(window.sessionStorage.getItem('guideants.settings.activeAddOperation')).toBeNull();
+      expect(window.sessionStorage.getItem('guideants.settings.activeModelOperation')).toBeNull();
       expect(api.settings.getModels).toHaveBeenCalledTimes(2);
     });
   });
 
   it('clears the add-model banner when onboarding polling fails', async () => {
     window.sessionStorage.setItem(
-      'guideants.settings.activeAddOperation',
-      JSON.stringify({ operationId: 'op-2', catalogModelId: 'llama/remote' }),
+      'guideants.settings.activeModelOperation',
+      JSON.stringify({
+        operationId: 'op-2',
+        catalogModelId: 'llama/remote',
+        routerModelId: 'alias-2',
+        kind: 'add',
+        pollRoute: 'downloads',
+      }),
     );
 
     renderSettingsAsAdmin();
@@ -193,14 +205,20 @@ describe('Settings operational flows', () => {
     });
 
     await waitFor(() => {
-      expect(window.sessionStorage.getItem('guideants.settings.activeAddOperation')).toBeNull();
+      expect(window.sessionStorage.getItem('guideants.settings.activeModelOperation')).toBeNull();
     });
   });
 
   it('clears the add-model banner when onboarding fails terminally', async () => {
     window.sessionStorage.setItem(
-      'guideants.settings.activeAddOperation',
-      JSON.stringify({ operationId: 'op-3', catalogModelId: 'llama/failed' }),
+      'guideants.settings.activeModelOperation',
+      JSON.stringify({
+        operationId: 'op-3',
+        catalogModelId: 'llama/failed',
+        routerModelId: 'alias-3',
+        kind: 'add',
+        pollRoute: 'downloads',
+      }),
     );
 
     renderSettingsAsAdmin();
@@ -216,7 +234,7 @@ describe('Settings operational flows', () => {
     });
 
     await waitFor(() => {
-      expect(window.sessionStorage.getItem('guideants.settings.activeAddOperation')).toBeNull();
+      expect(window.sessionStorage.getItem('guideants.settings.activeModelOperation')).toBeNull();
     });
   });
 

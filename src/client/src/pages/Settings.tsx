@@ -25,13 +25,14 @@ import { TelemetryTab } from './settings/components/TelemetryTab';
 import { AddModelWizard } from './settings/components/catalog/AddModelWizard';
 import { UsersTab } from './settings/components/UsersTab';
 import {
-  ActiveAddOperationState,
+  ActiveModelOperationState,
   ModelsRuntimeDeepLink,
   PendingConfirmation,
   SettingsTab,
 } from './settings/types';
 import {
   getErrorMessage,
+  parseActiveModelOperation,
 } from './settings/utils';
 import { useLocalModelOnboardingOperation } from '../features/localModelOnboarding/useOperationPolling';
 import { useAuth } from '../contexts/AuthContext';
@@ -41,6 +42,8 @@ import { HeaderUserMenu } from '../components/common/HeaderUserMenu';
 import { HeaderIconLinkButton } from '../components/common/HeaderIconLinkButton';
 import { FiBookOpen } from 'react-icons/fi';
 import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
+
+const ACTIVE_MODEL_OPERATION_STORAGE_KEY = 'guideants.settings.activeModelOperation';
 
 export default function Settings() {
   const { showToast } = useToast();
@@ -69,30 +72,30 @@ export default function Settings() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardProviderPreselect, setWizardProviderPreselect] = useState<string | null>(null);
   const [wizardAttachAliasPreselect, setWizardAttachAliasPreselect] = useState<string | null>(null);
-  const [activeAddOperation, setActiveAddOperationState] = useState<ActiveAddOperationState | null>(() => {
+  const [activeModelOperation, setActiveModelOperationState] = useState<ActiveModelOperationState | null>(() => {
     if (typeof window === 'undefined') {
       return null;
     }
     try {
-      const raw = window.sessionStorage.getItem('guideants.settings.activeAddOperation');
-      return raw ? (JSON.parse(raw) as ActiveAddOperationState) : null;
+      const raw = window.sessionStorage.getItem(ACTIVE_MODEL_OPERATION_STORAGE_KEY);
+      return raw ? parseActiveModelOperation(raw) : null;
     } catch {
       return null;
     }
   });
-  const [activeAddOperationStatus, setActiveAddOperationStatus] = useState<string>('queued');
+  const [activeModelOperationStatus, setActiveModelOperationStatus] = useState<string>('queued');
   const [catalogVersion, setCatalogVersion] = useState(0);
 
-  const setActiveAddOperation = useCallback((next: ActiveAddOperationState | null) => {
-    setActiveAddOperationState(next);
+  const setActiveModelOperation = useCallback((next: ActiveModelOperationState | null) => {
+    setActiveModelOperationState(next);
     if (typeof window === 'undefined') {
       return;
     }
     try {
       if (next) {
-        window.sessionStorage.setItem('guideants.settings.activeAddOperation', JSON.stringify(next));
+        window.sessionStorage.setItem(ACTIVE_MODEL_OPERATION_STORAGE_KEY, JSON.stringify(next));
       } else {
-        window.sessionStorage.removeItem('guideants.settings.activeAddOperation');
+        window.sessionStorage.removeItem(ACTIVE_MODEL_OPERATION_STORAGE_KEY);
       }
     } catch {
       // sessionStorage is best-effort; ignore quota/disabled errors
@@ -111,10 +114,10 @@ export default function Settings() {
   }, [activeTab, isAdmin]);
 
   useEffect(() => {
-    if (!isAdmin && activeAddOperation) {
-      setActiveAddOperation(null);
+    if (!isAdmin && activeModelOperation) {
+      setActiveModelOperation(null);
     }
-  }, [activeAddOperation, isAdmin, setActiveAddOperation]);
+  }, [activeModelOperation, isAdmin, setActiveModelOperation]);
 
   const loadSectionSummaries = useCallback(async () => {
     try {
@@ -184,41 +187,59 @@ export default function Settings() {
   }, [isAdmin, loadSectionSummaries, loadModels, loadLlamaInventory]);
 
   useLocalModelOnboardingOperation({
-    operationId: activeAddOperation?.operationId ?? null,
-    enabled: isAdmin && Boolean(activeAddOperation) && !wizardOpen,
+    operationId: activeModelOperation?.operationId ?? null,
+    // The Add Model wizard polls its own operation while open; a change-quant
+    // download has no other owner, so it keeps polling here.
+    enabled:
+      isAdmin &&
+      Boolean(activeModelOperation) &&
+      !(wizardOpen && activeModelOperation?.kind === 'add'),
+    pollRoute: activeModelOperation?.pollRoute,
     onUpdate: (op: ModelDownloadOperationDto) => {
-      setActiveAddOperationStatus(op.status);
+      setActiveModelOperationStatus(op.status);
     },
     onTerminal: (op: ModelDownloadOperationDto) => {
-      if (!activeAddOperation) {
+      if (!activeModelOperation) {
         return;
       }
+      const isChangeQuant = activeModelOperation.kind === 'changeQuant';
 
       if (op.status === 'completed') {
-        setActiveAddOperation(null);
-        setActiveAddOperationStatus('completed');
+        setActiveModelOperation(null);
+        setActiveModelOperationStatus('completed');
         void (async () => {
           await loadModels();
           await loadLlamaInventory('refresh');
           await loadSectionSummaries();
-          showToast({ type: 'success', title: `Model ${activeAddOperation.catalogModelId} added` });
+          showToast({
+            type: 'success',
+            title: isChangeQuant
+              ? `Quant changed for ${activeModelOperation.catalogModelId}`
+              : `Model ${activeModelOperation.catalogModelId} added`,
+          });
         })();
         return;
       }
 
-      setActiveAddOperation(null);
+      setActiveModelOperation(null);
       showToast({
         type: 'error',
-        title: 'Add model failed',
-        message: op.error?.message ?? op.errorMessage ?? 'Add model operation failed.',
+        title: isChangeQuant ? 'Change quant failed' : 'Add model failed',
+        message:
+          op.error?.message ??
+          op.errorMessage ??
+          (isChangeQuant ? 'Change quant operation failed.' : 'Add model operation failed.'),
       });
     },
     onPollFailureThreshold: () => {
-      setActiveAddOperation(null);
+      const isChangeQuant = activeModelOperation?.kind === 'changeQuant';
+      setActiveModelOperation(null);
       showToast({
         type: 'error',
-        title: 'Add model polling failed',
-        message: 'Could not read add-model operation status.',
+        title: isChangeQuant ? 'Change quant polling failed' : 'Add model polling failed',
+        message: isChangeQuant
+          ? 'Could not read change-quant operation status. The download may still be running on the server.'
+          : 'Could not read add-model operation status.',
       });
     },
     intervalMs: 2000,
@@ -536,7 +557,8 @@ export default function Settings() {
           onRequestDeleteModel={(modelId) => setPendingConfirmation({ kind: 'delete-model', modelId })}
           onCatalogEdited={handleCatalogDataRefresh}
           onOpenAddModelWizard={handleOpenAddModelWizard}
-          activeAddOperation={activeAddOperation}
+          activeModelOperation={activeModelOperation}
+          onModelOperationStarted={setActiveModelOperation}
         />
       );
     }
@@ -544,7 +566,8 @@ export default function Settings() {
     return null;
   }, [
     activeTab,
-    activeAddOperation,
+    activeModelOperation,
+    setActiveModelOperation,
     catalogVersion,
     connectionsFocusedSection,
     deletingModelId,
@@ -609,7 +632,7 @@ export default function Settings() {
 
       <SettingsTabNavigation activeTab={activeTab} role={role} onTabChange={handleNavigate} />
 
-      {isAdmin && activeAddOperation && (
+      {isAdmin && activeModelOperation && (
         <div
           className="border-b border-blue-200 bg-blue-50 px-8 py-2 text-sm text-blue-900"
           role="status"
@@ -618,22 +641,37 @@ export default function Settings() {
           <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3">
             <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-blue-500" aria-hidden />
             <span>
-              Installing <span className="font-mono">{activeAddOperation.catalogModelId}</span> &middot; step{' '}
-              <span className="font-medium">{activeAddOperationStatus}</span>
+              {activeModelOperation.kind === 'changeQuant' ? 'Changing quant for' : 'Installing'}{' '}
+              <span className="font-mono">{activeModelOperation.catalogModelId}</span> &middot; step{' '}
+              <span className="font-medium">{activeModelOperationStatus}</span>
             </span>
-            <button
-              type="button"
-              className="ml-auto rounded border border-blue-300 bg-white px-2 py-0.5 text-xs font-medium text-blue-800 hover:bg-blue-100"
-              onClick={() => {
-                setWizardProviderPreselect('llama-cpp');
-                setWizardOpen(true);
-                setModelsRuntimeDeepLink({ subTab: 'catalog' });
-                setActiveTab('models-runtime');
-              }}
-              title="Open progress view"
-            >
-              Open progress
-            </button>
+            {activeModelOperation.kind === 'add' ? (
+              <button
+                type="button"
+                className="ml-auto rounded border border-blue-300 bg-white px-2 py-0.5 text-xs font-medium text-blue-800 hover:bg-blue-100"
+                onClick={() => {
+                  setWizardProviderPreselect('llama-cpp');
+                  setWizardOpen(true);
+                  setModelsRuntimeDeepLink({ subTab: 'catalog' });
+                  setActiveTab('models-runtime');
+                }}
+                title="Open progress view"
+              >
+                Open progress
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="ml-auto rounded border border-blue-300 bg-white px-2 py-0.5 text-xs font-medium text-blue-800 hover:bg-blue-100"
+                onClick={() => {
+                  setModelsRuntimeDeepLink({ subTab: 'catalog', focusedModelId: activeModelOperation.catalogModelId });
+                  setActiveTab('models-runtime');
+                }}
+                title="Show model in catalog"
+              >
+                Show in catalog
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -654,7 +692,7 @@ export default function Settings() {
             setWizardAttachAliasPreselect(null);
           }}
           onCatalogChanged={handleCatalogDataRefresh}
-          onSetActiveAddOperation={setActiveAddOperation}
+          onSetActiveModelOperation={setActiveModelOperation}
         />
       ) : null}
 
