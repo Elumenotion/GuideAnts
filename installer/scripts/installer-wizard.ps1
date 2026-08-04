@@ -1,5 +1,5 @@
 # Shared installer wizard: component metadata, state, compose assembly, progressive pull.
-# Dot-source from guideants.ps1 and stop_guideants.ps1.
+# Dot-source from scripts/guideants-launcher.ps1 and scripts/stop-guideants-launcher.ps1.
 
 $script:InstallerComposeDir = 'compose'
 $script:InstallerOptionalComponents = @('docling', 'documentserver', 'plantuml', 'searxng')
@@ -379,8 +379,13 @@ function Resolve-InstallerComposeArgs {
         [Parameter(Mandatory = $true)][string[]]$FragmentFiles
     )
 
+    # Fragments live under docker/compose/, but host bind paths in .env
+    # (./volumes/...) must resolve from docker/ — otherwise SearXNG mounts an
+    # empty compose/volumes tree and crashes looking for settings.yml.
     $composeDir = Join-Path $DockerDir $script:InstallerComposeDir
     $args = New-Object System.Collections.Generic.List[string]
+    $args.Add('--project-directory') | Out-Null
+    $args.Add($DockerDir) | Out-Null
     foreach ($fragment in $FragmentFiles) {
         $path = Join-Path $composeDir $fragment
         if (-not (Test-Path -LiteralPath $path)) {
@@ -641,7 +646,7 @@ function Invoke-InstallerProgressivePull {
                 $imageList
                 'Build it locally, then rerun with local compose:'
                 '  powershell -ExecutionPolicy Bypass -File ..\docker\build\build_guideants_ai.ps1 -Backend vulkan'
-                '  powershell -ExecutionPolicy Bypass -File .\guideants.ps1 --backend vulkan --compose local --reconfigure'
+                '  powershell -ExecutionPolicy Bypass -File .\scripts\guideants-launcher.ps1 --backend vulkan --compose local --reconfigure'
                 'Or choose a published backend such as cuda13, cpu, or slim.'
             ) -join [Environment]::NewLine
             Invoke-InstallerStop $vulkanMessage
@@ -909,6 +914,9 @@ function Invoke-InstallerDockerCapture {
     if ($null -ne $script:InstallerDockerCaptureFn) {
         return & $script:InstallerDockerCaptureFn $FilePath $ArgumentList $IgnoreErrors.IsPresent
     }
+    # Windows PowerShell 5.1 + Stop EAP promotes redirected native stderr to terminating errors.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         $output = & $FilePath @ArgumentList 2>$null
         $code = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
@@ -916,6 +924,9 @@ function Invoke-InstallerDockerCapture {
     catch {
         if ($IgnoreErrors) { return [pscustomobject]@{ ExitCode = 1; Output = @() } }
         throw
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
     }
     if (-not $IgnoreErrors -and $code -ne 0) { throw "$FilePath failed with exit code $code" }
     return [pscustomobject]@{ ExitCode = $code; Output = @($output) }

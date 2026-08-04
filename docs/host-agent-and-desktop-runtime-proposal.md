@@ -51,7 +51,7 @@ Three roles, intentionally separate:
 
 | Role | Process | Lifetime |
 |------|---------|----------|
-| **Orchestrator** | `guideants.ps1` / `guideants.sh` | Start/stop session |
+| **Orchestrator** | `guideants.cmd` / `guideants.sh` | Start/stop session |
 | **Host agent** | `guideants-host-agent.mjs` (localhost HTTP) | Runs while stack is up |
 | **Desktop UI** | Electron or browser | User-facing; may close independently |
 
@@ -119,7 +119,7 @@ duplicate compose logic):
 | Windows (native PowerShell) | `installer/scripts/guideants-host-mount.ps1` |
 | Linux / macOS / WSL | `installer/scripts/guideants-host-mount.sh` |
 
-The agent detects environment the same way as `guideants.sh` / `guideants.ps1`
+The agent detects environment the same way as `guideants.sh` / `guideants.cmd`
 (`OS`, `IS_WSL`, presence of `pwsh` vs `bash`).
 
 Future compose operations (ROCm override regen, env reload) add routes that spawn
@@ -199,7 +199,7 @@ return `409`.
 
 ## 4. Launcher integration
 
-Extend `installer/guideants.ps1` and `installer/guideants.sh` after health check:
+Extend `installer/scripts/guideants-launcher.ps1` (via `guideants.cmd`) and `installer/guideants.sh` after health check:
 
 1. Start host agent if not already running (pidfile + health probe).
 2. Write agent port/token/pid into `.installer_state.env`.
@@ -214,7 +214,7 @@ Extend `installer/guideants.ps1` and `installer/guideants.sh` after health check
 | `--agent-only` | Start stack + agent; no UI (automation/CI) |
 | `--no-agent` | Skip agent (current manual-command-only behavior) |
 
-**Stop path** (`stop_guideants.ps1` / `.sh`):
+**Stop path** (`stop_guideants.cmd` / `stop_guideants.sh`):
 
 1. Stop host agent gracefully (`SIGTERM`, then `SIGKILL` after timeout).
 2. `docker compose down` as today.
@@ -228,7 +228,7 @@ The agent must run in the **same environment as `docker compose`**:
 - Never mix: a Windows-native agent cannot run `docker compose` that targets the
   WSL engine unless paths and context align.
 
-This matches existing launcher detection (`IS_WSL`, `OsName` in `guideants.ps1`).
+This matches existing launcher detection (`IS_WSL`, `OsName` in `guideants-launcher.ps1`).
 
 ### 4.2 Platform background start
 
@@ -248,7 +248,7 @@ of scope for phase 1.
 ### 5.1 Recommended startup: launcher starts both
 
 ```text
-guideants.ps1 --desktop
+guideants.cmd --desktop
   ├─ docker compose up
   ├─ guideants-host-agent.mjs (background)
   └─ GuideAnts Notebooks.exe / GuideAnts.app / AppImage
@@ -261,12 +261,14 @@ static server — the desktop app is a native shell around the running stack.
 
 ```text
 installer/
-├── guideants.ps1
+├── guideants.cmd
+├── guideants.sh
 ├── GuideAnts/
 │   ├── GuideAnts.exe              # Windows
 │   ├── GuideAnts.app/             # macOS
 │   └── guideants-notebooks        # Linux AppImage or binary
 └── scripts/
+    ├── guideants-launcher.ps1
     ├── guideants-host-agent.mjs
     ├── guideants-host-mount.ps1
     └── guideants-host-mount.sh
@@ -280,7 +282,7 @@ If the user double-clicks Electron without running the launcher:
 
 1. Read `GUIDEANTS_INSTALL_ROOT` or search upward for `.installer_state.env`.
 2. `GET /v1/health` on recorded port; if stack healthy, open `localhost:5107`.
-3. If stack missing, show setup UI that shells out to `guideants.ps1` (or instruct
+3. If stack missing, show setup UI that shells out to `guideants.cmd` / `guideants.sh` (or instruct
    the user to run the launcher first).
 
 Electron **may** ensure the agent is running on startup, but must not duplicate full
@@ -315,7 +317,7 @@ COMPOSE_MODE=ghcr
 COMPOSE_FILE=docker-compose.ghcr-cpu.yml
 HOST_MOUNT_OVERRIDE_FILE=docker-compose.host-mounts.generated.yml
 DOCKER_DIRECTORY=docker
-START_COMMAND=guideants.ps1
+START_COMMAND=guideants.cmd
 LAST_RUN_EPOCH=...
 
 # Proposed (host agent)

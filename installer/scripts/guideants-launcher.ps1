@@ -1,8 +1,9 @@
 <# 
-GuideAnts portable launcher - PowerShell companion to guideants.sh.
+GuideAnts portable launcher - PowerShell implementation behind guideants.cmd / guideants.sh.
 
-  Windows       : .\guideants.ps1
-  Linux / macOS : pwsh ./guideants.ps1
+  Windows       : guideants.cmd   (recommended; clears MotW then runs this script)
+  Windows (PS)  : pwsh -File .\scripts\guideants-launcher.ps1
+  Linux / macOS : ./guideants.sh
 
 What it does, in order:
   1. Detects your OS / shell environment.
@@ -27,9 +28,10 @@ Flags:
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $script:RootDir 'scripts/rocm-probe.ps1')
-. (Join-Path $script:RootDir 'scripts/installer-wizard.ps1')
+$script:ScriptDir = $PSScriptRoot
+$script:RootDir = Split-Path -Parent $script:ScriptDir
+. (Join-Path $script:ScriptDir 'rocm-probe.ps1')
+. (Join-Path $script:ScriptDir 'installer-wizard.ps1')
 $script:InstallerLogFn = ${function:Write-Log}
 $script:InstallerWarnFn = ${function:Write-WarnLog}
 $script:InstallerDockerInvokeFn = ${function:Invoke-External}
@@ -97,10 +99,11 @@ function Write-HRule {
 
 function Show-Usage {
     @'
-GuideAnts portable launcher - PowerShell companion to guideants.sh.
+GuideAnts portable launcher - PowerShell implementation behind guideants.cmd / guideants.sh.
 
-  Windows       : .\guideants.ps1
-  Linux / macOS : pwsh ./guideants.ps1
+  Windows       : guideants.cmd
+  Windows (PS)  : pwsh -File .\scripts\guideants-launcher.ps1
+  Linux / macOS : ./guideants.sh
 
 What it does, in order:
   1. Detects your OS / shell environment.
@@ -143,6 +146,11 @@ function Invoke-ExternalCapture {
         [switch]$IgnoreErrors
     )
 
+    # Windows PowerShell 5.1 + $ErrorActionPreference Stop treats native stderr
+    # redirected with 2>$null as terminating ErrorRecords (e.g. docker info WARNINGs).
+    # Lower EAP around the call so exit code is the only failure signal.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         $output = & $FilePath @ArgumentList 2>$null
         $exitCode = Get-LastExitCodeSafe
@@ -152,6 +160,9 @@ function Invoke-ExternalCapture {
             return [pscustomobject]@{ ExitCode = 1; Output = @() }
         }
         Stop-WithError "$FilePath failed: $($_.Exception.Message)"
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
     }
 
     if (-not $IgnoreErrors -and $exitCode -ne 0) {
@@ -1390,7 +1401,7 @@ function Save-State {
         -Components $script:SelectedComponents `
         -ComposeFiles $script:SelectedComposeFragments `
         -ComposeMode $script:ComposeMode `
-        -StartCommand 'guideants.ps1'
+        -StartCommand 'guideants.cmd'
 }
 
 function Ensure-ShellScriptsUseLf {

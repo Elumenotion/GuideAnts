@@ -234,7 +234,10 @@ installer_rewrite_image_pin() {
 }
 
 installer_compose_args() {
-  COMPOSE_ARGS=()
+  # Fragments live under docker/compose/, but host bind paths in .env
+  # (./volumes/...) must resolve from docker/ — otherwise SearXNG mounts an
+  # empty compose/volumes tree and crashes looking for settings.yml.
+  COMPOSE_ARGS=(--project-directory "$DOCKER_DIR")
   local f rel
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
@@ -390,7 +393,7 @@ installer_build_compose_args_from_state() {
     [[ -n "${COMPONENTS:-}" ]] && IFS=',' read -r -a comp_array <<< "$COMPONENTS"
     mapfile -t files < <(installer_compose_fragments "$DB_LAYOUT" "$AI_BACKEND" "${comp_array[@]}")
   fi
-  COMPOSE_ARGS=()
+  COMPOSE_ARGS=(--project-directory "$root_dir/docker")
   local f rel trimmed
   for f in "${files[@]}"; do
     trimmed="${f#"${f%%[![:space:]]*}"}"

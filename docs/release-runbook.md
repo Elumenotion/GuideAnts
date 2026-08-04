@@ -148,7 +148,7 @@ unzip -p guideants-installer-v1.2.3.zip docker/images.env | head
 On a clean machine (or clean Docker image cache):
 
 1. Unzip the asset
-2. Run `./guideants.ps1` or `./guideants.sh` (use `--yes` for non-interactive)
+2. Run `guideants.cmd` (Windows) or `./guideants.sh` (Linux/macOS; use `--yes` for non-interactive)
 3. Confirm first pull uses digest refs from `images.env`
 4. Confirm health at `http://localhost:5107/`
 

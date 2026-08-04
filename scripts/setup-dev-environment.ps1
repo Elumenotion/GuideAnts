@@ -180,7 +180,7 @@ Run the stack locally:
 
 To run the full Docker app again (no host dev):
     cd installer
-    ./guideants.ps1
+    guideants.cmd
 
 See docs/developer-config-guide.md for details.
 "@

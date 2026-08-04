@@ -1,8 +1,8 @@
 # GuideAnts — Portable Quick Start
 
 This is one universal bundle for every operating system. It contains launcher
-scripts (`guideants.sh` and `guideants.ps1`), stop scripts (`stop_guideants.sh` and
-`stop_guideants.ps1`), host-mount helper scripts, and Docker Compose **fragments**
+scripts (`guideants.sh` and `guideants.cmd`), stop scripts (`stop_guideants.sh` and
+`stop_guideants.cmd`), host-mount helper scripts, and Docker Compose **fragments**
 under `docker/compose/`. Docker downloads the actual application images on first
 run, so the download itself is tiny.
 
@@ -43,13 +43,21 @@ xattr -d com.apple.quarantine guideants.sh
 > **Apple Silicon note:** Images run as `linux/amd64` under emulation. The
 > `slim` AI backend is recommended on Apple Silicon for best performance.
 
-**Windows (PowerShell)**
+**Windows**
 
-Open PowerShell in this folder and run:
+Double-click `guideants.cmd`, or from Command Prompt / PowerShell in this folder:
 
-```powershell
-./guideants.ps1
+```bat
+guideants.cmd
 ```
+
+`guideants.cmd` clears Mark-of-the-Web (MotW) from extracted release scripts, then
+runs `scripts\guideants-launcher.ps1`. Prefer the `.cmd` entrypoint over calling
+the `.ps1` directly — download-blocked PowerShell scripts are a common pain after
+unzipping a GitHub release.
+
+Optional before extract: zip → Properties → **Unblock** → OK (stops MotW from
+landing on extracted files).
 
 **Windows (WSL / Git Bash)**
 
@@ -60,8 +68,8 @@ Docker Desktop installs WSL2, which includes bash. Open a WSL terminal
 bash guideants.sh
 ```
 
-On Windows, **PowerShell (`guideants.ps1`) is recommended** — it handles WSL distro
-probing, ROCm library staging, and browser launch more reliably than Git Bash.
+On Windows, **`guideants.cmd` is recommended** — it handles MotW unblocking, WSL
+distro probing, ROCm library staging, and browser launch more reliably than Git Bash.
 
 ### WSL2 check (Windows)
 
@@ -219,7 +227,7 @@ wsl -d Ubuntu-24.04 -u root bash /mnt/c/path/to/GuideAnts/installer/scripts/inst
 Or from the installer folder on Windows:
 
 ```powershell
-.\guideants.ps1 --install-rocm-wsl
+.\guideants.cmd --install-rocm-wsl
 ```
 
 **3. Confirm the GPU is visible in WSL:**
@@ -269,7 +277,7 @@ filesystem and the running containers.
 ```
 
 ```powershell
-./guideants.ps1 --mount C:/path/to/your/folder
+guideants.cmd --mount C:/path/to/your/folder
 ```
 
 1. The stack starts normally.
@@ -330,7 +338,7 @@ Generate pins locally (same script the release workflow runs):
 ```
 
 ```powershell
-./stop_guideants.ps1
+stop_guideants.cmd
 ```
 
 Reads saved `COMPOSE_FILES` from `.installer_state.env` and runs `docker compose down`.
@@ -352,20 +360,25 @@ Containers are included only when selected:
 ## Data persistence
 
 Projects, database, and models live in Docker named volumes (`mssql_data`,
-`mssql_log`, `ai_local_models`, etc.) and in the `docker/volumes/content-files`
-bind mount. They persist across stops and updates.
+`mssql_log`, `ai_local_models`, etc.) and in bind mounts under `docker/volumes/`:
+`content-files/` for project content, and `searxng/config/` (seeded
+`settings.yml` + `limiter.toml`) for the SearXNG service. They persist across
+stops and updates. Compose uses `--project-directory docker/` so these
+`./volumes/...` paths resolve correctly from the fragment files in `compose/`.
 
 ## File structure
 
 ```
 installer/
-├── guideants.sh                    # Main launcher
-├── guideants.ps1                   # Main launcher (PowerShell)
-├── stop_guideants.sh               # Stop script
-├── stop_guideants.ps1              # Stop script (PowerShell)
+├── guideants.sh                    # Main launcher (Linux / macOS / WSL)
+├── guideants.cmd                   # Main launcher (Windows; unblocks MotW)
+├── stop_guideants.sh               # Stop script (Linux / macOS / WSL)
+├── stop_guideants.cmd              # Stop script (Windows; unblocks MotW)
 ├── .installer_state.env            # Saved selections (auto-generated)
 ├── README.md
 ├── scripts/
+│   ├── guideants-launcher.ps1      # PowerShell implementation (called by .cmd)
+│   ├── stop-guideants-launcher.ps1 # PowerShell stop implementation (called by .cmd)
 │   ├── installer-wizard.sh         # Shared wizard (bash)
 │   ├── installer-wizard.ps1        # Shared wizard (PowerShell)
 │   ├── guideants-host-mount.sh     # Host mount helper (bash)
