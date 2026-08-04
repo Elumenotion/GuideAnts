@@ -26,6 +26,7 @@ import { NotebookAuthInterstitial } from '../components/notebook/auth/NotebookAu
 import { checkNotebookAuthRequirements } from '../utils/notebookAuth';
 import { useRegisterTour } from '../tour/useRegisterTour';
 import { useNotebookFilesPolling } from '../hooks/useNotebookFilesPolling';
+import { useProjectFilesPolling } from '../hooks/useProjectFilesPolling';
 import { NotebookFolderTreeDto } from '../types/notebook';
 import { useToast } from '../components/common/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,7 +38,7 @@ function NotebookDetailsContent() {
     const { projectId, notebookId } = useParams<{ projectId: string; notebookId: string }>();
     const navigate = useNavigate();
     const location = useLocation();
-    const { project, canEdit, isLoading: projectLoading, error: projectError, refreshProject, folderTree: projectFolderTree } = useProject();
+    const { project, canEdit, isLoading: projectLoading, error: projectError, refreshProject, folderTree: contextProjectFolderTree } = useProject();
     const { role, status } = useAuth();
     const isAdmin = role === 'Admin';
     const isAuthenticatedAdmin = status === 'authenticated' && isAdmin;
@@ -76,6 +77,13 @@ function NotebookDetailsContent() {
         notebookId: notebookId || '',
         enabled: Boolean(projectId && notebookId),
     });
+
+    // Keep project file picker current (ProjectContext tree is a one-shot load)
+    const { folderTree: polledProjectFolderTree } = useProjectFilesPolling({
+        projectId: projectId || '',
+        enabled: Boolean(projectId),
+    });
+    const projectFolderTree = polledProjectFolderTree ?? contextProjectFolderTree;
     
     // Initialize activeConversationId from URL query param 'c' to persist across iOS resume/page refresh
     const [activeConversationId, setActiveConversationIdState] = useState<string | null>(() => {

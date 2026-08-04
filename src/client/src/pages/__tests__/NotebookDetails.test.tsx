@@ -86,6 +86,16 @@ vi.mock('../../hooks/useNotebookFilesPolling', () => ({
   }),
 }));
 
+vi.mock('../../hooks/useProjectFilesPolling', () => ({
+  useProjectFilesPolling: () => ({
+    folderTree: null,
+    isLoading: false,
+    error: null,
+    lastUpdated: null,
+    refresh: vi.fn(),
+  }),
+}));
+
 vi.mock('../../hooks/useNotebookWorkspaceControls', () => ({
   useNotebookWorkspaceControls: () => mockWorkspaceControls,
 }));

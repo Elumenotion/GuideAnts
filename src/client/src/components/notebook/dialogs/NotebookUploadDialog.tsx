@@ -248,9 +248,10 @@ export const NotebookUploadDialog: React.FC<NotebookUploadDialogProps> = ({
 
   const dialogMarkup = (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+      {/* min-h-0 + overflow-hidden let flex children shrink so the file list can scroll inside max-h */}
+      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col min-h-0 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div className="flex-shrink-0 flex items-center justify-between p-6 border-b border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900 flex items-baseline gap-2">
             Add Files to Notebook
             <span className="text-sm font-normal text-gray-500">to {folderDisplayName}</span>
@@ -268,7 +269,7 @@ export const NotebookUploadDialog: React.FC<NotebookUploadDialogProps> = ({
 
         {/* Tabs */}
         {hasProjectFiles && (
-          <div className="flex border-b border-gray-200">
+          <div className="flex-shrink-0 flex border-b border-gray-200">
             <button
               onClick={() => setActiveTab('local')}
               className={`px-6 py-3 text-sm font-medium border-b-2 ${
@@ -293,16 +294,16 @@ export const NotebookUploadDialog: React.FC<NotebookUploadDialogProps> = ({
         )}
 
         {/* Content */}
-        <div className="p-6 flex-1 overflow-hidden flex flex-col">
+        <div className="p-6 flex-1 min-h-0 overflow-hidden flex flex-col">
           {activeTab === 'local' ? (
             <>
-              <h3 className="text-sm font-medium text-gray-700 mb-3">Select Files from Your Computer</h3>
+              <h3 className="flex-shrink-0 text-sm font-medium text-gray-700 mb-3">Select Files from Your Computer</h3>
               
               {/* Drop Zone */}
               <div
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
-                className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-blue-400 mb-4"
+                className="flex-shrink-0 border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-blue-400 mb-4"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <svg className="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 48 48">
@@ -325,11 +326,11 @@ export const NotebookUploadDialog: React.FC<NotebookUploadDialogProps> = ({
 
               {/* Selected Files List */}
               {selectedFiles.length > 0 && (
-                <div className="flex-1 overflow-hidden flex flex-col">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">
+                <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+                  <h4 className="flex-shrink-0 text-sm font-medium text-gray-700 mb-2">
                     Selected Files ({selectedFiles.length})
                   </h4>
-                  <div className="flex-1 border border-gray-200 rounded-md overflow-y-auto">
+                  <div className="flex-1 min-h-0 border border-gray-200 rounded-md overflow-y-auto">
                     {selectedFiles.map((file, index) => (
                       <div key={index} className="flex items-center justify-between p-3 border-b border-gray-100 last:border-b-0">
                         <div className="flex items-center flex-1 min-w-0">
@@ -358,24 +359,24 @@ export const NotebookUploadDialog: React.FC<NotebookUploadDialogProps> = ({
             </>
           ) : (
             <>
-              <h3 className="text-sm font-medium text-gray-700 mb-3">Select Files from Current Project</h3>
+              <h3 className="flex-shrink-0 text-sm font-medium text-gray-700 mb-3">Select Files from Current Project</h3>
               
               {projectFolderTree ? (
-                <div className="flex-1 overflow-hidden flex flex-col">
+                <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                   {selectedProjectFiles.length > 0 && (
-                    <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded">
+                    <div className="flex-shrink-0 mb-3 p-2 bg-blue-50 border border-blue-200 rounded">
                       <span className="text-sm text-blue-800 font-medium">
                         {selectedProjectFiles.length} file{selectedProjectFiles.length > 1 ? 's' : ''} selected
                       </span>
                     </div>
                   )}
                   
-                  <div className="flex-1 border border-gray-200 rounded-md overflow-y-auto">
+                  <div className="flex-1 min-h-0 border border-gray-200 rounded-md overflow-y-auto">
                     {renderProjectFolderTree(projectFolderTree)}
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 flex items-center justify-center text-gray-500">
+                <div className="flex-1 min-h-0 flex items-center justify-center text-gray-500">
                   <div className="text-center">
                     <svg className="w-12 h-12 mx-auto mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
@@ -389,7 +390,7 @@ export const NotebookUploadDialog: React.FC<NotebookUploadDialogProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-gray-200 flex items-center justify-between">
+        <div className="flex-shrink-0 p-6 border-t border-gray-200 flex items-center justify-between">
           <div />
           <div className="text-sm text-gray-600">
             {fileCount > 0 && (

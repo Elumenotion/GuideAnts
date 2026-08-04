@@ -9,7 +9,8 @@ internal static class WireClientRequestParser
 {
 internal sealed record ClientPromptParts(
         IReadOnlyList<ChatMessage> PrefixMessages,
-        string UserPrompt);
+        string UserPrompt,
+        IReadOnlyList<string> UserImageUrls);
 
 internal static List<ChatToolDefinition> ParseAnthropicClientToolDefinitions(JsonElement tools)
 {
@@ -182,6 +183,11 @@ internal static ClientPromptParts SplitClientPrompt(IReadOnlyList<ChatMessage> p
             continue;
         }
 
+        var imageUrls = message.Content
+            .Where(static c => c.IsImage && c.ImageUrl != null && !string.IsNullOrWhiteSpace(c.ImageUrl.Url))
+            .Select(static c => c.ImageUrl!.Url)
+            .ToList();
+
         var prefixMessages = new List<ChatMessage>(normalizedMessages.Count - 1);
         for (var index = 0; index < normalizedMessages.Count; index++)
         {
@@ -193,15 +199,21 @@ internal static ClientPromptParts SplitClientPrompt(IReadOnlyList<ChatMessage> p
             prefixMessages.Add(normalizedMessages[index]);
         }
 
-        return new ClientPromptParts(prefixMessages, text.Trim());
+        return new ClientPromptParts(prefixMessages, text.Trim(), imageUrls);
     }
 
-    return new ClientPromptParts(normalizedMessages, fallbackPrompt.Trim());
+    return new ClientPromptParts(normalizedMessages, fallbackPrompt.Trim(), []);
 }
 
 internal static bool IsMeaningfulClientMessage(ChatMessage message)
 {
     if (!string.IsNullOrWhiteSpace(message.GetText()))
+    {
+        return true;
+    }
+
+    if (message.Content.Any(static c =>
+            c.IsImage && c.ImageUrl != null && !string.IsNullOrWhiteSpace(c.ImageUrl.Url)))
     {
         return true;
     }
@@ -262,7 +274,7 @@ internal static List<ChatMessage> ParseOpenAiChatClientMessages(JsonElement mess
         }
 
         var contents = item.TryGetProperty("content", out var contentElement)
-            ? CreateTextContents(WireJson.ExtractTextContent(contentElement))
+            ? CreateOpenAiChatContents(contentElement)
             : Array.Empty<ChatContent>();
 
         var toolCalls = role == ChatRole.Assistant &&
@@ -356,6 +368,16 @@ internal static void TryAddOpenAiResponsesClientMessage(JsonElement item, IColle
         return;
     }
 
+    if (string.Equals(type, "input_image", StringComparison.OrdinalIgnoreCase))
+    {
+        var imageContents = CreateOpenAiChatContents(item);
+        if (imageContents.Count > 0)
+        {
+            destination.Add(new ChatMessage(ChatRole.User, imageContents));
+        }
+        return;
+    }
+
     if (string.Equals(type, "output_text", StringComparison.OrdinalIgnoreCase))
     {
         var text = item.TryGetProperty("text", out var textElement)
@@ -412,7 +434,7 @@ internal static void TryAddOpenAiResponsesClientMessage(JsonElement item, IColle
             : default;
     var contents = content.ValueKind == JsonValueKind.Undefined
         ? Array.Empty<ChatContent>()
-        : CreateTextContents(WireJson.ExtractTextContent(content));
+        : CreateOpenAiChatContents(content);
 
     var toolCalls = role == ChatRole.Assistant &&
                     messagePayload.TryGetProperty("tool_calls", out var toolCallsElement)
@@ -476,6 +498,7 @@ internal static List<ChatMessage> ParseAnthropicClientMessages(JsonElement syste
         }
 
         var textBlocks = new List<string>();
+        var imageContents = new List<ChatContent>();
         var toolCalls = new List<ChatToolCall>();
         var toolResults = new List<ChatMessage>();
 
@@ -497,6 +520,13 @@ internal static List<ChatMessage> ParseAnthropicClientMessages(JsonElement syste
                     textBlocks.Add(blockText.Trim());
                 }
 
+                continue;
+            }
+
+            if (string.Equals(blockType, "image", StringComparison.OrdinalIgnoreCase) &&
+                TryCreateAnthropicImageContent(block, out var imageContent))
+            {
+                imageContents.Add(imageContent!);
                 continue;
             }
 
@@ -554,8 +584,10 @@ internal static List<ChatMessage> ParseAnthropicClientMessages(JsonElement syste
             }
         }
 
+        var contents = new List<ChatContent>();
         var text = textBlocks.Count == 0 ? null : string.Join("\n", textBlocks);
-        var contents = CreateTextContents(text);
+        contents.AddRange(CreateTextContents(text));
+        contents.AddRange(imageContents);
 
         if (role == ChatRole.Assistant && toolCalls.Count > 0)
         {
@@ -643,6 +675,178 @@ internal static IReadOnlyList<ChatContent> CreateTextContents(string? text)
     }
 
     return [new ChatContent(text.Trim())];
+}
+
+internal static IReadOnlyList<ChatContent> CreateOpenAiChatContents(JsonElement content)
+{
+    if (content.ValueKind == JsonValueKind.String)
+    {
+        return CreateTextContents(content.GetString());
+    }
+
+    if (content.ValueKind == JsonValueKind.Array)
+    {
+        var items = new List<ChatContent>();
+        foreach (var part in content.EnumerateArray())
+        {
+            AddOpenAiChatContentPart(part, items);
+        }
+
+        return items;
+    }
+
+    if (content.ValueKind == JsonValueKind.Object)
+    {
+        var items = new List<ChatContent>();
+        AddOpenAiChatContentPart(content, items);
+        return items;
+    }
+
+    return Array.Empty<ChatContent>();
+}
+
+internal static void AddOpenAiChatContentPart(JsonElement part, List<ChatContent> items)
+{
+    if (part.ValueKind == JsonValueKind.String)
+    {
+        var text = part.GetString();
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            items.Add(new ChatContent(text.Trim()));
+        }
+
+        return;
+    }
+
+    if (part.ValueKind != JsonValueKind.Object)
+    {
+        return;
+    }
+
+    var type = part.TryGetProperty("type", out var typeElement) && typeElement.ValueKind == JsonValueKind.String
+        ? typeElement.GetString()
+        : null;
+
+    if (string.Equals(type, "text", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(type, "input_text", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(type, "output_text", StringComparison.OrdinalIgnoreCase))
+    {
+        var text = WireJson.ExtractTextContent(part);
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            items.Add(new ChatContent(text.Trim()));
+        }
+
+        return;
+    }
+
+    if (string.Equals(type, "image_url", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(type, "input_image", StringComparison.OrdinalIgnoreCase) ||
+        part.TryGetProperty("image_url", out _))
+    {
+        if (TryReadOpenAiImageUrl(part, out var imageUrl))
+        {
+            items.Add(new ChatContent(new ChatImageUrl(imageUrl!)));
+        }
+
+        return;
+    }
+
+    if (part.TryGetProperty("text", out var textElement) && textElement.ValueKind == JsonValueKind.String)
+    {
+        var textValue = textElement.GetString();
+        if (!string.IsNullOrWhiteSpace(textValue))
+        {
+            items.Add(new ChatContent(textValue.Trim()));
+        }
+    }
+}
+
+internal static bool TryReadOpenAiImageUrl(JsonElement part, out string? imageUrl)
+{
+    imageUrl = null;
+
+    if (part.TryGetProperty("image_url", out var imageUrlElement))
+    {
+        if (imageUrlElement.ValueKind == JsonValueKind.String)
+        {
+            imageUrl = imageUrlElement.GetString();
+        }
+        else if (imageUrlElement.ValueKind == JsonValueKind.Object &&
+                 imageUrlElement.TryGetProperty("url", out var urlElement) &&
+                 urlElement.ValueKind == JsonValueKind.String)
+        {
+            imageUrl = urlElement.GetString();
+        }
+    }
+    else if (part.TryGetProperty("url", out var directUrlElement) &&
+             directUrlElement.ValueKind == JsonValueKind.String)
+    {
+        imageUrl = directUrlElement.GetString();
+    }
+
+    if (string.IsNullOrWhiteSpace(imageUrl))
+    {
+        imageUrl = null;
+        return false;
+    }
+
+    imageUrl = imageUrl.Trim();
+    return true;
+}
+
+internal static bool TryCreateAnthropicImageContent(JsonElement block, out ChatContent? content)
+{
+    content = null;
+    if (!block.TryGetProperty("source", out var source) || source.ValueKind != JsonValueKind.Object)
+    {
+        return false;
+    }
+
+    var sourceType = source.TryGetProperty("type", out var sourceTypeElement) &&
+                     sourceTypeElement.ValueKind == JsonValueKind.String
+        ? sourceTypeElement.GetString()
+        : null;
+
+    if (string.Equals(sourceType, "url", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(sourceType, "image_url", StringComparison.OrdinalIgnoreCase))
+    {
+        var url = source.TryGetProperty("url", out var urlElement) && urlElement.ValueKind == JsonValueKind.String
+            ? urlElement.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return false;
+        }
+
+        content = new ChatContent(new ChatImageUrl(url.Trim()));
+        return true;
+    }
+
+    if (string.Equals(sourceType, "base64", StringComparison.OrdinalIgnoreCase))
+    {
+        var data = source.TryGetProperty("data", out var dataElement) && dataElement.ValueKind == JsonValueKind.String
+            ? dataElement.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(data))
+        {
+            return false;
+        }
+
+        var mediaType = source.TryGetProperty("media_type", out var mediaTypeElement) &&
+                        mediaTypeElement.ValueKind == JsonValueKind.String
+            ? mediaTypeElement.GetString()
+            : "image/png";
+        if (string.IsNullOrWhiteSpace(mediaType))
+        {
+            mediaType = "image/png";
+        }
+
+        content = new ChatContent(new ChatImageUrl($"data:{mediaType.Trim()};base64,{data.Trim()}"));
+        return true;
+    }
+
+    return false;
 }
 
 internal static bool TryMapClientRole(string? role, out ChatRole mappedRole)

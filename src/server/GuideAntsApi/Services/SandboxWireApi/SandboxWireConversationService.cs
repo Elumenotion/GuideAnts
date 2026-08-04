@@ -4,6 +4,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Services.Conversations.Attachments;
 using GuideAntsApi.Services.Conversations.Mapping;
 using GuideAntsApi.Services.Conversations.Persistence;
 using GuideAntsApi.Services.Conversations.Streaming;
@@ -38,6 +39,7 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
     private readonly PublishedConversationStreamPolicy _streamPolicy;
     private readonly IConversationStreamEngine _streamEngine;
     private readonly IConversationPersistence _persistence;
+    private readonly IAttachmentContentService _attachmentContentService;
     private readonly IConfiguration? _configuration;
 
     public SandboxWireConversationService(
@@ -48,6 +50,7 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
         PublishedConversationStreamPolicy streamPolicy,
         IConversationStreamEngine streamEngine,
         IConversationPersistence persistence,
+        IAttachmentContentService attachmentContentService,
         IConfiguration? configuration = null)
     {
         _publishedConversationService = publishedConversationService;
@@ -57,6 +60,7 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
         _streamPolicy = streamPolicy;
         _streamEngine = streamEngine;
         _persistence = persistence;
+        _attachmentContentService = attachmentContentService;
         _configuration = configuration;
     }
 
@@ -151,6 +155,29 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
                     AssistantId: runningAssistantId),
                 ct);
             userMessageId = userResult.MessageId;
+
+            if (request.Attachments != null && request.Attachments.Count > 0)
+            {
+                await _attachmentContentService.AddAttachmentsToUserMessageAsync(
+                    db,
+                    userResult.MessageId,
+                    dbConversation.NotebookId,
+                    request.Attachments,
+                    ct);
+                foreach (var attachment in request.Attachments)
+                {
+                    if (!attachment.NotebookFileId.HasValue)
+                    {
+                        continue;
+                    }
+
+                    var messages = await _attachmentContentService.CreateOpenAiMessagesFromNotebookFileAsync(
+                        db,
+                        attachment.NotebookFileId.Value,
+                        ct);
+                    previousMessages.AddRange(messages);
+                }
+            }
         }
 
         var runContext = new ConversationStreamRunContext

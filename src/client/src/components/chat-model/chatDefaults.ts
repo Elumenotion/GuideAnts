@@ -46,6 +46,43 @@ export function chatDefaultsToConfig(defaults: ChatDefaultsDto): ChatModelConfig
   };
 }
 
+/**
+ * Builds a config seeded entirely from the model's samplingParameterPolicy
+ * recommended defaults (and default reasoning choice). Used when the user
+ * selects a different model so prior model values are not carried over.
+ */
+export function buildChatModelConfigFromModelDefaults(
+  modelId: string,
+  model: ModelDto | undefined
+): ChatModelConfigValue {
+  const samplingOverrides: Record<string, number> = {};
+  let temperature: number | null = null;
+  let topP: number | null = null;
+
+  for (const param of model?.samplingParameterPolicy ?? []) {
+    const key = param.key.toLowerCase();
+    if (typeof param.recommendedDefault !== 'number' || Number.isNaN(param.recommendedDefault)) {
+      continue;
+    }
+
+    if (key === 'temperature') {
+      temperature = param.recommendedDefault;
+    } else if (key === 'top_p') {
+      topP = param.recommendedDefault;
+    } else {
+      samplingOverrides[param.key] = param.recommendedDefault;
+    }
+  }
+
+  return {
+    modelId,
+    temperature,
+    topP,
+    reasoningEffort: normalizeReasoningEffortForModel(model, undefined),
+    samplingOverrides,
+  };
+}
+
 export function normalizeChatModelConfigForModel(
   config: ChatModelConfigValue,
   model: ModelDto | undefined
@@ -72,6 +109,25 @@ export function normalizeChatModelConfigForModel(
       && !Number.isNaN(value)
     ) {
       normalizedOverrides[key] = value;
+    }
+  }
+
+  // Fill missing override keys from the model's recommended defaults so the UI
+  // and persisted chat defaults match the runtime profile JSON.
+  for (const param of model?.samplingParameterPolicy ?? []) {
+    const key = param.key.toLowerCase();
+    if (key === 'temperature' || key === 'top_p') {
+      continue;
+    }
+    const alreadySet = Object.keys(normalizedOverrides).some(
+      (overrideKey) => overrideKey.toLowerCase() === key
+    );
+    if (
+      !alreadySet
+      && typeof param.recommendedDefault === 'number'
+      && !Number.isNaN(param.recommendedDefault)
+    ) {
+      normalizedOverrides[param.key] = param.recommendedDefault;
     }
   }
 
@@ -112,10 +168,7 @@ export function buildChatDefaultsModelChangeRequest(
   overrideAllChatModels: boolean
 ): UpdateChatDefaultsRequest {
   const normalizedConfig = normalizeChatModelConfigForModel(
-    {
-      ...chatDefaultsToConfig(base),
-      modelId,
-    },
+    buildChatModelConfigFromModelDefaults(modelId, model),
     model
   );
 

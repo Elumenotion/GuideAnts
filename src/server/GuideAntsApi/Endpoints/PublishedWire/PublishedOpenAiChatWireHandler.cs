@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.PublishedWireApi;
 using GuideAntsApi.Services.Routing;
@@ -30,6 +31,8 @@ public static async Task<IResult> PostChatCompletionsAsync(
     [FromBody] OpenAiChatCompletionsRequest request,
     [FromServices] IPublishedApiExecutionContextResolver executionContextResolver,
     [FromServices] IPublishedConversationService publishedConversationService,
+    [FromServices] INotebookFileService notebookFileService,
+    [FromServices] IHttpClientFactory httpClientFactory,
     [FromServices] ApplicationDbContext db)
 {
     var loggerFactory = httpContext.RequestServices?.GetService<ILoggerFactory>() ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
@@ -104,6 +107,14 @@ public static async Task<IResult> PostChatCompletionsAsync(
                 db,
                 httpContext.RequestAborted);
 
+            var attachments = await WireImageAttachmentMaterializer.MaterializeAsync(
+                notebookFileService,
+                context.ProjectId,
+                context.NotebookId,
+                clientPrompt.UserImageUrls,
+                httpClientFactory.CreateClient(),
+                httpContext.RequestAborted);
+
             streamHandle = await WireConversationExecutor.StartConversationStreamAsync(
                 publishedConversationService,
                 context,
@@ -111,7 +122,8 @@ public static async Task<IResult> PostChatCompletionsAsync(
                 httpContext.RequestAborted,
                 existingConversationId: existingConversationId,
                 clientMessages: existingConversationId.HasValue ? null : clientPrompt.PrefixMessages,
-                clientToolDefinitions: clientToolDefinitions);
+                clientToolDefinitions: clientToolDefinitions,
+                attachments: attachments.Count == 0 ? null : attachments);
         }
 
         var publicApiOrigin = WireResponseSerializer.ResolvePublicApiOrigin(httpContext);
@@ -224,6 +236,8 @@ public static async Task<IResult> PostResponsesAsync(
     [FromBody] OpenAiResponsesRequest request,
     [FromServices] IPublishedApiExecutionContextResolver executionContextResolver,
     [FromServices] IPublishedConversationService publishedConversationService,
+    [FromServices] INotebookFileService notebookFileService,
+    [FromServices] IHttpClientFactory httpClientFactory,
     [FromServices] ApplicationDbContext db)
 {
     var loggerFactory = httpContext.RequestServices?.GetService<ILoggerFactory>() ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
@@ -324,6 +338,14 @@ public static async Task<IResult> PostResponsesAsync(
                 return conversationResolution.ErrorResult;
             }
 
+            var attachments = await WireImageAttachmentMaterializer.MaterializeAsync(
+                notebookFileService,
+                context.ProjectId,
+                context.NotebookId,
+                clientPrompt.UserImageUrls,
+                httpClientFactory.CreateClient(),
+                httpContext.RequestAborted);
+
             streamHandle = await WireConversationExecutor.StartConversationStreamAsync(
                 publishedConversationService,
                 context,
@@ -331,7 +353,8 @@ public static async Task<IResult> PostResponsesAsync(
                 httpContext.RequestAborted,
                 existingConversationId: conversationResolution.ConversationId,
                 clientMessages: conversationResolution.ConversationId.HasValue ? null : clientPrompt.PrefixMessages,
-                clientToolDefinitions: clientToolDefinitions);
+                clientToolDefinitions: clientToolDefinitions,
+                attachments: attachments.Count == 0 ? null : attachments);
         }
 
         var publicApiOrigin = WireResponseSerializer.ResolvePublicApiOrigin(httpContext);

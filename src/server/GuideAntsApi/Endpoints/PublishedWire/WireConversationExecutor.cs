@@ -35,7 +35,8 @@ internal static async Task<WireConversationStreamHandle> StartConversationStream
     CancellationToken ct,
     Guid? existingConversationId = null,
     IReadOnlyList<ChatMessage>? clientMessages = null,
-    IReadOnlyList<ChatToolDefinition>? clientToolDefinitions = null)
+    IReadOnlyList<ChatToolDefinition>? clientToolDefinitions = null,
+    IReadOnlyList<AttachmentDto>? attachments = null)
 {
     var createdConversation = !existingConversationId.HasValue;
     var conversationId = existingConversationId ??
@@ -45,6 +46,7 @@ internal static async Task<WireConversationStreamHandle> StartConversationStream
     var request = new SendMessageRequest
     {
         Instructions = instructions,
+        Attachments = attachments == null ? null : [.. attachments],
         ClientMessages = clientMessages == null ? null : [.. clientMessages],
         ClientToolDefinitions = clientToolDefinitions == null ? null : [.. clientToolDefinitions]
     };
@@ -86,7 +88,8 @@ internal static async Task<WireConversationResult> ExecuteConversationAsync(
     CancellationToken ct,
     Guid? existingConversationId = null,
     IReadOnlyList<ChatMessage>? clientMessages = null,
-    IReadOnlyList<ChatToolDefinition>? clientToolDefinitions = null)
+    IReadOnlyList<ChatToolDefinition>? clientToolDefinitions = null,
+    IReadOnlyList<AttachmentDto>? attachments = null)
 {
     var streamHandle = await StartConversationStreamAsync(
         publishedConversationService,
@@ -95,7 +98,8 @@ internal static async Task<WireConversationResult> ExecuteConversationAsync(
         ct,
         existingConversationId,
         clientMessages,
-        clientToolDefinitions);
+        clientToolDefinitions,
+        attachments);
 
     var result = await CollectWireConversationResultAsync(streamHandle.Events, db, streamHandle.ConversationId, ct);
     if (streamHandle.CreatedConversation)

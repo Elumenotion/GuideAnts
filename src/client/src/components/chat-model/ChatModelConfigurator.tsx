@@ -3,9 +3,9 @@ import { api } from '../../services/api';
 import { ModelDto } from '../../types/guides';
 import { ModelSelector } from '../guides/editor/ModelSelector';
 import { ConfigParams } from '../guides/editor/ConfigParams';
-import { normalizeReasoningEffortForModel, normalizeSamplingValueForModel } from './reasoning';
 import {
   ChatModelConfigValue,
+  buildChatModelConfigFromModelDefaults,
   normalizeChatModelConfigForModel,
 } from './chatDefaults';
 
@@ -100,21 +100,28 @@ export function ChatModelConfigurator({
       return;
     }
 
-    const normalizedReasoningEffort = normalizeReasoningEffortForModel(selectedModel, reasoningEffort);
-    const normalizedTemperature = normalizeSamplingValueForModel(selectedModel, 'temperature', temperature);
-    const normalizedTopP = normalizeSamplingValueForModel(selectedModel, 'top_p', topP);
+    const normalized = normalizeChatModelConfigForModel({
+      modelId: modelId ?? '',
+      temperature,
+      topP,
+      reasoningEffort,
+      samplingOverrides: overrides,
+    }, selectedModel);
+
+    const overridesChanged = Object.keys(normalized.samplingOverrides ?? {}).length !== Object.keys(overrides).length
+      || Object.entries(normalized.samplingOverrides ?? {}).some(
+        ([key, value]) => overrides[key] !== value
+      );
+
     if (
-      normalizedReasoningEffort !== reasoningEffort
-      || normalizedTemperature !== temperature
-      || normalizedTopP !== topP
+      normalized.reasoningEffort !== reasoningEffort
+      || normalized.temperature !== temperature
+      || normalized.topP !== topP
+      || overridesChanged
     ) {
-      pushChange({
-        temperature: normalizedTemperature,
-        topP: normalizedTopP,
-        reasoningEffort: normalizedReasoningEffort
-      });
+      onChange(normalized);
     }
-  }, [loading, selectedModel, temperature, topP, reasoningEffort]);
+  }, [loading, selectedModel, modelId, temperature, topP, reasoningEffort, overrides]);
 
   return (
     <div className="space-y-4">
@@ -126,10 +133,10 @@ export function ChatModelConfigurator({
         onChange={(id) => {
           const nextModelId = id ?? '';
           const nextModel = models.find((model) => model.modelId === nextModelId);
-          pushChange({
-            modelId: nextModelId,
-            reasoningEffort: normalizeReasoningEffortForModel(nextModel, reasoningEffort),
-          }, nextModel);
+          onChange(normalizeChatModelConfigForModel(
+            buildChatModelConfigFromModelDefaults(nextModelId, nextModel),
+            nextModel
+          ));
         }}
       />
 

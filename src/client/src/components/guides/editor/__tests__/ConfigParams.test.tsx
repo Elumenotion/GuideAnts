@@ -154,4 +154,44 @@ describe('ConfigParams', () => {
 
     expect((screen.getByLabelText('Reasoning Effort') as HTMLSelectElement).value).toBe('medium');
   });
+
+  it('falls back to model recommended defaults when temperature/topP are unset', () => {
+    render(
+      <ConfigParams
+        model={{
+          ...baseModel,
+          samplingParameterPolicy: [
+            {
+              key: 'temperature',
+              label: 'Temperature',
+              description: 'Controls randomness',
+              min: 0,
+              max: 2,
+              step: 0.1,
+              recommendedDefault: 0.7,
+              displayOrder: 1,
+            },
+            {
+              key: 'top_p',
+              label: 'Top P',
+              description: 'Nucleus sampling',
+              min: 0,
+              max: 1,
+              step: 0.05,
+              recommendedDefault: 0.8,
+              displayOrder: 2,
+            },
+          ],
+        }}
+        temperature={null}
+        topP={null}
+        onTemperatureChange={vi.fn()}
+        onTopPChange={vi.fn()}
+        onReasoningEffortChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText('Temperature')).toHaveValue('0.7');
+    expect(screen.getByLabelText('Top P')).toHaveValue('0.8');
+  });
 });
