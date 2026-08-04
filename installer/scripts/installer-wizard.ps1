@@ -229,7 +229,10 @@ function Set-InstallerLocalImageEnv {
         GA_WEBAPI_UI_SLIM_GHCR_IMAGE = 'GA_WEBAPI_UI_SLIM_IMAGE'
         GA_MSSQL_IMAGE = 'GA_MSSQL_IMAGE'
         GA_AI_SLIM_GHCR_IMAGE = 'GA_AI_SLIM_IMAGE'
-        GA_AI_GHCR_IMAGE = 'GA_AI_CUDA_IMAGE'
+        GA_AI_CPU_GHCR_IMAGE = 'GA_AI_CPU_IMAGE'
+        GA_AI_CUDA_GHCR_IMAGE = 'GA_AI_CUDA_IMAGE'
+        GA_AI_ROCM_GHCR_IMAGE = 'GA_AI_ROCM_IMAGE'
+        GA_AI_VULKAN_GHCR_IMAGE = 'GA_AI_VULKAN_IMAGE'
         GA_PLANTUML_GHCR_IMAGE = 'GA_PLANTUML_IMAGE'
         GA_SEARXNG_GHCR_IMAGE = 'GA_SEARXNG_IMAGE'
     }
@@ -241,13 +244,133 @@ function Set-InstallerLocalImageEnv {
             Set-Item -Path "Env:$ghcrVar" -Value $localValue
         }
     }
+}
 
-    switch ($script:SelectedAiBackend) {
-        'cpu' { if ($env:GA_AI_CPU_IMAGE) { $env:GA_AI_GHCR_IMAGE = $env:GA_AI_CPU_IMAGE } }
-        'rocm' { if ($env:GA_AI_ROCM_IMAGE) { $env:GA_AI_GHCR_IMAGE = $env:GA_AI_ROCM_IMAGE } }
-        'vulkan' { if ($env:GA_AI_VULKAN_IMAGE) { $env:GA_AI_GHCR_IMAGE = $env:GA_AI_VULKAN_IMAGE } }
-        'cuda13' { if ($env:GA_AI_CUDA_IMAGE) { $env:GA_AI_GHCR_IMAGE = $env:GA_AI_CUDA_IMAGE } }
+function Get-InstallerImagesEnvPath {
+    $configured = Get-Variable -Name ImagesEnvFile -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $configured -and -not [string]::IsNullOrWhiteSpace([string]$configured.Value)) {
+        return [string]$configured.Value
     }
+    $dockerDir = Get-Variable -Name DockerDir -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $dockerDir -and -not [string]::IsNullOrWhiteSpace([string]$dockerDir.Value)) {
+        return (Join-Path ([string]$dockerDir.Value) 'images.env')
+    }
+    return 'images.env'
+}
+
+function Get-InstallerComposeEnvArgs {
+    param([Parameter(Mandatory = $true)][string]$EnvFile)
+
+    $args = @('--env-file', $EnvFile)
+    $imagesEnv = Get-InstallerImagesEnvPath
+    if (Test-Path -LiteralPath $imagesEnv) {
+        $args += @('--env-file', $imagesEnv)
+    }
+    return $args
+}
+
+function Read-InstallerEnvFileValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Key
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    foreach ($raw in Get-Content -LiteralPath $Path) {
+        $line = ([string]$raw).Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
+        $idx = $line.IndexOf('=')
+        if ($idx -lt 1) { continue }
+        $k = $line.Substring(0, $idx).Trim()
+        if ($k -ne $Key) { continue }
+        return $line.Substring($idx + 1).Trim()
+    }
+    return $null
+}
+
+function Initialize-InstallerImagesEnvMeta {
+    $script:UpdateChannel = 'main'
+    $script:ReleaseTag = ''
+    $imagesEnv = Get-InstallerImagesEnvPath
+    if (-not (Test-Path -LiteralPath $imagesEnv)) { return }
+
+    $channel = Read-InstallerEnvFileValue -Path $imagesEnv -Key 'GA_UPDATE_CHANNEL'
+    if (-not [string]::IsNullOrWhiteSpace($channel)) { $script:UpdateChannel = $channel }
+    $release = Read-InstallerEnvFileValue -Path $imagesEnv -Key 'GA_RELEASE_TAG'
+    if (-not [string]::IsNullOrWhiteSpace($release)) { $script:ReleaseTag = $release }
+
+    $env:GA_UPDATE_CHANNEL = $script:UpdateChannel
+    if (-not [string]::IsNullOrWhiteSpace($script:ReleaseTag)) {
+        $env:GA_RELEASE_TAG = $script:ReleaseTag
+        Write-InstallerLog "Release image pins: $($script:ReleaseTag) (update channel :$($script:UpdateChannel))"
+    }
+    else {
+        Write-InstallerLog "Image pins loaded from $(Split-Path -Leaf $imagesEnv) (update channel :$($script:UpdateChannel))"
+    }
+}
+
+function Get-InstallerUpdateChannelName {
+    $channelVar = Get-Variable -Name UpdateChannel -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $channelVar -and -not [string]::IsNullOrWhiteSpace([string]$channelVar.Value)) {
+        return [string]$channelVar.Value
+    }
+    return 'main'
+}
+
+function Get-InstallerImageRepository {
+    param([Parameter(Mandatory = $true)][string]$ImageRef)
+
+    if ($ImageRef.Contains('@')) {
+        return $ImageRef.Split('@')[0]
+    }
+    if ($ImageRef -match '.*/.+:') {
+        $idx = $ImageRef.LastIndexOf(':')
+        if ($idx -gt 0) { return $ImageRef.Substring(0, $idx) }
+    }
+    return $ImageRef
+}
+
+function Get-InstallerUpdateChannelRef {
+    param([Parameter(Mandatory = $true)][string]$ImageRef)
+
+    $repo = Get-InstallerImageRepository -ImageRef $ImageRef
+    $channel = Get-InstallerUpdateChannelName
+    if ($repo -match '^ghcr\.io/.+/guideants-' -or $repo -match '^ghcr\.io/.+/mssql2025-express-fts$') {
+        return "${repo}:${channel}"
+    }
+    return $ImageRef
+}
+
+function Update-InstallerImagePin {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$Digest
+    )
+
+    $file = Get-InstallerImagesEnvPath
+    if (-not (Test-Path -LiteralPath $file)) { return }
+    if ([string]::IsNullOrWhiteSpace($Digest)) { return }
+
+    $newRef = "${Repository}@${Digest}"
+    $lines = Get-Content -LiteralPath $file
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($raw in $lines) {
+        $line = [string]$raw
+        if ($line -match '^(?<key>[A-Za-z0-9_]+)=(?<val>.*)$') {
+            $key = $Matches['key']
+            $val = $Matches['val']
+            if ($key -like 'GA_*IMAGE*' -or $key -eq 'GA_MSSQL_IMAGE') {
+                $vrepo = Get-InstallerImageRepository -ImageRef $val
+                if ($vrepo -eq $Repository) {
+                    $out.Add("$key=$newRef") | Out-Null
+                    continue
+                }
+            }
+        }
+        $out.Add($line) | Out-Null
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllLines($file, $out.ToArray(), $utf8NoBom)
 }
 
 function Resolve-InstallerComposeArgs {
@@ -375,7 +498,10 @@ function Invoke-InstallerProgressivePull {
         [switch]$AssumeYes
     )
 
-    $config = Invoke-InstallerDockerCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $EnvFile, 'config', '--images')) -IgnoreErrors
+    $envArgs = @(Get-InstallerComposeEnvArgs -EnvFile $EnvFile)
+    Initialize-InstallerImagesEnvMeta
+
+    $config = Invoke-InstallerDockerCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + $envArgs + @('config', '--images')) -IgnoreErrors
     if ($config.ExitCode -ne 0) {
         Invoke-InstallerStop 'Could not resolve image list from compose fragments. Check compose files and docker/.env.'
     }
@@ -387,7 +513,7 @@ function Invoke-InstallerProgressivePull {
 
     Write-InstallerLog 'Checking for image updates (reads registry metadata only until pull)...'
     $missing = New-Object System.Collections.Generic.List[string]
-    $stale = New-Object System.Collections.Generic.List[string]
+    $staleChannel = New-Object System.Collections.Generic.List[string]
     $current = New-Object System.Collections.Generic.List[string]
 
     if ($ComposeMode -eq 'local') {
@@ -402,21 +528,24 @@ function Invoke-InstallerProgressivePull {
         }
     }
     else {
-    foreach ($image in $images) {
-        $localDigest = Invoke-InstallerGetLocalDigest -ImageRef $image
-        if ([string]::IsNullOrWhiteSpace($localDigest)) {
-            $missing.Add($image) | Out-Null
-            continue
-        }
+        foreach ($image in $images) {
+            $localDigest = Invoke-InstallerGetLocalDigest -ImageRef $image
+            if ([string]::IsNullOrWhiteSpace($localDigest)) {
+                $missing.Add($image) | Out-Null
+                continue
+            }
 
-        $remoteDigest = Invoke-InstallerGetRemoteDigest -ImageRef $image
-        if (-not [string]::IsNullOrWhiteSpace($remoteDigest) -and $remoteDigest -ne $localDigest) {
-            $stale.Add($image) | Out-Null
+            $channelRef = Get-InstallerUpdateChannelRef -ImageRef $image
+            $remoteDigest = Invoke-InstallerGetRemoteDigest -ImageRef $channelRef
+            if (-not [string]::IsNullOrWhiteSpace($remoteDigest) -and $remoteDigest -ne $localDigest) {
+                if (-not $staleChannel.Contains($channelRef)) {
+                    $staleChannel.Add($channelRef) | Out-Null
+                }
+            }
+            else {
+                $current.Add($image) | Out-Null
+            }
         }
-        else {
-            $current.Add($image) | Out-Null
-        }
-    }
     }
 
     if ($ComposeMode -eq 'local') {
@@ -439,36 +568,68 @@ function Invoke-InstallerProgressivePull {
     $pullImages = New-Object System.Collections.Generic.List[string]
     foreach ($image in $missing) { $pullImages.Add($image) | Out-Null }
 
-    if ($stale.Count -gt 0) {
-        Write-InstallerLog "Updates available for $($stale.Count) image(s)."
+    $updateChannels = New-Object System.Collections.Generic.List[string]
+    if ($staleChannel.Count -gt 0) {
+        $channelName = Get-InstallerUpdateChannelName
+        Write-InstallerLog "Updates available for $($staleChannel.Count) image(s) on channel :$channelName."
         $doUpdate = $AssumeYes.IsPresent
         if (-not $doUpdate) {
             $doUpdate = Invoke-InstallerAskYesNo -Prompt 'Update now before starting? [Y/n]' -Default 'Y'
         }
         if ($doUpdate) {
-            foreach ($image in $stale) { $pullImages.Add($image) | Out-Null }
+            foreach ($channelRef in $staleChannel) { $updateChannels.Add($channelRef) | Out-Null }
         }
         else {
             Write-InstallerLog 'Keeping current images for stale entries.'
         }
     }
 
-    if ($current.Count -gt 0 -and $pullImages.Count -eq 0) {
+    if ($current.Count -gt 0 -and $pullImages.Count -eq 0 -and $updateChannels.Count -eq 0) {
         Write-InstallerLog 'All images are up to date.'
     }
 
-    if ($pullImages.Count -eq 0) { return }
+    if ($pullImages.Count -eq 0 -and $updateChannels.Count -eq 0) { return }
 
     $pullFailures = New-Object System.Collections.Generic.List[string]
-    Write-InstallerLog "Pulling $($pullImages.Count) image(s) sequentially..."
-    foreach ($image in $pullImages) {
-        Write-InstallerLog "  docker pull $image"
-        try {
-            Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $image)
+
+    if ($pullImages.Count -gt 0) {
+        Write-InstallerLog "Pulling $($pullImages.Count) image(s) sequentially..."
+        foreach ($image in $pullImages) {
+            Write-InstallerLog "  docker pull $image"
+            try {
+                Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $image)
+            }
+            catch {
+                $pullFailures.Add($image) | Out-Null
+                Write-InstallerWarn "Pull failed: $image"
+            }
         }
-        catch {
-            $pullFailures.Add($image) | Out-Null
-            Write-InstallerWarn "Pull failed: $image"
+    }
+
+    if ($updateChannels.Count -gt 0) {
+        $channelName = Get-InstallerUpdateChannelName
+        Write-InstallerLog "Updating $($updateChannels.Count) image(s) from channel :$channelName..."
+        foreach ($channelRef in $updateChannels) {
+            Write-InstallerLog "  docker pull $channelRef"
+            try {
+                Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $channelRef)
+                $digest = Invoke-InstallerGetLocalDigest -ImageRef $channelRef
+                $repo = Get-InstallerImageRepository -ImageRef $channelRef
+                if (-not [string]::IsNullOrWhiteSpace($digest)) {
+                    Update-InstallerImagePin -Repository $repo -Digest $digest
+                    $digestRef = "${repo}@${digest}"
+                    try {
+                        Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $digestRef)
+                    }
+                    catch {
+                        # Layers already present from channel pull; digest pull is best-effort.
+                    }
+                }
+            }
+            catch {
+                $pullFailures.Add($channelRef) | Out-Null
+                Write-InstallerWarn "Pull failed: $channelRef"
+            }
         }
     }
 
@@ -500,10 +661,11 @@ function Invoke-InstallerStartStack {
         [switch]$AssumeYes
     )
 
+    $envArgs = @(Get-InstallerComposeEnvArgs -EnvFile $EnvFile)
     $active = @(Get-InstallerActiveServices -DbLayout $DbLayout -AiBackend $AiBackend -Components $Components)
     Invoke-InstallerProgressivePull -ComposeArgs $ComposeArgs -EnvFile $EnvFile -AiBackend $AiBackend -ComposeMode $ComposeMode -AssumeYes:$AssumeYes
     Write-InstallerLog "Applying selected compose stack (remove-orphans): $($active -join ', ')"
-    Invoke-InstallerDocker -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $EnvFile, 'up', '-d', '--remove-orphans'))
+    Invoke-InstallerDocker -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + $envArgs + @('up', '-d', '--remove-orphans'))
 }
 
 function Invoke-InstallerGetLocalDigest {

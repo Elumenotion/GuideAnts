@@ -2,6 +2,7 @@ param(
     [string]$Owner = 'elumenotion',
     [string]$Registry = 'ghcr.io',
     [string]$ComposeTag = 'main',
+    [string]$ReleaseTag = '',
     [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
     [string[]]$Variant = @(),
     [string]$Username = $env:GHCR_USERNAME,
@@ -311,12 +312,20 @@ foreach ($target in $targets) {
     $buildRef = "$Registry/$Owner/$($target.PackageName):$($target.BuildTag)"
     $latestRef = "$Registry/$Owner/$($target.PackageName):latest"
     $composeRef = "$Registry/$Owner/$($target.PackageName):$ComposeTag"
+    $releaseRef = if (-not [string]::IsNullOrWhiteSpace($ReleaseTag)) {
+        "$Registry/$Owner/$($target.PackageName):$ReleaseTag"
+    } else {
+        $null
+    }
 
     Write-Host ""
     Write-Host "Pushing $($target.Variant) image" -ForegroundColor Cyan
     Write-Host "  Source:      $($target.SourceRef)"
     Write-Host "  Build tag:   $buildRef"
     Write-Host "  Compose tag: $composeRef"
+    if ($null -ne $releaseRef) {
+        Write-Host "  Release tag: $releaseRef"
+    }
     Write-Host "  Latest tag:  $latestRef"
 
     Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $buildRef)
@@ -324,6 +333,11 @@ foreach ($target in $targets) {
 
     Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $composeRef)
     Invoke-DockerCommand -Arguments @('push', $composeRef)
+
+    if ($null -ne $releaseRef) {
+        Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $releaseRef)
+        Invoke-DockerCommand -Arguments @('push', $releaseRef)
+    }
 
     Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $latestRef)
     Invoke-DockerCommand -Arguments @('push', $latestRef)
@@ -362,6 +376,12 @@ if ($pushSupportImages) {
             Tags        = @($cpuImage.BuildTag, $ComposeTag, 'latest')
         }
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseTag)) {
+        foreach ($target in $extraTargets) {
+            $target.Tags = @($target.Tags + @($ReleaseTag) | Select-Object -Unique)
+        }
+    }
 
     foreach ($target in $extraTargets) {
         $targetRefs = @()

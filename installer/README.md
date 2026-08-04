@@ -300,6 +300,29 @@ reference but are not used by the new wizard path.
 For the `rocm` backend, the launcher also layers
 `docker-compose.rocm-runtime.generated.yml` (auto-generated GPU wiring).
 
+## Release image pins and updates
+
+Published installer zips include `docker/images.env` with **immutable digest pins**
+for the GuideAnts GHCR images that belong to that release. Compose loads
+`.env` then `images.env` (later wins).
+
+On each start in GHCR mode the launcher:
+
+1. Pulls any **missing** pinned images.
+2. Compares each local digest to the remote **update channel** (`:main` by default,
+   from `GA_UPDATE_CHANNEL`).
+3. If the channel moved, asks **Update now before starting?** (auto-yes with `--yes`).
+4. On accept, pulls the channel tags and rewrites `images.env` pins to the new digests.
+
+Dev checkouts without `images.env` keep using compose defaults (`:main`) and the same
+detect/ask/update flow against those floating tags.
+
+Generate pins locally (same script the release workflow runs):
+
+```bash
+./installer/scripts/generate-release-image-pins.sh v1.2.3 elumenotion main
+```
+
 ## Stopping
 
 ```bash

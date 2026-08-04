@@ -135,14 +135,102 @@ installer_set_local_image_env() {
   [[ -n "${GA_WEBAPI_UI_SLIM_IMAGE:-}" ]] && export GA_WEBAPI_UI_SLIM_GHCR_IMAGE="$GA_WEBAPI_UI_SLIM_IMAGE"
   [[ -n "${GA_MSSQL_IMAGE:-}" ]] && export GA_MSSQL_IMAGE="$GA_MSSQL_IMAGE"
   [[ -n "${GA_AI_SLIM_IMAGE:-}" ]] && export GA_AI_SLIM_GHCR_IMAGE="$GA_AI_SLIM_IMAGE"
+  [[ -n "${GA_AI_CPU_IMAGE:-}" ]] && export GA_AI_CPU_GHCR_IMAGE="$GA_AI_CPU_IMAGE"
+  [[ -n "${GA_AI_CUDA_IMAGE:-}" ]] && export GA_AI_CUDA_GHCR_IMAGE="$GA_AI_CUDA_IMAGE"
+  [[ -n "${GA_AI_ROCM_IMAGE:-}" ]] && export GA_AI_ROCM_GHCR_IMAGE="$GA_AI_ROCM_IMAGE"
+  [[ -n "${GA_AI_VULKAN_IMAGE:-}" ]] && export GA_AI_VULKAN_GHCR_IMAGE="$GA_AI_VULKAN_IMAGE"
   [[ -n "${GA_PLANTUML_IMAGE:-}" ]] && export GA_PLANTUML_GHCR_IMAGE="$GA_PLANTUML_IMAGE"
   [[ -n "${GA_SEARXNG_IMAGE:-}" ]] && export GA_SEARXNG_GHCR_IMAGE="$GA_SEARXNG_IMAGE"
-  case "$SELECTED_AI_BACKEND" in
-    cpu) [[ -n "${GA_AI_CPU_IMAGE:-}" ]] && export GA_AI_GHCR_IMAGE="$GA_AI_CPU_IMAGE" ;;
-    cuda13) [[ -n "${GA_AI_CUDA_IMAGE:-}" ]] && export GA_AI_GHCR_IMAGE="$GA_AI_CUDA_IMAGE" ;;
-    rocm) [[ -n "${GA_AI_ROCM_IMAGE:-}" ]] && export GA_AI_ROCM_IMAGE="$GA_AI_ROCM_IMAGE" && export GA_AI_GHCR_IMAGE="$GA_AI_ROCM_IMAGE" ;;
-    vulkan) [[ -n "${GA_AI_VULKAN_IMAGE:-}" ]] && export GA_AI_GHCR_IMAGE="$GA_AI_VULKAN_IMAGE" ;;
+}
+
+# Optional release pin file (written into release zips; rewritten locally on update).
+installer_images_env_path() {
+  if [[ -n "${IMAGES_ENV_FILE:-}" ]]; then
+    printf '%s\n' "$IMAGES_ENV_FILE"
+  elif [[ -n "${DOCKER_DIR:-}" ]]; then
+    printf '%s\n' "$DOCKER_DIR/images.env"
+  else
+    printf '%s\n' "images.env"
+  fi
+}
+
+installer_compose_env_args() {
+  COMPOSE_ENV_ARGS=(--env-file "$ENV_FILE")
+  IMAGES_ENV_FILE="$(installer_images_env_path)"
+  if [[ -f "$IMAGES_ENV_FILE" ]]; then
+    COMPOSE_ENV_ARGS+=(--env-file "$IMAGES_ENV_FILE")
+  fi
+}
+
+installer_load_images_env_meta() {
+  GA_UPDATE_CHANNEL="${GA_UPDATE_CHANNEL:-main}"
+  GA_RELEASE_TAG="${GA_RELEASE_TAG:-}"
+  IMAGES_ENV_FILE="$(installer_images_env_path)"
+  [[ -f "$IMAGES_ENV_FILE" ]] || return 0
+  local v
+  v="$(installer_state_get GA_UPDATE_CHANNEL "$IMAGES_ENV_FILE")"
+  [[ -n "$v" ]] && GA_UPDATE_CHANNEL="$v"
+  v="$(installer_state_get GA_RELEASE_TAG "$IMAGES_ENV_FILE")"
+  [[ -n "$v" ]] && GA_RELEASE_TAG="$v"
+  export GA_UPDATE_CHANNEL GA_RELEASE_TAG
+  if [[ -n "$GA_RELEASE_TAG" ]]; then
+    installer_log "Release image pins: $GA_RELEASE_TAG (update channel :$GA_UPDATE_CHANNEL)"
+  else
+    installer_log "Image pins loaded from $(basename "$IMAGES_ENV_FILE") (update channel :$GA_UPDATE_CHANNEL)"
+  fi
+}
+
+installer_image_repository() {
+  local ref="$1"
+  if [[ "$ref" == *@* ]]; then
+    printf '%s\n' "${ref%%@*}"
+    return 0
+  fi
+  if [[ "$ref" == */*:* ]]; then
+    printf '%s\n' "${ref%:*}"
+    return 0
+  fi
+  printf '%s\n' "$ref"
+}
+
+installer_update_channel_ref() {
+  local image_ref="$1"
+  local repo channel="${GA_UPDATE_CHANNEL:-main}"
+  repo="$(installer_image_repository "$image_ref")"
+  case "$repo" in
+    ghcr.io/*/guideants-*|ghcr.io/*/mssql2025-express-fts)
+      printf '%s:%s\n' "$repo" "$channel"
+      ;;
+    *)
+      printf '%s\n' "$image_ref"
+      ;;
   esac
+}
+
+installer_rewrite_image_pin() {
+  local repo="$1" digest="$2"
+  local file tmp key val vrepo
+  file="$(installer_images_env_path)"
+  [[ -f "$file" && -n "$digest" ]] || return 0
+  tmp="$(mktemp)"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "$line" =~ ^([A-Za-z0-9_]+)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      val="${BASH_REMATCH[2]}"
+      case "$key" in
+        GA_*IMAGE*|GA_MSSQL_IMAGE)
+          vrepo="$(installer_image_repository "$val")"
+          if [[ "$vrepo" == "$repo" ]]; then
+            printf '%s=%s@%s\n' "$key" "$repo" "$digest" >> "$tmp"
+            continue
+          fi
+          ;;
+      esac
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$file"
+  mv "$tmp" "$file"
 }
 
 installer_compose_args() {
@@ -157,9 +245,11 @@ installer_compose_args() {
 }
 
 installer_progressive_pull() {
-  local images img l r missing=0 stale=0
-  local -a missing_images=() stale_images=() pull_images=() pull_failures=()
-  if ! images="$(installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" config --images 2>/dev/null)"; then
+  local images img l r channel_ref missing=0 stale=0 dig repo
+  local -a missing_images=() stale_compose=() stale_channel=() pull_images=() update_channels=() pull_failures=()
+  installer_compose_env_args
+  installer_load_images_env_meta
+  if ! images="$(installer_docker compose "${COMPOSE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" config --images 2>/dev/null)"; then
     fail "Could not resolve image list from compose fragments."
   fi
   installer_log "Checking for image updates (reads registry metadata only until pull)..."
@@ -170,8 +260,13 @@ installer_progressive_pull() {
       missing=$((missing+1)); missing_images+=("$img"); continue
     fi
     if [[ "$COMPOSE_MODE" == "local" ]]; then continue; fi
-    r="$(remote_digest "$img" 2>/dev/null || true)"
-    if [[ -n "$r" && "$r" != "$l" ]]; then stale=$((stale+1)); stale_images+=("$img"); fi
+    channel_ref="$(installer_update_channel_ref "$img")"
+    r="$(remote_digest "$channel_ref" 2>/dev/null || true)"
+    if [[ -n "$r" && "$r" != "$l" ]]; then
+      stale=$((stale+1))
+      stale_compose+=("$img")
+      stale_channel+=("$channel_ref")
+    fi
   done <<< "$images"
 
   if [[ "$COMPOSE_MODE" == "local" ]]; then
@@ -190,26 +285,51 @@ installer_progressive_pull() {
   fi
 
   if [[ "$stale" -gt 0 ]]; then
-    installer_log "Updates available for $stale image(s)."
+    installer_log "Updates available for $stale image(s) on channel :${GA_UPDATE_CHANNEL:-main}."
     if [[ "$ASSUME_YES" == "1" ]] || ask_yes_no "Update now before starting? [Y/n]" "Y"; then
-      pull_images+=("${stale_images[@]}")
+      local i
+      for ((i=0; i<stale; i++)); do
+        update_channels+=("${stale_channel[$i]}")
+      done
     else
       installer_log "Keeping current images for stale entries."
     fi
   fi
 
-  if [[ ${#pull_images[@]} -eq 0 ]]; then
+  if [[ ${#pull_images[@]} -eq 0 && ${#update_channels[@]} -eq 0 ]]; then
     installer_log "All images are up to date."
     return 0
   fi
-  installer_log "Pulling ${#pull_images[@]} image(s) sequentially..."
-  for img in "${pull_images[@]}"; do
-    [[ -n "$img" ]] || continue
-    installer_log "  docker pull $img"
-    if ! installer_docker pull "$img"; then
-      pull_failures+=("$img")
-    fi
-  done
+
+  if [[ ${#pull_images[@]} -gt 0 ]]; then
+    installer_log "Pulling ${#pull_images[@]} image(s) sequentially..."
+    for img in "${pull_images[@]}"; do
+      [[ -n "$img" ]] || continue
+      installer_log "  docker pull $img"
+      if ! installer_docker pull "$img"; then
+        pull_failures+=("$img")
+      fi
+    done
+  fi
+
+  if [[ ${#update_channels[@]} -gt 0 ]]; then
+    installer_log "Updating ${#update_channels[@]} image(s) from channel :${GA_UPDATE_CHANNEL:-main}..."
+    for channel_ref in "${update_channels[@]}"; do
+      [[ -n "$channel_ref" ]] || continue
+      installer_log "  docker pull $channel_ref"
+      if ! installer_docker pull "$channel_ref"; then
+        pull_failures+=("$channel_ref")
+        continue
+      fi
+      dig="$(local_digest "$channel_ref" 2>/dev/null || true)"
+      repo="$(installer_image_repository "$channel_ref")"
+      if [[ -n "$dig" ]]; then
+        installer_rewrite_image_pin "$repo" "$dig"
+        # Ensure compose digest refs resolve immediately after pin rewrite.
+        installer_docker pull "${repo}@${dig}" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
 
   if [[ ${#pull_failures[@]} -gt 0 ]]; then
     if [[ "$SELECTED_AI_BACKEND" == "vulkan" ]]; then
@@ -229,9 +349,10 @@ installer_progressive_pull() {
 
 installer_start_stack() {
   installer_active_services
+  installer_compose_env_args
   installer_progressive_pull
   installer_log "Applying selected compose stack (remove-orphans): ${ACTIVE_SERVICES[*]}"
-  installer_docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" up -d --remove-orphans
+  installer_docker compose "${COMPOSE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" up -d --remove-orphans
 }
 
 installer_services_for_selection() {

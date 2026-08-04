@@ -441,6 +441,8 @@ docker-compose.voice-pack.local.yml
 /installer/docker/volumes/content-files/*
 !/installer/docker/volumes/content-files/.gitkeep
 /installer/docker/volumes/rocm-wsl/
+/installer/docker/images.env
+/installer/.installer_state.env
 /docker/volumes/rocm-wsl/
 *.cli-auth-token
 /src/client/GuideAnts.code-workspace

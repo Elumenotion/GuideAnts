@@ -29,6 +29,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$ROOT_DIR/docker"
 ENV_FILE="$DOCKER_DIR/.env"
+IMAGES_ENV_FILE="$DOCKER_DIR/images.env"
 STATE_FILE="$ROOT_DIR/.installer_state.env"
 HEALTH_URL="http://localhost:5107/"
 HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
@@ -176,6 +177,37 @@ report_resources() {
 # =============================================================================
 # 4. Interactive backend walkthrough
 # =============================================================================
+# Local/remote image digests used by installer_progressive_pull.
+local_digest() {
+  local image_ref="$1" line
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    [[ -n "$line" ]] || continue
+    if [[ "$line" == *@* ]]; then
+      printf '%s\n' "${line##*@}"
+      return 0
+    fi
+  done < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image_ref" 2>/dev/null || true)
+  return 1
+}
+
+remote_digest() {
+  local image_ref="$1" out
+  if docker buildx version >/dev/null 2>&1; then
+    out="$(docker buildx imagetools inspect "$image_ref" 2>/dev/null || true)"
+    if [[ "$out" =~ Digest:[[:space:]]+(sha256:[a-f0-9]+) ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  fi
+  out="$(docker manifest inspect -v "$image_ref" 2>/dev/null || true)"
+  if [[ "$out" =~ \"digest\"[[:space:]]*:[[:space:]]*\"(sha256:[a-f0-9]+)\" ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
 ask_yes_no() { # prompt default(Y/N) -> 0 yes / 1 no
   local prompt="$1" def="${2:-Y}" reply
   if [[ "$ASSUME_YES" == "1" ]]; then return 0; fi
@@ -226,7 +258,8 @@ resolve_cuda_image_ref_from_fragments() {
     rel="$DOCKER_DIR/$INSTALLER_COMPOSE_DIR/$f"
     args+=(-f "$rel")
   done
-  docker compose "${args[@]}" --env-file "$ENV_FILE" config --format json 2>/dev/null \
+  installer_compose_env_args
+  docker compose "${args[@]}" "${COMPOSE_ENV_ARGS[@]}" config --format json 2>/dev/null \
     | python3 -c "
 import json,sys
 svc = json.load(sys.stdin).get('services',{}).get('guideants-ai',{})
@@ -238,7 +271,8 @@ if img: print(img)
 # Resolve the guideants-ai image reference from a compose file.
 resolve_cuda_image_ref() {
   local compose_path="$1"
-  docker compose -f "$compose_path" --env-file "$ENV_FILE" config --format json 2>/dev/null \
+  installer_compose_env_args
+  docker compose -f "$compose_path" "${COMPOSE_ENV_ARGS[@]}" config --format json 2>/dev/null \
     | python3 -c "
 import json,sys
 svc = json.load(sys.stdin).get('services',{}).get('guideants-ai',{})
@@ -996,7 +1030,8 @@ if [[ "$MODE" == "doctor" ]]; then
   [[ -f "$DOCKER_DIR/$HOST_MOUNT_OVERRIDE_FILE" ]] && would_start+=" -f docker/$HOST_MOUNT_OVERRIDE_FILE"
   [[ -f "$DOCKER_DIR/$VOICE_PACK_OVERRIDE_FILE" ]] && would_start+=" -f docker/$VOICE_PACK_OVERRIDE_FILE"
   [[ -f "$DOCKER_DIR/$ROCM_RUNTIME_OVERRIDE_FILE" && "$SELECTED_AI_BACKEND" == "rocm" ]] && would_start+=" -f docker/$ROCM_RUNTIME_OVERRIDE_FILE"
-  log "Would start: $would_start --env-file docker/.env up -d"
+  installer_compose_env_args
+  log "Would start: $would_start ${COMPOSE_ENV_ARGS[*]} up -d"
   exit 0
 fi
 
@@ -1008,8 +1043,9 @@ find "$DOCKER_DIR/build" -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null ||
 cd "$DOCKER_DIR"
 installer_set_local_image_env
 installer_compose_args
+installer_compose_env_args
 if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
-  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$HOST_MOUNT_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$HOST_MOUNT_OVERRIDE_FILE" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null 2>&1; then
     COMPOSE_ARGS+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
     log "Including host mount override: $HOST_MOUNT_OVERRIDE_FILE"
   else
@@ -1017,7 +1053,7 @@ if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
   fi
 fi
 if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
-  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$ROCM_RUNTIME_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$ROCM_RUNTIME_OVERRIDE_FILE" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null 2>&1; then
     COMPOSE_ARGS+=(-f "$ROCM_RUNTIME_OVERRIDE_FILE")
     log "Including ROCm runtime override: $ROCM_RUNTIME_OVERRIDE_FILE"
   else
@@ -1025,7 +1061,7 @@ if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
   fi
 fi
 if [[ -f "$VOICE_PACK_OVERRIDE_FILE" ]]; then
-  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$VOICE_PACK_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+  if installer_docker compose "${COMPOSE_ARGS[@]}" -f "$VOICE_PACK_OVERRIDE_FILE" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null 2>&1; then
     COMPOSE_ARGS+=(-f "$VOICE_PACK_OVERRIDE_FILE")
     log "Including voice pack override: $VOICE_PACK_OVERRIDE_FILE"
   else

@@ -1,6 +1,6 @@
 services:
   guideants-ai:
-    image: ${GA_AI_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-cuda13:main}
+    image: ${GA_AI_CUDA_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-cuda13:main}
     pull_policy: missing
     container_name: guideants-ai
     cap_drop:
