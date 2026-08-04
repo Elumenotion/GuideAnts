@@ -1,5 +1,5 @@
 # Shared ROCm / WSL probe helpers for GuideAnts installer scripts.
-# Dot-source from guideants.ps1, rocm-runtime-compose.ps1, or stop_guideants.ps1.
+# Dot-source from scripts/guideants-launcher.ps1, rocm-runtime-compose.ps1, or stop-guideants-launcher.ps1.
 
 function Get-WslUserDistroNames {
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return @() }
@@ -97,7 +97,7 @@ function Write-RocmInstallHint {
     $cmd = Get-RocmInstallCommand -RootDir $RootDir
     & $WarnFn "Install ROCm in WSL with:"
     & $WarnFn "  $cmd"
-    & $WarnFn "Or run: .\guideants.ps1 --install-rocm-wsl"
+    & $WarnFn "Or run: guideants.cmd --install-rocm-wsl"
 }
 
 function Get-NormalizedWslCliText {

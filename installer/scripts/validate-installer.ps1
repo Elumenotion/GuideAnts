@@ -3,8 +3,8 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 $psFiles = @(
-    (Join-Path $root 'guideants.ps1'),
-    (Join-Path $root 'stop_guideants.ps1'),
+    (Join-Path $root 'scripts/guideants-launcher.ps1'),
+    (Join-Path $root 'scripts/stop-guideants-launcher.ps1'),
     (Join-Path $root 'scripts/installer-wizard.ps1'),
     (Join-Path $root 'scripts/guideants-host-mount.ps1')
 )
@@ -18,6 +18,15 @@ foreach ($path in $psFiles) {
         exit 1
     }
     Write-Host "PASS parse: $(Split-Path -Leaf $path)"
+}
+
+foreach ($rel in @('guideants.cmd', 'stop_guideants.cmd')) {
+    $path = Join-Path $root $rel
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-Host "FAIL missing: $rel"
+        exit 1
+    }
+    Write-Host "PASS present: $rel"
 }
 
 $bash = Get-Command bash -ErrorAction SilentlyContinue

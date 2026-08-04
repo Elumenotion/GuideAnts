@@ -1,8 +1,12 @@
 <#
-Stop the GuideAnts stack that was started by guideants.ps1.
+Stop the GuideAnts stack that was started by guideants.cmd / guideants.sh.
 
 Reads saved component selections from .installer_state.env and runs
 docker compose down on the matching compose fragment list.
+
+  Windows       : stop_guideants.cmd
+  Windows (PS)  : pwsh -File .\scripts\stop-guideants-launcher.ps1
+  Linux / macOS : ./stop_guideants.sh
 
 Flags:
   --help   Show this help.
@@ -11,13 +15,14 @@ Flags:
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$script:ScriptDir = $PSScriptRoot
+$script:RootDir = Split-Path -Parent $script:ScriptDir
 $script:DockerDir = Join-Path $script:RootDir 'docker'
 $script:EnvFile = Join-Path $script:DockerDir '.env'
 $script:ImagesEnvFile = Join-Path $script:DockerDir 'images.env'
 $script:StateFile = Join-Path $script:RootDir '.installer_state.env'
 
-. (Join-Path $script:RootDir 'scripts/installer-wizard.ps1')
+. (Join-Path $script:ScriptDir 'installer-wizard.ps1')
 
 function Write-Log {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -31,10 +36,11 @@ function Stop-WithError {
 
 function Show-Usage {
     @'
-Stop the GuideAnts stack that was started by guideants.ps1.
+Stop the GuideAnts stack that was started by guideants.cmd / guideants.sh.
 
-  Windows       : .\stop_guideants.ps1
-  Linux / macOS : pwsh ./stop_guideants.ps1
+  Windows       : stop_guideants.cmd
+  Windows (PS)  : pwsh -File .\scripts\stop-guideants-launcher.ps1
+  Linux / macOS : ./stop_guideants.sh
 
 Reads saved selections from .installer_state.env and runs docker compose down.
 
@@ -76,7 +82,7 @@ function Invoke-Main {
     Parse-Arguments @args
 
     if (-not (Test-Path -LiteralPath $script:StateFile)) {
-        Stop-WithError "No saved state found ($($script:StateFile)). Run guideants.ps1 first."
+        Stop-WithError "No saved state found ($($script:StateFile)). Run guideants.cmd (or guideants.sh) first."
     }
 
     $built = Build-InstallerComposeArgsFromState `
@@ -90,7 +96,7 @@ function Invoke-Main {
     Write-Log "Stopping GuideAnts (DB=$($selection.DbLayout), AI=$($selection.AiBackend))..."
 
     if ($selection.AiBackend -eq 'rocm') {
-        $helper = Join-Path $script:RootDir 'scripts/rocm-runtime-compose.ps1'
+        $helper = Join-Path $script:ScriptDir 'rocm-runtime-compose.ps1'
         if (Test-Path -LiteralPath $helper) {
             & $helper -DockerDir $script:DockerDir -Backend 'rocm' -RootDir $script:RootDir
         }

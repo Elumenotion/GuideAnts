@@ -21,6 +21,11 @@ for f in "${sh_files[@]}"; do
   echo "PASS bash -n: $(basename "$f")"
 done
 
+for rel in guideants.cmd stop_guideants.cmd; do
+  [[ -f "$ROOT_DIR/$rel" ]] || { echo "FAIL missing: $rel" >&2; exit 1; }
+  echo "PASS present: $rel"
+done
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "SKIP compose config: docker not found"
   exit 0

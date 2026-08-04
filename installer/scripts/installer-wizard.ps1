@@ -1,5 +1,5 @@
 # Shared installer wizard: component metadata, state, compose assembly, progressive pull.
-# Dot-source from guideants.ps1 and stop_guideants.ps1.
+# Dot-source from scripts/guideants-launcher.ps1 and scripts/stop-guideants-launcher.ps1.
 
 $script:InstallerComposeDir = 'compose'
 $script:InstallerOptionalComponents = @('docling', 'documentserver', 'plantuml', 'searxng')
@@ -646,7 +646,7 @@ function Invoke-InstallerProgressivePull {
                 $imageList
                 'Build it locally, then rerun with local compose:'
                 '  powershell -ExecutionPolicy Bypass -File ..\docker\build\build_guideants_ai.ps1 -Backend vulkan'
-                '  powershell -ExecutionPolicy Bypass -File .\guideants.ps1 --backend vulkan --compose local --reconfigure'
+                '  powershell -ExecutionPolicy Bypass -File .\scripts\guideants-launcher.ps1 --backend vulkan --compose local --reconfigure'
                 'Or choose a published backend such as cuda13, cpu, or slim.'
             ) -join [Environment]::NewLine
             Invoke-InstallerStop $vulkanMessage

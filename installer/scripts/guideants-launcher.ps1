@@ -1,8 +1,9 @@
 <# 
-GuideAnts portable launcher - PowerShell companion to guideants.sh.
+GuideAnts portable launcher - PowerShell implementation behind guideants.cmd / guideants.sh.
 
-  Windows       : .\guideants.ps1
-  Linux / macOS : pwsh ./guideants.ps1
+  Windows       : guideants.cmd   (recommended; clears MotW then runs this script)
+  Windows (PS)  : pwsh -File .\scripts\guideants-launcher.ps1
+  Linux / macOS : ./guideants.sh
 
 What it does, in order:
   1. Detects your OS / shell environment.
@@ -27,9 +28,10 @@ Flags:
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $script:RootDir 'scripts/rocm-probe.ps1')
-. (Join-Path $script:RootDir 'scripts/installer-wizard.ps1')
+$script:ScriptDir = $PSScriptRoot
+$script:RootDir = Split-Path -Parent $script:ScriptDir
+. (Join-Path $script:ScriptDir 'rocm-probe.ps1')
+. (Join-Path $script:ScriptDir 'installer-wizard.ps1')
 $script:InstallerLogFn = ${function:Write-Log}
 $script:InstallerWarnFn = ${function:Write-WarnLog}
 $script:InstallerDockerInvokeFn = ${function:Invoke-External}
@@ -97,10 +99,11 @@ function Write-HRule {
 
 function Show-Usage {
     @'
-GuideAnts portable launcher - PowerShell companion to guideants.sh.
+GuideAnts portable launcher - PowerShell implementation behind guideants.cmd / guideants.sh.
 
-  Windows       : .\guideants.ps1
-  Linux / macOS : pwsh ./guideants.ps1
+  Windows       : guideants.cmd
+  Windows (PS)  : pwsh -File .\scripts\guideants-launcher.ps1
+  Linux / macOS : ./guideants.sh
 
 What it does, in order:
   1. Detects your OS / shell environment.
@@ -1390,7 +1393,7 @@ function Save-State {
         -Components $script:SelectedComponents `
         -ComposeFiles $script:SelectedComposeFragments `
         -ComposeMode $script:ComposeMode `
-        -StartCommand 'guideants.ps1'
+        -StartCommand 'guideants.cmd'
 }
 
 function Ensure-ShellScriptsUseLf {

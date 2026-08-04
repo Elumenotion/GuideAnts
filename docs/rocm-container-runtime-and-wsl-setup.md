@@ -136,7 +136,7 @@ The staging dirs are git-ignored:
 
 ### Changed
 
-- `installer/guideants.ps1`
+- `installer/scripts/guideants-launcher.ps1` (Windows entrypoint is `installer/guideants.cmd`)
   - `Get-WslUserDistros` — lists user WSL distros; strips UTF-16 NULs from `wsl -l -q`; skips `docker-desktop`/`docker-desktop-data`.
   - `Invoke-WslUserProbe` — runs a probe in each user distro with `-d <distro>`.
   - `Test-AmdGpuDetected` — checks `/dev/kfd`, `rocminfo`, Windows video controllers, and `/dev/dxg`/`rocminfo` inside user distros.
@@ -181,9 +181,9 @@ Expected: `AMD Radeon(TM) 8060S Graphics` / `gfx1151` (for Strix Halo).
 
 4. Launch GuideAnts with the ROCm backend:
 
-```powershell
+```bat
 cd C:\repos\GuideAnts\installer
-.\guideants.ps1 --backend rocm
+guideants.cmd --backend rocm
 ```
 
 The launcher stages `librocdxg`, writes the WSL override, and starts the stack.
