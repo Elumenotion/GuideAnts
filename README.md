@@ -24,7 +24,108 @@ GuideAnts gives AI work a real home. Projects, notebooks, documents and source f
 
 For teams who want to go further, GuideAnts lets you encode repeatable ways of working into **guides and assistants**–reusable assets that package instructions, tools, files, model choices, and context options. And when a workflow is ready, you can **share** it with a friendly URL, **embed** it in another application with the [`guideants` web component](https://www.npmjs.com/package/guideants), or **integrate** it into your app's data and workflow.
 
-[**Try GuideAnts SaaS →**](https://www.guideants.ai) · [**Self-host GuideAnts →**](#getting-started)
+[**Try GuideAnts SaaS →**](https://www.guideants.ai) · [**Self-host with the installer →**](#getting-started) · [**Latest release →**](https://github.com/Elumenotion/GuideAnts/releases/latest)
+
+---
+
+## Getting started
+
+The fastest way to run GuideAnts is the **portable installer** from a GitHub Release. It is a small zip of launcher scripts and Docker Compose fragments—Docker pulls the application images on first run. No repo clone or image build required.
+
+### Requirements
+
+- **Docker** installed and running
+  - [Docker Desktop](https://www.docker.com/products/docker-desktop/) on Windows / macOS
+  - Docker Engine 24+ with the Compose plugin on Linux (legacy `docker-compose` v1 is not supported)
+- **Windows:** [WSL2](https://learn.microsoft.com/windows/wsl/install) (Docker Desktop’s default backend). Confirm with `wsl --status` — you should see **Default Version: 2**.
+- Recommended: **16+ GiB RAM** available to Docker, and enough free disk for the images you select (core alone is roughly 7–8 GB; local AI and optional services add more)
+
+### Install from a release (recommended)
+
+1. Open the [**latest GuideAnts release**](https://github.com/Elumenotion/GuideAnts/releases/latest).
+2. Download **`guideants-installer-<version>.zip`** (for example `guideants-installer-v0.9.12.zip`).
+3. Unzip it somewhere convenient.
+4. Run the launcher:
+
+**Windows** — double-click `guideants.cmd`, or from Command Prompt / PowerShell in the unzipped folder:
+
+```bat
+guideants.cmd
+```
+
+Prefer `guideants.cmd` over calling the PowerShell scripts directly. After a download, Windows often marks extracted scripts with Mark-of-the-Web; the `.cmd` entrypoint clears that so the launcher can run. Optional before extract: zip → Properties → **Unblock**.
+
+**Linux / macOS:**
+
+```bash
+chmod +x guideants.sh
+./guideants.sh
+```
+
+If macOS Gatekeeper blocks the script, right-click → **Open**, or run `xattr -d com.apple.quarantine guideants.sh`.
+
+5. Answer the wizard prompts (database layout, AI backend, optional services).
+6. When the stack is healthy, open **http://localhost:5107/** — the first registered account becomes **Admin**.
+
+Release zips pin exact image digests. On later launches, if newer builds are available on the update channel, the installer can offer an update while keeping your volumes (database, content, models).
+
+Stop the stack with `stop_guideants.cmd` (Windows) or `./stop_guideants.sh` (Linux/macOS) from the same folder.
+
+Full installer details—GPU drivers, ROCm/WSL, host folder mounts, flags, and component sizes—are in [`installer/README.md`](installer/README.md).
+
+### What you choose in the wizard
+
+| Choice | Options (summary) |
+|--------|-------------------|
+| **Database** | **Bundled** (UI + SQL in one container) or **Separate** (slim UI + SQL Express). Fixed after first install. |
+| **AI backend** | `none`, `slim` (sandbox only), `cpu`, `cuda13` (NVIDIA), `rocm` (AMD), `vulkan`. Hardware detection recommends; you decide. |
+| **Optional services** | DocLing, DocumentServer (in-app Office), PlantUML, SearXNG |
+
+Start with **slim** if you mainly use cloud providers and want a smaller pull; re-run with `--reconfigure` later to add a local GPU/CPU runtime without changing the database layout.
+
+> **Apple Silicon:** images run as `linux/amd64` under emulation. Prefer the **slim** AI backend.
+
+### Useful launcher flags
+
+| Flag | Purpose |
+|------|---------|
+| `--yes` / `-y` | Non-interactive defaults (bundled DB, slim AI, all optionals) |
+| `--backend <name>` | Skip the AI backend prompt (`none`, `slim`, `cpu`, `cuda13`, `rocm`, `vulkan`) |
+| `--reconfigure` | Change AI backend / optionals on an existing install |
+| `--doctor` | Run checks only; print the compose command that would be used |
+| `--mount <path>` | Mount a host folder into a project after login |
+
+### Run from a git clone
+
+If you already have the repo checked out, use the same launcher from [`installer/`](installer/):
+
+```bash
+cd installer
+chmod +x guideants.sh   # Linux / macOS
+./guideants.sh
+```
+
+```bat
+cd installer
+guideants.cmd
+```
+
+Dev checkouts without a release `images.env` use floating `:main` tags; release zips use digest pins. See [`installer/README.md`](installer/README.md) and [`docs/release-runbook.md`](docs/release-runbook.md).
+
+### Documentation
+
+- [Installer README](installer/README.md) – portable quick start, wizard, GPU/ROCm, mounts, updates
+- [Setup guide](docs/setup-guide.md) – installation and configuration
+- [Local AI setup guide](docs/local-ai-setup-guide.md) – wizard-driven fully local configuration (ASR, TTS, embeddings, image gen)
+- [Developer config guide](docs/developer-config-guide.md) – configuration reference for contributors
+- [Auth flow](docs/auth-flow.md) – authentication architecture
+- [Project and notebook files system](docs/project-and-notebook-files-system.md) – file and content management
+- [LLaMA model management](docs/llama-model-download-and-runtime-management.md) – local model lifecycle
+- [Native local AI migration](docs/native-ai-migration/README.md) – curated catalog manifests, voice packs, and contributor workflow
+- [Docker build guide](docker/guideants-ai-build.md) – building the runtime service
+- [Vulkan backend guide](docker/guideants-ai-vulkan.md) – vendor-neutral GPU on Docker Desktop and native Linux
+- [Release runbook](docs/release-runbook.md) – cutting releases and installer zip pins
+- [Full docs directory](docs/) – architecture, features, test plans, and more
 
 ---
 
@@ -182,46 +283,14 @@ Each AI capability–chat, embeddings, document intelligence, image generation, 
 
 ---
 
-## Getting started
+## Development entry points
 
-GuideAnts runs locally with Docker Compose. OS-specific quickstart scripts are included:
-
-```bash
-# Windows
-.\quickstart.ps1
-# or: start_windows.cmd
-
-# Linux / macOS
-./quickstart.sh
-# or: start_linux.sh / start_macos.sh
-```
-
-Backends: `cuda13` (NVIDIA), `rocm` (AMD), `vulkan` (NVIDIA/AMD/Intel via Vulkan), `cpu`, and `slim` (sandbox-only, no local models). The root launchers auto-detect GPU where possible; on Windows, NVIDIA drivers below the CUDA 13 minimum (R580) fall back to `vulkan` instead of CPU.
-
-See the [setup guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/setup-guide.md) for full instructions and the [developer config guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/developer-config-guide.md) for configuration options.
-
-### Documentation
-
-All documentation lives in the repository:
-
-- [Setup guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/setup-guide.md) – installation and configuration
-- [Local AI setup guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/local-ai-setup-guide.md) – wizard-driven fully local configuration (ASR, TTS, embeddings, image gen)
-- [Developer config guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/developer-config-guide.md) – configuration reference
-- [Auth flow](https://github.com/Elumenotion/GuideAnts/blob/main/docs/auth-flow.md) – authentication architecture
-- [Project and notebook files system](https://github.com/Elumenotion/GuideAnts/blob/main/docs/project-and-notebook-files-system.md) – file and content management
-- [LLaMA model management](https://github.com/Elumenotion/GuideAnts/blob/main/docs/llama-model-download-and-runtime-management.md) – local model lifecycle
-- [Native local AI migration](https://github.com/Elumenotion/GuideAnts/blob/main/docs/native-ai-migration/README.md) – curated catalog manifests, voice packs, and contributor workflow
-- [Docker build guide](https://github.com/Elumenotion/GuideAnts/blob/main/docker/guideants-ai-build.md) – building the runtime service
-- [Vulkan backend guide](https://github.com/Elumenotion/GuideAnts/blob/main/docker/guideants-ai-vulkan.md) – vendor-neutral GPU (llama + image gen) on Docker Desktop and native Linux
-- [Full docs directory](https://github.com/Elumenotion/GuideAnts/tree/main/docs) – architecture, features, test plans, and more
-
-## Development Entry Points
-
-> **New to the codebase?** Read [`docs/developer-config-guide.md`](docs/developer-config-guide.md) first–it is the single source of truth for what to install and how the client, server, and docker lanes hang together.
+> **New to the codebase?** Read [`docs/developer-config-guide.md`](docs/developer-config-guide.md) first—it is the single source of truth for what to install and how the client, server, and docker lanes hang together.
 
 For day-to-day work, the main entry points are:
 
-- [`docs/developer-config-guide.md`](docs/developer-config-guide.md) for the install checklist and per-lane pre-requisites (client, server, docker)
+- [`docs/developer-config-guide.md`](docs/developer-config-guide.md) for the install checklist and per-lane prerequisites (client, server, docker)
+- [`installer/`](installer/) for the portable compose launcher used in releases
 - [`src/client/package.json`](src/client/package.json) for browser/Electron dev, build, and test commands
 - [`src/server/GuideAntsApi.sln`](src/server/GuideAntsApi.sln) for the .NET solution
 - [`appsettings.example.json`](appsettings.example.json) and [`appsettings.Development.example.json`](appsettings.Development.example.json) for sanitized config templates
@@ -231,7 +300,7 @@ Typical work splits into one of three lanes:
 
 - frontend/product work in `src/client`
 - API/domain/runtime work in `src/server`
-- local infrastructure/runtime work in `docker` (see [`docs/native-ai-migration/`](docs/native-ai-migration/README.md) when changing ASR/TTS/emb catalogs or local model settings UI)
+- local infrastructure/runtime work in `docker` and `installer` (see [`docs/native-ai-migration/`](docs/native-ai-migration/README.md) when changing ASR/TTS/emb catalogs or local model settings UI)
 
 ## Big Thanks To Upstream Projects
 
