@@ -914,6 +914,9 @@ function Invoke-InstallerDockerCapture {
     if ($null -ne $script:InstallerDockerCaptureFn) {
         return & $script:InstallerDockerCaptureFn $FilePath $ArgumentList $IgnoreErrors.IsPresent
     }
+    # Windows PowerShell 5.1 + Stop EAP promotes redirected native stderr to terminating errors.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         $output = & $FilePath @ArgumentList 2>$null
         $code = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
@@ -921,6 +924,9 @@ function Invoke-InstallerDockerCapture {
     catch {
         if ($IgnoreErrors) { return [pscustomobject]@{ ExitCode = 1; Output = @() } }
         throw
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
     }
     if (-not $IgnoreErrors -and $code -ne 0) { throw "$FilePath failed with exit code $code" }
     return [pscustomobject]@{ ExitCode = $code; Output = @($output) }

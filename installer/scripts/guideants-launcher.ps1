@@ -146,6 +146,11 @@ function Invoke-ExternalCapture {
         [switch]$IgnoreErrors
     )
 
+    # Windows PowerShell 5.1 + $ErrorActionPreference Stop treats native stderr
+    # redirected with 2>$null as terminating ErrorRecords (e.g. docker info WARNINGs).
+    # Lower EAP around the call so exit code is the only failure signal.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         $output = & $FilePath @ArgumentList 2>$null
         $exitCode = Get-LastExitCodeSafe
@@ -155,6 +160,9 @@ function Invoke-ExternalCapture {
             return [pscustomobject]@{ ExitCode = 1; Output = @() }
         }
         Stop-WithError "$FilePath failed: $($_.Exception.Message)"
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
     }
 
     if (-not $IgnoreErrors -and $exitCode -ne 0) {
