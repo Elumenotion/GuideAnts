@@ -4,6 +4,7 @@ import type { ChatDefaultsDto } from '../../../types/settings';
 import {
   buildChatDefaultsModelChangeRequest,
   buildChatDefaultsUpdateRequest,
+  buildChatModelConfigFromModelDefaults,
   chatDefaultsToConfig,
   normalizeChatModelConfigForModel,
   parseSamplingOverrides,
@@ -36,10 +37,36 @@ describe('chatDefaults', () => {
     });
   });
 
+  it('builds config from model recommended defaults on model selection', () => {
+    const model: ModelDto = {
+      modelId: 'qwen',
+      displayName: 'Qwen',
+      samplingParameterPolicy: [
+        { key: 'temperature', label: 'Temperature', description: '', min: 0, max: 2, step: 0.1, recommendedDefault: 0.7, displayOrder: 0 },
+        { key: 'top_p', label: 'Top P', description: '', min: 0, max: 1, step: 0.05, recommendedDefault: 0.8, displayOrder: 1 },
+        { key: 'top_k', label: 'Top K', description: '', min: 1, max: 100, step: 1, recommendedDefault: 20, displayOrder: 2 },
+        { key: 'presence_penalty', label: 'Presence', description: '', min: 0, max: 2, step: 0.1, recommendedDefault: 1.5, displayOrder: 3 },
+      ],
+      reasoningChoices: ['none', 'medium'],
+      defaultReasoningChoice: 'medium',
+    } as ModelDto;
+
+    expect(buildChatModelConfigFromModelDefaults('qwen', model)).toEqual({
+      modelId: 'qwen',
+      temperature: 0.7,
+      topP: 0.8,
+      reasoningEffort: 'medium',
+      samplingOverrides: {
+        top_k: 20,
+        presence_penalty: 1.5,
+      },
+    });
+  });
+
   it('normalizes config against declared sampling policy keys', () => {
     const model: ModelDto = {
       id: 'gpt-4o',
-      samplingParameterPolicy: [{ key: 'frequency_penalty' }],
+      samplingParameterPolicy: [{ key: 'frequency_penalty', recommendedDefault: 0 }],
     } as ModelDto;
 
     const normalized = normalizeChatModelConfigForModel(
@@ -59,6 +86,36 @@ describe('chatDefaults', () => {
 
     expect(normalized.samplingOverrides).toEqual({ frequency_penalty: 0.3 });
     expect(normalized.samplingOverrides.ignored_key).toBeUndefined();
+  });
+
+  it('seeds missing sampling override keys from model recommended defaults', () => {
+    const model: ModelDto = {
+      modelId: 'qwen',
+      displayName: 'Qwen',
+      samplingParameterPolicy: [
+        { key: 'temperature', recommendedDefault: 0.7 },
+        { key: 'top_p', recommendedDefault: 0.8 },
+        { key: 'top_k', recommendedDefault: 20 },
+        { key: 'presence_penalty', recommendedDefault: 1.5 },
+      ],
+    } as ModelDto;
+
+    const normalized = normalizeChatModelConfigForModel(
+      {
+        modelId: 'qwen',
+        temperature: null,
+        topP: null,
+        samplingOverrides: {},
+      },
+      model
+    );
+
+    expect(normalized.temperature).toBe(0.7);
+    expect(normalized.topP).toBe(0.8);
+    expect(normalized.samplingOverrides).toEqual({
+      top_k: 20,
+      presence_penalty: 1.5,
+    });
   });
 
   it('builds update requests and model-change requests', () => {
@@ -84,14 +141,27 @@ describe('chatDefaults', () => {
       samplingParametersJson: '{"presence_penalty":0.1}',
     });
 
+    const qwenModel: ModelDto = {
+      modelId: 'qwen',
+      displayName: 'Qwen',
+      samplingParameterPolicy: [
+        { key: 'temperature', recommendedDefault: 0.7 },
+        { key: 'top_p', recommendedDefault: 0.8 },
+        { key: 'presence_penalty', recommendedDefault: 1.5 },
+      ],
+    } as ModelDto;
+
     const modelChange = buildChatDefaultsModelChangeRequest(
       baseDefaults,
-      'gpt-4o-mini',
-      undefined,
+      'qwen',
+      qwenModel,
       false
     );
-    expect(modelChange.defaultModelId).toBe('gpt-4o-mini');
+    expect(modelChange.defaultModelId).toBe('qwen');
     expect(modelChange.overrideAllChatModels).toBe(false);
+    expect(modelChange.temperature).toBe(0.7);
+    expect(modelChange.topP).toBe(0.8);
+    expect(modelChange.samplingParametersJson).toBe('{"presence_penalty":1.5}');
 
     const clearedModel = buildChatDefaultsUpdateRequest(
       baseDefaults,

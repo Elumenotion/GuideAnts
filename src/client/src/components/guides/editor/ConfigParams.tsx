@@ -15,8 +15,8 @@ interface ConfigParamsProps {
 
 export function ConfigParams({
   model,
-  temperature = 1.0,
-  topP = 1.0,
+  temperature,
+  topP,
   reasoningEffort,
   samplingOverrides,
   onTemperatureChange,
@@ -39,10 +39,18 @@ export function ConfigParams({
   }
 
   const getParamValue = (key: string): number => {
-    const policyDefault = samplingPolicy.find(p => p.key === key)?.recommendedDefault ?? 0;
+    const policy = samplingPolicy.find(p => p.key.toLowerCase() === key.toLowerCase());
+    const policyDefault = policy?.recommendedDefault ?? 0;
     if (key === 'temperature') return temperature ?? policyDefault;
     if (key === 'top_p') return topP ?? policyDefault;
-    if (samplingOverrides && key in samplingOverrides) return samplingOverrides[key];
+    if (samplingOverrides) {
+      const overrideEntry = Object.entries(samplingOverrides).find(
+        ([overrideKey]) => overrideKey.toLowerCase() === key.toLowerCase()
+      );
+      if (overrideEntry) {
+        return overrideEntry[1];
+      }
+    }
     return policyDefault;
   };
 

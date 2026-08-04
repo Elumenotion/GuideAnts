@@ -110,6 +110,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -162,6 +164,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -217,6 +221,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -271,6 +277,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -337,6 +345,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -386,6 +396,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -442,6 +454,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -517,6 +531,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -590,6 +606,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -751,6 +769,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -844,6 +864,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -988,6 +1010,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1060,6 +1084,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1118,6 +1144,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1193,6 +1221,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1230,6 +1260,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1292,6 +1324,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1394,6 +1428,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1465,6 +1501,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1624,6 +1662,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1778,6 +1818,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -1969,6 +2011,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -2252,6 +2296,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -2442,6 +2488,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -2613,6 +2661,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -2736,6 +2786,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -2839,6 +2891,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -2966,6 +3020,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             request,
             resolver,
             conversationService.Object,
+            CreateNotebookFileService().Object,
+            CreateHttpClientFactory().Object,
             db);
         var executed = await ExecuteResultAsync(result);
 
@@ -3020,7 +3076,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3072,7 +3128,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3119,7 +3175,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3169,7 +3225,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3244,7 +3300,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3284,7 +3340,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             Conversation = ParseJsonElement($"\"conv_{conversationId:N}\"")
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3309,7 +3365,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             Conversation = ParseJsonElement("\"not-a-conversation-id\"")
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
@@ -3340,7 +3396,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             Conversation = ParseJsonElement($"\"conv_{conversationId:N}\"")
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
@@ -3373,7 +3429,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             PreviousResponseId = $"resp_{assistantMessageId:N}"
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
@@ -3408,7 +3464,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             Conversation = ParseJsonElement("\"conv_not_a_real_id\"")
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
@@ -3453,7 +3509,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3487,7 +3543,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             PreviousResponseId = "resp_not_a_real_id"
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
@@ -3724,6 +3780,27 @@ public sealed class PublishedOpenAiWireHandlersTests
             });
 
         await db.SaveChangesAsync();
+    }
+
+    private static Mock<INotebookFileService> CreateNotebookFileService()
+    {
+        var mock = new Mock<INotebookFileService>(MockBehavior.Loose);
+        mock.Setup(s => s.UploadFilesAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<IFormFileCollection>(),
+                It.IsAny<string>(),
+                It.IsAny<bool>(),
+                It.IsAny<bool>()))
+            .ReturnsAsync(Array.Empty<GuideAntsApi.Models.NotebookFileDto>());
+        return mock;
+    }
+
+    private static Mock<IHttpClientFactory> CreateHttpClientFactory()
+    {
+        var mock = new Mock<IHttpClientFactory>(MockBehavior.Loose);
+        mock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
+        return mock;
     }
 
     private static PublishedApiExecutionContext CreateExecutionContext(
@@ -4058,7 +4135,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, CreateNotebookFileService().Object, CreateHttpClientFactory().Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);

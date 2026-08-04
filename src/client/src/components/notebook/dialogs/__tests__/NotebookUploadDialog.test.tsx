@@ -527,6 +527,42 @@ describe('NotebookUploadDialog', () => {
       expect(screen.getByText('Level 1')).toBeInTheDocument();
       expect(screen.getByText('Level 2')).toBeInTheDocument();
     });
+
+    it('renders every project file in a scrollable list container', () => {
+      const manyFiles: ProjectContentFile[] = Array.from({ length: 40 }, (_, i) => ({
+        ...mockProjectFile,
+        id: `bulk-${i}`,
+        fileName: `bulk-file-${i}.txt`,
+        relativePath: `bulk-file-${i}.txt`,
+        path: `/bulk-file-${i}.txt`,
+        documentId: `doc-bulk-${i}`,
+      }));
+      const tree: FolderTreeDto = {
+        ...mockProjectFolderTree,
+        files: manyFiles,
+        subFolders: [],
+      };
+
+      render(
+        <NotebookUploadDialog
+          isOpen
+          onClose={onClose}
+          onUpload={onUpload}
+          onCopyFromProject={onCopyFromProject}
+          projectFolderTree={tree}
+        />,
+      );
+
+      fireEvent.click(screen.getByText(/select project files/i));
+
+      expect(screen.getByText('bulk-file-0.txt')).toBeInTheDocument();
+      expect(screen.getByText('bulk-file-39.txt')).toBeInTheDocument();
+
+      const firstRow = screen.getByText('bulk-file-0.txt').closest('div');
+      const scrollContainer = firstRow?.parentElement?.parentElement;
+      expect(scrollContainer?.className).toMatch(/overflow-y-auto/);
+      expect(scrollContainer?.className).toMatch(/min-h-0/);
+    });
   });
 
   describe('Accessibility', () => {

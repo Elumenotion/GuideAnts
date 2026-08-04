@@ -52,6 +52,8 @@ public static class SandboxOpenAiWireHandlers
         [FromBody] OpenAiChatCompletionsRequest request,
         [FromServices] ISandboxWireExecutionContextResolver executionContextResolver,
         [FromServices] ISandboxWireConversationService sandboxWireConversationService,
+        [FromServices] INotebookFileService notebookFileService,
+        [FromServices] IHttpClientFactory httpClientFactory,
         [FromServices] ApplicationDbContext db)
     {
         var resolution = await executionContextResolver.ResolveAsync(
@@ -125,12 +127,21 @@ public static class SandboxOpenAiWireHandlers
                     context.NotebookId,
                     httpContext.RequestAborted);
 
+                var attachments = await WireImageAttachmentMaterializer.MaterializeAsync(
+                    notebookFileService,
+                    context.ProjectId,
+                    context.NotebookId,
+                    clientPrompt.UserImageUrls,
+                    httpClientFactory.CreateClient(),
+                    httpContext.RequestAborted);
+
                 var stream = sandboxWireConversationService.SendMessageStreamAsync(
                     context,
                     ephemeralConversationId,
                     new Models.Conversations.SendMessageRequest
                     {
                         Instructions = instructions,
+                        Attachments = attachments.Count == 0 ? null : attachments,
                         ClientMessages = clientPrompt.PrefixMessages == null ? null : [.. clientPrompt.PrefixMessages],
                         ClientToolDefinitions = clientToolDefinitions
                     },
@@ -240,6 +251,8 @@ public static class SandboxOpenAiWireHandlers
         [FromBody] AnthropicMessagesRequest request,
         [FromServices] ISandboxWireExecutionContextResolver executionContextResolver,
         [FromServices] ISandboxWireConversationService sandboxWireConversationService,
+        [FromServices] INotebookFileService notebookFileService,
+        [FromServices] IHttpClientFactory httpClientFactory,
         [FromServices] ApplicationDbContext db)
     {
         var resolution = await executionContextResolver.ResolveAsync(
@@ -314,12 +327,21 @@ public static class SandboxOpenAiWireHandlers
                     context.NotebookId,
                     httpContext.RequestAborted);
 
+                var attachments = await WireImageAttachmentMaterializer.MaterializeAsync(
+                    notebookFileService,
+                    context.ProjectId,
+                    context.NotebookId,
+                    clientPrompt.UserImageUrls,
+                    httpClientFactory.CreateClient(),
+                    httpContext.RequestAborted);
+
                 var stream = sandboxWireConversationService.SendMessageStreamAsync(
                     context,
                     ephemeralConversationId,
                     new Models.Conversations.SendMessageRequest
                     {
                         Instructions = instructions,
+                        Attachments = attachments.Count == 0 ? null : attachments,
                         ClientMessages = clientPrompt.PrefixMessages == null ? null : [.. clientPrompt.PrefixMessages],
                         ClientToolDefinitions = clientToolDefinitions
                     },
