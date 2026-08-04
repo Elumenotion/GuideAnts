@@ -1,6 +1,6 @@
 services:
   guideants-ai:
-    image: ${GA_AI_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-rocm:main}
+    image: ${GA_AI_ROCM_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-rocm:main}
     pull_policy: missing
     container_name: guideants-ai
     # ROCm GPU devices are supplied by docker-compose.rocm-runtime.generated.yml

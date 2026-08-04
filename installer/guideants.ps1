@@ -41,6 +41,7 @@ $script:InstallerStopFn = ${function:Stop-WithError}
 $script:InstallerLocalAiOptionsFn = ${function:Get-GuideAntsLocalAiOptions}
 $script:DockerDir = Join-Path $script:RootDir 'docker'
 $script:EnvFile = Join-Path $script:DockerDir '.env'
+$script:ImagesEnvFile = Join-Path $script:DockerDir 'images.env'
 $script:StateFile = Join-Path $script:RootDir '.installer_state.env'
 $script:HealthUrl = 'http://localhost:5107/'
 $script:ApiBase = 'http://localhost:5107'
@@ -461,7 +462,8 @@ function Test-VersionGte {
 function Resolve-CudaImageRefFromComposeArgs {
     param([Parameter(Mandatory = $true)][string[]]$ComposeArgs)
 
-    $result = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('--env-file', $script:EnvFile, 'config', '--format', 'json')) -IgnoreErrors
+    $envArgs = @(Get-InstallerComposeEnvArgs -EnvFile $script:EnvFile)
+    $result = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + $envArgs + @('config', '--format', 'json')) -IgnoreErrors
     if ($result.ExitCode -ne 0) { return $null }
 
     try {
@@ -792,7 +794,8 @@ function Add-ComposeOverrideIfValid {
     $overridePath = Join-Path $script:DockerDir $OverrideFile
     if (-not (Test-Path -LiteralPath $overridePath)) { return $ComposeArgs }
 
-    $configCheck = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('-f', $overridePath, '--env-file', $script:EnvFile, 'config')) -IgnoreErrors
+    $envArgs = @(Get-InstallerComposeEnvArgs -EnvFile $script:EnvFile)
+    $configCheck = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList (@('compose') + $ComposeArgs + @('-f', $overridePath) + $envArgs + @('config')) -IgnoreErrors
     if ($configCheck.ExitCode -eq 0) {
         Write-Log "Including compose override: $OverrideFile"
         return @($ComposeArgs + @('-f', $overridePath))
@@ -1516,8 +1519,9 @@ function Invoke-Main {
         Write-HRule
         Write-Log 'Doctor mode complete. No changes were made.'
         $wouldArgs = @(Build-ComposeArgs)
-        $wouldStart = 'docker compose ' + ($wouldArgs -join ' ')
-        Write-Log "Would start: $wouldStart --env-file docker/.env up -d"
+        $envArgs = @(Get-InstallerComposeEnvArgs -EnvFile $script:EnvFile)
+        $wouldStart = 'docker compose ' + (($wouldArgs + $envArgs) -join ' ')
+        Write-Log "Would start: $wouldStart up -d"
         return
     }
 

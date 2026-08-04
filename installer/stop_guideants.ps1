@@ -14,6 +14,7 @@ $ErrorActionPreference = 'Stop'
 $script:RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:DockerDir = Join-Path $script:RootDir 'docker'
 $script:EnvFile = Join-Path $script:DockerDir '.env'
+$script:ImagesEnvFile = Join-Path $script:DockerDir 'images.env'
 $script:StateFile = Join-Path $script:RootDir '.installer_state.env'
 
 . (Join-Path $script:RootDir 'scripts/installer-wizard.ps1')
@@ -95,7 +96,8 @@ function Invoke-Main {
         }
     }
 
-    Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $built.ComposeArgs + @('--env-file', $script:EnvFile, 'down'))
+    $envArgs = @(Get-InstallerComposeEnvArgs -EnvFile $script:EnvFile)
+    Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $built.ComposeArgs + $envArgs + @('down'))
     Write-Log 'GuideAnts stopped.'
 }
 

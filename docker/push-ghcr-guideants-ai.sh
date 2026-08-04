@@ -4,6 +4,7 @@ set -euo pipefail
 OWNER="elumenotion"
 REGISTRY="ghcr.io"
 COMPOSE_TAG="main"
+RELEASE_TAG=""
 USERNAME="${GHCR_USERNAME:-}"
 TOKEN="${CR_PAT:-${GHCR_PAT:-${GITHUB_TOKEN:-}}}"
 SKIP_LOGIN=false
@@ -17,6 +18,7 @@ Options:
   --owner <owner>          GHCR owner (default: elumenotion)
   --registry <registry>    Registry hostname (default: ghcr.io)
   --compose-tag <tag>      Compose tag (default: main)
+  --release-tag <tag>      Optional immutable release tag (for example: v1.2.3)
   --username <username>    GHCR username (default: GHCR_USERNAME | GITHUB_ACTOR | git credential | token login)
   --token <token>          GHCR token (default: CR_PAT | GHCR_PAT | GITHUB_TOKEN | git credential)
   --skip-login             Skip docker login
@@ -37,6 +39,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --compose-tag)
       COMPOSE_TAG="${2:-}"
+      shift 2
+      ;;
+    --release-tag)
+      RELEASE_TAG="${2:-}"
       shift 2
       ;;
     --username)
@@ -297,12 +303,20 @@ for target in "${targets[@]}"; do
   echo "  Source:      $source_ref"
   echo "  Build tag:   $build_ref"
   echo "  Compose tag: $compose_ref"
+  if [[ -n "$RELEASE_TAG" ]]; then
+    release_ref="$REGISTRY/$OWNER/$package:$RELEASE_TAG"
+    echo "  Release tag: $release_ref"
+  fi
   echo "  Latest tag:  $latest_ref"
 
   docker_cmd tag "$source_ref" "$build_ref"
   docker_cmd push "$build_ref"
   docker_cmd tag "$source_ref" "$compose_ref"
   docker_cmd push "$compose_ref"
+  if [[ -n "$RELEASE_TAG" ]]; then
+    docker_cmd tag "$source_ref" "$release_ref"
+    docker_cmd push "$release_ref"
+  fi
   docker_cmd tag "$source_ref" "$latest_ref"
   docker_cmd push "$latest_ref"
 done
@@ -312,9 +326,9 @@ mssql_source_ref="$(get_local_image_ref 'mssql2025-express-fts' 'latest' 'No loc
 searxng_source_ref="$(get_local_image_ref 'guideants-searxng' 'latest' 'No local guideants-searxng:latest image found. Build it first with docker/build/build_support_images.sh.')"
 
 extra_targets=(
-  "plantuml|$plantuml_source_ref|guideants-plantuml|$CPU_BUILD,1.2025.2,$COMPOSE_TAG,latest"
-  "mssql|$mssql_source_ref|mssql2025-express-fts|$CPU_BUILD,$COMPOSE_TAG,latest"
-  "searxng|$searxng_source_ref|guideants-searxng|$CPU_BUILD,$COMPOSE_TAG,latest"
+  "plantuml|$plantuml_source_ref|guideants-plantuml|$CPU_BUILD,1.2025.2,$COMPOSE_TAG,latest${RELEASE_TAG:+,$RELEASE_TAG}"
+  "mssql|$mssql_source_ref|mssql2025-express-fts|$CPU_BUILD,$COMPOSE_TAG,latest${RELEASE_TAG:+,$RELEASE_TAG}"
+  "searxng|$searxng_source_ref|guideants-searxng|$CPU_BUILD,$COMPOSE_TAG,latest${RELEASE_TAG:+,$RELEASE_TAG}"
 )
 
 for target in "${extra_targets[@]}"; do

@@ -13,6 +13,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$ROOT_DIR/docker"
 ENV_FILE="$DOCKER_DIR/.env"
+IMAGES_ENV_FILE="$DOCKER_DIR/images.env"
 STATE_FILE="$ROOT_DIR/.installer_state.env"
 
 log()  { printf '[guideants] %s\n' "$*"; }
@@ -45,6 +46,7 @@ if [[ "$AI_BACKEND" == "rocm" ]]; then
     COMPOSE_ARGS+=(-f "$DOCKER_DIR/docker-compose.rocm-runtime.generated.yml")
 fi
 
+installer_compose_env_args
 log "Stopping GuideAnts (DB=$DB_LAYOUT, AI=$AI_BACKEND)..."
-docker compose "${COMPOSE_ARGS[@]}" --env-file "$ENV_FILE" down
+docker compose "${COMPOSE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" down
 log "GuideAnts stopped."
