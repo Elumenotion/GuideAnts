@@ -379,8 +379,13 @@ function Resolve-InstallerComposeArgs {
         [Parameter(Mandatory = $true)][string[]]$FragmentFiles
     )
 
+    # Fragments live under docker/compose/, but host bind paths in .env
+    # (./volumes/...) must resolve from docker/ — otherwise SearXNG mounts an
+    # empty compose/volumes tree and crashes looking for settings.yml.
     $composeDir = Join-Path $DockerDir $script:InstallerComposeDir
     $args = New-Object System.Collections.Generic.List[string]
+    $args.Add('--project-directory') | Out-Null
+    $args.Add($DockerDir) | Out-Null
     foreach ($fragment in $FragmentFiles) {
         $path = Join-Path $composeDir $fragment
         if (-not (Test-Path -LiteralPath $path)) {

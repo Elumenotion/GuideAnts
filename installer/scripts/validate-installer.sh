@@ -26,6 +26,12 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 0
 fi
 
+SEARXNG_SETTINGS="$DOCKER_DIR/volumes/searxng/config/settings.yml"
+SEARXNG_LIMITER="$DOCKER_DIR/volumes/searxng/config/limiter.toml"
+[[ -f "$SEARXNG_SETTINGS" ]] || { echo "FAIL missing SearXNG settings seed: $SEARXNG_SETTINGS" >&2; exit 1; }
+[[ -f "$SEARXNG_LIMITER" ]] || { echo "FAIL missing SearXNG limiter seed: $SEARXNG_LIMITER" >&2; exit 1; }
+echo "PASS searxng config seeds present"
+
 combos=(
   "compose/base.yml compose/core-bundled.yml"
   "compose/base.yml compose/core-separate.yml"
@@ -37,10 +43,24 @@ cd "$DOCKER_DIR"
 for combo in "${combos[@]}"; do
   # shellcheck disable=SC2206
   files=($combo)
-  args=()
+  args=(--project-directory "$DOCKER_DIR")
   for f in "${files[@]}"; do args+=(-f "$f"); done
   docker compose "${args[@]}" --env-file .env config --quiet
   echo "PASS compose: ${files[-1]}"
 done
+
+rendered="$(docker compose --project-directory "$DOCKER_DIR" \
+  -f compose/base.yml -f compose/core-bundled.yml -f compose/searxng.yml \
+  --env-file .env config)"
+expected="$DOCKER_DIR/volumes/searxng/config"
+wrong="$DOCKER_DIR/compose/volumes/searxng/config"
+case "$rendered" in
+  *"$expected"*) ;;
+  *) echo "FAIL searxng bind must resolve under docker/volumes/searxng/config" >&2; exit 1 ;;
+esac
+case "$rendered" in
+  *"$wrong"*) echo "FAIL searxng bind incorrectly resolves under compose/volumes/" >&2; exit 1 ;;
+esac
+echo "PASS searxng bind path resolves to docker/volumes/searxng"
 
 echo "All installer validation checks passed."

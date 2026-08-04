@@ -55,6 +55,18 @@ else {
     }
 }
 $dockerDir = Join-Path $root 'docker'
+$searxngSettings = Join-Path $dockerDir 'volumes/searxng/config/settings.yml'
+$searxngLimiter = Join-Path $dockerDir 'volumes/searxng/config/limiter.toml'
+if (-not (Test-Path -LiteralPath $searxngSettings)) {
+    Write-Host "FAIL missing SearXNG settings seed: $searxngSettings"
+    exit 1
+}
+if (-not (Test-Path -LiteralPath $searxngLimiter)) {
+    Write-Host "FAIL missing SearXNG limiter seed: $searxngLimiter"
+    exit 1
+}
+Write-Host 'PASS searxng config seeds present'
+
 Push-Location $dockerDir
 try {
     $combos = @(
@@ -64,7 +76,7 @@ try {
         @('compose/base.yml', 'compose/core-separate.yml', 'compose/ai-cuda13.yml', 'compose/docling-cuda.yml', 'compose/documentserver.yml', 'compose/plantuml.yml', 'compose/searxng.yml')
     )
     foreach ($combo in $combos) {
-        $composeArgs = @()
+        $composeArgs = @('--project-directory', $dockerDir)
         foreach ($f in $combo) { $composeArgs += '-f'; $composeArgs += $f }
         & docker compose @composeArgs --env-file .env config --quiet
         if ($LASTEXITCODE -ne 0) {
@@ -73,6 +85,32 @@ try {
         }
         Write-Host "PASS compose: $($combo[-1])"
     }
+
+    $searxngArgs = @(
+        '--project-directory', $dockerDir,
+        '-f', 'compose/base.yml',
+        '-f', 'compose/core-bundled.yml',
+        '-f', 'compose/searxng.yml',
+        '--env-file', '.env',
+        'config'
+    )
+    $rendered = & docker compose @searxngArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'FAIL searxng compose config render'
+        exit 1
+    }
+    $expectedConfig = (Join-Path $dockerDir 'volumes\searxng\config').Replace('\', '/')
+    $wrongConfig = (Join-Path $dockerDir 'compose\volumes\searxng\config').Replace('\', '/')
+    $normalized = ($rendered -join "`n").Replace('\', '/')
+    if ($normalized -notmatch [regex]::Escape($expectedConfig)) {
+        Write-Host "FAIL searxng bind must resolve under docker/volumes/searxng/config (got wrong project root?)"
+        exit 1
+    }
+    if ($normalized -match [regex]::Escape($wrongConfig)) {
+        Write-Host 'FAIL searxng bind incorrectly resolves under compose/volumes/'
+        exit 1
+    }
+    Write-Host 'PASS searxng bind path resolves to docker/volumes/searxng'
 }
 finally {
     Pop-Location

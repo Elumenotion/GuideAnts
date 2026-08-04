@@ -253,7 +253,7 @@ FALLBACK_MIN_CUDA_VERSION="13.0"
 MIN_ROCM_VERSION="6.0.0"
 
 resolve_cuda_image_ref_from_fragments() {
-  local -a args=() f rel
+  local -a args=(--project-directory "$DOCKER_DIR") f rel
   for f in "${SELECTED_COMPOSE_FRAGMENTS[@]}"; do
     rel="$DOCKER_DIR/$INSTALLER_COMPOSE_DIR/$f"
     args+=(-f "$rel")

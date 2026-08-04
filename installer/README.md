@@ -352,8 +352,11 @@ Containers are included only when selected:
 ## Data persistence
 
 Projects, database, and models live in Docker named volumes (`mssql_data`,
-`mssql_log`, `ai_local_models`, etc.) and in the `docker/volumes/content-files`
-bind mount. They persist across stops and updates.
+`mssql_log`, `ai_local_models`, etc.) and in bind mounts under `docker/volumes/`:
+`content-files/` for project content, and `searxng/config/` (seeded
+`settings.yml` + `limiter.toml`) for the SearXNG service. They persist across
+stops and updates. Compose uses `--project-directory docker/` so these
+`./volumes/...` paths resolve correctly from the fragment files in `compose/`.
 
 ## File structure
 
