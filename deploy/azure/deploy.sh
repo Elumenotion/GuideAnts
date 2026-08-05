@@ -13,6 +13,7 @@ SUBSCRIPTION_ID=""
 SKIP_MIGRATIONS=0
 ONLY_INFRA=0
 ONLY_APPS=0
+SKIP_SCRIPT_VENV_RESET=0
 SQL_AAD_ADMIN_OBJECT_ID=""
 
 usage() {
@@ -33,6 +34,7 @@ Options:
   --skip-migrations                 Skip EF migrations
   --only-infra                      Deploy infrastructure only
   --only-apps                       Deploy container apps only (infra must exist)
+  --skip-script-venv-reset          Skip clearing scoped python-venv dirs on script-agent-state share
   --sql-aad-admin-object-id <id>    Optional AAD SQL admin object ID
 EOF
   exit 1
@@ -52,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     --skip-migrations) SKIP_MIGRATIONS=1; shift ;;
     --only-infra) ONLY_INFRA=1; shift ;;
     --only-apps) ONLY_APPS=1; shift ;;
+    --skip-script-venv-reset) SKIP_SCRIPT_VENV_RESET=1; shift ;;
     -h|--help) usage ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
@@ -149,6 +152,12 @@ if [[ "$ONLY_INFRA" -eq 0 ]]; then
       documentServerEnabled=true \
     --output none
   ok "Container apps deployed"
+
+  if [[ "$SKIP_SCRIPT_VENV_RESET" -eq 0 ]]; then
+    pwsh -File "$DEPLOY_ROOT/scripts/reset-scoped-script-venvs.ps1" -ResourceGroupName "$RESOURCE_GROUP"
+  else
+    warn "Skipping scoped script-agent venv reset (--skip-script-venv-reset)."
+  fi
 
   SQL_SERVER_NAME="$(az sql server list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)"
   if [[ -n "$SQL_SERVER_NAME" ]]; then
