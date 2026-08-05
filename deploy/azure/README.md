@@ -65,8 +65,6 @@ When complete, the script prints your application URL.
 | `-CustomDomain` | `""` | Public HTTPS domain (optional) |
 | `-SqlAdminPassword` | *(required on first deploy)* | SQL admin for Phase 1 + migrations. On redeploy, omit to read `sql-admin-password` from Key Vault. Not used with `-OnlyApps`. |
 | `-SkipMigrations` | false | Skip `dotnet ef database update` |
-| `-SkipScriptVenvReset` | false | Skip the one-time mfsymlinks scoped venv migration on `script-agent-state` |
-| `-ForceScriptVenvReset` | false | Re-run the migration even if the share marker already exists (deletes marker; scales up `guideants-ai` only when legacy venvs exist) |
 | `-OnlyInfra` | false | Phase 1 only (no container apps) |
 | `-OnlyApps` | false | Phase 2 only (infra must already exist) |
 | `-SqlAadAdminObjectId` | `""` | Optional AAD object ID for SQL admin |
@@ -126,7 +124,15 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 ./deploy.ps1 -OnlyApps -SkipMigrations -ImageTag main
 ```
 
-This redeploys container apps and runs share-only maintenance (for example scoped venv migration). It does **not** regenerate Key Vault secrets, reset the SQL admin password, run migrations, or rewrite `sql-connection-string`.
+This redeploys container apps only. It does **not** regenerate Key Vault secrets, reset the SQL admin password, run migrations, or rewrite `sql-connection-string`.
+
+### Scoped venv repair
+
+Scoped Python venvs live on the `script-agent-state` share. A venv created before the mount had `mfsymlinks` can never resolve its interpreter, so it has to be rebuilt.
+
+`guideants-ai` handles this itself: on every start it checks each `python-venv` for a resolvable interpreter and `pyvenv.cfg`, deletes only the ones that fail, and leaves healthy venvs alone. Deleted venvs rebuild on next script run. If the mount has no symlink support it changes nothing rather than risk deleting good venvs.
+
+Deploy is not involved and cannot fail because of it.
 
 **Image-only bump** without Bicep (single apps):
 
@@ -162,7 +168,7 @@ This redeploys container apps and runs share-only maintenance (for example scope
 | docling CrashLoop | Insufficient memory | Increase CPU/memory in `modules/container-apps.bicep` |
 | documentserver unhealthy | JWT mismatch | Ensure secrets generated once; force new revision |
 | searxng empty | Config not seeded | Run `scripts/upload-searxng-config.ps1 -ResourceGroupName rg-guideants-dev` |
-| Python venv / scoped execute fails (`Permission denied` on `lib64`) | `script-agent-state` SMB mount missing `mfsymlinks` | Re-run `deploy.ps1 -OnlyApps -SkipMigrations`. Deploy applies `mfsymlinks` and runs a one-time scoped venv cleanup on the share (marker prevents repeats). Fresh installs with no venvs complete without starting a replica. |
+| Python venv / scoped execute fails (`Permission denied` on `lib64`) | `script-agent-state` SMB mount missing `mfsymlinks` | Re-run `deploy.ps1 -OnlyApps -SkipMigrations` so the mount picks up `mfsymlinks`. `guideants-ai` repairs unusable scoped venvs itself on next start — deploy does not touch the share. |
 | First scoped venv very slow on cold share | Azure Files latency for `python -m venv` + pip | Expected; venv is durable on the share after first create |
 | First request after idle is slow | Apps scaled to zero and/or SQL paused | Expected; wait for cold start + SQL resume, or `manage.ps1 -Operation scale -MinReplicas 1` |
 | No historical logs in portal Logs blade | CAE log destination is null (not saved) | Use `manage.ps1 -Operation logs -Follow` (live stream); console is not ingested into LA |

@@ -11,8 +11,6 @@ param(
     [switch]$SkipMigrations,
     [switch]$OnlyInfra,
     [switch]$OnlyApps,
-    [switch]$SkipScriptVenvReset,
-    [switch]$ForceScriptVenvReset,
     [string]$SqlAadAdminObjectId = ""
 )
 
@@ -444,21 +442,6 @@ function Upload-SearXngConfig {
     & (Join-Path $script:DeployRoot "scripts" "upload-searxng-config.ps1") -ResourceGroupName $script:ResourceGroupName
 }
 
-function Reset-ScopedScriptVenvs {
-    if ($SkipScriptVenvReset) {
-        Write-Warn "Skipping scoped script-agent venv reset (-SkipScriptVenvReset)."
-        return
-    }
-
-    $resetArgs = @{
-        ResourceGroupName = $script:ResourceGroupName
-    }
-    if ($ForceScriptVenvReset) {
-        $resetArgs.Force = $true
-    }
-    & (Join-Path $script:DeployRoot "scripts" "reset-scoped-script-venvs.ps1") @resetArgs
-}
-
 function Show-DeploymentSummary {
     Write-Host ""
     Write-Host "==============================================" -ForegroundColor Cyan
@@ -504,7 +487,6 @@ function Main {
 
     if (-not $OnlyInfra) {
         Deploy-ContainerApps
-        Reset-ScopedScriptVenvs
 
         if (-not $OnlyApps) {
             $sqlServerName = Set-SqlDatabase

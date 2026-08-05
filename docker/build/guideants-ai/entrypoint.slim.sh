@@ -28,6 +28,10 @@ if [ "$SCRIPT_EXECUTION_ADMIN_API_ENABLED" = "true" ] && [ -z "${SCRIPT_EXECUTIO
     exit 1
 fi
 
+if [ "$SCRIPT_EXECUTION_ADMIN_API_ENABLED" = "true" ]; then
+    /opt/guideants/script-agent-admin/migrate-mfsymlinks-scoped-venvs.sh || true
+fi
+
 if [ "$SCRIPT_EXECUTION_ADMIN_API_ENABLED" = "true" ] && [ -x /opt/guideants/script-agent-admin/reconcile.sh ]; then
     /opt/guideants/script-agent-admin/reconcile.sh
 fi
