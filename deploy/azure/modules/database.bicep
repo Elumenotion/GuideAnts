@@ -1,4 +1,4 @@
-// Database Module - Azure SQL Database (Waterfall-proven S2 pattern)
+// Database Module - Azure SQL Database (GP serverless, auto-pause for low at-rest cost)
 param location string
 param environmentName string
 param appNamePrefix string
@@ -33,18 +33,22 @@ resource sqlDatabase 'Microsoft.Sql/servers/databases@2023-05-01-preview' = {
   location: location
   tags: tags
   sku: {
-    name: 'S2'
-    tier: 'Standard'
-    capacity: 50
+    name: 'GP_S_Gen5'
+    tier: 'GeneralPurpose'
+    family: 'Gen5'
+    capacity: 1
   }
   properties: {
     collation: 'SQL_Latin1_General_CP1_CI_AS'
-    maxSizeBytes: 268435456000
+    maxSizeBytes: 34359738368 // 32 GB
     catalogCollation: 'SQL_Latin1_General_CP1_CI_AS'
     zoneRedundant: false
     readScale: 'Disabled'
     requestedBackupStorageRedundancy: 'Local'
     isLedgerOn: false
+    // Pause after 15 minutes idle (platform minimum). Compute bills only while resumed.
+    autoPauseDelay: 15
+    minCapacity: json('0.5')
   }
 }
 
@@ -68,14 +72,15 @@ resource sqlAdAdmin 'Microsoft.Sql/servers/administrators@2023-05-01-preview' = 
   }
 }
 
+// Disabled by default: auditing to Azure Monitor feeds Log Analytics and is not required for app console diagnostics.
 resource sqlDatabaseAuditing 'Microsoft.Sql/servers/databases/extendedAuditingSettings@2023-05-01-preview' = {
   parent: sqlDatabase
   name: 'default'
   properties: {
-    state: 'Enabled'
+    state: 'Disabled'
     storageEndpoint: ''
-    retentionDays: 7
-    isAzureMonitorTargetEnabled: true
+    retentionDays: 0
+    isAzureMonitorTargetEnabled: false
   }
 }
 

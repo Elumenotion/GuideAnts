@@ -32,14 +32,16 @@ Copy-Item parameters.example.json parameters.local.json
   -AppNamePrefix guideants `
   -ImageTag main `
   -CustomDomain "" `
-  -SqlAdminPassword "<strong-password>"
+  -SqlAdminPassword 'G4-Deploy!xK9mQ2vL'
 ```
+
+SQL password rules: 8+ chars, upper/lower/number/symbol; must **not** contain the login name (`sqladmin`) or angle brackets `<` `>` (Windows `az.cmd` redirection).
 
 Bash equivalent:
 
 ```bash
 chmod +x deploy.sh scripts/*.sh
-./deploy.sh --environment-name dev --image-tag main --sql-admin-password '<strong-password>'
+./deploy.sh --environment-name dev --image-tag main --sql-admin-password 'G4-Deploy!xK9mQ2vL'
 ```
 
 When complete, the script prints your application URL.
@@ -120,7 +122,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 # Status of all apps
 ./manage.ps1 -Operation status
 
-# Tail web API logs
+# Tail web API logs (live stream — not Log Analytics)
 ./manage.ps1 -Operation logs -AppName guideants-webapi-ui -Follow
 
 # Bump image tag
@@ -143,6 +145,10 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 | documentserver unhealthy | JWT mismatch | Ensure secrets generated once; force new revision |
 | searxng empty | Config not seeded | Run `scripts/upload-searxng-config.ps1 -ResourceGroupName rg-guideants-dev` |
 | Migration fail | Firewall blocks your IP | Deploy adds temporary rule; check `sqlcmd`/EF can reach server |
+| First request after idle is slow | Apps scaled to zero and/or SQL paused | Expected; wait for cold start + SQL resume, or `manage.ps1 -Operation scale -MinReplicas 1` |
+| Python skill execution fails on first run after cold start | Scoped venv rehydrating from durable requirements on EmptyDir | Expected on ACA replica replacement; confirm `SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT` mounts at `/var/run/guideants/script-agent-runtime` and venv is created there, not under `/var/lib/guideants/script-agent-admin` |
+| Python venv `Permission denied` on `lib64` symlink | Scoped venv created on Azure Files (`nounix`) instead of runtime mount | Redeploy with `script-agent-runtime-volume` EmptyDir; never place venvs on `script-agent-state` share |
+| No historical logs in portal Logs blade | CAE log destination is null (not saved) | Use `manage.ps1 -Operation logs -Follow` (live stream); console is not ingested into LA |
 
 ## Cleanup
 
@@ -154,16 +160,22 @@ az group delete --name rg-guideants-dev --yes --no-wait
 
 ## Cost notes
 
-Approximate monthly cost (varies by region and usage):
+Defaults favor **low cost at rest** (scale-to-zero + SQL auto-pause + no console log ingest):
 
-| Resource | Estimate |
-|----------|----------|
-| Azure SQL S2 (50 DTU) | ~$75/mo |
-| 6 Container Apps (minReplicas=1) | ~$150–300/mo |
-| Log Analytics (30-day retention) | ~$20–100/mo depending on log volume |
-| Azure Files + storage | ~$5–20/mo |
+| Resource | At rest (idle) | Notes |
+|----------|----------------|-------|
+| Azure SQL GP serverless | ~storage only after 15 min pause | Resumes on first connection (~tens of seconds) |
+| 6 Container Apps (`minReplicas=0`) | ~$0 compute when scaled to zero | Cold starts on first request after idle |
+| Log Analytics | ~$0 from ACA console | CAE logs destination is null (not saved); use live log stream |
+| Azure Files + storage | ~$5–20/mo | Depends on content size |
 
-Log Analytics is often the surprise line item. Consider table-level retention tuning after deploy.
+**Active usage** bills ACA vCPU/memory while replicas run and SQL compute while the database is resumed. DocumentServer and Docling are heavy on cold start — first Office/doc request after idle can take a while.
+
+Raise always-on capacity when needed:
+
+```powershell
+./manage.ps1 -Operation scale -MinReplicas 1 -MaxReplicas 3
+```
 
 ## Security
 
@@ -178,7 +190,7 @@ Source contract: `docker/docker-compose.ghcr-slim.yml`. Intentional differences:
 
 | Compose | Azure |
 |---------|-------|
-| `MSSQL_*`, embedded SQL | Azure SQL Standard S2 |
+| `MSSQL_*`, embedded SQL | Azure SQL GP serverless (auto-pause) |
 | `ASPNETCORE_ENVIRONMENT=Development` | `Production` |
 | `webapi-ui-mssql` image | `webapi-ui-slim` + external SQL |
 | Local AI URLs `127.0.0.1:9` | Same (local AI disabled) |

@@ -72,7 +72,7 @@ All admin requests require `X-Script-Agent-Admin-Token`.
 
 Scoped `install-scripts.json` stores ordered setup scripts (`Python` or `Bash`) that run after pip requirements during apply and on replay. Each script's last status is recorded in `applied-state.json`.
 
-`POST /admin/apply` runs synchronous preflight (requirements/apt validation plus pip/apt dry-run when installs are needed) and returns `400` on preflight failure. When preflight passes it returns `202 Accepted` with a `jobId` and starts background apply work detached from the HTTP request (default timeout: 60 minutes via `SCRIPT_EXECUTION_ADMIN_APPLY_TIMEOUT_MINUTES`). Poll `GET /admin/apply/jobs/{jobId}` for `queued`, `running`, `succeeded`, or `failed` status. Preflight timeout defaults to 120 seconds (`SCRIPT_EXECUTION_ADMIN_APPLY_PREFLIGHT_TIMEOUT_SECONDS`).
+`POST /admin/apply` runs synchronous preflight (requirements/apt validation plus pip/apt dry-run when installs are needed) and returns `400` on preflight failure. When preflight passes it returns `202 Accepted` with a `jobId` and starts background apply work detached from the HTTP request (default timeout: 60 minutes via `SCRIPT_EXECUTION_ADMIN_APPLY_TIMEOUT_MINUTES`). Poll `GET /admin/apply/jobs/{jobId}` for `queued`, `running`, `succeeded`, or `failed` status. Preflight timeout defaults to 120 seconds (`SCRIPT_EXECUTION_ADMIN_APPLY_PREFLIGHT_TIMEOUT_SECONDS`). The agent never applies package definitions automatically at startup; an apply is either explicitly requested through this endpoint or performed for the one scope needed by a Python execution.
 
 `GET`/`PUT /admin/requirements` and `POST /admin/apply` operate on global state unless both `projectId` and `guideId` query parameters are provided. Scoped requests affect the shared `project + guide` Python venv used by all matching notebooks.
 
@@ -80,24 +80,30 @@ Scoped `install-scripts.json` stores ordered setup scripts (`Python` or `Bash`) 
 
 Every execution request must include `ProjectId`, `NotebookId`, and `WorkingDirectory`. The GuideAnts API also sends `GuideId`; when omitted for compatibility, the agent falls back to `NotebookId` as the scope key.
 
-Python runtime state is scoped by `project + guide`:
+Python runtime state is scoped by `project + guide` across two roots:
 
 ```text
-{SCRIPT_EXECUTION_SCOPE_STATE_ROOT}/
+{SCRIPT_EXECUTION_SCOPE_STATE_ROOT}/          # durable definitions (Azure Files / named volume)
   project-{projectId:N}/
-    runtime/          # shared npm/npx, uv, and other tool caches for all guides in the project
-      .npm/
+    guide-{guideId:N}/
+      requirements.txt
+      install-scripts.json
+      applied-state.json                        # admin audit record only
+
+{SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT}/        # executable runtime (EmptyDir / named volume)
+  project-{projectId:N}/
+    runtime/                                    # shared npm/npx, uv, and other tool caches
       cache/
       config/
     guide-{guideId:N}/
       python-venv/
-      requirements.txt
-      applied-state.json
+      runtime-applied-state.json                # local execution marker
+      install-scripts-work/
 ```
 
-All notebooks in the same project that use the same guide share that venv. Scoped requirements are applied into the scoped venv before Python execution. If a scoped `requirements.txt` does not exist, the agent uses the global admin `requirements.txt` as the fallback requirements source for that scope.
+All notebooks in the same project that use the same guide share that venv. Before Python execution, the agent compares the durable definition hashes to the local `runtime-applied-state.json` marker and rehydrates the scoped venv when the local runtime is empty or stale. The durable `applied-state.json` is an admin audit record only; execution never skips provisioning based on it alone.
 
-Scoped venvs extend the image-provided Python runtime instead of replacing it. By default on Linux, the agent links the scoped venv to `/opt/venv` site-packages with a `.pth` file. Packages installed into the scoped venv remain first on `sys.path`, and baked image packages remain available as a fallback. Set `SCRIPT_EXECUTION_BASE_PYTHON_VENV` to override the base runtime venv path or leave it unset on non-AI images.
+Scoped venvs extend the image-provided Python runtime instead of replacing it. By default on Linux, the agent links the scoped venv to `/opt/venv` site-packages with a `.pth` file. Packages installed into the scoped venv remain first on `sys.path`, and baked image packages remain available to the scope. Requirements are additive: applying a definition installs or updates its declared packages and never uninstalls packages that were not declared by that definition. Set `SCRIPT_EXECUTION_BASE_PYTHON_VENV` to override the base runtime venv path or leave it unset on non-AI images.
 
 The optional `environment` object on `/execute` is a per-run injection surface. Values are placed only into the launched script process environment; they are not persisted by the ScriptExecutionAgent and are not written to scope state.
 
@@ -138,20 +144,19 @@ Scripts can read their own process environment, so any injected credential is av
 
 GuideAnts AI images bake the admin mechanism into the image and enable it with image-level `ENV SCRIPT_EXECUTION_ADMIN_API_ENABLED=true`. Other images that embed the agent remain disabled by default unless they explicitly opt in.
 
-In the compose stacks, `guideants-ai` mounts `script_agent_admin_state` at:
+In the compose stacks, `guideants-ai` mounts:
 
-```text
-/var/lib/guideants/script-agent-admin
-```
+- `script_agent_admin_state` at `/var/lib/guideants/script-agent-admin`
+- `script_agent_runtime` at `/var/run/guideants/script-agent-runtime`
 
-That volume stores:
+The admin state volume stores durable definitions and audit records. The runtime volume stores executable scoped environments and is recreated from the durable definitions when empty.
 
 - global `requirements.txt`
 - global `apt-packages.txt`
 - global `applied-state.json`
-- scoped state under `scopes/project-{projectId:N}/guide-{guideId:N}/`
+- scoped definitions under `scopes/project-{projectId:N}/guide-{guideId:N}/`
 
-The volume survives container restart and normal `docker compose down` / `up`. It is removed by `docker compose down -v` or manual volume deletion.
+The admin state volume survives container restart and normal `docker compose down` / `up`. The runtime volume also survives ordinary container recreation in Docker Compose, but is reset on Azure Container Apps replica replacement.
 
 ## Container Integration
 
@@ -211,8 +216,9 @@ services:
 | `SCRIPT_EXECUTION_REQUIRE_TOKEN` | `true` | Require `X-Script-Agent-Token` on `/execute` and `/files` |
 | `SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION` | `true` | Enable Linux notebook identity + `setpriv` execution/listing |
 | `SCRIPT_EXECUTION_ALLOW_OWNERSHIP_FALLBACK` | `false` in production (`true` in Development if not set) | Allow compatibility fallback if Linux ownership hardening fails |
-| `SCRIPT_EXECUTION_SCOPE_STATE_ROOT` | `FILE_STORAGE_ROOT/.guideants/script-execution` | Root for project+guide scoped runtime state (venv + requirements apply state) |
-| `SCRIPT_EXECUTION_SCOPE_PYTHON_VENV_DIR` | `python-venv` | Relative path (within scope root) for the Python virtual environment |
+| `SCRIPT_EXECUTION_SCOPE_STATE_ROOT` | `FILE_STORAGE_ROOT/.guideants/script-execution` | Durable root for scoped package definitions and admin audit state |
+| `SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT` | _(required)_ | Local filesystem root for scoped venvs, runtime markers, install-script work, and project caches |
+| `SCRIPT_EXECUTION_SCOPE_PYTHON_VENV_DIR` | `python-venv` | Relative path (within runtime scope root) for the Python virtual environment |
 | `SCRIPT_EXECUTION_PYTHON_BOOTSTRAP` | _(unset)_ | Optional bootstrap interpreter command used for `python -m venv` |
 | `SCRIPT_EXECUTION_REQUIRE_SCOPED_VENV` | `true` on Linux | Fail Python execution if the project+guide venv cannot be created/applied |
 | `SCRIPT_EXECUTION_BASE_PYTHON_VENV` | `/opt/venv` on Linux | Base image venv whose site-packages are exposed as fallback imports inside scoped venvs |
@@ -220,7 +226,7 @@ services:
 | `SCRIPT_EXECUTION_ADMIN_API_ENABLED` | `false` | Enable `/admin/*` routes |
 | `SCRIPT_EXECUTION_ADMIN_TOKEN` | _(required when admin API enabled)_ | Shared token expected in `X-Script-Agent-Admin-Token` |
 | `SCRIPT_EXECUTION_ADMIN_STATE_DIR` | `/var/lib/guideants/script-agent-admin` on Linux | Volume-backed admin state root |
-| `SCRIPT_EXECUTION_ADMIN_FAIL_OPEN` | `false` | Continue startup after admin reconcile failure |
+| `SCRIPT_EXECUTION_ADMIN_FAIL_OPEN` | `false` | Continue startup after invalid admin-state validation |
 | `SCRIPT_EXECUTION_ADMIN_APPLY_TIMEOUT_MINUTES` | `60` | Background apply job timeout |
 | `SCRIPT_EXECUTION_ADMIN_APPLY_PREFLIGHT_TIMEOUT_SECONDS` | `120` | Synchronous preflight timeout for `POST /admin/apply` |
 

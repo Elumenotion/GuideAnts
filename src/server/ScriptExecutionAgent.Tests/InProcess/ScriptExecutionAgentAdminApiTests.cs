@@ -158,7 +158,7 @@ public sealed class ScriptExecutionAgentAdminApiTests
     }
 
     [TestMethod]
-    public async Task Admin_apply_scoped_reconciles_unmanaged_python_package_when_requirements_hash_is_unchanged()
+    public async Task Admin_apply_scoped_preserves_packages_not_declared_in_requirements()
     {
         if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
         {
@@ -248,18 +248,18 @@ print("created")
         }
 
         var applyResult = await StartApplyAndWaitForResultAsync(adminClient, scopedAdminUrl);
-        applyResult.GetProperty("status").GetString().Should().Be("applied");
+        applyResult.GetProperty("status").GetString().Should().Be("skipped");
 
-        var probeRemovedResponse = await executionClient.PostAsJsonAsync(
+        var probePreservedResponse = await executionClient.PostAsJsonAsync(
             "/execute",
             CreateExecuteBody(
                 _factory.Notebook,
                 $"import importlib.util\nprint('present' if importlib.util.find_spec('{packageName}') else 'missing')",
                 scriptType: (int)ScriptType.Python));
-        probeRemovedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        using (var removedDoc = JsonDocument.Parse(await probeRemovedResponse.Content.ReadAsStringAsync()))
+        probePreservedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var preservedDoc = JsonDocument.Parse(await probePreservedResponse.Content.ReadAsStringAsync()))
         {
-            ReadStandardOutput(removedDoc.RootElement).Should().Be("missing");
+            ReadStandardOutput(preservedDoc.RootElement).Should().Be("present");
         }
     }
 

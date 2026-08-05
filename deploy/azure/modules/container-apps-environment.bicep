@@ -2,20 +2,18 @@
 param location string
 param containerAppsEnvironmentName string
 param containerAppsSubnetId string
-param logAnalyticsWorkspaceId string
 param tags object
 
-resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' = {
+resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' = {
   name: containerAppsEnvironmentName
   location: location
   tags: tags
   properties: {
+    // Null destination = don't save logs (live stream still works via az/portal).
+    // String 'none' fails preflight on several API versions; null is the supported create shape.
     appLogsConfiguration: {
-      destination: 'log-analytics'
-      logAnalyticsConfiguration: {
-        customerId: reference(logAnalyticsWorkspaceId, '2023-09-01').customerId
-        sharedKey: listKeys(logAnalyticsWorkspaceId, '2023-09-01').primarySharedKey
-      }
+      destination: null
+      logAnalyticsConfiguration: null
     }
     vnetConfiguration: {
       internal: false

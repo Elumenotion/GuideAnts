@@ -16,7 +16,8 @@ internal sealed record AdminSetupStatusResponse(
 internal sealed record AdminSetupHealthStatus(
   string Status,
   string AdminStateDir,
-  string ScopeStateRoot);
+  string ScopeStateRoot,
+  string ScopeRuntimeRoot);
 
 internal sealed record AdminSetupRequirementsStatus(
   bool HasStagedContent,
@@ -66,7 +67,8 @@ internal static class AdminSetupStatusRuntime
     var health = new AdminSetupHealthStatus(
       "OK",
       adminOptions.StateDirectoryPath,
-      scopeOptions.StateRootPath);
+      scopeOptions.StateRootPath,
+      scopeOptions.RuntimeRootPath);
 
     AdminSetupRequirementsStatus? requirementsStatus = null;
     AdminSetupInstallScriptsStatus? installScriptsStatus = null;

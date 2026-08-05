@@ -10,6 +10,7 @@ services:
       - "8110:80"
     volumes:
       - script_agent_admin_state:/var/lib/guideants/script-agent-admin
+      - script_agent_runtime:/var/run/guideants/script-agent-runtime
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
@@ -21,6 +22,7 @@ services:
       - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
       - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
       - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
+      - SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT=/var/run/guideants/script-agent-runtime
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
       - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
     networks:
@@ -180,6 +182,8 @@ volumes:
 
   script_agent_admin_state:
 
+
+  script_agent_runtime:
 networks:
   guideants-network:
     driver: bridge

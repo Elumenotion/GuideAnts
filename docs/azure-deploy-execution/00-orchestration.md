@@ -86,7 +86,7 @@ cloud AI in Settings.
 
 ```text
 Phase 1  Bicep infrastructure
-         (RG, VNet, Log Analytics, App Insights, SQL S2, storage shares,
+         (RG, VNet, Log Analytics, App Insights, SQL GP serverless, storage shares,
           Key Vault shell, Container Apps Environment)
               │
               ▼
@@ -127,7 +127,7 @@ Phase 4  Docs + acceptance
 ### 4.2 Phase 1 — Bicep infrastructure
 
 - [ ] `deploy/azure/main.bicep` deploys at subscription scope without container apps.
-- [ ] SQL module matches Waterfall S2 SKU and MI outputs.
+- [ ] SQL module is GP serverless (auto-pause) with MI outputs.
 - [ ] Storage module creates shares: `contentfiles`, `searxng-config`, `searxng-data`,
       `script-agent-state`.
 - [ ] Key Vault RBAC enabled; no secret values in Bicep parameters committed to repo.

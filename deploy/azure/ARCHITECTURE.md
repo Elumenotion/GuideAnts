@@ -18,10 +18,10 @@ flowchart TB
     end
 
     subgraph Platform["Azure Platform Services"]
-        SQL[(Azure SQL\nguideants)]
+        SQL[(Azure SQL GP serverless\nguideants)]
         KV[Key Vault]
         Files[Azure Files]
-        LA[Log Analytics]
+        AI_Mon[App Insights]
     end
 
     User -->|HTTPS| WebUI
@@ -32,21 +32,26 @@ flowchart TB
     WebUI --> DocServer
     WebUI -->|MI| SQL
     WebUI --> KV
+    WebUI -.->|optional SDK| AI_Mon
     AI --> Files
     PlantUML --> Files
     SearXNG --> Files
     WebUI --> Files
-    ACA --> LA
 ```
+
+Console logs: live stream only (`destination: null` on CAE). No ACA → Log Analytics ingest.
 
 ## Persistence
 
-| Azure Files share | Mount path | Consumers |
-|-------------------|------------|-----------|
+| Azure Files share / volume | Mount path | Consumers |
+|---|---|---|
 | `contentfiles` | `/app/ContentFiles` | webapi-ui, guideants-ai, plantuml |
-| `script-agent-state` | `/var/lib/guideants/script-agent-admin` | guideants-ai |
+| `script-agent-state` | `/var/lib/guideants/script-agent-admin` | guideants-ai (durable definitions) |
+| EmptyDir `script-agent-runtime-volume` | `/var/run/guideants/script-agent-runtime` | guideants-ai (executable scoped venvs) |
 | `searxng-config` | `/etc/searxng` | searxng |
 | `searxng-data` | `/var/cache/searxng` | searxng |
+
+Azure Files mounts use CIFS with `nounix`, so Python venvs cannot be created on the durable admin share. Scoped venvs must live on the replica-local EmptyDir runtime mount and are rehydrated from the durable `requirements.txt` / `install-scripts.json` definitions when a replica starts cold.
 
 SearXNG config is seeded from `docker/volumes/searxng/config/` on first deploy.
 

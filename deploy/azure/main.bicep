@@ -122,7 +122,6 @@ module containerAppsEnvironment 'modules/container-apps-environment.bicep' = {
     location: location
     containerAppsEnvironmentName: containerAppsEnvironmentName
     containerAppsSubnetId: coreInfrastructure.outputs.containerAppsSubnetId
-    logAnalyticsWorkspaceId: coreInfrastructure.outputs.logAnalyticsWorkspaceId
     tags: tags
   }
 }

@@ -1,11 +1,11 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "metadata": {
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "10937480497450819496"
+      "templateHash": "4655659353304572800"
     }
   },
   "parameters": {
@@ -21,13 +21,6 @@
       "defaultValue": "East US 2",
       "metadata": {
         "description": "Location for all resources"
-      }
-    },
-    "resourceGroupName": {
-      "type": "string",
-      "defaultValue": "[format('rg-guideants-{0}', parameters('environmentName'))]",
-      "metadata": {
-        "description": "Resource group name"
       }
     },
     "containerAppsEnvironmentName": {
@@ -112,17 +105,9 @@
   },
   "resources": [
     {
-      "type": "Microsoft.Resources/resourceGroups",
-      "apiVersion": "2023-07-01",
-      "name": "[parameters('resourceGroupName')]",
-      "location": "[parameters('location')]",
-      "tags": "[variables('tags')]"
-    },
-    {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "core-infrastructure",
-      "resourceGroup": "[parameters('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -272,16 +257,12 @@
             }
           }
         }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
-      ]
+      }
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "container-apps-identity",
-      "resourceGroup": "[parameters('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -353,16 +334,12 @@
             }
           }
         }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
-      ]
+      }
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "key-vault",
-      "resourceGroup": "[parameters('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -403,7 +380,7 @@
             "value": "[parameters('deployerObjectId')]"
           },
           "containerAppsPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'container-apps-identity'), '2025-04-01').outputs.principalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-apps-identity'), '2025-04-01').outputs.principalId.value]"
           },
           "tags": {
             "value": "[variables('tags')]"
@@ -610,15 +587,13 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'container-apps-identity')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+        "[resourceId('Microsoft.Resources/deployments', 'container-apps-identity')]"
       ]
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "storage",
-      "resourceGroup": "[parameters('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -786,16 +761,12 @@
             }
           }
         }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
-      ]
+      }
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "database",
-      "resourceGroup": "[parameters('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -831,7 +802,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.39.26.7824",
-              "templateHash": "16439399657129405204"
+              "templateHash": "5069481370653714442"
             }
           },
           "parameters": {
@@ -888,18 +859,21 @@
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
               "sku": {
-                "name": "S2",
-                "tier": "Standard",
-                "capacity": 50
+                "name": "GP_S_Gen5",
+                "tier": "GeneralPurpose",
+                "family": "Gen5",
+                "capacity": 1
               },
               "properties": {
                 "collation": "SQL_Latin1_General_CP1_CI_AS",
-                "maxSizeBytes": 268435456000,
+                "maxSizeBytes": 34359738368,
                 "catalogCollation": "SQL_Latin1_General_CP1_CI_AS",
                 "zoneRedundant": false,
                 "readScale": "Disabled",
                 "requestedBackupStorageRedundancy": "Local",
-                "isLedgerOn": false
+                "isLedgerOn": false,
+                "autoPauseDelay": 15,
+                "minCapacity": "[json('0.5')]"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
@@ -937,10 +911,10 @@
               "apiVersion": "2023-05-01-preview",
               "name": "[format('{0}/{1}/{2}', variables('sqlServerName'), parameters('sqlDatabaseName'), 'default')]",
               "properties": {
-                "state": "Enabled",
+                "state": "Disabled",
                 "storageEndpoint": "",
-                "retentionDays": 7,
-                "isAzureMonitorTargetEnabled": true
+                "retentionDays": 0,
+                "isAzureMonitorTargetEnabled": false
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Sql/servers/databases', variables('sqlServerName'), parameters('sqlDatabaseName'))]"
@@ -974,16 +948,12 @@
             }
           }
         }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
-      ]
+      }
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "container-apps-environment",
-      "resourceGroup": "[parameters('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -997,10 +967,7 @@
             "value": "[parameters('containerAppsEnvironmentName')]"
           },
           "containerAppsSubnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'core-infrastructure'), '2025-04-01').outputs.containerAppsSubnetId.value]"
-          },
-          "logAnalyticsWorkspaceId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'core-infrastructure'), '2025-04-01').outputs.logAnalyticsWorkspaceId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'core-infrastructure'), '2025-04-01').outputs.containerAppsSubnetId.value]"
           },
           "tags": {
             "value": "[variables('tags')]"
@@ -1013,7 +980,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.39.26.7824",
-              "templateHash": "15114336131116158975"
+              "templateHash": "14052502213387845973"
             }
           },
           "parameters": {
@@ -1026,9 +993,6 @@
             "containerAppsSubnetId": {
               "type": "string"
             },
-            "logAnalyticsWorkspaceId": {
-              "type": "string"
-            },
             "tags": {
               "type": "object"
             }
@@ -1036,17 +1000,14 @@
           "resources": [
             {
               "type": "Microsoft.App/managedEnvironments",
-              "apiVersion": "2023-05-01",
+              "apiVersion": "2025-01-01",
               "name": "[parameters('containerAppsEnvironmentName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
               "properties": {
                 "appLogsConfiguration": {
-                  "destination": "log-analytics",
-                  "logAnalyticsConfiguration": {
-                    "customerId": "[reference(parameters('logAnalyticsWorkspaceId'), '2023-09-01').customerId]",
-                    "sharedKey": "[listKeys(parameters('logAnalyticsWorkspaceId'), '2023-09-01').primarySharedKey]"
-                  }
+                  "destination": null,
+                  "logAnalyticsConfiguration": null
                 },
                 "vnetConfiguration": {
                   "internal": false,
@@ -1075,65 +1036,60 @@
             },
             "containerAppsEnvironmentDefaultDomain": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.App/managedEnvironments', parameters('containerAppsEnvironmentName')), '2023-05-01').defaultDomain]"
+              "value": "[reference(resourceId('Microsoft.App/managedEnvironments', parameters('containerAppsEnvironmentName')), '2025-01-01').defaultDomain]"
             },
             "containerAppsEnvironmentStaticIp": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.App/managedEnvironments', parameters('containerAppsEnvironmentName')), '2023-05-01').staticIp]"
+              "value": "[reference(resourceId('Microsoft.App/managedEnvironments', parameters('containerAppsEnvironmentName')), '2025-01-01').staticIp]"
             }
           }
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'core-infrastructure')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+        "[resourceId('Microsoft.Resources/deployments', 'core-infrastructure')]"
       ]
     }
   ],
   "outputs": {
-    "resourceGroupName": {
-      "type": "string",
-      "value": "[parameters('resourceGroupName')]"
-    },
     "containerAppsEnvironmentId": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'container-apps-environment'), '2025-04-01').outputs.containerAppsEnvironmentId.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-apps-environment'), '2025-04-01').outputs.containerAppsEnvironmentId.value]"
     },
     "containerAppsEnvironmentName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'container-apps-environment'), '2025-04-01').outputs.containerAppsEnvironmentName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-apps-environment'), '2025-04-01').outputs.containerAppsEnvironmentName.value]"
     },
     "containerAppsEnvironmentDefaultDomain": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'container-apps-environment'), '2025-04-01').outputs.containerAppsEnvironmentDefaultDomain.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-apps-environment'), '2025-04-01').outputs.containerAppsEnvironmentDefaultDomain.value]"
     },
     "keyVaultName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'key-vault'), '2025-04-01').outputs.keyVaultName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'key-vault'), '2025-04-01').outputs.keyVaultName.value]"
     },
     "keyVaultUri": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'key-vault'), '2025-04-01').outputs.keyVaultUri.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'key-vault'), '2025-04-01').outputs.keyVaultUri.value]"
     },
     "storageAccountName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.storageAccountName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.storageAccountName.value]"
     },
     "sqlServerFqdn": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'database'), '2025-04-01').outputs.sqlServerFqdn.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'database'), '2025-04-01').outputs.sqlServerFqdn.value]"
     },
     "sqlServerName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'database'), '2025-04-01').outputs.sqlServerName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'database'), '2025-04-01').outputs.sqlServerName.value]"
     },
     "sqlDatabaseName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'database'), '2025-04-01').outputs.sqlDatabaseName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'database'), '2025-04-01').outputs.sqlDatabaseName.value]"
     },
     "appInsightsConnectionString": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'core-infrastructure'), '2025-04-01').outputs.appInsightsConnectionString.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'core-infrastructure'), '2025-04-01').outputs.appInsightsConnectionString.value]"
     }
   }
 }

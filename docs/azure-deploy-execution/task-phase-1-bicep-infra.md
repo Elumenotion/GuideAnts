@@ -39,7 +39,7 @@ first.
 
 - Do **not** deploy container apps yet (Phase 2).
 - Do **not** commit secret values — only `@secure()` parameters and Key Vault secret *names*.
-- SQL SKU: **S2 Standard, capacity 50** (Waterfall-proven).
+- SQL SKU: **GP serverless** (`GP_S_Gen5`, max 1 vCore, min 0.5, auto-pause 15 min).
 - Database name default: **`guideants`** (not `AntArmyProjects`).
 - No `AzureAd__*` or Stripe/Postmark parameters.
 - App name prefix default: **`guideants`** (not Waterfall's `aqm`).
@@ -115,7 +115,7 @@ but **no defaults in scripts**.
 
 Cost-optimized from day one (learn from Waterfall `cost-optimized-recreation-plan.md`):
 
-- Log Analytics: 30-day retention (table-level optimization later).
+- Log Analytics: 30-day retention (PerGB2018 minimum); ACA console destination `null` (live stream only).
 - App Insights linked to workspace.
 - Optional `data-collection-rules.bicep` for basic logs tier (stretch).
 

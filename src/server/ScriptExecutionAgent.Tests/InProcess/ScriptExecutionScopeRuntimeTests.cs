@@ -17,10 +17,11 @@ public sealed class ScriptExecutionScopeRuntimeTests
     {
         var projectId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         var guideId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var runtimeRoot = Path.Combine(Path.GetTempPath(), "script-agent-runtime", Guid.NewGuid().ToString("N"));
         var scope = ScriptExecutionScopeRuntime.ResolveScope(
             projectId,
             guideId,
-            new ScriptExecutionScopeOptions("/tmp/scopes", null, null, false, null));
+            new ScriptExecutionScopeOptions("/tmp/scopes", runtimeRoot, null, null, false, null));
 
         var workingDirectory = "/app/ContentFiles/project/notebooks/nb/Output";
         var environment = ScriptExecutionScopeRuntime.BuildScriptEnvironment(
@@ -30,7 +31,7 @@ public sealed class ScriptExecutionScopeRuntimeTests
             NullLogger.Instance);
 
         var expectedRuntimeRoot = Path.Combine(
-            "/tmp/scopes",
+            runtimeRoot,
             $"project-{projectId:N}",
             "runtime");
 
@@ -46,14 +47,36 @@ public sealed class ScriptExecutionScopeRuntimeTests
         var projectId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         var guideA = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var guideB = Guid.Parse("33333333-3333-3333-3333-333333333333");
-        var options = new ScriptExecutionScopeOptions("/tmp/scopes", null, null, false, null);
+        var runtimeRoot = Path.Combine(Path.GetTempPath(), "script-agent-runtime", Guid.NewGuid().ToString("N"));
+        var options = new ScriptExecutionScopeOptions("/tmp/scopes", runtimeRoot, null, null, false, null);
 
         var scopeA = ScriptExecutionScopeRuntime.ResolveScope(projectId, guideA, options);
         var scopeB = ScriptExecutionScopeRuntime.ResolveScope(projectId, guideB, options);
 
         scopeA.ProjectRuntimeRootPath.Should().Be(scopeB.ProjectRuntimeRootPath);
         scopeA.ProjectRuntimeRootPath.Should().Be(
-            Path.Combine("/tmp/scopes", $"project-{projectId:N}", "runtime"));
+            Path.Combine(runtimeRoot, $"project-{projectId:N}", "runtime"));
+    }
+
+    [TestMethod]
+    public void ResolveScope_places_executable_runtime_outside_durable_definition_root()
+    {
+        var projectId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var guideId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var definitionRoot = Path.Combine(Path.GetTempPath(), "script-agent-definition", Guid.NewGuid().ToString("N"));
+        var runtimeRoot = Path.Combine(Path.GetTempPath(), "script-agent-runtime", Guid.NewGuid().ToString("N"));
+        var scope = ScriptExecutionScopeRuntime.ResolveScope(
+            projectId,
+            guideId,
+            new ScriptExecutionScopeOptions(definitionRoot, runtimeRoot, null, null, false, null));
+
+        scope.RequirementsFilePath.Should().StartWith(scope.ScopeRootPath);
+        scope.AppliedStateFilePath.Should().StartWith(scope.ScopeRootPath);
+        scope.PythonVenvPath.Should().StartWith(scope.RuntimeScopeRootPath);
+        scope.RuntimeAppliedStateFilePath.Should().StartWith(scope.RuntimeScopeRootPath);
+        scope.ProjectRuntimeRootPath.Should().StartWith(runtimeRoot);
+        scope.PythonVenvPath.Should().NotStartWith(definitionRoot);
+        scope.RuntimeScopeRootPath.Should().NotStartWith(definitionRoot);
     }
 
     [TestMethod]

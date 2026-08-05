@@ -45,6 +45,7 @@ Last updated: 2026-06-20
 - `SCRIPT_EXECUTION_ADMIN_STATE_DIR` (default: `/var/lib/guideants/script-agent-admin`)
 - `SCRIPT_EXECUTION_ADMIN_FAIL_OPEN` (default: `false`)
 - `SCRIPT_EXECUTION_SCOPE_STATE_ROOT` (default: `FILE_STORAGE_ROOT/.guideants/script-execution`)
+- `SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT` (required in deployed configurations)
 - `SCRIPT_EXECUTION_SCOPE_PYTHON_VENV_DIR` (default: `python-venv`)
 - `SCRIPT_EXECUTION_PYTHON_BOOTSTRAP` (optional interpreter command for `-m venv`)
 - `SCRIPT_EXECUTION_REQUIRE_SCOPED_VENV` (strict mode for scoped venv requirement)

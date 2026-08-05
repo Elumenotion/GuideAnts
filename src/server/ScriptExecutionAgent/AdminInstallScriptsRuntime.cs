@@ -155,7 +155,7 @@ internal static class AdminInstallScriptsRuntime
     }
 
     await ScriptExecutionScopeRuntime.EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
-    var workDirectory = Path.Combine(scope.ScopeRootPath, "install-scripts-work");
+    var workDirectory = Path.Combine(scope.RuntimeScopeRootPath, "install-scripts-work");
     Directory.CreateDirectory(workDirectory);
 
   foreach (var step in document.Scripts.OrderBy(static script => script.Order))

@@ -347,7 +347,7 @@ resource webApiApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 3
       }
       volumes: [
@@ -429,6 +429,10 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
               value: '/var/lib/guideants/script-agent-admin/scopes'
             }
             {
+              name: 'SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT'
+              value: '/var/run/guideants/script-agent-runtime'
+            }
+            {
               name: 'SCRIPT_EXECUTION_REQUIRE_TOKEN'
               value: 'true'
             }
@@ -446,11 +450,15 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
               volumeName: 'script-agent-state-volume'
               mountPath: '/var/lib/guideants/script-agent-admin'
             }
+            {
+              volumeName: 'script-agent-runtime-volume'
+              mountPath: '/var/run/guideants/script-agent-runtime'
+            }
           ]
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
       volumes: [
@@ -463,6 +471,10 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'script-agent-state-volume'
           storageType: 'AzureFile'
           storageName: 'script-agent-state-storage'
+        }
+        {
+          name: 'script-agent-runtime-volume'
+          storageType: 'EmptyDir'
         }
       ]
     }
@@ -550,7 +562,7 @@ resource doclingApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
     }
@@ -625,7 +637,7 @@ resource plantumlApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
       volumes: [
@@ -689,7 +701,7 @@ resource searxngApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
       volumes: [
@@ -774,7 +786,7 @@ resource documentServerApp 'Microsoft.App/containerApps@2023-05-01' = if (docume
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
     }

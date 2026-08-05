@@ -54,6 +54,11 @@ if (string.IsNullOrWhiteSpace(scopeStateRoot))
 {
     scopeStateRoot = Path.Combine(fileStorageRoot, ".guideants", "script-execution");
 }
+var scopeRuntimeRoot = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT");
+if (string.IsNullOrWhiteSpace(scopeRuntimeRoot))
+{
+    throw new InvalidOperationException("SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT must be configured.");
+}
 var requireScopedPythonVenv = GetBooleanEnvironmentVariable(
     "SCRIPT_EXECUTION_REQUIRE_SCOPED_VENV",
     defaultValue: OperatingSystem.IsLinux());
@@ -64,6 +69,7 @@ if (string.IsNullOrWhiteSpace(basePythonVenvPath) && OperatingSystem.IsLinux())
 }
 var scopeOptions = new ScriptExecutionScopeOptions(
     Path.GetFullPath(scopeStateRoot),
+    Path.GetFullPath(scopeRuntimeRoot),
     Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_SCOPE_PYTHON_VENV_DIR"),
     Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_PYTHON_BOOTSTRAP"),
     requireScopedPythonVenv,
@@ -80,13 +86,14 @@ if (adminOptions.Enabled && string.IsNullOrWhiteSpace(adminOptions.AdminToken))
 }
 
 startupLogger.LogInformation(
-    "SECURITY: startup config tokenRequired={TokenRequired} tokenConfigured={TokenConfigured} storageRootConfigured={StorageRootConfigured} linuxIdentityIsolation={IdentityIsolation} allowOwnershipFallback={AllowOwnershipFallback} scopeStateRoot={ScopeStateRoot} requireScopedVenv={RequireScopedVenv} adminApiEnabled={AdminApiEnabled} adminTokenConfigured={AdminTokenConfigured} adminStateDir={AdminStateDir}",
+    "SECURITY: startup config tokenRequired={TokenRequired} tokenConfigured={TokenConfigured} storageRootConfigured={StorageRootConfigured} linuxIdentityIsolation={IdentityIsolation} allowOwnershipFallback={AllowOwnershipFallback} scopeStateRoot={ScopeStateRoot} scopeRuntimeRoot={ScopeRuntimeRoot} requireScopedVenv={RequireScopedVenv} adminApiEnabled={AdminApiEnabled} adminTokenConfigured={AdminTokenConfigured} adminStateDir={AdminStateDir}",
     requireAgentToken,
     !string.IsNullOrWhiteSpace(agentToken),
     !string.IsNullOrWhiteSpace(fileStorageRoot),
     enableNotebookIdentityIsolation,
     allowOwnershipFallback,
     LogValueSanitizer.Sanitize(scopeOptions.StateRootPath),
+    LogValueSanitizer.Sanitize(scopeOptions.RuntimeRootPath),
     scopeOptions.RequireScopedPythonVenv,
     adminOptions.Enabled,
     !string.IsNullOrWhiteSpace(adminOptions.AdminToken),
@@ -94,6 +101,7 @@ startupLogger.LogInformation(
 
 await StartupFilesystemHardening.ApplyAsync(fileStorageRoot, startupLogger);
 Directory.CreateDirectory(scopeOptions.StateRootPath);
+Directory.CreateDirectory(scopeOptions.RuntimeRootPath);
 if (adminOptions.Enabled)
 {
     await AdminStateRuntime.InitializeAsync(adminOptions, scopeOptions, startupLogger, CancellationToken.None);
@@ -475,7 +483,8 @@ if (adminOptions.Enabled)
         {
             status = "OK",
             adminStateDir = adminOptions.StateDirectoryPath,
-            scopeStateRoot = scopeOptions.StateRootPath
+            scopeStateRoot = scopeOptions.StateRootPath,
+            scopeRuntimeRoot = scopeOptions.RuntimeRootPath
         }));
     });
 
@@ -740,18 +749,6 @@ if (adminOptions.Enabled)
 }
 
 await app.StartAsync();
-
-if (adminOptions.Enabled)
-{
-    // Bind the HTTP listener first, then reconcile sandbox scopes in the background so that
-    // apt/pip provisioning never delays /execute or /health. Any scope an execution needs that
-    // has not been reconciled yet is provisioned on demand by EnsureScopeRequirementsForExecutionAsync.
-    _ = Task.Run(() => AdminStateRuntime.ReconcileStartupStateAsync(
-        adminOptions,
-        scopeOptions,
-        startupLogger,
-        app.Lifetime.ApplicationStopping));
-}
 
 await app.WaitForShutdownAsync();
 
@@ -1400,6 +1397,7 @@ static (string FileName, string[] Arguments) GetScriptCommand(
 
 internal sealed record ScriptExecutionScopeOptions(
     string StateRootPath,
+    string RuntimeRootPath,
     string? PythonVenvRelativePath,
     string? PythonBootstrapCommand,
     bool RequireScopedPythonVenv,
@@ -1439,10 +1437,12 @@ internal sealed record ScriptExecutionScope(
     Guid ProjectId,
     Guid GuideScopeId,
     string ScopeRootPath,
+    string RuntimeScopeRootPath,
     string ProjectRuntimeRootPath,
     string PythonVenvPath,
     string RequirementsFilePath,
-    string AppliedStateFilePath)
+    string AppliedStateFilePath,
+    string RuntimeAppliedStateFilePath)
 {
     public string PythonExecutablePath =>
         OperatingSystem.IsWindows()
@@ -1456,12 +1456,6 @@ internal static class ScriptExecutionScopeRuntime
     private static readonly Regex EnvironmentVariableNamePattern = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex RequirementsPackageNamePattern = new("^[A-Za-z0-9][A-Za-z0-9._-]*", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex NormalizedPythonPackageSeparatorPattern = new("[-_.]+", RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly HashSet<string> ProtectedTopLevelPythonPackages = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "pip",
-        "setuptools",
-        "wheel"
-    };
     private static readonly HashSet<string> ReservedEnvironmentKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "SCRIPT_EXECUTION_SCOPE_ROOT",
@@ -1524,18 +1518,22 @@ internal static class ScriptExecutionScopeRuntime
     {
         var venvRelativePath = NormalizeRelativePath(options.PythonVenvRelativePath, "python-venv");
 
-        var projectRoot = Path.Combine(options.StateRootPath, $"project-{projectId:N}");
-        var scopeRoot = Path.Combine(projectRoot, $"guide-{guideScopeId:N}");
-        var projectRuntimeRoot = Path.Combine(projectRoot, "runtime");
+        var projectDefinitionRoot = Path.Combine(options.StateRootPath, $"project-{projectId:N}");
+        var scopeRoot = Path.Combine(projectDefinitionRoot, $"guide-{guideScopeId:N}");
+
+        var projectRuntimeRoot = Path.Combine(options.RuntimeRootPath, $"project-{projectId:N}", "runtime");
+        var runtimeScopeRoot = Path.Combine(options.RuntimeRootPath, $"project-{projectId:N}", $"guide-{guideScopeId:N}");
 
         return new ScriptExecutionScope(
             projectId,
             guideScopeId,
             scopeRoot,
+            runtimeScopeRoot,
             projectRuntimeRoot,
-            Path.Combine(scopeRoot, venvRelativePath),
+            Path.Combine(runtimeScopeRoot, venvRelativePath),
             Path.Combine(scopeRoot, "requirements.txt"),
-            Path.Combine(scopeRoot, "applied-state.json"));
+            Path.Combine(scopeRoot, "applied-state.json"),
+            Path.Combine(runtimeScopeRoot, "runtime-applied-state.json"));
     }
 
     public static void EnsureProjectRuntimeDirectory(ScriptExecutionScope scope)
@@ -1558,12 +1556,23 @@ internal static class ScriptExecutionScopeRuntime
         }
     }
 
+    public static void EnsureRuntimeScopeDirectory(ScriptExecutionScope scope)
+    {
+        Directory.CreateDirectory(scope.RuntimeScopeRootPath);
+        var runtimeAppliedDirectory = Path.GetDirectoryName(scope.RuntimeAppliedStateFilePath);
+        if (!string.IsNullOrWhiteSpace(runtimeAppliedDirectory))
+        {
+            Directory.CreateDirectory(runtimeAppliedDirectory);
+        }
+    }
+
     public static async Task EnsurePythonVenvAsync(
         ScriptExecutionScope scope,
         ScriptExecutionScopeOptions options,
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        EnsureRuntimeScopeDirectory(scope);
         if (File.Exists(scope.PythonExecutablePath))
         {
             EnsureBasePythonRuntimeExtension(scope, options, logger);
@@ -1807,73 +1816,95 @@ internal static class ScriptExecutionScopeRuntime
         EnsureScopeDirectory(scope);
         await EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
 
-        // Serialize requirement installs per venv so a background startup reconcile and an
-        // on-demand execution never run two pip processes against the same environment.
+        // Serialize requirement installs per venv so concurrent executions never run two pip
+        // processes against the same environment.
         var venvLock = VenvLocks.GetOrAdd(scope.PythonVenvPath, static _ => new SemaphoreSlim(1, 1));
         await venvLock.WaitAsync(cancellationToken);
         try
         {
-            var requirementsPath = File.Exists(scope.RequirementsFilePath)
-                ? scope.RequirementsFilePath
-                : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
-            var requirementsText = File.Exists(requirementsPath)
-                ? await File.ReadAllTextAsync(requirementsPath, cancellationToken)
-                : string.Empty;
-            var validation = ValidateRequirements(requirementsText);
-            if (!validation.IsValid)
-            {
-                throw new InvalidOperationException(validation.ErrorMessage);
-            }
-
-            var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
-            var requirementsHash = ComputeSha256(requirementsText);
-            var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
-            if (requirementsHash == appliedState.RequirementsHash)
-            {
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(requirementsText))
-            {
-                var result = await Cli.Wrap(scope.PythonExecutablePath)
-                    .WithArguments(args => args
-                        .Add("-m")
-                        .Add("pip")
-                        .Add("--disable-pip-version-check")
-                        .Add("install")
-                        .Add("-r")
-                        .Add(requirementsPath))
-                    .WithValidation(CommandResultValidation.None)
-                    .ExecuteBufferedAsync(cancellationToken);
-
-                if (result.ExitCode != 0)
-                {
-                    throw new InvalidOperationException(FormatPipFailure(result));
-                }
-            }
-
-            await PruneUnmanagedTopLevelPackagesAsync(
-                scope.PythonExecutablePath,
-                desiredTopLevelPackages,
-                cancellationToken);
-
-            await AdminScopeAppliedStateRuntime.WriteAsync(
+            await SyncScopeRuntimeFromDefinitionsAsync(
                 scope,
-                requirementsHash,
-                requirementsPath,
-                desiredTopLevelPackages,
-                appliedState.InstallScriptsHash,
-                appliedState.InstallScriptStepResults,
+                adminOptions,
+                logger,
                 cancellationToken);
-            logger.LogInformation(
-                "Synced scoped Python requirements for execution on project={ProjectId} guide={GuideId}.",
-                scope.ProjectId,
-                scope.GuideScopeId);
         }
         finally
         {
             venvLock.Release();
         }
+    }
+
+    private static async Task SyncScopeRuntimeFromDefinitionsAsync(
+        ScriptExecutionScope scope,
+        AdminApiOptions adminOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var requirementsPath = File.Exists(scope.RequirementsFilePath)
+            ? scope.RequirementsFilePath
+            : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
+        var requirementsText = File.Exists(requirementsPath)
+            ? await File.ReadAllTextAsync(requirementsPath, cancellationToken)
+            : string.Empty;
+        var validation = ValidateRequirements(requirementsText);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException(validation.ErrorMessage);
+        }
+
+        var requirementsHash = ComputeSha256(requirementsText);
+        var installScriptsDocument = AdminInstallScriptsRuntime.ReadDocument(scope);
+        var installScriptsHash = AdminInstallScriptsRuntime.ComputeDocumentHash(installScriptsDocument);
+        var runtimeAppliedState = ScopeRuntimeAppliedStateRuntime.Read(scope);
+        var requirementsHashChanged = requirementsHash != runtimeAppliedState.RequirementsHash;
+        var scriptsNeedApply = AdminInstallScriptsRuntime.NeedsApply(
+            installScriptsHash,
+            runtimeAppliedState.InstallScriptsHash,
+            installScriptsDocument.Scripts.Count);
+        if (!requirementsHashChanged && !scriptsNeedApply)
+        {
+            return;
+        }
+
+        if (requirementsHashChanged && !string.IsNullOrWhiteSpace(requirementsText))
+        {
+            var result = await Cli.Wrap(scope.PythonExecutablePath)
+                .WithArguments(args => args
+                    .Add("-m")
+                    .Add("pip")
+                    .Add("--disable-pip-version-check")
+                    .Add("install")
+                    .Add("-r")
+                    .Add(requirementsPath))
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(cancellationToken);
+
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(FormatPipFailure(result));
+            }
+        }
+
+        if (scriptsNeedApply)
+        {
+            await ApplyScopeInstallScriptsAsync(
+                scope,
+                installScriptsDocument,
+                logger,
+                cancellationToken);
+        }
+
+        await ScopeRuntimeAppliedStateRuntime.WriteAsync(
+            scope,
+            requirementsHash,
+            installScriptsHash,
+            cancellationToken);
+        logger.LogInformation(
+            "Synced scoped Python runtime for execution on project={ProjectId} guide={GuideId}. requirementsApplied={RequirementsApplied} installScriptsApplied={InstallScriptsApplied}",
+            scope.ProjectId,
+            scope.GuideScopeId,
+            requirementsHashChanged,
+            scriptsNeedApply);
     }
 
     public static async Task<AdminApplyResult> ApplyScopeRequirementsAsync(
@@ -1886,8 +1917,8 @@ internal static class ScriptExecutionScopeRuntime
         EnsureScopeDirectory(scope);
         await EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
 
-        // Serialize requirement installs per venv so a background startup reconcile and an
-        // on-demand execution never run two pip processes against the same environment.
+        // Serialize requirement installs per venv so concurrent admin applies and executions
+        // never run two pip processes against the same environment.
         var venvLock = VenvLocks.GetOrAdd(scope.PythonVenvPath, static _ => new SemaphoreSlim(1, 1));
         await venvLock.WaitAsync(cancellationToken);
         try
@@ -1907,23 +1938,28 @@ internal static class ScriptExecutionScopeRuntime
             var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
             var requirementsHash = ComputeSha256(requirementsText);
             var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
-            var unmanagedPackagesBeforeInstall = await GetUnmanagedTopLevelPackagesAsync(
-                scope.PythonExecutablePath,
-                desiredTopLevelPackages,
-                cancellationToken);
+            var runtimeAppliedState = ScopeRuntimeAppliedStateRuntime.Read(scope);
             var installScriptsDocument = AdminInstallScriptsRuntime.ReadDocument(scope);
             var installScriptsHash = AdminInstallScriptsRuntime.ComputeDocumentHash(installScriptsDocument);
-            var requirementsNeedsApply = requirementsHash != appliedState.RequirementsHash || unmanagedPackagesBeforeInstall.Count > 0;
-            var scriptsNeedApply = AdminInstallScriptsRuntime.NeedsApply(
+            var requirementsNeedRuntimeSync = requirementsHash != runtimeAppliedState.RequirementsHash;
+            var scriptsNeedRuntimeSync = AdminInstallScriptsRuntime.NeedsApply(
+                installScriptsHash,
+                runtimeAppliedState.InstallScriptsHash,
+                installScriptsDocument.Scripts.Count);
+            var requirementsNeedAuditUpdate = requirementsHash != appliedState.RequirementsHash;
+            var scriptsNeedAuditUpdate = AdminInstallScriptsRuntime.NeedsApply(
                 installScriptsHash,
                 appliedState.InstallScriptsHash,
                 installScriptsDocument.Scripts.Count);
-            if (!requirementsNeedsApply && !scriptsNeedApply)
+            if (!requirementsNeedRuntimeSync
+                && !scriptsNeedRuntimeSync
+                && !requirementsNeedAuditUpdate
+                && !scriptsNeedAuditUpdate)
             {
                 return new AdminApplyResult("skipped", 0, 1, Array.Empty<string>());
             }
 
-            if (requirementsNeedsApply && requirementsHash != appliedState.RequirementsHash && !string.IsNullOrWhiteSpace(requirementsText))
+            if (requirementsNeedRuntimeSync && !string.IsNullOrWhiteSpace(requirementsText))
             {
                 var result = await Cli.Wrap(scope.PythonExecutablePath)
                     .WithArguments(args => args
@@ -1942,17 +1978,9 @@ internal static class ScriptExecutionScopeRuntime
                 }
             }
 
-            if (requirementsNeedsApply)
-            {
-                await PruneUnmanagedTopLevelPackagesAsync(
-                    scope.PythonExecutablePath,
-                    desiredTopLevelPackages,
-                    cancellationToken);
-            }
-
             AdminInstallScriptsApplyDetails? installScriptsDetails = null;
             IReadOnlyList<AdminInstallScriptStepResult> installScriptStepResults = appliedState.InstallScriptStepResults;
-            if (scriptsNeedApply)
+            if (scriptsNeedRuntimeSync)
             {
                 installScriptsDetails = await ApplyScopeInstallScriptsAsync(
                     scope,
@@ -1970,12 +1998,17 @@ internal static class ScriptExecutionScopeRuntime
                 installScriptsHash,
                 installScriptStepResults,
                 cancellationToken);
+            await ScopeRuntimeAppliedStateRuntime.WriteAsync(
+                scope,
+                requirementsHash,
+                installScriptsHash,
+                cancellationToken);
             logger.LogInformation(
                 "Applied scoped sandbox setup for project={ProjectId} guide={GuideId}. requirementsApplied={RequirementsApplied} installScriptsApplied={InstallScriptsApplied}",
                 scope.ProjectId,
                 scope.GuideScopeId,
-                requirementsNeedsApply,
-                scriptsNeedApply);
+                requirementsNeedRuntimeSync,
+                scriptsNeedRuntimeSync);
             return new AdminApplyResult("applied", 1, 0, Array.Empty<string>(), InstallScripts: installScriptsDetails);
         }
         finally
@@ -1995,7 +2028,7 @@ internal static class ScriptExecutionScopeRuntime
             return new AdminInstallScriptsApplyDetails("skipped", 0, 0, 0, Array.Empty<AdminInstallScriptStepResult>());
         }
 
-        var workDirectory = Path.Combine(scope.ScopeRootPath, "install-scripts-work");
+        var workDirectory = Path.Combine(scope.RuntimeScopeRootPath, "install-scripts-work");
         Directory.CreateDirectory(workDirectory);
         var environment = BuildScriptEnvironment(scope, null, workDirectory, logger);
         var stepResults = new List<AdminInstallScriptStepResult>();
@@ -2140,33 +2173,26 @@ internal static class ScriptExecutionScopeRuntime
             throw new InvalidOperationException(validation.ErrorMessage);
         }
 
-        var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
         var requirementsHash = ComputeSha256(requirementsText);
-        var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
-        var unmanagedPackagesBeforeInstall = await GetUnmanagedTopLevelPackagesAsync(
-            scope.PythonExecutablePath,
-            desiredTopLevelPackages,
-            cancellationToken);
-        if (requirementsHash != appliedState.RequirementsHash || unmanagedPackagesBeforeInstall.Count > 0)
+        var runtimeAppliedState = ScopeRuntimeAppliedStateRuntime.Read(scope);
+        if (requirementsHash != runtimeAppliedState.RequirementsHash
+            && !string.IsNullOrWhiteSpace(requirementsText))
         {
-            if (requirementsHash != appliedState.RequirementsHash && !string.IsNullOrWhiteSpace(requirementsText))
-            {
-                var result = await Cli.Wrap(scope.PythonExecutablePath)
-                    .WithArguments(args => args
-                        .Add("-m")
-                        .Add("pip")
-                        .Add("--disable-pip-version-check")
-                        .Add("install")
-                        .Add("--dry-run")
-                        .Add("-r")
-                        .Add(requirementsPath))
-                    .WithValidation(CommandResultValidation.None)
-                    .ExecuteBufferedAsync(cancellationToken);
+            var result = await Cli.Wrap(scope.PythonExecutablePath)
+                .WithArguments(args => args
+                    .Add("-m")
+                    .Add("pip")
+                    .Add("--disable-pip-version-check")
+                    .Add("install")
+                    .Add("--dry-run")
+                    .Add("-r")
+                    .Add(requirementsPath))
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(cancellationToken);
 
-                if (result.ExitCode != 0)
-                {
-                    throw new InvalidOperationException(FormatPipFailure(result));
-                }
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(FormatPipFailure(result));
             }
         }
 
@@ -2430,124 +2456,6 @@ internal static class ScriptExecutionScopeRuntime
         return packageNames;
     }
 
-    private static async Task<IReadOnlyList<string>> GetUnmanagedTopLevelPackagesAsync(
-        string pythonExecutablePath,
-        IReadOnlySet<string> desiredTopLevelPackages,
-        CancellationToken cancellationToken)
-    {
-        var installedTopLevelPackages = await GetInstalledTopLevelPackagesAsync(pythonExecutablePath, cancellationToken);
-        return installedTopLevelPackages
-            .Where(packageName =>
-                !ProtectedTopLevelPythonPackages.Contains(packageName)
-                && !desiredTopLevelPackages.Contains(packageName))
-            .OrderBy(static packageName => packageName, StringComparer.Ordinal)
-            .ToArray();
-    }
-
-    private static async Task<IReadOnlyList<string>> PruneUnmanagedTopLevelPackagesAsync(
-        string pythonExecutablePath,
-        IReadOnlySet<string> desiredTopLevelPackages,
-        CancellationToken cancellationToken)
-    {
-        var removedPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        for (var iteration = 0; iteration < 8; iteration++)
-        {
-            var toRemove = await GetUnmanagedTopLevelPackagesAsync(
-                pythonExecutablePath,
-                desiredTopLevelPackages,
-                cancellationToken);
-            if (toRemove.Count == 0)
-            {
-                break;
-            }
-
-            var uninstall = await Cli.Wrap(pythonExecutablePath)
-                .WithArguments(args =>
-                {
-                    args.Add("-m")
-                        .Add("pip")
-                        .Add("--disable-pip-version-check")
-                        .Add("uninstall")
-                        .Add("-y");
-                    foreach (var packageName in toRemove)
-                    {
-                        args.Add(packageName);
-                    }
-                })
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(cancellationToken);
-
-            if (uninstall.ExitCode != 0)
-            {
-                throw new InvalidOperationException(
-                    $"pip uninstall failed with exit code {uninstall.ExitCode} for packages [{string.Join(", ", toRemove)}]: {uninstall.StandardError}");
-            }
-
-            foreach (var packageName in toRemove)
-            {
-                removedPackages.Add(packageName);
-            }
-        }
-
-        return removedPackages
-            .OrderBy(static packageName => packageName, StringComparer.Ordinal)
-            .ToArray();
-    }
-
-    private static async Task<IReadOnlySet<string>> GetInstalledTopLevelPackagesAsync(
-        string pythonExecutablePath,
-        CancellationToken cancellationToken)
-    {
-        var listResult = await Cli.Wrap(pythonExecutablePath)
-            .WithArguments(args => args
-                .Add("-m")
-                .Add("pip")
-                .Add("--disable-pip-version-check")
-                .Add("list")
-                .Add("--not-required")
-                .Add("--format=json"))
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(cancellationToken);
-
-        if (listResult.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"pip list --not-required failed with exit code {listResult.ExitCode}: {listResult.StandardError}");
-        }
-
-        var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var output = listResult.StandardOutput;
-        if (string.IsNullOrWhiteSpace(output))
-        {
-            return packages;
-        }
-
-        using var document = JsonDocument.Parse(output);
-        if (document.RootElement.ValueKind != JsonValueKind.Array)
-        {
-            return packages;
-        }
-
-        foreach (var package in document.RootElement.EnumerateArray())
-        {
-            if (!package.TryGetProperty("name", out var nameElement))
-            {
-                continue;
-            }
-
-            var name = nameElement.GetString();
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                continue;
-            }
-
-            packages.Add(NormalizePythonPackageName(name));
-        }
-
-        return packages;
-    }
-
     private static string NormalizePythonPackageName(string packageName) =>
         NormalizedPythonPackageSeparatorPattern.Replace(packageName.Trim().ToLowerInvariant(), "-");
 
@@ -2681,39 +2589,6 @@ internal static class AdminStateRuntime
             }
 
             logger.LogWarning(ex, "ScriptExecutionAgent admin state validation failed; continuing because SCRIPT_EXECUTION_ADMIN_FAIL_OPEN=true.");
-        }
-    }
-
-    // Applies global apt packages and reconciles every known scope's Python requirements/install
-    // scripts. Intentionally NOT awaited during startup: it performs lengthy pip/apt work and must
-    // never gate the HTTP listener. /execute provisions whatever scope it needs on demand, so this
-    // is a warm-up reconcile rather than a prerequisite for serving requests.
-    public static async Task ReconcileStartupStateAsync(
-        AdminApiOptions adminOptions,
-        ScriptExecutionScopeOptions scopeOptions,
-        ILogger logger,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var aptResult = await ApplyGlobalAptPackagesAsync(adminOptions, logger, cancellationToken);
-            var result = await ApplyAllKnownScopesAsync(scopeOptions, adminOptions, logger, cancellationToken);
-            logger.LogInformation(
-                "ScriptExecutionAgent admin startup reconcile complete. aptStatus={AptStatus} status={Status} scopesApplied={Applied} scopesSkipped={Skipped}",
-                aptResult.Status,
-                result.Status,
-                result.ScopesApplied,
-                result.ScopesSkipped);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            logger.LogInformation("ScriptExecutionAgent admin startup reconcile canceled during shutdown.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(
-                ex,
-                "ScriptExecutionAgent admin startup reconcile failed; affected scopes will be provisioned on first execution.");
         }
     }
 

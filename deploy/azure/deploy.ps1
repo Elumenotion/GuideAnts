@@ -109,26 +109,35 @@ Then re-run this script.
 
     $deployer = Get-DeployerIdentity
     $deploymentName = "guideants-$EnvironmentName-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-    # main.bicep now uses targetScope = 'resourceGroup', so deploy at resource group level
-    az deployment group create `
-        --name $deploymentName `
-        --resource-group $script:ResourceGroupName `
-        --template-file (Join-Path $script:DeployRoot "main.bicep") `
-        --parameters `
-            environmentName=$EnvironmentName `
-            location=$Location `
-            appNamePrefix=$AppNamePrefix `
-            sqlDatabaseName=$script:SqlDatabaseName `
-            sqlAdminPassword=$script:SqlAdminPassword `
-            sqlAadAdminObjectId=$SqlAadAdminObjectId `
-            deployerObjectId=$($deployer.ObjectId) `
-            jwtSigningKey=$script:JwtSigningKey `
-            settingsSecretsKey=$script:SettingsSecretsKey `
-            scriptAgentToken=$script:ScriptAgentToken `
-            scriptAgentAdminToken=$script:ScriptAgentAdminToken `
-            documentServerJwtSecret=$script:DocumentServerJwtSecret `
-        --output none
-    if ($LASTEXITCODE -ne 0) { Write-Err "Infrastructure deployment failed"; exit 1 }
+    # Pass secrets via a parameters file so Windows az.cmd does not treat < > & in values as shell redirection.
+    $paramsPath = Join-Path ([System.IO.Path]::GetTempPath()) ("guideants-infra-{0}.parameters.json" -f [guid]::NewGuid().ToString('n'))
+    try {
+        $paramsObject = [ordered]@{
+            environmentName          = @{ value = $EnvironmentName }
+            location                 = @{ value = $Location }
+            appNamePrefix            = @{ value = $AppNamePrefix }
+            sqlDatabaseName          = @{ value = $script:SqlDatabaseName }
+            sqlAdminPassword         = @{ value = $script:SqlAdminPassword }
+            sqlAadAdminObjectId      = @{ value = $SqlAadAdminObjectId }
+            deployerObjectId         = @{ value = $deployer.ObjectId }
+            jwtSigningKey            = @{ value = $script:JwtSigningKey }
+            settingsSecretsKey       = @{ value = $script:SettingsSecretsKey }
+            scriptAgentToken         = @{ value = $script:ScriptAgentToken }
+            scriptAgentAdminToken    = @{ value = $script:ScriptAgentAdminToken }
+            documentServerJwtSecret  = @{ value = $script:DocumentServerJwtSecret }
+        }
+        ($paramsObject | ConvertTo-Json -Depth 6) | Set-Content -Path $paramsPath -Encoding utf8
+        az deployment group create `
+            --name $deploymentName `
+            --resource-group $script:ResourceGroupName `
+            --template-file (Join-Path $script:DeployRoot "main.bicep") `
+            --parameters "@$paramsPath" `
+            --output none
+        if ($LASTEXITCODE -ne 0) { Write-Err "Infrastructure deployment failed"; exit 1 }
+    }
+    finally {
+        if (Test-Path $paramsPath) { Remove-Item -Force $paramsPath -ErrorAction SilentlyContinue }
+    }
     $script:DeploymentName = $deploymentName
     Write-Success "Infrastructure deployment completed"
 }
@@ -136,20 +145,29 @@ Then re-run this script.
 function Deploy-ContainerApps {
     Write-Status "Deploying Container Apps (Phase 2)..."
     $deploymentName = "guideants-apps-$EnvironmentName-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-    az deployment group create `
-        --name $deploymentName `
-        --resource-group $script:ResourceGroupName `
-        --template-file (Join-Path $script:DeployRoot "apps.bicep") `
-        --parameters `
-            environmentName=$EnvironmentName `
-            location=$Location `
-            appNamePrefix=$AppNamePrefix `
-            ghcrOwner=$GhcrOwner `
-            imageTag=$ImageTag `
-            customDomain=$CustomDomain `
-            documentServerEnabled=true `
-        --output none
-    if ($LASTEXITCODE -ne 0) { Write-Err "Container Apps deployment failed"; exit 1 }
+    $paramsPath = Join-Path ([System.IO.Path]::GetTempPath()) ("guideants-apps-{0}.parameters.json" -f [guid]::NewGuid().ToString('n'))
+    try {
+        $paramsObject = [ordered]@{
+            environmentName         = @{ value = $EnvironmentName }
+            location                = @{ value = $Location }
+            appNamePrefix           = @{ value = $AppNamePrefix }
+            ghcrOwner               = @{ value = $GhcrOwner }
+            imageTag                = @{ value = $ImageTag }
+            customDomain            = @{ value = $CustomDomain }
+            documentServerEnabled   = @{ value = $true }
+        }
+        ($paramsObject | ConvertTo-Json -Depth 6) | Set-Content -Path $paramsPath -Encoding utf8
+        az deployment group create `
+            --name $deploymentName `
+            --resource-group $script:ResourceGroupName `
+            --template-file (Join-Path $script:DeployRoot "apps.bicep") `
+            --parameters "@$paramsPath" `
+            --output none
+        if ($LASTEXITCODE -ne 0) { Write-Err "Container Apps deployment failed"; exit 1 }
+    }
+    finally {
+        if (Test-Path $paramsPath) { Remove-Item -Force $paramsPath -ErrorAction SilentlyContinue }
+    }
     $script:ContainerAppsDeploymentName = $deploymentName
     Write-Success "Container Apps deployment completed"
 }

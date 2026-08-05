@@ -17,6 +17,11 @@ public sealed class ScriptExecutionAgentWebApplicationFactory : WebApplicationFa
         "script-agent-inprocess",
         Guid.NewGuid().ToString("N"));
 
+    public string RuntimeRoot { get; } = Path.Combine(
+        Path.GetTempPath(),
+        "script-agent-runtime",
+        Guid.NewGuid().ToString("N"));
+
     public NotebookStorageFixture Notebook { get; private set; } = null!;
 
     public bool EnableIdentityIsolation { get; }
@@ -46,9 +51,11 @@ public sealed class ScriptExecutionAgentWebApplicationFactory : WebApplicationFa
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         Directory.CreateDirectory(StorageRoot);
+        Directory.CreateDirectory(RuntimeRoot);
         Notebook = new NotebookStorageFixture(StorageRoot);
 
         Environment.SetEnvironmentVariable("FILE_STORAGE_ROOT", StorageRoot);
+        Environment.SetEnvironmentVariable("SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT", RuntimeRoot);
         Environment.SetEnvironmentVariable("SCRIPT_EXECUTION_REQUIRE_TOKEN", "true");
         Environment.SetEnvironmentVariable("SCRIPT_EXECUTION_AGENT_TOKEN", AgentToken);
         Environment.SetEnvironmentVariable(
@@ -98,6 +105,11 @@ public sealed class ScriptExecutionAgentWebApplicationFactory : WebApplicationFa
             if (Directory.Exists(StorageRoot))
             {
                 Directory.Delete(StorageRoot, recursive: true);
+            }
+
+            if (Directory.Exists(RuntimeRoot))
+            {
+                Directory.Delete(RuntimeRoot, recursive: true);
             }
         }
         catch

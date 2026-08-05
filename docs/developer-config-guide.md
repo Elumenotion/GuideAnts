@@ -298,7 +298,7 @@ If SearXNG still appears stale, remove and rebuild:
 
 The full AI builds are heavy: they compile local model runtime pieces such as `stable-diffusion.cpp` and include the full local AI service set. The `guideants-ai slim` build is intentionally for sandbox use: it starts `ScriptExecutionAgent` and the non-model media service, and it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. BuildKit cache is mandatory for sane iteration (the script tags `guideants-ai-deps:<backend>-cache` for layer reuse).
 
-Script execution package/config persistence is handled by `script_agent_admin_state`, mounted into `guideants-ai` at `/var/lib/guideants/script-agent-admin`. Use the admin API/state files for durable apt/pip changes; direct `apt-get install` or `pip install` inside a running container is lost when the container is recreated. Scoped venvs extend the baked `/opt/venv` runtime through `SCRIPT_EXECUTION_BASE_PYTHON_VENV`, so per-guide packages add to or override the image-provided packages instead of replacing them.
+Script execution package/config persistence is handled by `script_agent_admin_state`, mounted into `guideants-ai` at `/var/lib/guideants/script-agent-admin`. Executable scoped Python environments live on `script_agent_runtime` at `/var/run/guideants/script-agent-runtime` (`SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT`). Use the admin API/state files for durable apt/pip changes; direct `apt-get install` or `pip install` inside a running container is lost when the container is recreated. Scoped venvs extend the baked `/opt/venv` runtime through `SCRIPT_EXECUTION_BASE_PYTHON_VENV`, so per-guide packages add to or override the image-provided packages instead of replacing them.
 
 ### Required env values for compose
 
