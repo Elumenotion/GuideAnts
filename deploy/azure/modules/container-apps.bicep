@@ -463,6 +463,7 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'script-agent-state-volume'
           storageType: 'AzureFile'
           storageName: 'script-agent-state-storage'
+          mountOptions: 'mfsymlinks,nobrl,file_mode=0755,dir_mode=0755'
         }
       ]
     }

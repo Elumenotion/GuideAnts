@@ -44,7 +44,15 @@ flowchart TB
 | Azure Files share | Mount path | Consumers |
 |-------------------|------------|-----------|
 | `contentfiles` | `/app/ContentFiles` | webapi-ui, guideants-ai, plantuml |
-| `script-agent-state` | `/var/lib/guideants/script-agent-admin` | guideants-ai |
+| `script-agent-state` | `/var/lib/guideants/script-agent-admin` | guideants-ai (scoped SEA state + venvs under `.../scopes/`) |
+
+The `script-agent-state` volume on `guideants-ai` must mount with CIFS `mountOptions` so Linux can create venv symlinks on the share:
+
+```text
+mfsymlinks,nobrl,file_mode=0755,dir_mode=0755
+```
+
+Without `mfsymlinks`, `python -m venv` under `SCRIPT_EXECUTION_SCOPE_STATE_ROOT` fails on `lib64 -> lib` (`Permission denied`). This is configured in [`modules/container-apps.bicep`](modules/container-apps.bicep) on `script-agent-state-volume`. Evidence: [`docs/azure-deploy-execution/mfsymlinks-venv-evidence.md`](../../docs/azure-deploy-execution/mfsymlinks-venv-evidence.md).
 | `searxng-config` | `/etc/searxng` | searxng |
 | `searxng-data` | `/var/cache/searxng` | searxng |
 

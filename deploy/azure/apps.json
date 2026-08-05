@@ -463,7 +463,8 @@
                     {
                       "name": "script-agent-state-volume",
                       "storageType": "AzureFile",
-                      "storageName": "script-agent-state-storage"
+                      "storageName": "script-agent-state-storage",
+                      "mountOptions": "mfsymlinks,nobrl,file_mode=0755,dir_mode=0755"
                     }
                   ]
                 }
