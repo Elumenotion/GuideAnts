@@ -130,7 +130,7 @@ COPY --from=script-agent-exec-builder /usr/local/bin/ga-script-exec /usr/local/b
 COPY nginx.slim.conf /etc/nginx/nginx.conf
 COPY entrypoint.slim.sh /entrypoint.sh
 COPY start-media.sh /app/start-media.sh
-RUN chmod +x /entrypoint.sh /opt/guideants/script-agent-admin/reconcile.sh /app/start-media.sh
+RUN chmod +x /entrypoint.sh /opt/guideants/script-agent-admin/reconcile.sh /opt/guideants/script-agent-admin/migrate-mfsymlinks-scoped-venvs.sh /app/start-media.sh
 
 COPY media-service/ /app/media-service/
 
