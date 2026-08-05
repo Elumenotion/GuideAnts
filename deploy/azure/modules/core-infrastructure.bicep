@@ -48,6 +48,8 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
   }
 }
 
+// Workspace backs App Insights only. ACA console logs are not routed here
+// (CAE appLogsConfiguration.destination = 'none') — use live log stream instead.
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsWorkspaceName
   location: location
@@ -56,6 +58,7 @@ resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09
     sku: {
       name: 'PerGB2018'
     }
+    // PerGB2018 minimum retention is 30 days
     retentionInDays: 30
     features: {
       enableLogAccessUsingOnlyResourcePermissions: true

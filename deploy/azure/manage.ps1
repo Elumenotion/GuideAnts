@@ -7,7 +7,7 @@ param(
     [string]$EnvironmentName = "dev",
     [string]$AppNamePrefix = "guideants",
     [string]$AppName = "",
-    [int]$MinReplicas = 1,
+    [int]$MinReplicas = 0,
     [int]$MaxReplicas = 3,
     [string]$ImageTag = "",
     [switch]$Follow,

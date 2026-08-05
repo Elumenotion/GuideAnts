@@ -18,10 +18,10 @@ flowchart TB
     end
 
     subgraph Platform["Azure Platform Services"]
-        SQL[(Azure SQL\nguideants)]
+        SQL[(Azure SQL GP serverless\nguideants)]
         KV[Key Vault]
         Files[Azure Files]
-        LA[Log Analytics]
+        AI_Mon[App Insights]
     end
 
     User -->|HTTPS| WebUI
@@ -32,12 +32,14 @@ flowchart TB
     WebUI --> DocServer
     WebUI -->|MI| SQL
     WebUI --> KV
+    WebUI -.->|optional SDK| AI_Mon
     AI --> Files
     PlantUML --> Files
     SearXNG --> Files
     WebUI --> Files
-    ACA --> LA
 ```
+
+Console logs: live stream only (`destination: null` on CAE). No ACA → Log Analytics ingest.
 
 ## Persistence
 

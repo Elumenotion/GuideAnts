@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "15932455032497244812"
+      "templateHash": "16217861908992690064"
     }
   },
   "parameters": {
@@ -131,7 +131,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.39.26.7824",
-              "templateHash": "2680766342079353619"
+              "templateHash": "4195456741231024804"
             }
           },
           "parameters": {
@@ -195,7 +195,7 @@
             "searxngInternalUrl": "[format('http://{0}.internal.{1}', variables('searxngAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
             "aiInternalUrl": "[format('http://{0}.internal.{1}', variables('aiAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
             "doclingInternalUrl": "[format('http://{0}.internal.{1}', variables('doclingAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
-            "documentServerInternalUrl": "[format('http://{0}.internal.{1}', variables('documentServerAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
+            "documentServerInternalUrl": "[format('https://{0}.internal.{1}', variables('documentServerAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
             "plantumlInternalUrl": "[format('http://{0}.internal.{1}', variables('plantumlAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
             "webApiImage": "[format('ghcr.io/{0}/guideants-webapi-ui-slim:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
             "aiImage": "[format('ghcr.io/{0}/guideants-ai-slim:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
@@ -347,7 +347,7 @@
                     }
                   ],
                   "scale": {
-                    "minReplicas": 1,
+                    "minReplicas": 0,
                     "maxReplicas": 3
                   },
                   "volumes": [
@@ -451,7 +451,7 @@
                     }
                   ],
                   "scale": {
-                    "minReplicas": 1,
+                    "minReplicas": 0,
                     "maxReplicas": 2
                   },
                   "volumes": [
@@ -553,7 +553,7 @@
                     }
                   ],
                   "scale": {
-                    "minReplicas": 1,
+                    "minReplicas": 0,
                     "maxReplicas": 2
                   }
                 }
@@ -629,7 +629,7 @@
                     }
                   ],
                   "scale": {
-                    "minReplicas": 1,
+                    "minReplicas": 0,
                     "maxReplicas": 2
                   },
                   "volumes": [
@@ -694,7 +694,7 @@
                     }
                   ],
                   "scale": {
-                    "minReplicas": 1,
+                    "minReplicas": 0,
                     "maxReplicas": 2
                   },
                   "volumes": [
@@ -736,7 +736,7 @@
                   "activeRevisionsMode": "Single",
                   "ingress": {
                     "external": false,
-                    "targetPort": 8000,
+                    "targetPort": 80,
                     "allowInsecure": true
                   },
                   "secrets": [
@@ -781,7 +781,7 @@
                     }
                   ],
                   "scale": {
-                    "minReplicas": 1,
+                    "minReplicas": 0,
                     "maxReplicas": 2
                   }
                 }

@@ -136,7 +136,7 @@ When empty:
 
 ### 7. Resources
 
-All apps: `minReplicas: 1`, consumption profile.
+All apps: `minReplicas: 0` (scale-to-zero), consumption profile.
 
 Suggested CPU/memory starting points (tune during deploy-gate):
 

@@ -347,7 +347,7 @@ resource webApiApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 3
       }
       volumes: [
@@ -450,7 +450,7 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
       volumes: [
@@ -551,7 +551,7 @@ resource doclingApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
     }
@@ -626,7 +626,7 @@ resource plantumlApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
       volumes: [
@@ -690,7 +690,7 @@ resource searxngApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
       volumes: [
@@ -775,7 +775,7 @@ resource documentServerApp 'Microsoft.App/containerApps@2023-05-01' = if (docume
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: 0
         maxReplicas: 2
       }
     }

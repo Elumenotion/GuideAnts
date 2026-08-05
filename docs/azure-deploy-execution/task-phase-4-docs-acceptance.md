@@ -32,7 +32,7 @@ Complete consumer-facing documentation, compose parity validation, and
 ## Guardrails
 
 - README is consumer-facing — no internal Waterfall references.
-- Document estimated Azure monthly cost range (SQL S2 + 6 ACA apps + storage + logs).
+- Document estimated Azure monthly cost range (SQL serverless at rest + scale-to-zero ACA + storage).
 - Document third-party images (Docling, DocumentServer) and licenses.
 - No secrets in docs or example files.
 
@@ -55,7 +55,7 @@ Sections:
    - DocumentServer enabled by default
 7. **Troubleshooting** — image pull, SQL firewall, SMB locks, container logs
 8. **Cleanup** — `az group delete`
-9. **Cost notes** — Log Analytics can be expensive; link to cost tips
+9. **Cost notes** — scale-to-zero + SQL auto-pause + no ACA→LA console ingest; link to cost tips
 
 ### 2. Compose parity checklist
 
