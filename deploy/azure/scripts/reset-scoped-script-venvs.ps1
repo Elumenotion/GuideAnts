@@ -1,5 +1,4 @@
-# Remove scoped Python venv directories (and applied-state) from script-agent-state share.
-# One-time migration after mfsymlinks is enabled on guideants-ai (marker file prevents repeat wipes).
+# One-time migration: clear pre-mfsymlinks scoped python-venv trees via guideants-ai (fast rm on mounted share).
 param(
     [Parameter(Mandatory = $true)]
     [string]$ResourceGroupName,
@@ -7,7 +6,9 @@ param(
     [string]$ShareName = "script-agent-state",
     [string]$ScopesPath = "scopes",
     [string]$AiAppName = "guideants-ai",
+    [string]$StateMountPath = "/var/lib/guideants/script-agent-admin",
     [string]$ResetMarkerPath = ".guideants/mfsymlinks-venv-reset.done",
+    [int]$ReplicaWaitSeconds = 300,
     [switch]$Force
 )
 
@@ -76,25 +77,6 @@ function Test-ShareFileExists {
     return $output -eq "True"
 }
 
-function Test-SharePathExists {
-    param(
-        [hashtable]$Storage,
-        [string]$Path
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return $true
-    }
-
-    $output = az storage directory exists `
-        --account-name $Storage.AccountName `
-        --account-key $Storage.AccountKey `
-        --share-name $ShareName `
-        --name $Path `
-        -o tsv 2>$null
-    return $output -eq "True"
-}
-
 function Set-ShareFileContent {
     param(
         [hashtable]$Storage,
@@ -102,14 +84,22 @@ function Set-ShareFileContent {
         [string]$Content
     )
 
-    $parent = Split-Path -Parent $Path
-    if ($parent -and -not (Test-SharePathExists -Storage $Storage -Path $parent)) {
-        az storage directory create `
+    $parent = ($Path -replace '/[^/]+$','')
+    if ($parent -and $parent -ne $Path) {
+        $parentExists = az storage directory exists `
             --account-name $Storage.AccountName `
             --account-key $Storage.AccountKey `
             --share-name $ShareName `
             --name $parent `
-            --output none | Out-Null
+            -o tsv 2>$null
+        if ($parentExists -ne "True") {
+            az storage directory create `
+                --account-name $Storage.AccountName `
+                --account-key $Storage.AccountKey `
+                --share-name $ShareName `
+                --name $parent `
+                --output none | Out-Null
+        }
     }
 
     $tempFile = [System.IO.Path]::GetTempFileName()
@@ -132,76 +122,94 @@ function Set-ShareFileContent {
     }
 }
 
-function Remove-ShareFile {
-    param(
-        [hashtable]$Storage,
-        [string]$Path
-    )
-
-    az storage file delete `
-        --account-name $Storage.AccountName `
-        --account-key $Storage.AccountKey `
-        --share-name $ShareName `
-        --path $Path `
-        --output none | Out-Null
+function Get-AiScaleSettings {
+    $scaleJson = az containerapp show `
+        --name $AiAppName `
+        --resource-group $ResourceGroupName `
+        --query "properties.template.scale" -o json
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to read scale settings for '$AiAppName'."
+    }
+    $scale = $scaleJson | ConvertFrom-Json
+    return @{
+        MinReplicas = [int]$scale.minReplicas
+        MaxReplicas = [int]$scale.maxReplicas
+    }
 }
 
-function Remove-ShareDirectoryRecursive {
-    param(
-        [hashtable]$Storage,
-        [string]$Path
-    )
-
-    $childrenJson = az storage file list `
-        --account-name $Storage.AccountName `
-        --account-key $Storage.AccountKey `
-        --share-name $ShareName `
-        --path $Path `
-        -o json
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to list Azure Files path '$Path' on share '$ShareName'."
-    }
-
-    $children = @($childrenJson | ConvertFrom-Json)
-    foreach ($child in $children) {
-        $childPath = "$Path/$($child.name)"
-        if ($child.isDirectory) {
-            Remove-ShareDirectoryRecursive -Storage $Storage -Path $childPath
-        }
-        else {
-            Remove-ShareFile -Storage $Storage -Path $childPath
-        }
-    }
-
-    az storage directory delete `
-        --account-name $Storage.AccountName `
-        --account-key $Storage.AccountKey `
-        --share-name $ShareName `
-        --name $Path `
-        --output none | Out-Null
+function Test-AiReplicaRunning {
+    $running = az containerapp replica list `
+        --name $AiAppName `
+        --resource-group $ResourceGroupName `
+        --query "[?properties.runningState=='Running'] | length(@)" -o tsv 2>$null
+    return $running -match '^\d+$' -and [int]$running -gt 0
 }
 
-function Get-ShareChildren {
-    param(
-        [hashtable]$Storage,
-        [string]$Path
-    )
-
-    if (-not (Test-SharePathExists -Storage $Storage -Path $Path)) {
-        return @()
+function Wait-AiReplicaRunning {
+    $deadline = (Get-Date).AddSeconds($ReplicaWaitSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-AiReplicaRunning) {
+            return $true
+        }
+        Start-Sleep -Seconds 5
     }
+    return $false
+}
 
-    $childrenJson = az storage file list `
-        --account-name $Storage.AccountName `
-        --account-key $Storage.AccountKey `
-        --share-name $ShareName `
-        --path $Path `
-        -o json
+function Invoke-AiContainerCleanup {
+    $markerContainerPath = "$StateMountPath/$ResetMarkerPath".Replace('\', '/')
+    $scopeContainerPath = "$StateMountPath/$ScopesPath".Replace('\', '/')
+
+    $shellScript = @"
+set -eu
+ROOT='$StateMountPath'
+SCOPE_ROOT='$scopeContainerPath'
+MARKER='$markerContainerPath'
+VENV_COUNT=0
+APPLIED_COUNT=0
+if [ -d "`$SCOPE_ROOT" ]; then
+  while IFS= read -r -d '' venv_dir; do
+    rm -rf "`$venv_dir"
+    VENV_COUNT=`$((VENV_COUNT + 1))
+  done < <(find "`$SCOPE_ROOT" -type d -name python-venv -print0 2>/dev/null || true)
+  APPLIED_COUNT=`$(find "`$SCOPE_ROOT" -type f -name applied-state.json 2>/dev/null | wc -l | tr -d ' ')
+  find "`$SCOPE_ROOT" -type f -name applied-state.json -delete 2>/dev/null || true
+fi
+mkdir -p "`$(dirname "`$MARKER")"
+printf 'completedUtc=%s\nremovedVenvs=%s\nremovedAppliedState=%s\n' "`$(date -u +%Y-%m-%dT%H:%M:%SZ)" "`$VENV_COUNT" "`$APPLIED_COUNT" > "`$MARKER"
+echo GA_VENV_RESET_REMOVED_VENVS=`$VENV_COUNT
+echo GA_VENV_RESET_REMOVED_APPLIED=`$APPLIED_COUNT
+"@
+
+    $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($shellScript))
+    $remoteCommand = "echo $encoded | base64 -d | /bin/sh"
+
+    Write-Status "Removing scoped python-venv directories via $AiAppName (mounted share; seconds, not minutes)..."
+
+    $output = az containerapp exec `
+        --name $AiAppName `
+        --resource-group $ResourceGroupName `
+        --command "/bin/sh" `
+        --args "-c" $remoteCommand 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to list Azure Files path '$Path' on share '$ShareName'."
+        throw "Scoped venv migration failed in '$AiAppName': $output"
     }
 
-    return @($childrenJson | ConvertFrom-Json)
+    $removedVenvs = 0
+    $removedAppliedState = 0
+    foreach ($line in @($output)) {
+        if ($line -match '^GA_VENV_RESET_REMOVED_VENVS=(\d+)$') {
+            $removedVenvs = [int]$Matches[1]
+        }
+        elseif ($line -match '^GA_VENV_RESET_REMOVED_APPLIED=(\d+)$') {
+            $removedAppliedState = [int]$Matches[1]
+        }
+    }
+
+    return @{
+        RemovedVenvs = $removedVenvs
+        RemovedAppliedState = $removedAppliedState
+    }
 }
 
 Write-Status "Checking scoped script-agent venv migration on share '$ShareName'..."
@@ -217,48 +225,58 @@ if (-not $Force -and (Test-ShareFileExists -Storage $storage -Path $ResetMarkerP
     exit 0
 }
 
-if (-not (Test-SharePathExists -Storage $storage -Path $ScopesPath)) {
+$scopeExists = az storage directory exists `
+    --account-name $storage.AccountName `
+    --account-key $storage.AccountKey `
+    --share-name $ShareName `
+    --name $ScopesPath `
+    -o tsv 2>$null
+
+if ($scopeExists -ne "True") {
     $markerBody = "completedUtc=$([DateTime]::UtcNow.ToString('o'))`nremovedVenvs=0`nremovedAppliedState=0`n"
     Set-ShareFileContent -Storage $storage -Path $ResetMarkerPath -Content $markerBody
     Write-Success "No '$ScopesPath' directory on share — migration marker recorded; nothing to reset."
     exit 0
 }
 
-$removedVenvs = 0
-$removedAppliedState = 0
-
-foreach ($projectEntry in Get-ShareChildren -Storage $storage -Path $ScopesPath) {
-    if (-not $projectEntry.isDirectory) { continue }
-    if ($projectEntry.name -notlike "project-*") { continue }
-
-    $projectPath = "$ScopesPath/$($projectEntry.name)"
-    foreach ($guideEntry in Get-ShareChildren -Storage $storage -Path $projectPath) {
-        if (-not $guideEntry.isDirectory) { continue }
-        if ($guideEntry.name -notlike "guide-*") { continue }
-
-        $guidePath = "$projectPath/$($guideEntry.name)"
-        $venvPath = "$guidePath/python-venv"
-        if (Test-SharePathExists -Storage $storage -Path $venvPath) {
-            Write-Status "Removing $venvPath"
-            Remove-ShareDirectoryRecursive -Storage $storage -Path $venvPath
-            $removedVenvs++
+$scale = Get-AiScaleSettings
+$scaledUpForCleanup = $false
+try {
+    if (-not (Test-AiReplicaRunning)) {
+        if ($scale.MinReplicas -lt 1) {
+            Write-Status "Scaling $AiAppName to minReplicas=1 so migration can run on the mounted share..."
+            az containerapp update `
+                --name $AiAppName `
+                --resource-group $ResourceGroupName `
+                --min-replicas 1 `
+                --output none | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to scale '$AiAppName' to minReplicas=1."
+            }
+            $scaledUpForCleanup = $true
         }
 
-        $appliedStatePath = "$guidePath/applied-state.json"
-        if (Test-ShareFileExists -Storage $storage -Path $appliedStatePath) {
-            Write-Status "Removing $appliedStatePath"
-            Remove-ShareFile -Storage $storage -Path $appliedStatePath
-            $removedAppliedState++
+        if (-not (Wait-AiReplicaRunning)) {
+            throw "Timed out waiting for a running '$AiAppName' replica after ${ReplicaWaitSeconds}s."
         }
+    }
+
+    $result = Invoke-AiContainerCleanup
+}
+finally {
+    if ($scaledUpForCleanup) {
+        Write-Status "Restoring $AiAppName minReplicas=$($scale.MinReplicas)..."
+        az containerapp update `
+            --name $AiAppName `
+            --resource-group $ResourceGroupName `
+            --min-replicas $scale.MinReplicas `
+            --output none | Out-Null
     }
 }
 
-$markerBody = "completedUtc=$([DateTime]::UtcNow.ToString('o'))`nremovedVenvs=$removedVenvs`nremovedAppliedState=$removedAppliedState`n"
-Set-ShareFileContent -Storage $storage -Path $ResetMarkerPath -Content $markerBody
-
-if ($removedVenvs -eq 0 -and $removedAppliedState -eq 0) {
+if ($result.RemovedVenvs -eq 0 -and $result.RemovedAppliedState -eq 0) {
     Write-Success "No scoped venv or applied-state files found — migration marker recorded."
 }
 else {
-    Write-Success "Removed $removedVenvs scoped venv director$(if ($removedVenvs -eq 1) { 'y' } else { 'ies' }) and $removedAppliedState applied-state file$(if ($removedAppliedState -eq 1) { '' } else { 's' }). Venvs recreate on next script run; pip requirements re-apply automatically. Future deploys will not repeat this reset."
+    Write-Success "Removed $($result.RemovedVenvs) scoped venv director$(if ($result.RemovedVenvs -eq 1) { 'y' } else { 'ies' }) and $($result.RemovedAppliedState) applied-state file$(if ($result.RemovedAppliedState -eq 1) { '' } else { 's' }). Venvs recreate on next script run. Future deploys will not repeat this reset."
 }
