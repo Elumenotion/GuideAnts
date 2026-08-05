@@ -332,13 +332,18 @@ export function useOpenAiWizardState(): UseOpenAiWizardStateResult {
   }, [optionalForm]);
 
   const persistOptionalServices = useCallback(async (
-    _snapshot: WizardLoadSnapshot,
+    snapshot: WizardLoadSnapshot,
     loadSnapshot: () => Promise<WizardLoadSnapshot>,
     setSnapshot: (s: WizardLoadSnapshot) => void
   ): Promise<void> => {
     if (!validateOptionalServices()) {
       throw new Error('Optional service inputs are incomplete.');
     }
+
+    // Provider activation reads connection credentials from persisted settings.
+    // Re-save from wizard state so first-run optional services work without a
+    // prior Settings visit or a second wizard pass.
+    await persistConnection(snapshot, loadSnapshot, setSnapshot);
 
     if (optionalForm.enableSpeechTranscription) {
       await api.settings.services.updateProviderFields('SpeechTranscription', OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription, {
@@ -381,7 +386,7 @@ export function useOpenAiWizardState(): UseOpenAiWizardStateResult {
     const refreshed = await loadSnapshot();
     setSnapshot(refreshed);
     setOptionalErrors({});
-  }, [optionalForm, validateOptionalServices]);
+  }, [optionalForm, persistConnection, validateOptionalServices]);
 
   return {
     coreForm,

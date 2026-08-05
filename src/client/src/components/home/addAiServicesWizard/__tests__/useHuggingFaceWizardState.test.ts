@@ -244,6 +244,13 @@ describe('useHuggingFaceWizardState', () => {
     const snapshot = createWizardSnapshot();
     const { result } = renderHook(() => useHuggingFaceWizardState());
 
+    act(() => {
+      result.current.setCoreForm({
+        token: 'hf-secret-token-12345',
+        routerBaseUrl: 'https://router.huggingface.co/v1',
+      });
+    });
+
     await act(async () => {
       await result.current.persistOptionalServices(snapshot, createLoadSnapshot(snapshot), createSetSnapshot());
     });
@@ -261,6 +268,35 @@ describe('useHuggingFaceWizardState', () => {
       HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechSynthesis,
       WIZARD_DEFER_WARMUP_OPTIONS
     );
+  });
+
+  it('persists connection from wizard state before activating optional services', async () => {
+    const snapshot = createWizardSnapshot();
+    const { result } = renderHook(() => useHuggingFaceWizardState());
+
+    act(() => {
+      result.current.setCoreForm({
+        token: 'hf-secret-token-12345',
+        routerBaseUrl: 'https://router.huggingface.co/v1',
+      });
+    });
+
+    await act(async () => {
+      await result.current.persistOptionalServices(snapshot, createLoadSnapshot(snapshot), createSetSnapshot());
+    });
+
+    expect(api.settings.updateSection).toHaveBeenCalledWith(
+      HUGGINGFACE_SECTION,
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          Token: 'hf-secret-token-12345',
+          RouterBaseUrl: 'https://router.huggingface.co/v1',
+        }),
+      })
+    );
+    const updateSectionOrder = vi.mocked(api.settings.updateSection).mock.invocationCallOrder[0];
+    const activateProviderOrder = vi.mocked(api.settings.services.updateActiveProvider).mock.invocationCallOrder[0];
+    expect(updateSectionOrder).toBeLessThan(activateProviderOrder);
   });
 
   it('validates image model fields when images are enabled', async () => {
