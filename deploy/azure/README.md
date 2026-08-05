@@ -65,8 +65,8 @@ When complete, the script prints your application URL.
 | `-CustomDomain` | `""` | Public HTTPS domain (optional) |
 | `-SqlAdminPassword` | *(required)* | SQL admin — migrations only; omit with `-OnlyApps -SkipMigrations` |
 | `-SkipMigrations` | false | Skip `dotnet ef database update` |
-| `-SkipScriptVenvReset` | false | Skip the one-time mfsymlinks venv migration step |
-| `-ForceScriptVenvReset` | false | Re-run the venv migration even if it already completed (clears scoped venvs again) |
+| `-SkipScriptVenvReset` | false | Skip restarting `guideants-ai` to run the one-time mfsymlinks venv migration |
+| `-ForceScriptVenvReset` | false | Re-run the migration even if the share marker already exists (deletes marker, restarts `guideants-ai`) |
 | `-OnlyInfra` | false | Phase 1 only (no container apps) |
 | `-OnlyApps` | false | Phase 2 only (infra must already exist) |
 | `-SqlAadAdminObjectId` | `""` | Optional AAD object ID for SQL admin |
@@ -146,7 +146,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 | docling CrashLoop | Insufficient memory | Increase CPU/memory in `modules/container-apps.bicep` |
 | documentserver unhealthy | JWT mismatch | Ensure secrets generated once; force new revision |
 | searxng empty | Config not seeded | Run `scripts/upload-searxng-config.ps1 -ResourceGroupName rg-guideants-dev` |
-| Python venv / scoped execute fails (`Permission denied` on `lib64`) | `script-agent-state` SMB mount missing `mfsymlinks` | Re-run `deploy.ps1 -OnlyApps -SkipMigrations` (applies `mfsymlinks` and runs a **one-time** migration that clears pre-fix scoped `python-venv` trees). Later deploys skip this automatically. Use `-ForceScriptVenvReset` only if you need to run the migration again. |
+| Python venv / scoped execute fails (`Permission denied` on `lib64`) | `script-agent-state` SMB mount missing `mfsymlinks` | Re-run `deploy.ps1 -OnlyApps -SkipMigrations` with a current `guideants-ai-slim` image. Deploy applies `mfsymlinks`, restarts `guideants-ai`, and the container entrypoint runs a one-time scoped venv cleanup (share marker prevents repeats). |
 | First scoped venv very slow on cold share | Azure Files latency for `python -m venv` + pip | Expected; venv is durable on the share after first create |
 | First request after idle is slow | Apps scaled to zero and/or SQL paused | Expected; wait for cold start + SQL resume, or `manage.ps1 -Operation scale -MinReplicas 1` |
 | No historical logs in portal Logs blade | CAE log destination is null (not saved) | Use `manage.ps1 -Operation logs -Follow` (live stream); console is not ingested into LA |

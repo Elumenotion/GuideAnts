@@ -1,14 +1,13 @@
-# One-time migration: clear pre-mfsymlinks scoped python-venv trees via guideants-ai (fast rm on mounted share).
+# After container apps deploy: restart guideants-ai so entrypoint migration runs on the mounted share.
 param(
     [Parameter(Mandatory = $true)]
     [string]$ResourceGroupName,
 
     [string]$ShareName = "script-agent-state",
-    [string]$ScopesPath = "scopes",
     [string]$AiAppName = "guideants-ai",
-    [string]$StateMountPath = "/var/lib/guideants/script-agent-admin",
     [string]$ResetMarkerPath = ".guideants/mfsymlinks-venv-reset.done",
     [int]$ReplicaWaitSeconds = 300,
+    [int]$MarkerWaitSeconds = 300,
     [switch]$Force
 )
 
@@ -40,28 +39,6 @@ function Get-StorageContext {
     }
 }
 
-function Test-AiAppHasMfsymlinks {
-    $appJson = az containerapp show --name $AiAppName --resource-group $ResourceGroupName -o json 2>$null
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($appJson)) {
-        Write-Status "Container app '$AiAppName' not found; skipping scoped venv reset."
-        return $false
-    }
-
-    $app = $appJson | ConvertFrom-Json
-    $mountOptions = @(
-        $app.properties.template.volumes |
-            Where-Object { $_.name -eq "script-agent-state-volume" } |
-            Select-Object -ExpandProperty mountOptions
-    ) | Select-Object -First 1
-
-    if ($mountOptions -ne $script:MfsymlinksMountOptions) {
-        Write-Status "guideants-ai is not using mfsymlinks mount options yet; skipping scoped venv reset."
-        return $false
-    }
-
-    return $true
-}
-
 function Test-ShareFileExists {
     param(
         [hashtable]$Storage,
@@ -77,64 +54,26 @@ function Test-ShareFileExists {
     return $output -eq "True"
 }
 
-function Set-ShareFileContent {
-    param(
-        [hashtable]$Storage,
-        [string]$Path,
-        [string]$Content
-    )
-
-    $parent = ($Path -replace '/[^/]+$','')
-    if ($parent -and $parent -ne $Path) {
-        $parentExists = az storage directory exists `
-            --account-name $Storage.AccountName `
-            --account-key $Storage.AccountKey `
-            --share-name $ShareName `
-            --name $parent `
-            -o tsv 2>$null
-        if ($parentExists -ne "True") {
-            az storage directory create `
-                --account-name $Storage.AccountName `
-                --account-key $Storage.AccountKey `
-                --share-name $ShareName `
-                --name $parent `
-                --output none | Out-Null
-        }
+function Test-AiAppHasMfsymlinks {
+    $appJson = az containerapp show --name $AiAppName --resource-group $ResourceGroupName -o json 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($appJson)) {
+        Write-Status "Container app '$AiAppName' not found; skipping scoped venv migration."
+        return $false
     }
 
-    $tempFile = [System.IO.Path]::GetTempFileName()
-    try {
-        Set-Content -Path $tempFile -Value $Content -Encoding utf8NoBOM
-        az storage file upload `
-            --account-name $Storage.AccountName `
-            --account-key $Storage.AccountKey `
-            --share-name $ShareName `
-            --path $Path `
-            --source $tempFile `
-            --overwrite `
-            --output none | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to upload marker file '$Path' to share '$ShareName'."
-        }
-    }
-    finally {
-        Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
-    }
-}
+    $app = $appJson | ConvertFrom-Json
+    $mountOptions = @(
+        $app.properties.template.volumes |
+            Where-Object { $_.name -eq "script-agent-state-volume" } |
+            Select-Object -ExpandProperty mountOptions
+    ) | Select-Object -First 1
 
-function Get-AiScaleSettings {
-    $scaleJson = az containerapp show `
-        --name $AiAppName `
-        --resource-group $ResourceGroupName `
-        --query "properties.template.scale" -o json
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to read scale settings for '$AiAppName'."
+    if ($mountOptions -ne $script:MfsymlinksMountOptions) {
+        Write-Status "guideants-ai is not using mfsymlinks mount options yet; skipping scoped venv migration."
+        return $false
     }
-    $scale = $scaleJson | ConvertFrom-Json
-    return @{
-        MinReplicas = [int]$scale.minReplicas
-        MaxReplicas = [int]$scale.maxReplicas
-    }
+
+    return $true
 }
 
 function Test-AiReplicaRunning {
@@ -156,63 +95,54 @@ function Wait-AiReplicaRunning {
     return $false
 }
 
-function Invoke-AiContainerCleanup {
-    $markerContainerPath = "$StateMountPath/$ResetMarkerPath".Replace('\', '/')
-    $scopeContainerPath = "$StateMountPath/$ScopesPath".Replace('\', '/')
+function Wait-MigrationMarker {
+    param([hashtable]$Storage)
 
-    $shellScript = @"
-set -eu
-ROOT='$StateMountPath'
-SCOPE_ROOT='$scopeContainerPath'
-MARKER='$markerContainerPath'
-VENV_COUNT=0
-APPLIED_COUNT=0
-if [ -d "`$SCOPE_ROOT" ]; then
-  while IFS= read -r -d '' venv_dir; do
-    rm -rf "`$venv_dir"
-    VENV_COUNT=`$((VENV_COUNT + 1))
-  done < <(find "`$SCOPE_ROOT" -type d -name python-venv -print0 2>/dev/null || true)
-  APPLIED_COUNT=`$(find "`$SCOPE_ROOT" -type f -name applied-state.json 2>/dev/null | wc -l | tr -d ' ')
-  find "`$SCOPE_ROOT" -type f -name applied-state.json -delete 2>/dev/null || true
-fi
-mkdir -p "`$(dirname "`$MARKER")"
-printf 'completedUtc=%s\nremovedVenvs=%s\nremovedAppliedState=%s\n' "`$(date -u +%Y-%m-%dT%H:%M:%SZ)" "`$VENV_COUNT" "`$APPLIED_COUNT" > "`$MARKER"
-echo GA_VENV_RESET_REMOVED_VENVS=`$VENV_COUNT
-echo GA_VENV_RESET_REMOVED_APPLIED=`$APPLIED_COUNT
-"@
+    $deadline = (Get-Date).AddSeconds($MarkerWaitSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-ShareFileExists -Storage $Storage -Path $ResetMarkerPath) {
+            return $true
+        }
+        Start-Sleep -Seconds 5
+    }
+    return $false
+}
 
-    $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($shellScript))
-    $remoteCommand = "echo $encoded | base64 -d | /bin/sh"
+function Remove-ShareFile {
+    param(
+        [hashtable]$Storage,
+        [string]$Path
+    )
 
-    Write-Status "Removing scoped python-venv directories via $AiAppName (mounted share; seconds, not minutes)..."
+    az storage file delete `
+        --account-name $Storage.AccountName `
+        --account-key $Storage.AccountKey `
+        --share-name $ShareName `
+        --path $Path `
+        --output none | Out-Null
+}
 
-    $output = az containerapp exec `
+function Restart-AiApp {
+    $revision = az containerapp revision list `
         --name $AiAppName `
         --resource-group $ResourceGroupName `
-        --command "/bin/sh" `
-        --args "-c" $remoteCommand 2>&1
+        --query "[0].name" -o tsv
+    if (-not $revision) {
+        throw "No active revision found for '$AiAppName'."
+    }
+
+    Write-Status "Restarting $AiAppName revision $revision so entrypoint migration can run..."
+    az containerapp revision restart `
+        --name $AiAppName `
+        --resource-group $ResourceGroupName `
+        --revision $revision `
+        --output none | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "Scoped venv migration failed in '$AiAppName': $output"
-    }
-
-    $removedVenvs = 0
-    $removedAppliedState = 0
-    foreach ($line in @($output)) {
-        if ($line -match '^GA_VENV_RESET_REMOVED_VENVS=(\d+)$') {
-            $removedVenvs = [int]$Matches[1]
-        }
-        elseif ($line -match '^GA_VENV_RESET_REMOVED_APPLIED=(\d+)$') {
-            $removedAppliedState = [int]$Matches[1]
-        }
-    }
-
-    return @{
-        RemovedVenvs = $removedVenvs
-        RemovedAppliedState = $removedAppliedState
+        throw "Failed to restart '$AiAppName' revision '$revision'."
     }
 }
 
-Write-Status "Checking scoped script-agent venv migration on share '$ShareName'..."
+Write-Status "Checking scoped script-agent venv migration..."
 
 if (-not (Test-AiAppHasMfsymlinks)) {
     exit 0
@@ -220,63 +150,39 @@ if (-not (Test-AiAppHasMfsymlinks)) {
 
 $storage = Get-StorageContext
 
-if (-not $Force -and (Test-ShareFileExists -Storage $storage -Path $ResetMarkerPath)) {
-    Write-Success "mfsymlinks venv migration already completed; scoped venvs were not modified."
+if ($Force -and (Test-ShareFileExists -Storage $storage -Path $ResetMarkerPath)) {
+    Write-Status "Removing migration marker (--ForceScriptVenvReset)..."
+    Remove-ShareFile -Storage $storage -Path $ResetMarkerPath
+}
+elseif (-not $Force -and (Test-ShareFileExists -Storage $storage -Path $ResetMarkerPath)) {
+    Write-Success "mfsymlinks venv migration already completed."
     exit 0
 }
 
-$scopeExists = az storage directory exists `
-    --account-name $storage.AccountName `
-    --account-key $storage.AccountKey `
-    --share-name $ShareName `
-    --name $ScopesPath `
-    -o tsv 2>$null
+if (-not (Test-AiReplicaRunning)) {
+    Write-Status "Waiting for a running $AiAppName replica..."
+    if (-not (Wait-AiReplicaRunning)) {
+        throw "Timed out waiting for a running '$AiAppName' replica after ${ReplicaWaitSeconds}s."
+    }
+}
 
-if ($scopeExists -ne "True") {
-    $markerBody = "completedUtc=$([DateTime]::UtcNow.ToString('o'))`nremovedVenvs=0`nremovedAppliedState=0`n"
-    Set-ShareFileContent -Storage $storage -Path $ResetMarkerPath -Content $markerBody
-    Write-Success "No '$ScopesPath' directory on share — migration marker recorded; nothing to reset."
+Restart-AiApp
+
+if (-not (Wait-AiReplicaRunning)) {
+    throw "Timed out waiting for '$AiAppName' to come back after restart."
+}
+
+if (Wait-MigrationMarker -Storage $storage) {
+    Write-Success "mfsymlinks scoped venv migration completed (marker present on share)."
     exit 0
 }
 
-$scale = Get-AiScaleSettings
-$scaledUpForCleanup = $false
-try {
-    if (-not (Test-AiReplicaRunning)) {
-        if ($scale.MinReplicas -lt 1) {
-            Write-Status "Scaling $AiAppName to minReplicas=1 so migration can run on the mounted share..."
-            az containerapp update `
-                --name $AiAppName `
-                --resource-group $ResourceGroupName `
-                --min-replicas 1 `
-                --output none | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to scale '$AiAppName' to minReplicas=1."
-            }
-            $scaledUpForCleanup = $true
-        }
+throw @"
+Scoped venv migration did not complete within ${MarkerWaitSeconds}s.
 
-        if (-not (Wait-AiReplicaRunning)) {
-            throw "Timed out waiting for a running '$AiAppName' replica after ${ReplicaWaitSeconds}s."
-        }
-    }
+The guideants-ai image must include script-agent-admin/migrate-mfsymlinks-scoped-venvs.sh
+(entrypoint runs it on start). Redeploy with a current guideants-ai-slim image (:main after this change),
+then re-run:
 
-    $result = Invoke-AiContainerCleanup
-}
-finally {
-    if ($scaledUpForCleanup) {
-        Write-Status "Restoring $AiAppName minReplicas=$($scale.MinReplicas)..."
-        az containerapp update `
-            --name $AiAppName `
-            --resource-group $ResourceGroupName `
-            --min-replicas $scale.MinReplicas `
-            --output none | Out-Null
-    }
-}
-
-if ($result.RemovedVenvs -eq 0 -and $result.RemovedAppliedState -eq 0) {
-    Write-Success "No scoped venv or applied-state files found — migration marker recorded."
-}
-else {
-    Write-Success "Removed $($result.RemovedVenvs) scoped venv director$(if ($result.RemovedVenvs -eq 1) { 'y' } else { 'ies' }) and $($result.RemovedAppliedState) applied-state file$(if ($result.RemovedAppliedState -eq 1) { '' } else { 's' }). Venvs recreate on next script run. Future deploys will not repeat this reset."
-}
+  ./deploy.ps1 -OnlyApps -SkipMigrations -ImageTag main
+"@
