@@ -318,7 +318,6 @@ RUN ldconfig
 ENV SCRIPT_EXECUTION_ADMIN_API_ENABLED=true
 ENV SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
 ENV SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
-ENV SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT=/var/run/guideants/script-agent-runtime
 
 COPY ScriptExecutionAgent/ /app/script-agent/
 COPY script-agent-admin/ /opt/guideants/script-agent-admin/

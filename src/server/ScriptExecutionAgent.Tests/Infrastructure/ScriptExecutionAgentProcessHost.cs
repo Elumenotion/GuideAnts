@@ -13,11 +13,6 @@ public sealed class ScriptExecutionAgentProcessHost : IAsyncDisposable
         "script-agent-tests",
         Guid.NewGuid().ToString("N"));
 
-    public string RuntimeRoot { get; } = Path.Combine(
-        Path.GetTempPath(),
-        "script-agent-runtime-tests",
-        Guid.NewGuid().ToString("N"));
-
     public NotebookStorageFixture Notebook { get; private set; } = null!;
 
     private Process? _process;
@@ -29,7 +24,6 @@ public sealed class ScriptExecutionAgentProcessHost : IAsyncDisposable
     public async Task StartAsync()
     {
         Directory.CreateDirectory(StorageRoot);
-        Directory.CreateDirectory(RuntimeRoot);
         Notebook = new NotebookStorageFixture(StorageRoot);
 
         var port = GetFreeTcpPort();
@@ -47,7 +41,6 @@ public sealed class ScriptExecutionAgentProcessHost : IAsyncDisposable
         };
 
         startInfo.Environment["FILE_STORAGE_ROOT"] = StorageRoot;
-        startInfo.Environment["SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT"] = RuntimeRoot;
         startInfo.Environment["SCRIPT_EXECUTION_REQUIRE_TOKEN"] = "true";
         startInfo.Environment["SCRIPT_EXECUTION_AGENT_TOKEN"] = AgentToken;
         startInfo.Environment["SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION"] = "false";
@@ -168,11 +161,6 @@ public sealed class ScriptExecutionAgentProcessHost : IAsyncDisposable
             if (Directory.Exists(StorageRoot))
             {
                 Directory.Delete(StorageRoot, recursive: true);
-            }
-
-            if (Directory.Exists(RuntimeRoot))
-            {
-                Directory.Delete(RuntimeRoot, recursive: true);
             }
         }
         catch

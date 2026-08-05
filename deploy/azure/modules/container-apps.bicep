@@ -429,10 +429,6 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
               value: '/var/lib/guideants/script-agent-admin/scopes'
             }
             {
-              name: 'SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT'
-              value: '/var/run/guideants/script-agent-runtime'
-            }
-            {
               name: 'SCRIPT_EXECUTION_REQUIRE_TOKEN'
               value: 'true'
             }
@@ -449,10 +445,6 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               volumeName: 'script-agent-state-volume'
               mountPath: '/var/lib/guideants/script-agent-admin'
-            }
-            {
-              volumeName: 'script-agent-runtime-volume'
-              mountPath: '/var/run/guideants/script-agent-runtime'
             }
           ]
         }
@@ -471,10 +463,7 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'script-agent-state-volume'
           storageType: 'AzureFile'
           storageName: 'script-agent-state-storage'
-        }
-        {
-          name: 'script-agent-runtime-volume'
-          storageType: 'EmptyDir'
+          mountOptions: 'mfsymlinks,nobrl,file_mode=0755,dir_mode=0755'
         }
       ]
     }

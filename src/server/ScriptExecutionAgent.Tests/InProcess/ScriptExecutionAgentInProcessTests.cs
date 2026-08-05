@@ -233,52 +233,6 @@ public sealed class ScriptExecutionAgentInProcessTests
     }
 
     [TestMethod]
-    public async Task Execute_python_rehydrates_runtime_after_local_scope_cache_is_cleared()
-    {
-        if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
-        {
-            Assert.Inconclusive("Scoped Python venv with pip is not available on this machine.");
-        }
-
-        using var client = _factory.CreateAuthenticatedClient();
-        var body = CreateExecuteBody(
-            _factory.Notebook,
-            "import sys\nprint(sys.executable)",
-            scriptType: (int)ScriptType.Python);
-
-        var firstResponse = await client.PostAsJsonAsync("/execute", body);
-        firstResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        using (var firstDoc = JsonDocument.Parse(await firstResponse.Content.ReadAsStringAsync()))
-        {
-            var stderr = ReadStandardError(firstDoc.RootElement);
-            if (stderr?.Contains("Failed to create scoped Python virtual environment", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                Assert.Inconclusive($"Scoped Python venv could not be provisioned on this host: {stderr}");
-            }
-
-            ReadStandardOutput(firstDoc.RootElement).Should().NotBeNullOrWhiteSpace();
-        }
-
-        if (Directory.Exists(_factory.RuntimeRoot))
-        {
-            Directory.Delete(_factory.RuntimeRoot, recursive: true);
-            Directory.CreateDirectory(_factory.RuntimeRoot);
-        }
-
-        var secondResponse = await client.PostAsJsonAsync("/execute", body);
-        secondResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        using var secondDoc = JsonDocument.Parse(await secondResponse.Content.ReadAsStringAsync());
-        var secondStdout = ReadStandardOutput(secondDoc.RootElement);
-        if (string.IsNullOrWhiteSpace(secondStdout))
-        {
-            var secondStderr = ReadStandardError(secondDoc.RootElement);
-            secondStderr.Should().NotContain("Failed to create scoped Python virtual environment");
-        }
-
-        secondStdout.Should().NotBeNullOrWhiteSpace();
-    }
-
-    [TestMethod]
     public async Task Execute_with_mismatched_notebook_metadata_returns_400_in_process()
     {
         using var client = _factory.CreateAuthenticatedClient();

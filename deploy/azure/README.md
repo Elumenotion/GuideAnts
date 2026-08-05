@@ -144,10 +144,9 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 | docling CrashLoop | Insufficient memory | Increase CPU/memory in `modules/container-apps.bicep` |
 | documentserver unhealthy | JWT mismatch | Ensure secrets generated once; force new revision |
 | searxng empty | Config not seeded | Run `scripts/upload-searxng-config.ps1 -ResourceGroupName rg-guideants-dev` |
-| Migration fail | Firewall blocks your IP | Deploy adds temporary rule; check `sqlcmd`/EF can reach server |
+| Python venv / scoped execute fails (`Permission denied` on `lib64`) | `script-agent-state` SMB mount missing `mfsymlinks` | Ensure `script-agent-state-volume` has `mountOptions: mfsymlinks,nobrl,file_mode=0755,dir_mode=0755`; redeploy apps or update container app revision. See `docs/azure-deploy-execution/mfsymlinks-venv-evidence.md` |
+| First scoped venv very slow on cold share | Azure Files latency for `python -m venv` + pip | Expected; venv is durable on the share after first create |
 | First request after idle is slow | Apps scaled to zero and/or SQL paused | Expected; wait for cold start + SQL resume, or `manage.ps1 -Operation scale -MinReplicas 1` |
-| Python skill execution fails on first run after cold start | Scoped venv rehydrating from durable requirements on EmptyDir | Expected on ACA replica replacement; confirm `SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT` mounts at `/var/run/guideants/script-agent-runtime` and venv is created there, not under `/var/lib/guideants/script-agent-admin` |
-| Python venv `Permission denied` on `lib64` symlink | Scoped venv created on Azure Files (`nounix`) instead of runtime mount | Redeploy with `script-agent-runtime-volume` EmptyDir; never place venvs on `script-agent-state` share |
 | No historical logs in portal Logs blade | CAE log destination is null (not saved) | Use `manage.ps1 -Operation logs -Follow` (live stream); console is not ingested into LA |
 
 ## Cleanup

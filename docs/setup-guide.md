@@ -118,11 +118,11 @@ The slim stack is selected with `--backend slim` and uses `docker/docker-compose
 
 Script execution state:
 
-- The `guideants-ai` service mounts `script_agent_admin_state` at `/var/lib/guideants/script-agent-admin` for durable package definitions and admin audit records.
-- It also mounts `script_agent_runtime` at `/var/run/guideants/script-agent-runtime` for executable scoped Python environments, install-script work directories, and project runtime caches.
+- The `guideants-ai` service mounts `script_agent_admin_state` at `/var/lib/guideants/script-agent-admin`.
+- That volume stores admin config, apt package requests, global requirements, and per-`project + guide` Python venv state.
 - Per-`project + guide` venvs extend the image-provided `/opt/venv` packages; they add or override packages for that scope instead of replacing the baked runtime.
-- The admin state volume survives restart and normal `docker compose down` / `up`. The runtime volume also survives ordinary container recreation in Docker Compose.
-- Both volumes are removed by `docker compose down -v`.
+- It survives restart and normal `docker compose down` / `up`.
+- It is removed by `docker compose down -v`.
 
 Build references:
 

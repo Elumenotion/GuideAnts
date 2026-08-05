@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "12137891104898981304"
+      "templateHash": "16217861908992690064"
     }
   },
   "parameters": {
@@ -131,7 +131,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.39.26.7824",
-              "templateHash": "6338823547931893742"
+              "templateHash": "4195456741231024804"
             }
           },
           "parameters": {
@@ -430,10 +430,6 @@
                           "value": "/var/lib/guideants/script-agent-admin/scopes"
                         },
                         {
-                          "name": "SCRIPT_EXECUTION_SCOPE_RUNTIME_ROOT",
-                          "value": "/var/run/guideants/script-agent-runtime"
-                        },
-                        {
                           "name": "SCRIPT_EXECUTION_REQUIRE_TOKEN",
                           "value": "true"
                         },
@@ -450,10 +446,6 @@
                         {
                           "volumeName": "script-agent-state-volume",
                           "mountPath": "/var/lib/guideants/script-agent-admin"
-                        },
-                        {
-                          "volumeName": "script-agent-runtime-volume",
-                          "mountPath": "/var/run/guideants/script-agent-runtime"
                         }
                       ]
                     }
@@ -471,11 +463,8 @@
                     {
                       "name": "script-agent-state-volume",
                       "storageType": "AzureFile",
-                      "storageName": "script-agent-state-storage"
-                    },
-                    {
-                      "name": "script-agent-runtime-volume",
-                      "storageType": "EmptyDir"
+                      "storageName": "script-agent-state-storage",
+                      "mountOptions": "mfsymlinks,nobrl,file_mode=0755,dir_mode=0755"
                     }
                   ]
                 }

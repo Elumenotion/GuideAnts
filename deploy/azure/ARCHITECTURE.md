@@ -43,15 +43,20 @@ Console logs: live stream only (`destination: null` on CAE). No ACA → Log Anal
 
 ## Persistence
 
-| Azure Files share / volume | Mount path | Consumers |
-|---|---|---|
+| Azure Files share | Mount path | Consumers |
+|-------------------|------------|-----------|
 | `contentfiles` | `/app/ContentFiles` | webapi-ui, guideants-ai, plantuml |
-| `script-agent-state` | `/var/lib/guideants/script-agent-admin` | guideants-ai (durable definitions) |
-| EmptyDir `script-agent-runtime-volume` | `/var/run/guideants/script-agent-runtime` | guideants-ai (executable scoped venvs) |
+| `script-agent-state` | `/var/lib/guideants/script-agent-admin` | guideants-ai (scoped SEA state + venvs under `.../scopes/`) |
+
+The `script-agent-state` volume on `guideants-ai` must mount with CIFS `mountOptions` so Linux can create venv symlinks on the share:
+
+```text
+mfsymlinks,nobrl,file_mode=0755,dir_mode=0755
+```
+
+Without `mfsymlinks`, `python -m venv` under `SCRIPT_EXECUTION_SCOPE_STATE_ROOT` fails on `lib64 -> lib` (`Permission denied`). This is configured in [`modules/container-apps.bicep`](modules/container-apps.bicep) on `script-agent-state-volume`. Evidence: [`docs/azure-deploy-execution/mfsymlinks-venv-evidence.md`](../../docs/azure-deploy-execution/mfsymlinks-venv-evidence.md).
 | `searxng-config` | `/etc/searxng` | searxng |
 | `searxng-data` | `/var/cache/searxng` | searxng |
-
-Azure Files mounts use CIFS with `nounix`, so Python venvs cannot be created on the durable admin share. Scoped venvs must live on the replica-local EmptyDir runtime mount and are rehydrated from the durable `requirements.txt` / `install-scripts.json` definitions when a replica starts cold.
 
 SearXNG config is seeded from `docker/volumes/searxng/config/` on first deploy.
 

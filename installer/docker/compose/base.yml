@@ -9,8 +9,6 @@ volumes:
   ai_local_models:
   script_agent_admin_state:
 
-  script_agent_runtime:
-
 networks:
   guideants-network:
     driver: bridge
