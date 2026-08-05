@@ -238,9 +238,12 @@ export function CatalogRowEditModal({
             />
           ) : (
             <NonLocalModelParameterSurfaceEditor
+              provider={value.provider}
               value={{
                 samplingParametersJson: value.samplingParametersJson,
                 reasoningChoicesJson: value.reasoningChoicesJson,
+                thinkingControlJson: value.thinkingControlJson,
+                requestFieldsWhenToolsPresentJson: value.requestFieldsWhenToolsPresentJson,
               }}
               onChange={(updates) => setValue((previous) => (previous ? { ...previous, ...updates } : previous))}
             />

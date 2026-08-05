@@ -268,7 +268,7 @@ Shape names in this plan (`openai_chat_standard`, `anthropic_standard`, etc.) re
 
 | Flow | UI |
 |------|-----|
-| **Catalog edit** (pencil, non-llama) | **Sampling Parameters JSON** + **Reasoning Choices** |
+| **Catalog edit** (pencil, non-llama) | **Sampling Parameters JSON** + **Reasoning Choices**; OpenRouter and HF rows also show optional **Thinking Control JSON** + **Extra Request Fields JSON** |
 | **Catalog edit** (pencil, llama) | Full **Model chat behavior** editor (sampling, reasoning, thinking control, tools fields, combine/pattern) |
 | **Add Model** wizard (cloud) | Same sampling/reasoning fields; model id typeahead may pre-fill from `knownCloudModels.json` |
 | **Add Model** wizard (llama custom HF / attach) | Same model chat behavior editor — no runtime profile control |

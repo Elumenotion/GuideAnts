@@ -48,6 +48,38 @@ describe('buildAddModelRequest', () => {
     expect(request.install).toBeUndefined();
   });
 
+  it('sends row-owned request shaping for openrouter and omits it elsewhere', () => {
+    const openRouter = createEmptyAddModelWizardState('openrouter-chat');
+    openRouter.catalogModelId = 'qwen/qwen3-32b';
+    openRouter.catalogDisplayName = 'Qwen3 32B';
+    openRouter.thinkingControlJson =
+      '{"defaultChoice":"none","choiceActions":{"none":[{"target":"NestedRequestField","key":"chat_template_kwargs.enable_thinking","value":false}]}}';
+    openRouter.requestFieldsWhenToolsPresentJson = '{"parallel_tool_calls":false}';
+
+    const openRouterRequest = buildAddModelRequest(openRouter);
+    expect(openRouterRequest.providerConfig).toMatchObject({
+      thinkingControlJson: openRouter.thinkingControlJson,
+      requestFieldsWhenToolsPresentJson: '{"parallel_tool_calls":false}',
+    });
+
+    const openAi = createEmptyAddModelWizardState('openai-chat');
+    openAi.catalogModelId = 'gpt-4o-chat';
+    openAi.catalogDisplayName = 'GPT-4o Chat';
+    openAi.thinkingControlJson = '{"defaultChoice":"none","choiceActions":{}}';
+
+    const openAiRequest = buildAddModelRequest(openAi);
+    expect(openAiRequest.providerConfig).not.toHaveProperty('thinkingControlJson');
+  });
+
+  it('rejects malformed behavior json before sending an add-model request', () => {
+    const state = createEmptyAddModelWizardState('hf-inference-chat');
+    state.catalogModelId = 'Qwen/Qwen3-32B';
+    state.catalogDisplayName = 'Qwen3 32B';
+    state.requestFieldsWhenToolsPresentJson = '{not json';
+
+    expect(() => buildAddModelRequest(state)).toThrow('Extra request fields JSON must be valid JSON.');
+  });
+
   it('defaults anthropic add-model state with expected empty fields', () => {
     const state = createEmptyAddModelWizardState('anthropic');
 

@@ -43,9 +43,9 @@ public sealed class ModelOwnedChatBehaviorTests
         var resolver = new ChatTargetResolver(new TestServiceScopeFactory(db));
         var target = resolver.Resolve("qwen-local");
 
-        target.LlamaChatBehavior.Should().NotBeNull();
-        target.LlamaChatBehavior!.ThinkingControl.ChoiceActions.Should().ContainKeys("none", "medium");
-        target.LlamaChatBehavior.ThoughtBlockPattern.Should().Be("<think>");
+        target.ChatBehavior.Should().NotBeNull();
+        target.ChatBehavior!.ThinkingControl.ChoiceActions.Should().ContainKeys("none", "medium");
+        target.ChatBehavior.ThoughtBlockPattern.Should().Be("<think>");
     }
 
     [TestMethod]

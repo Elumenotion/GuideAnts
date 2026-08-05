@@ -495,7 +495,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
             ModelId: command.CatalogModelId,
             Provider: "llama-cpp",
             RuntimeConfigJson: LocalModelOnboardingOrchestrator.BuildLlamaLocalRuntimeJson(command),
-            LlamaChatBehavior: chatBehavior));
+            ChatBehavior: chatBehavior));
     }
 
     private static AddModelException MapRoutingException(RoutingException exception)

@@ -388,6 +388,15 @@ namespace AntRunner.Chat
             var resolvedModelId = options.ExecutionPolicy.ModelId;
             var resolvedParameterBag = ResolveExecutionParameters(options.ExecutionPolicy);
             var requestedReasoningEffort = TryGetStringParameter(resolvedParameterBag, "reasoning_effort");
+            // A guide using its own model takes the Direct/EmptyParameters branch in ChatModelResolver,
+            // so the execution-policy bag carries no reasoning_effort. Fall back to the assistant/guide's
+            // own persisted ReasoningEffort so the per-guide setting is honored -- without this the
+            // request carries no effort and a model row's ThinkingControlJson defaultChoice wins every
+            // turn. A global override (ChatDefaults) still wins because it populates the bag above.
+            if (string.IsNullOrWhiteSpace(requestedReasoningEffort))
+            {
+                requestedReasoningEffort = assistantDef.ReasoningEffort;
+            }
             var reasoningEffortParam = await ResolveReasoningEffortAsync(
                 resolvedModelId,
                 requestedReasoningEffort,

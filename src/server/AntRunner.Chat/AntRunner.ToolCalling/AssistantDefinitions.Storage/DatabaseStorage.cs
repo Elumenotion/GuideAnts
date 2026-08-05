@@ -251,17 +251,52 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
             }
         }
 
+        private static bool HasRuntimeProfile(string? runtimeConfigJson)
+        {
+            if (string.IsNullOrWhiteSpace(runtimeConfigJson))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(runtimeConfigJson);
+                return doc.RootElement.TryGetProperty("runtimeProfileId", out var value)
+                    && value.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(value.GetString());
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         /// <summary>
         /// Materializes a database Assistant entity to AssistantStorageMetadata format.
         /// </summary>
         private static AssistantStorageMetadata MaterializeAssistant(Assistant assistant)
         {
+            // Project the guide's persisted reasoning effort into the manifest so it reaches
+            // AssistantDefinition and, via ThreadRun's Direct/EmptyParameters fallback, the outgoing
+            // request. Without it a guide that references its own model sends no reasoning effort at
+            // all, and a model row whose ThinkingControlJson declares a defaultChoice would apply
+            // that default on every turn regardless of the guide's selection.
+            // Suppressed (left null, then omitted by WhenWritingNull) when an explicit
+            // SamplingParametersJson bag or a cloud runtime profile already governs this model's
+            // parameters -- those paths carry their own reasoning handling.
+            var hasSamplingBag = !string.IsNullOrWhiteSpace(assistant.SamplingParametersJson);
+            var hasCloudRuntimeProfile = HasRuntimeProfile(assistant.Model?.RuntimeConfigJson);
+            var projectedReasoningEffort = hasSamplingBag || hasCloudRuntimeProfile
+                ? null
+                : assistant.ReasoningEffort;
+
             // Build the manifest JSON
             var manifest = new
             {
                 name = assistant.Name,
                 description = assistant.Description,
                 model = assistant.ModelId ?? assistant.Model?.ModelId,
+                reasoning_effort = projectedReasoningEffort,
                 invocation_evaluator = assistant.InvocationEvaluator,
                 max_tool_calls_per_turn = assistant.MaxToolCallsPerTurn,
                 tools = BuildToolsArray(assistant),
