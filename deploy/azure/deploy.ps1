@@ -29,13 +29,52 @@ $script:SqlDatabaseName = "guideants"
 $script:DeployRoot = $PSScriptRoot
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot ".." "..")).Path
 
+function Get-KeyVaultName {
+    param([switch]$AllowMissing)
+
+    $kvName = az keyvault list --resource-group $script:ResourceGroupName --query "[0].name" -o tsv 2>$null
+    if (-not $kvName -and -not $AllowMissing) {
+        throw "Key Vault not found in resource group '$($script:ResourceGroupName)'."
+    }
+    return $kvName
+}
+
+function Resolve-SqlAdminPassword {
+    if (-not [string]::IsNullOrWhiteSpace($SqlAdminPassword)) {
+        $script:SqlAdminPassword = $SqlAdminPassword
+        return
+    }
+
+    if ($OnlyApps) {
+        return
+    }
+
+    $kvName = Get-KeyVaultName -AllowMissing
+    if (-not $kvName) {
+        return
+    }
+
+    $stored = az keyvault secret show --vault-name $kvName --name sql-admin-password --query value -o tsv 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($stored)) {
+        Write-Status "Using sql-admin-password from Key Vault (no -SqlAdminPassword supplied)."
+        $script:SqlAdminPassword = $stored
+    }
+}
+
 function Test-Prerequisites {
     Write-Status "Checking prerequisites..."
     try { az --version | Out-Null } catch { Write-Err "Azure CLI is not installed."; exit 1 }
     try { az account show | Out-Null } catch { Write-Err "Not logged in to Azure. Run 'az login' first."; exit 1 }
-    $passwordRequired = -not ($OnlyApps -and $SkipMigrations)
-    if ($passwordRequired -and [string]::IsNullOrWhiteSpace($SqlAdminPassword)) {
-        Write-Err "SqlAdminPassword is required unless both -OnlyApps and -SkipMigrations are set."
+
+    Resolve-SqlAdminPassword
+    if (-not $OnlyApps -and [string]::IsNullOrWhiteSpace($script:SqlAdminPassword)) {
+        Write-Err @"
+SqlAdminPassword is required for infrastructure deploy (Phase 1 or full deploy).
+Pass -SqlAdminPassword with the original password, or omit it when Key Vault already stores sql-admin-password.
+
+For app-only image updates that must not touch SQL or secrets, use:
+  ./deploy.ps1 -OnlyApps -SkipMigrations -ImageTag <tag>
+"@
         exit 1
     }
     Write-Success "Prerequisites check passed"
@@ -49,7 +88,9 @@ function Set-Variables {
     } else {
         $script:SubscriptionId = az account show --query id -o tsv
     }
-    $script:SqlAdminPassword = $SqlAdminPassword
+    if ([string]::IsNullOrWhiteSpace($script:SqlAdminPassword) -and -not [string]::IsNullOrWhiteSpace($SqlAdminPassword)) {
+        $script:SqlAdminPassword = $SqlAdminPassword
+    }
     Write-Success "Using subscription $($script:SubscriptionId), resource group $($script:ResourceGroupName)"
 }
 
@@ -86,6 +127,46 @@ function New-DeploymentSecrets {
     $script:ScriptAgentAdminToken = $secrets.scriptAgentAdminToken
     $script:DocumentServerJwtSecret = $secrets.documentServerJwtSecret
     Write-Success "Secrets generated (not written to disk)"
+}
+
+function Resolve-DeploymentSecrets {
+    if ($OnlyApps) {
+        Write-Status "Skipping bootstrap secret generation (-OnlyApps preserves existing Key Vault secrets)."
+        return
+    }
+
+    $kvName = Get-KeyVaultName -AllowMissing
+    if (-not $kvName) {
+        New-DeploymentSecrets
+        return
+    }
+
+    Write-Status "Key Vault '$kvName' exists; reusing stored bootstrap secrets..."
+    $secretNames = @{
+        JwtSigningKey           = 'jwt-signing-key'
+        SettingsSecretsKey      = 'settings-secrets-key-azure-deploy'
+        ScriptAgentToken        = 'script-agent-token'
+        ScriptAgentAdminToken   = 'script-agent-admin-token'
+        DocumentServerJwtSecret = 'documentserver-jwt-secret'
+    }
+
+    $resolved = @{}
+    foreach ($entry in $secretNames.GetEnumerator()) {
+        $value = az keyvault secret show --vault-name $kvName --name $entry.Value --query value -o tsv 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($value)) {
+            Write-Warn "Missing Key Vault secret '$($entry.Value)'; generating fresh bootstrap secrets."
+            New-DeploymentSecrets
+            return
+        }
+        $resolved[$entry.Key] = $value
+    }
+
+    $script:JwtSigningKey = $resolved.JwtSigningKey
+    $script:SettingsSecretsKey = $resolved.SettingsSecretsKey
+    $script:ScriptAgentToken = $resolved.ScriptAgentToken
+    $script:ScriptAgentAdminToken = $resolved.ScriptAgentAdminToken
+    $script:DocumentServerJwtSecret = $resolved.DocumentServerJwtSecret
+    Write-Success "Reusing existing Key Vault bootstrap secrets."
 }
 
 function Deploy-Infrastructure {
@@ -415,7 +496,7 @@ function Main {
 
     Test-Prerequisites
     Set-Variables
-    New-DeploymentSecrets
+    Resolve-DeploymentSecrets
 
     if (-not $OnlyApps) {
         Deploy-Infrastructure
@@ -425,13 +506,17 @@ function Main {
         Deploy-ContainerApps
         Reset-ScopedScriptVenvs
 
-        $sqlServerName = Set-SqlDatabase
-        if ($sqlServerName) {
-            if (-not $SkipMigrations) {
-                Apply-DatabaseMigrations
+        if (-not $OnlyApps) {
+            $sqlServerName = Set-SqlDatabase
+            if ($sqlServerName) {
+                if (-not $SkipMigrations) {
+                    Apply-DatabaseMigrations
+                }
+                Update-KeyVaultConnectionString -SqlServerName $sqlServerName
+                Force-NewRevision-WebApiApp
             }
-            Update-KeyVaultConnectionString -SqlServerName $sqlServerName
-            Force-NewRevision-WebApiApp
+        } else {
+            Write-Status "Skipping SQL setup, Key Vault connection string update, and web API revision bump (-OnlyApps)."
         }
         Upload-SearXngConfig
     }

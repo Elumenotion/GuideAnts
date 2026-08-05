@@ -63,10 +63,10 @@ When complete, the script prints your application URL.
 | `-GhcrOwner` | `elumenotion` | GHCR organization for GuideAnts images |
 | `-ImageTag` | `main` | Image tag (see below) |
 | `-CustomDomain` | `""` | Public HTTPS domain (optional) |
-| `-SqlAdminPassword` | *(required)* | SQL admin — migrations only; omit with `-OnlyApps -SkipMigrations` |
+| `-SqlAdminPassword` | *(required on first deploy)* | SQL admin for Phase 1 + migrations. On redeploy, omit to read `sql-admin-password` from Key Vault. Not used with `-OnlyApps`. |
 | `-SkipMigrations` | false | Skip `dotnet ef database update` |
-| `-SkipScriptVenvReset` | false | Skip restarting `guideants-ai` to run the one-time mfsymlinks venv migration |
-| `-ForceScriptVenvReset` | false | Re-run the migration even if the share marker already exists (deletes marker, restarts `guideants-ai`) |
+| `-SkipScriptVenvReset` | false | Skip the one-time mfsymlinks scoped venv migration on `script-agent-state` |
+| `-ForceScriptVenvReset` | false | Re-run the migration even if the share marker already exists (deletes marker; scales up `guideants-ai` only when legacy venvs exist) |
 | `-OnlyInfra` | false | Phase 1 only (no container apps) |
 | `-OnlyApps` | false | Phase 2 only (infra must already exist) |
 | `-SqlAadAdminObjectId` | `""` | Optional AAD object ID for SQL admin |
@@ -120,6 +120,22 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 
 ## Day-2 operations
 
+**Safe app-only update** (new image tag, no SQL/password/secret changes):
+
+```powershell
+./deploy.ps1 -OnlyApps -SkipMigrations -ImageTag main
+```
+
+This redeploys container apps and runs share-only maintenance (for example scoped venv migration). It does **not** regenerate Key Vault secrets, reset the SQL admin password, run migrations, or rewrite `sql-connection-string`.
+
+**Image-only bump** without Bicep (single apps):
+
+```powershell
+./manage.ps1 -Operation update -ImageTag v1.0.0
+```
+
+**Do not** run a full deploy (without `-OnlyApps`) against an existing environment unless you intend to reconcile infrastructure. Phase 1 reapplies the SQL admin password and bootstrap secrets from parameters — wrong `-SqlAdminPassword` breaks migrations and can lock out `sqladmin`.
+
 ```powershell
 # Status of all apps
 ./manage.ps1 -Operation status
@@ -139,14 +155,14 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | Image pull 401/404 | Wrong tag or private GHCR package | Verify tag exists; confirm package is public |
-| SQL connection fail | MI user not created or wrong connection string | Re-run deploy; check Key Vault `sql-connection-string` has `User ID={clientId}` |
+| SQL connection fail after redeploy | Wrong `-SqlAdminPassword` on full deploy, or `sql-connection-string` missing `User ID={clientId}` | Use `-OnlyApps -SkipMigrations` for routine updates. For full deploy, pass the **original** password or omit it so deploy reads `sql-admin-password` from Key Vault. |
 | Port 8080 already in use | `ASPNETCORE_URLS` set to `:8080` conflicts with nginx in `webapi-ui-slim` image | Use `ASPNETCORE_URLS=http://127.0.0.1:8081`; ACA ingress stays on 8080 |
 | Key Vault `setSecret` Forbidden | Deployer not in vault access policies (re-run Phase 1 with deployer signed in) | Re-run full deploy; confirm `az ad signed-in-user show` matches deployer passed to Bicep |
 | File share mount fail | Storage account key mount not ready | Wait 2–5 min; redeploy apps |
 | docling CrashLoop | Insufficient memory | Increase CPU/memory in `modules/container-apps.bicep` |
 | documentserver unhealthy | JWT mismatch | Ensure secrets generated once; force new revision |
 | searxng empty | Config not seeded | Run `scripts/upload-searxng-config.ps1 -ResourceGroupName rg-guideants-dev` |
-| Python venv / scoped execute fails (`Permission denied` on `lib64`) | `script-agent-state` SMB mount missing `mfsymlinks` | Re-run `deploy.ps1 -OnlyApps -SkipMigrations` with a current `guideants-ai-slim` image. Deploy applies `mfsymlinks`, restarts `guideants-ai`, and the container entrypoint runs a one-time scoped venv cleanup (share marker prevents repeats). |
+| Python venv / scoped execute fails (`Permission denied` on `lib64`) | `script-agent-state` SMB mount missing `mfsymlinks` | Re-run `deploy.ps1 -OnlyApps -SkipMigrations`. Deploy applies `mfsymlinks` and runs a one-time scoped venv cleanup on the share (marker prevents repeats). Fresh installs with no venvs complete without starting a replica. |
 | First scoped venv very slow on cold share | Azure Files latency for `python -m venv` + pip | Expected; venv is durable on the share after first create |
 | First request after idle is slow | Apps scaled to zero and/or SQL paused | Expected; wait for cold start + SQL resume, or `manage.ps1 -Operation scale -MinReplicas 1` |
 | No historical logs in portal Logs blade | CAE log destination is null (not saved) | Use `manage.ps1 -Operation logs -Follow` (live stream); console is not ingested into LA |

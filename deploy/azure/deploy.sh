@@ -70,7 +70,13 @@ ok() { echo "[SUCCESS] $*"; }
 warn() { echo "[WARNING] $*" >&2; }
 die() { echo "[ERROR] $*" >&2; exit 1; }
 
-[[ -n "$SQL_ADMIN_PASSWORD" || ( "$ONLY_APPS" -eq 1 && "$SKIP_MIGRATIONS" -eq 1 ) ]] || die "SqlAdminPassword is required unless both --only-apps and --skip-migrations are set"
+[[ -n "$SQL_ADMIN_PASSWORD" || "$ONLY_APPS" -eq 1 ]] || {
+  KV_NAME="$(az keyvault list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null || true)"
+  if [[ -n "$KV_NAME" ]]; then
+    SQL_ADMIN_PASSWORD="$(az keyvault secret show --vault-name "$KV_NAME" --name sql-admin-password --query value -o tsv 2>/dev/null || true)"
+  fi
+}
+[[ -n "$SQL_ADMIN_PASSWORD" || "$ONLY_APPS" -eq 1 ]] || die "SqlAdminPassword is required for infrastructure deploy unless --only-apps is set (app-only updates skip SQL)."
 command -v az >/dev/null || die "Azure CLI is not installed"
 az account show >/dev/null 2>&1 || die "Not logged in to Azure. Run 'az login' first."
 
@@ -78,14 +84,36 @@ if [[ -n "$SUBSCRIPTION_ID" ]]; then
   az account set --subscription "$SUBSCRIPTION_ID"
 fi
 
-log "Generating deployment secrets..."
-SECRETS_JSON="$("$DEPLOY_ROOT/scripts/generate-secrets.sh" --quiet)"
-JWT_SIGNING_KEY="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['jwtSigningKey'])")"
-SETTINGS_SECRETS_KEY="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['settingsSecretsKey'])")"
-SCRIPT_AGENT_TOKEN="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['scriptAgentToken'])")"
-SCRIPT_AGENT_ADMIN_TOKEN="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['scriptAgentAdminToken'])")"
-DOCUMENTSERVER_JWT_SECRET="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['documentServerJwtSecret'])")"
-ok "Secrets generated"
+resolve_deployment_secrets() {
+  if [[ "$ONLY_APPS" -eq 1 ]]; then
+    log "Skipping bootstrap secret generation (--only-apps preserves existing Key Vault secrets)."
+    return 0
+  fi
+
+  local kv_name
+  kv_name="$(az keyvault list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null || true)"
+  if [[ -z "$kv_name" ]]; then
+    log "Generating deployment secrets..."
+    SECRETS_JSON="$("$DEPLOY_ROOT/scripts/generate-secrets.sh" --quiet)"
+    JWT_SIGNING_KEY="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['jwtSigningKey'])")"
+    SETTINGS_SECRETS_KEY="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['settingsSecretsKey'])")"
+    SCRIPT_AGENT_TOKEN="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['scriptAgentToken'])")"
+    SCRIPT_AGENT_ADMIN_TOKEN="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['scriptAgentAdminToken'])")"
+    DOCUMENTSERVER_JWT_SECRET="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['documentServerJwtSecret'])")"
+    ok "Secrets generated"
+    return 0
+  fi
+
+  log "Key Vault '$kv_name' exists; reusing stored bootstrap secrets..."
+  JWT_SIGNING_KEY="$(az keyvault secret show --vault-name "$kv_name" --name jwt-signing-key --query value -o tsv)"
+  SETTINGS_SECRETS_KEY="$(az keyvault secret show --vault-name "$kv_name" --name settings-secrets-key-azure-deploy --query value -o tsv)"
+  SCRIPT_AGENT_TOKEN="$(az keyvault secret show --vault-name "$kv_name" --name script-agent-token --query value -o tsv)"
+  SCRIPT_AGENT_ADMIN_TOKEN="$(az keyvault secret show --vault-name "$kv_name" --name script-agent-admin-token --query value -o tsv)"
+  DOCUMENTSERVER_JWT_SECRET="$(az keyvault secret show --vault-name "$kv_name" --name documentserver-jwt-secret --query value -o tsv)"
+  ok "Reusing existing Key Vault bootstrap secrets"
+}
+
+resolve_deployment_secrets
 
 resolve_deployer_identity() {
   local signed_in_user_id
@@ -160,7 +188,7 @@ if [[ "$ONLY_INFRA" -eq 0 ]]; then
   fi
 
   SQL_SERVER_NAME="$(az sql server list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)"
-  if [[ -n "$SQL_SERVER_NAME" ]]; then
+  if [[ -n "$SQL_SERVER_NAME" && "$ONLY_APPS" -eq 0 ]]; then
     PUBLIC_IP="$(curl -fsS https://api.ipify.org)"
     EXISTING_RULE="$(az sql server firewall-rule list --resource-group "$RESOURCE_GROUP" --server "$SQL_SERVER_NAME" --query "[?startIpAddress=='$PUBLIC_IP'].name | [0]" -o tsv || true)"
     if [[ -z "$EXISTING_RULE" || "$EXISTING_RULE" == "null" ]]; then
@@ -191,6 +219,8 @@ if [[ "$ONLY_INFRA" -eq 0 ]]; then
     az containerapp update --name guideants-webapi-ui --resource-group "$RESOURCE_GROUP" --set-env-vars "DEPLOYMENT_TRIGGER=$(date +%s)" --output none \
       || die "Failed to force a new revision for guideants-webapi-ui."
     ok "Key Vault connection string updated and web API revision forced"
+  elif [[ -n "$SQL_SERVER_NAME" && "$ONLY_APPS" -eq 1 ]]; then
+    log "Skipping SQL setup, Key Vault connection string update, and web API revision bump (--only-apps)."
   fi
 
   pwsh -File "$DEPLOY_ROOT/scripts/upload-searxng-config.ps1" -ResourceGroupName "$RESOURCE_GROUP"
