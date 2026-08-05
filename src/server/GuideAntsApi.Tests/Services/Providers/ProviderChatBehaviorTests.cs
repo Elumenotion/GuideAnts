@@ -438,6 +438,65 @@ public sealed class ProviderChatBehaviorTests
     }
 
     /// <summary>
+    /// Same row-columns path for Hugging Face, where thinking control is the only mechanism that
+    /// exists: the built-in mapping is a bare <c>reasoning_effort</c> the router's providers ignore,
+    /// so <c>chat_template_kwargs.enable_thinking</c> is reachable only as a nested action.
+    /// </summary>
+    [TestMethod]
+    public async Task HuggingFaceRowConfig_TogglesEnableThinkingPerChoice()
+    {
+        const string thinkingControlJson = """
+            {
+              "defaultChoice": "none",
+              "choiceActions": {
+                "none":    [{ "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": false }],
+                "enabled": [{ "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true }]
+              }
+            }
+            """;
+        var behavior = GuideAntsApi.Services.Conversations.RoutingChatCompletionClientFactory.ToProviderChatBehavior(
+            GuideAntsApi.Services.LlamaCpp.RuntimeProfileDataJson.FromJsonStrings(
+                "Qwen/Qwen3-32B",
+                combineSystemAndDeveloperMessages: true,
+                thoughtBlockPattern: null,
+                samplingParametersJson: "{}",
+                thinkingControlJson: thinkingControlJson,
+                requestFieldsWhenToolsPresentJson: "{}"));
+
+        var handler = new CapturingHandler(_ => JsonResponse(HuggingFaceTextResponse("hi")));
+        using var httpClient = new HttpClient(handler);
+        var client = new HuggingFaceChatClient(
+            httpClient,
+            new HuggingFaceChatConfig { Token = "t" },
+            "Qwen/Qwen3-32B",
+            logger: null,
+            behavior: behavior);
+
+        // No effort selected: the row's defaultChoice disables thinking.
+        await client.GetCompletionAsync(new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, "hi")],
+            model: null));
+        using (var json = JsonDocument.Parse(handler.LastRequestBody))
+        {
+            json.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean()
+                .Should().BeFalse();
+            json.RootElement.TryGetProperty("reasoning_effort", out _).Should().BeFalse();
+        }
+
+        // A guide selecting "enabled" must reach the wire as the opposite kwarg.
+        await client.GetCompletionAsync(new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, "hi")],
+            model: null,
+            reasoningEffort: "enabled"));
+        using (var json = JsonDocument.Parse(handler.LastRequestBody))
+        {
+            json.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean()
+                .Should().BeTrue();
+            json.RootElement.TryGetProperty("reasoning_effort", out _).Should().BeFalse();
+        }
+    }
+
+    /// <summary>
     /// The extra-request-fields column rejects object values (llama-era
     /// <see cref="GuideAntsApi.Services.LlamaCpp.RuntimeProfileRequestFieldsValidator"/> rule), and the
     /// non-local resolver treats a failed parse as "no behavior" — so an object there silently drops the
