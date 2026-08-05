@@ -220,6 +220,10 @@ describe('useGeminiWizardState', () => {
     const snapshot = createWizardSnapshot();
     const { result } = renderHook(() => useGeminiWizardState());
 
+    act(() => {
+      result.current.setCoreForm({ apiKey: 'gemini-secret-key-12345' });
+    });
+
     await act(async () => {
       await result.current.persistOptionalServices(snapshot, createLoadSnapshot(snapshot), createSetSnapshot());
     });

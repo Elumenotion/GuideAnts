@@ -60,7 +60,7 @@ function Invoke-LogsOperation {
 
 function Invoke-StatusOperation {
     foreach ($app in (Get-ContainerApps)) {
-        Write-Status "Status for $app:"
+        Write-Status "Status for ${app}:"
         az containerapp show --name $app --resource-group $ResourceGroupName `
             --query "{name:name, status:properties.runningStatus, provisioning:properties.provisioningState, fqdn:properties.configuration.ingress.fqdn}" -o table
         Write-Host ""

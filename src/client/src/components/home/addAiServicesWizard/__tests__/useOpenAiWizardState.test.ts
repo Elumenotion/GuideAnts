@@ -189,6 +189,13 @@ describe('useOpenAiWizardState', () => {
     const snapshot = createWizardSnapshot();
     const { result } = renderHook(() => useOpenAiWizardState());
 
+    act(() => {
+      result.current.setCoreForm({
+        apiKey: 'openai-secret-key-12345',
+        endpoint: 'https://api.openai.com/v1',
+      });
+    });
+
     await act(async () => {
       await result.current.persistOptionalServices(snapshot, createLoadSnapshot(snapshot), createSetSnapshot());
     });

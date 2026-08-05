@@ -239,6 +239,13 @@ describe('useOpenRouterWizardState', () => {
     const snapshot = createWizardSnapshot();
     const { result } = renderHook(() => useOpenRouterWizardState());
 
+    act(() => {
+      result.current.setCoreForm({
+        apiKey: 'openrouter-secret-key-12345',
+        baseUrl: 'https://openrouter.ai/api/v1',
+      });
+    });
+
     await act(async () => {
       await result.current.persistOptionalServices(snapshot, createLoadSnapshot(snapshot), createSetSnapshot());
     });
@@ -253,5 +260,34 @@ describe('useOpenRouterWizardState', () => {
       OPENROUTER_SERVICE_PROVIDER_IDS.SpeechTranscription,
       WIZARD_DEFER_WARMUP_OPTIONS
     );
+  });
+
+  it('persists connection from wizard state before activating optional services', async () => {
+    const snapshot = createWizardSnapshot();
+    const { result } = renderHook(() => useOpenRouterWizardState());
+
+    act(() => {
+      result.current.setCoreForm({
+        apiKey: 'openrouter-secret-key-12345',
+        baseUrl: 'https://openrouter.ai/api/v1',
+      });
+    });
+
+    await act(async () => {
+      await result.current.persistOptionalServices(snapshot, createLoadSnapshot(snapshot), createSetSnapshot());
+    });
+
+    expect(api.settings.updateSection).toHaveBeenCalledWith(
+      OPENROUTER_SECTION,
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          ApiKey: 'openrouter-secret-key-12345',
+          BaseUrl: 'https://openrouter.ai/api/v1',
+        }),
+      })
+    );
+    const updateSectionOrder = vi.mocked(api.settings.updateSection).mock.invocationCallOrder[0];
+    const activateProviderOrder = vi.mocked(api.settings.services.updateActiveProvider).mock.invocationCallOrder[0];
+    expect(updateSectionOrder).toBeLessThan(activateProviderOrder);
   });
 });
