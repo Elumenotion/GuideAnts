@@ -794,13 +794,13 @@
     "GuideAntsApp.SandboxAdminApply": {
       "post": {
         "operationId": "SandboxAdminApply",
-        "summary": "Start POST /api/system-guide/sandbox-admin/apply after staging requirements/apt. Runs preflight synchronously (fail fast on invalid packages). On success returns jobId with status running; poll SandboxAdminGetApplyJob until succeeded or failed.",
+        "summary": "Start POST /api/system-guide/sandbox-admin/apply after staging requirements/apt. Global apply uses targets [\"apt\"] only. Scoped apply uses targets [\"pip\",\"installScripts\"] for one guide venv. Runs preflight synchronously (fail fast on invalid packages). On success returns jobId with status running; poll SandboxAdminGetApplyJob until succeeded or failed.",
         "requestBody": {
           "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SandboxAdminScopedRequest"
+                "$ref": "#/components/schemas/SandboxAdminApplyRequest"
               }
             }
           }
@@ -1079,6 +1079,39 @@
           "status",
           "endpoint"
         ]
+      },
+      "SandboxAdminApplyRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project scope. Provide with either guideId or notebookId for scoped pip/installScripts apply.",
+            "format": "uuid"
+          },
+          "guideId": {
+            "type": "string",
+            "description": "Guide scope. Mutually exclusive with notebookId.",
+            "format": "uuid"
+          },
+          "notebookId": {
+            "type": "string",
+            "description": "Notebook scope. Mutually exclusive with guideId. API resolves guide for venv scope.",
+            "format": "uuid"
+          },
+          "targets": {
+            "type": "array",
+            "description": "Apply intent. Global (no scope): [\"apt\"] only. Scoped: [\"pip\", \"installScripts\"] or a subset. Omitted body defaults to apt (global) or pip+installScripts (scoped).",
+            "items": {
+              "type": "string",
+              "enum": [
+                "apt",
+                "pip",
+                "installScripts"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "SandboxAdminScopedRequest": {
         "type": "object",

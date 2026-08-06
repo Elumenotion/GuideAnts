@@ -77,7 +77,7 @@ Recommended workflow:
 Apply is two-phase:
 
 - **Preflight (synchronous):** `SandboxAdminApply` validates requirements/apt/scripts (including pip/apt dry-run and Python/Bash syntax checks). Invalid packages or scripts return an immediate tool error (HTTP 400). Do not claim apply started when preflight fails.
-- **Background job:** When preflight passes, apply returns `jobId` with status `queued` or `running`. Apply order for scoped work: pip requirements, then install scripts in order. Global apply reconciles apt plus all known scoped venvs.
+- **Background job:** When preflight passes, apply returns `jobId` with status `queued` or `running`. Scoped apply order: pip requirements, then install scripts in order. Global apply reconciles apt only (`targets: ["apt"]`).
 - **Poll:** Call `SandboxAdminGetApplyJob` with `jobId` until status is `succeeded` or `failed`. Poll with backoff; do not block a single tool call for the full install duration.
 
 `SandboxAdminGetSetupStatus` returns `overallStatus` (`ready`, `pending`, `applying`, `failed`), staged/applied hashes, per install-script step status, active/last apply job, and an `errors` list. Use it before adjusting configuration.
@@ -91,9 +91,10 @@ Python scope policy:
 Apply scope policy:
 
 - `SandboxAdminApply` may run globally (no scope) or scoped.
-- Scoped apply runs pip and install scripts for the project+guide venv.
-- Global apply runs apt reconciliation plus all known scoped venvs.
+- Scoped apply runs pip and install scripts for the project+guide venv (`targets: ["pip", "installScripts"]`).
+- Global apply runs apt reconciliation only (`targets: ["apt"]`). It does not walk other guides' venvs.
 - Install scripts are scoped-only.
+- On container restart, scoped `python-venv/` folders on durable storage are trusted; startup reifies apt only.
 
 Do not retry the same invalid payload shape repeatedly. If validation fails after one corrected retry, report the exact tool error and stop.
 
