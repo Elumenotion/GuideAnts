@@ -36,6 +36,7 @@ internal static class AdminApplyJobRuntime
     internal static async Task<AdminApplyJobAccepted> StartApplyAsync(
         bool hasScope,
         ScriptExecutionScope? scope,
+        AdminApplyTargets targets,
         ScriptExecutionScopeOptions scopeOptions,
         AdminApiOptions adminOptions,
         ILogger logger,
@@ -55,18 +56,15 @@ internal static class AdminApplyJobRuntime
         {
             await ScriptExecutionScopeRuntime.PreflightScopeRequirementsAsync(
                 scope!,
+                targets,
                 scopeOptions,
                 adminOptions,
                 logger,
                 preflightCts.Token);
         }
-        else
+        else if (targets.Apt)
         {
-            await AdminStateRuntime.PreflightGlobalApplyAsync(
-                scopeOptions,
-                adminOptions,
-                logger,
-                preflightCts.Token);
+            await AdminStateRuntime.PreflightGlobalAptPackagesAsync(adminOptions, preflightCts.Token);
         }
 
         var job = new AdminApplyJobRecord(
@@ -79,7 +77,7 @@ internal static class AdminApplyJobRuntime
         ActiveJobByScopeKey[scopeKey] = job.JobId;
         await PersistJobAsync(job, adminOptions, cancellationToken);
 
-        _ = Task.Run(() => RunJobAsync(job, hasScope, scope, scopeOptions, adminOptions, logger));
+        _ = Task.Run(() => RunJobAsync(job, hasScope, scope, targets, scopeOptions, adminOptions, logger));
 
         return ToAccepted(job);
     }
@@ -183,6 +181,7 @@ internal static class AdminApplyJobRuntime
         AdminApplyJobRecord job,
         bool hasScope,
         ScriptExecutionScope? scope,
+        AdminApplyTargets targets,
         ScriptExecutionScopeOptions scopeOptions,
         AdminApiOptions adminOptions,
         ILogger logger)
@@ -198,6 +197,7 @@ internal static class AdminApplyJobRuntime
             {
                 result = await ScriptExecutionScopeRuntime.ApplyScopeRequirementsAsync(
                     scope!,
+                    targets,
                     scopeOptions,
                     adminOptions,
                     logger,
@@ -206,12 +206,7 @@ internal static class AdminApplyJobRuntime
             else
             {
                 var aptResult = await AdminStateRuntime.ApplyGlobalAptPackagesAsync(adminOptions, logger, cts.Token);
-                var scopeResult = await AdminStateRuntime.ApplyAllKnownScopesAsync(
-                    scopeOptions,
-                    adminOptions,
-                    logger,
-                    cts.Token);
-                result = scopeResult with
+                result = aptResult with
                 {
                     Apt = new AdminApplyResultDetails(
                         aptResult.Status,

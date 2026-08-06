@@ -602,7 +602,10 @@ export function registerGuideAntsAppBridge(
       });
     }
 
-    const result = await callSandboxAdminEndpoint('POST', 'apply', { query });
+    const applyTargets = query
+      ? JSON.stringify({ targets: ['pip', 'installScripts'] })
+      : JSON.stringify({ targets: ['apt'] });
+    const result = await callSandboxAdminEndpoint('POST', 'apply', { query, body: applyTargets });
     return toolResult(call, 'SandboxAdminApply', result);
   });
 

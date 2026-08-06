@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.SystemGuide;
@@ -206,6 +207,7 @@ public static class SystemGuideEndpoints
             [FromQuery] Guid? projectId,
             [FromQuery] Guid? guideId,
             [FromQuery] Guid? notebookId,
+            HttpRequest request,
             ApplicationDbContext db,
             ISystemGuideSandboxAdminProxy proxy,
             CancellationToken cancellationToken) =>
@@ -221,12 +223,15 @@ public static class SystemGuideEndpoints
                 return scopeError;
             }
 
+            var rawBody = await ReadRawBodyAsync(request, cancellationToken);
+            var bodyToForward = SandboxAdminApplyIntent.ResolveForwardBody(rawBody, scopeQuery is not null);
+
             return await proxy.ForwardAsync(
                 HttpMethod.Post,
                 "apply",
                 query: scopeQuery,
-                body: null,
-                contentType: null,
+                body: bodyToForward,
+                contentType: "application/json",
                 cancellationToken);
         })
         .RequireAuthorization("RequireAdmin")

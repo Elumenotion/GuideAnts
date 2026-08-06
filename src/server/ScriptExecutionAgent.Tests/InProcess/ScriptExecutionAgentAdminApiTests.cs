@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using ScriptExecutionAgent;
 using ScriptExecutionAgent.Tests.Infrastructure;
 
 namespace ScriptExecutionAgent.Tests.InProcess;
@@ -264,6 +266,147 @@ print("created")
     }
 
     [TestMethod]
+    public async Task Admin_apply_scoped_installs_missing_packages_when_requirements_hash_matches()
+    {
+        if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
+        {
+            Assert.Inconclusive("Scoped Python venv with pip is not available on this machine.");
+        }
+
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        using var adminClient = _factory.CreateAdminClient();
+        using var executionClient = _factory.CreateAuthenticatedClient();
+        var scopedAdminUrl = BuildScopedAdminUrl(_factory.Notebook);
+        using var setRequirementsContent = new StringContent("six", Encoding.UTF8, "text/plain");
+        var setRequirementsResponse = await adminClient.PutAsync($"/admin/requirements{scopedAdminUrl}", setRequirementsContent);
+        setRequirementsResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var firstApplyResponse = await adminClient.PostAsync(
+            $"/admin/apply{scopedAdminUrl}",
+            CreateApplyTargetsBody("pip", "installScripts"));
+        if (firstApplyResponse.StatusCode == HttpStatusCode.BadRequest)
+        {
+            var firstApplyBody = await firstApplyResponse.Content.ReadAsStringAsync();
+            if (firstApplyBody.Contains("Failed to create scoped Python virtual environment", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Inconclusive("Scoped Python venv could not be provisioned on this host.");
+            }
+        }
+
+        firstApplyResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var firstApplyResult = await WaitForApplyJobResultAsync(
+            adminClient,
+            JsonDocument.Parse(await firstApplyResponse.Content.ReadAsStringAsync()).RootElement.GetProperty("jobId").GetString()!);
+        firstApplyResult.GetProperty("status").GetString().Should().Be("succeeded");
+        firstApplyResult.GetProperty("result").GetProperty("status").GetString().Should().BeOneOf("applied", "skipped");
+
+        var probeInstalledResponse = await executionClient.PostAsJsonAsync(
+            "/execute",
+            CreateExecuteBody(
+                _factory.Notebook,
+                "import importlib.util\nprint('present' if importlib.util.find_spec('six') else 'missing')",
+                scriptType: (int)ScriptType.Python));
+        probeInstalledResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var installedDoc = JsonDocument.Parse(await probeInstalledResponse.Content.ReadAsStringAsync()))
+        {
+            ReadStandardOutput(installedDoc.RootElement).Should().Be("present");
+        }
+
+        var uninstallResponse = await executionClient.PostAsJsonAsync(
+            "/execute",
+            CreateExecuteBody(
+                _factory.Notebook,
+                """
+import subprocess
+import sys
+
+subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "six"])
+print("uninstalled")
+""",
+                scriptType: (int)ScriptType.Python));
+        uninstallResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var probeMissingResponse = await executionClient.PostAsJsonAsync(
+            "/execute",
+            CreateExecuteBody(
+                _factory.Notebook,
+                "import importlib.util\nprint('present' if importlib.util.find_spec('six') else 'missing')",
+                scriptType: (int)ScriptType.Python));
+        probeMissingResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var missingDoc = JsonDocument.Parse(await probeMissingResponse.Content.ReadAsStringAsync()))
+        {
+            ReadStandardOutput(missingDoc.RootElement).Should().Be("missing");
+        }
+
+        var secondApplyResponse = await adminClient.PostAsync(
+            $"/admin/apply{scopedAdminUrl}",
+            CreateApplyTargetsBody("pip", "installScripts"));
+        secondApplyResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var secondApplyJob = await WaitForApplyJobResultAsync(
+            adminClient,
+            JsonDocument.Parse(await secondApplyResponse.Content.ReadAsStringAsync()).RootElement.GetProperty("jobId").GetString()!);
+        secondApplyJob.GetProperty("status").GetString().Should().Be("succeeded");
+        secondApplyJob.GetProperty("result").GetProperty("status").GetString().Should().Be("applied");
+
+        var probeRestoredResponse = await executionClient.PostAsJsonAsync(
+            "/execute",
+            CreateExecuteBody(
+                _factory.Notebook,
+                "import importlib.util\nprint('present' if importlib.util.find_spec('six') else 'missing')",
+                scriptType: (int)ScriptType.Python));
+        probeRestoredResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var restoredDoc = JsonDocument.Parse(await probeRestoredResponse.Content.ReadAsStringAsync()))
+        {
+            ReadStandardOutput(restoredDoc.RootElement).Should().Be("present");
+        }
+    }
+
+    [TestMethod]
+    public async Task Admin_apply_scoped_is_skipped_when_requirements_already_satisfied()
+    {
+        if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
+        {
+            Assert.Inconclusive("Scoped Python venv with pip is not available on this machine.");
+        }
+
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        using var adminClient = _factory.CreateAdminClient();
+        var scopedAdminUrl = BuildScopedAdminUrl(_factory.Notebook);
+        using var setRequirementsContent = new StringContent("six", Encoding.UTF8, "text/plain");
+        var setRequirementsResponse = await adminClient.PutAsync($"/admin/requirements{scopedAdminUrl}", setRequirementsContent);
+        setRequirementsResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var firstApplyResponse = await adminClient.PostAsync(
+            $"/admin/apply{scopedAdminUrl}",
+            CreateApplyTargetsBody("pip", "installScripts"));
+        if (firstApplyResponse.StatusCode == HttpStatusCode.BadRequest)
+        {
+            var firstApplyBody = await firstApplyResponse.Content.ReadAsStringAsync();
+            if (firstApplyBody.Contains("Failed to create scoped Python virtual environment", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Inconclusive("Scoped Python venv could not be provisioned on this host.");
+            }
+        }
+
+        firstApplyResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var firstApplyJob = await WaitForApplyJobResultAsync(
+            adminClient,
+            JsonDocument.Parse(await firstApplyResponse.Content.ReadAsStringAsync()).RootElement.GetProperty("jobId").GetString()!);
+        firstApplyJob.GetProperty("status").GetString().Should().Be("succeeded");
+
+        var secondApplyResponse = await adminClient.PostAsync(
+            $"/admin/apply{scopedAdminUrl}",
+            CreateApplyTargetsBody("pip", "installScripts"));
+        secondApplyResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var secondApplyJob = await WaitForApplyJobResultAsync(
+            adminClient,
+            JsonDocument.Parse(await secondApplyResponse.Content.ReadAsStringAsync()).RootElement.GetProperty("jobId").GetString()!);
+        secondApplyJob.GetProperty("status").GetString().Should().Be("succeeded");
+        secondApplyJob.GetProperty("result").GetProperty("status").GetString().Should().Be("skipped");
+        secondApplyJob.GetProperty("result").GetProperty("scopesSkipped").GetInt32().Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task Admin_apply_scoped_preflight_rejects_missing_python_package()
     {
         if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
@@ -377,7 +520,7 @@ print("created")
         _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
         using var client = _factory.CreateAdminClient();
 
-        var startResponse = await client.PostAsync("/admin/apply", content: null);
+        var startResponse = await client.PostAsync("/admin/apply", CreateApplyTargetsBody("apt"));
         startResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
         using var acceptedDoc = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
         var jobId = acceptedDoc.RootElement.GetProperty("jobId").GetString();
@@ -388,12 +531,173 @@ print("created")
         result.TryGetProperty("result", out _).Should().BeTrue();
     }
 
+    [TestMethod]
+    public async Task Admin_apply_global_with_omitted_body_defaults_to_apt_only()
+    {
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        SeedPoisonedSiblingScope(_factory.StorageRoot);
+        using var client = _factory.CreateAdminClient();
+
+        var startResponse = await client.PostAsync("/admin/apply", content: null);
+
+        startResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        using var acceptedDoc = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var jobId = acceptedDoc.RootElement.GetProperty("jobId").GetString();
+        var status = await WaitForApplyJobResultAsync(client, jobId!);
+        status.GetProperty("status").GetString().Should().Be("succeeded");
+        status.GetProperty("result").GetProperty("scopesApplied").GetInt32().Should().BeLessThanOrEqualTo(1);
+    }
+
+    [TestMethod]
+    public async Task Admin_apply_global_does_not_create_sibling_scope_venv_or_applied_state()
+    {
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        var poisonedScopeRoot = SeedPoisonedSiblingScope(_factory.StorageRoot);
+        using var client = _factory.CreateAdminClient();
+
+        var result = await StartApplyAndWaitForResultAsync(client);
+
+        result.TryGetProperty("apt", out _).Should().BeTrue();
+        result.GetProperty("scopesApplied").GetInt32().Should().BeLessThanOrEqualTo(1);
+        File.Exists(Path.Combine(poisonedScopeRoot, "applied-state.json")).Should().BeFalse();
+        Directory.Exists(Path.Combine(poisonedScopeRoot, "python-venv")).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task Admin_apply_scoped_with_omitted_body_defaults_to_pip_and_install_scripts()
+    {
+        if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
+        {
+            Assert.Inconclusive("Scoped Python venv with pip is not available on this machine.");
+        }
+
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        using var client = _factory.CreateAdminClient();
+        var scopedAdminUrl = BuildScopedAdminUrl(_factory.Notebook);
+        using var setRequirementsContent = new StringContent(string.Empty, Encoding.UTF8, "text/plain");
+        var setRequirementsResponse = await client.PutAsync($"/admin/requirements{scopedAdminUrl}", setRequirementsContent);
+        setRequirementsResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var applyResponse = await client.PostAsync($"/admin/apply{scopedAdminUrl}", content: null);
+        if (applyResponse.StatusCode == HttpStatusCode.BadRequest)
+        {
+            var body = await applyResponse.Content.ReadAsStringAsync();
+            if (body.Contains("Failed to create scoped Python virtual environment", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Inconclusive("Scoped Python venv could not be provisioned on this host.");
+            }
+        }
+
+        applyResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [TestMethod]
+    public async Task Admin_apply_global_succeeds_when_poisoned_sibling_scope_exists()
+    {
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        SeedPoisonedSiblingScope(_factory.StorageRoot);
+        using var client = _factory.CreateAdminClient();
+
+        var startResponse = await client.PostAsync("/admin/apply", CreateApplyTargetsBody("apt"));
+
+        startResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        using var acceptedDoc = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var jobId = acceptedDoc.RootElement.GetProperty("jobId").GetString();
+        var result = await WaitForApplyJobResultAsync(client, jobId!);
+        result.GetProperty("status").GetString().Should().Be("succeeded");
+        result.GetProperty("result").TryGetProperty("apt", out _).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task Admin_apply_global_preflight_does_not_fail_on_poisoned_sibling_scope()
+    {
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        SeedPoisonedSiblingScope(_factory.StorageRoot);
+        using var client = _factory.CreateAdminClient();
+
+        var applyResponse = await client.PostAsync("/admin/apply", CreateApplyTargetsBody("apt"));
+
+        applyResponse.StatusCode.Should().NotBe(HttpStatusCode.BadRequest);
+        applyResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [TestMethod]
+    public async Task Admin_apply_rejects_scoped_apt_target()
+    {
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        using var client = _factory.CreateAdminClient();
+        var scopedAdminUrl = BuildScopedAdminUrl(_factory.Notebook);
+
+        var applyResponse = await client.PostAsync(
+            $"/admin/apply{scopedAdminUrl}",
+            CreateApplyTargetsBody("apt"));
+
+        applyResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await applyResponse.Content.ReadAsStringAsync();
+        body.Should().Contain("Scoped apply cannot target apt");
+    }
+
+    [TestMethod]
+    public async Task Admin_apply_rejects_global_pip_target()
+    {
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        using var client = _factory.CreateAdminClient();
+
+        var applyResponse = await client.PostAsync("/admin/apply", CreateApplyTargetsBody("pip"));
+
+        applyResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await applyResponse.Content.ReadAsStringAsync();
+        body.Should().Contain("Global apply supports only apt");
+    }
+
+    [TestMethod]
+    public async Task Admin_startup_reconcile_is_apt_only_and_ignores_poisoned_scopes()
+    {
+        _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
+        var poisonedScopeRoot = SeedPoisonedSiblingScope(_factory.StorageRoot);
+        var adminStateDir = Path.Combine(_factory.StorageRoot, ".guideants", "script-agent-admin");
+        var scopeStateRoot = Path.Combine(_factory.StorageRoot, ".guideants", "script-execution");
+        var adminOptions = new AdminApiOptions(true, ScriptExecutionAgentWebApplicationFactory.AdminToken, adminStateDir, FailOpen: false);
+        var scopeOptions = new ScriptExecutionScopeOptions(scopeStateRoot, null, null, false, null);
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddSimpleConsole());
+        var logger = loggerFactory.CreateLogger<Program>();
+
+        var act = () => AdminStateRuntime.ReconcileStartupStateAsync(
+            adminOptions,
+            scopeOptions,
+            logger,
+            CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        File.Exists(Path.Combine(poisonedScopeRoot, "applied-state.json")).Should().BeFalse();
+    }
+
+    private static StringContent CreateApplyTargetsBody(params string[] targets) =>
+        new(JsonSerializer.Serialize(new { targets }), Encoding.UTF8, "application/json");
+
+    private static string SeedPoisonedSiblingScope(string storageRoot)
+    {
+        var scopeStateRoot = Path.Combine(storageRoot, ".guideants", "script-execution");
+        var poisonedProjectId = Guid.NewGuid();
+        var poisonedGuideId = Guid.NewGuid();
+        var scopeRoot = Path.Combine(scopeStateRoot, $"project-{poisonedProjectId:N}", $"guide-{poisonedGuideId:N}");
+        Directory.CreateDirectory(scopeRoot);
+        File.WriteAllText(
+            Path.Combine(scopeRoot, "requirements.txt"),
+            "--index-url https://example.invalid/simple");
+        return scopeRoot;
+    }
+
     private static async Task<JsonElement> StartApplyAndWaitForResultAsync(
         HttpClient client,
         string? scopedUrl = null,
         TimeSpan? timeout = null)
     {
-        var startResponse = await client.PostAsync("/admin/apply" + (scopedUrl ?? string.Empty), content: null);
+        var startResponse = await client.PostAsync(
+            "/admin/apply" + (scopedUrl ?? string.Empty),
+            string.IsNullOrEmpty(scopedUrl)
+                ? CreateApplyTargetsBody("apt")
+                : CreateApplyTargetsBody("pip", "installScripts"));
         startResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
         using var acceptedDoc = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
         var jobId = acceptedDoc.RootElement.GetProperty("jobId").GetString();
