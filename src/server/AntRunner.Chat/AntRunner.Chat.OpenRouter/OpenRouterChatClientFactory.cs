@@ -26,7 +26,17 @@ public sealed class OpenRouterChatClientFactory : IChatCompletionClientFactory
 
     public string? DefaultDeploymentId => null;
 
-    public IChatCompletionClient CreateClient(string? deploymentId, HttpClient? httpClient = null)
+    public IChatCompletionClient CreateClient(string? deploymentId, HttpClient? httpClient = null) =>
+        CreateClientForBehavior(deploymentId, behavior: null, httpClient);
+
+    /// <summary>
+    /// Creates a client bound to the catalog row's model-owned chat behavior
+    /// (thinking control and extra request fields).
+    /// </summary>
+    public IChatCompletionClient CreateClientForBehavior(
+        string? deploymentId,
+        ProviderChatBehavior? behavior,
+        HttpClient? httpClient = null)
     {
         var resolvedConfig = _configAccessor?.Invoke()
             ?? _config
@@ -35,6 +45,7 @@ public sealed class OpenRouterChatClientFactory : IChatCompletionClientFactory
             httpClient ?? _httpClientFactory.CreateClient(),
             resolvedConfig,
             deploymentId,
-            _logger);
+            _logger,
+            behavior);
     }
 }

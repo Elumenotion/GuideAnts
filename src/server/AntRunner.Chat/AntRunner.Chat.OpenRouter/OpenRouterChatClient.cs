@@ -21,6 +21,7 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
     private readonly HttpClient _httpClient;
     private readonly OpenRouterChatConfig _config;
     private readonly string? _defaultModel;
+    private readonly ProviderChatBehavior? _behavior;
     private readonly ILogger<OpenRouterChatClient> _logger;
 
     public bool SupportsToolChoiceNone => true;
@@ -29,11 +30,13 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
         HttpClient httpClient,
         OpenRouterChatConfig config,
         string? defaultModel,
-        ILogger<OpenRouterChatClient>? logger = null)
+        ILogger<OpenRouterChatClient>? logger = null,
+        ProviderChatBehavior? behavior = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _defaultModel = defaultModel;
+        _behavior = behavior;
         _logger = logger ?? NullLogger<OpenRouterChatClient>.Instance;
     }
 
@@ -41,8 +44,7 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
         ChatCompletionRequest request,
         CancellationToken cancellationToken = default)
     {
-        var payload = OpenRouterRequestMapper.ToRequest(request, ResolveModel(request), stream: false);
-        using var message = CreateRequestMessage(payload);
+        using var message = CreateRequestMessage(BuildRequestBody(request, stream: false));
         using var response = await _httpClient.SendAsync(message, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
@@ -61,8 +63,7 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
         Action<ChatCompletionChunk> onChunk,
         CancellationToken cancellationToken = default)
     {
-        var payload = OpenRouterRequestMapper.ToRequest(request, ResolveModel(request), stream: true);
-        using var message = CreateRequestMessage(payload);
+        using var message = CreateRequestMessage(BuildRequestBody(request, stream: true));
         using var response = await _httpClient.SendAsync(
             message,
             HttpCompletionOption.ResponseHeadersRead,
@@ -116,7 +117,32 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
         return accumulator.ToResponse();
     }
 
-    private HttpRequestMessage CreateRequestMessage(OpenRouterChatRequest payload)
+    /// <summary>
+    /// Serializes the typed payload, then lets the model row's chat behavior override it.
+    /// Row-owned thinking control replaces the built-in reasoning mapping entirely, so a model
+    /// that needs something other than OpenRouter's normalized <c>reasoning</c> object (nested
+    /// <c>chat_template_kwargs</c>, a bare <c>reasoning_effort</c>, a system prefix) can say so.
+    /// </summary>
+    private JsonObject BuildRequestBody(ChatCompletionRequest request, bool stream)
+    {
+        var payload = OpenRouterRequestMapper.ToRequest(request, ResolveModel(request), stream);
+        var body = JsonSerializer.SerializeToNode(payload, SerializerOptions)?.AsObject()
+            ?? throw new InvalidOperationException("OpenRouter chat request payload could not be serialized.");
+
+        ProviderChatBehaviorApplier.ApplyExtraRequestFields(body, _behavior);
+
+        var thinkingActions = ProviderChatBehaviorApplier.ResolveThinkingActions(_behavior, request.ReasoningEffort);
+        if (thinkingActions != null)
+        {
+            body.Remove("reasoning");
+            body.Remove("reasoning_effort");
+            ProviderChatBehaviorApplier.ApplyThinkingActions(body, body["messages"] as JsonArray, thinkingActions);
+        }
+
+        return body;
+    }
+
+    private HttpRequestMessage CreateRequestMessage(JsonObject body)
     {
         if (string.IsNullOrWhiteSpace(_config.ApiKey))
         {
@@ -126,7 +152,7 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
         var endpoint = $"{(_config.BaseUrl ?? "https://openrouter.ai/api/v1").TrimEnd('/')}/chat/completions";
         var message = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = new StringContent(JsonSerializer.Serialize(payload, SerializerOptions), Encoding.UTF8, "application/json")
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
         };
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.ApiKey);
         OpenRouterAttribution.Apply(message);

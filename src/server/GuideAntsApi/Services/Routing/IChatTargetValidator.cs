@@ -200,7 +200,7 @@ public sealed class ChatTargetValidator : IChatTargetValidator
                 innerException: ex);
         }
 
-        if (target.LlamaChatBehavior?.ThinkingControl?.ChoiceActions is not { Count: > 0 })
+        if (target.ChatBehavior?.ThinkingControl?.ChoiceActions is not { Count: > 0 })
         {
             throw new RoutingException(
                 RoutingErrorCodes.ModelNotReady,

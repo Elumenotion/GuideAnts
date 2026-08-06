@@ -21,6 +21,7 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
     private readonly HttpClient _httpClient;
     private readonly HuggingFaceChatConfig _config;
     private readonly string? _defaultModel;
+    private readonly ProviderChatBehavior? _behavior;
     private readonly ILogger<HuggingFaceChatClient> _logger;
 
     public bool SupportsToolChoiceNone => false;
@@ -29,11 +30,13 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         HttpClient httpClient,
         HuggingFaceChatConfig config,
         string? defaultModel,
-        ILogger<HuggingFaceChatClient>? logger = null)
+        ILogger<HuggingFaceChatClient>? logger = null,
+        ProviderChatBehavior? behavior = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _defaultModel = defaultModel;
+        _behavior = behavior;
         _logger = logger ?? NullLogger<HuggingFaceChatClient>.Instance;
     }
 
@@ -41,8 +44,7 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         ChatCompletionRequest request,
         CancellationToken cancellationToken = default)
     {
-        var payload = CreatePayloadOrThrow(request, stream: false);
-        using var message = CreateRequestMessage(payload);
+        using var message = CreateRequestMessage(CreateRequestBodyOrThrow(request, stream: false));
         using var response = await _httpClient.SendAsync(message, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
@@ -65,8 +67,7 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         Action<ChatCompletionChunk> onChunk,
         CancellationToken cancellationToken = default)
     {
-        var payload = CreatePayloadOrThrow(request, stream: true);
-        using var message = CreateRequestMessage(payload);
+        using var message = CreateRequestMessage(CreateRequestBodyOrThrow(request, stream: true));
         using var response = await _httpClient.SendAsync(
             message,
             HttpCompletionOption.ResponseHeadersRead,
@@ -124,7 +125,7 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         return accumulator.ToResponse();
     }
 
-    private HttpRequestMessage CreateRequestMessage(HuggingFaceChatRequest payload)
+    private HttpRequestMessage CreateRequestMessage(JsonObject body)
     {
         if (string.IsNullOrWhiteSpace(_config.Token))
         {
@@ -134,7 +135,7 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         var endpoint = $"{(_config.RouterBaseUrl ?? "https://router.huggingface.co/v1").TrimEnd('/')}/chat/completions";
         var message = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = new StringContent(JsonSerializer.Serialize(payload, SerializerOptions), Encoding.UTF8, "application/json")
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
         };
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.Token);
         return message;
@@ -149,6 +150,31 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         }
 
         return model;
+    }
+
+    /// <summary>
+    /// Maps the typed payload, then lets the model row's chat behavior override it. The router
+    /// forwards unknown body fields to the upstream provider, so this is how a model reaches
+    /// controls the OpenAI-compatible shape has no slot for — most importantly
+    /// <c>chat_template_kwargs.enable_thinking</c>, which is what actually toggles thinking on
+    /// Qwen/GLM-style models; <c>reasoning_effort</c> alone is silently ignored by most providers.
+    /// </summary>
+    private JsonObject CreateRequestBodyOrThrow(ChatCompletionRequest request, bool stream)
+    {
+        var payload = CreatePayloadOrThrow(request, stream);
+        var body = JsonSerializer.SerializeToNode(payload, SerializerOptions)?.AsObject()
+            ?? throw new InvalidOperationException("Hugging Face chat request payload could not be serialized.");
+
+        ProviderChatBehaviorApplier.ApplyExtraRequestFields(body, _behavior);
+
+        var thinkingActions = ProviderChatBehaviorApplier.ResolveThinkingActions(_behavior, request.ReasoningEffort);
+        if (thinkingActions != null)
+        {
+            body.Remove("reasoning_effort");
+            ProviderChatBehaviorApplier.ApplyThinkingActions(body, body["messages"] as JsonArray, thinkingActions);
+        }
+
+        return body;
     }
 
     private HuggingFaceChatRequest CreatePayloadOrThrow(ChatCompletionRequest request, bool stream)

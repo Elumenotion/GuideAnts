@@ -46,8 +46,16 @@ public sealed partial class ApplicationSettingsService
             CombineSystemAndDeveloperMessages = request.CombineSystemAndDeveloperMessages,
             ThoughtBlockPattern = request.ThoughtBlockPattern,
             SamplingParametersJson = NormalizeJsonObject(request.SamplingParametersJson, "{}"),
-            ThinkingControlJson = NormalizeJsonObject(request.ThinkingControlJson, "{}"),
-            RequestFieldsWhenToolsPresentJson = NormalizeJsonObject(request.RequestFieldsWhenToolsPresentJson, "{}"),
+            ThinkingControlJson = NormalizeBehaviorJsonObject(
+                modelId,
+                nameof(Model.ThinkingControlJson),
+                request.ThinkingControlJson,
+                "{}"),
+            RequestFieldsWhenToolsPresentJson = NormalizeBehaviorJsonObject(
+                modelId,
+                nameof(Model.RequestFieldsWhenToolsPresentJson),
+                request.RequestFieldsWhenToolsPresentJson,
+                "{}"),
             IsActive = request.IsActive,
             DisplayOrder = request.DisplayOrder,
             Created = DateTime.UtcNow,
@@ -87,8 +95,14 @@ public sealed partial class ApplicationSettingsService
         model.CombineSystemAndDeveloperMessages = request.CombineSystemAndDeveloperMessages;
         model.ThoughtBlockPattern = request.ThoughtBlockPattern;
         model.SamplingParametersJson = NormalizeJsonObject(request.SamplingParametersJson, model.SamplingParametersJson);
-        model.ThinkingControlJson = NormalizeJsonObject(request.ThinkingControlJson, model.ThinkingControlJson);
-        model.RequestFieldsWhenToolsPresentJson = NormalizeJsonObject(
+        model.ThinkingControlJson = NormalizeBehaviorJsonObject(
+            routeModelId,
+            nameof(Model.ThinkingControlJson),
+            request.ThinkingControlJson,
+            model.ThinkingControlJson);
+        model.RequestFieldsWhenToolsPresentJson = NormalizeBehaviorJsonObject(
+            routeModelId,
+            nameof(Model.RequestFieldsWhenToolsPresentJson),
             request.RequestFieldsWhenToolsPresentJson,
             model.RequestFieldsWhenToolsPresentJson);
         model.IsActive = request.IsActive;
@@ -205,6 +219,37 @@ public sealed partial class ApplicationSettingsService
         }
 
         return json.Trim();
+    }
+
+    /// <summary>
+    /// Chat-behavior columns are replayed into request bodies at dispatch, where malformed JSON can
+    /// only be ignored. Reject it on write instead so a bad paste fails visibly in Settings.
+    /// </summary>
+    private static string NormalizeBehaviorJsonObject(string modelId, string field, string? json, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return fallback;
+        }
+
+        var trimmed = json.Trim();
+        JsonValueKind kind;
+        try
+        {
+            using var document = JsonDocument.Parse(trimmed);
+            kind = document.RootElement.ValueKind;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"Model '{modelId}' {field} must be valid JSON.", ex);
+        }
+
+        if (kind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException($"Model '{modelId}' {field} must be a JSON object.");
+        }
+
+        return trimmed;
     }
 
     private static string? NormalizeReasoningChoicesJson(string modelId, string? reasoningChoicesJson)

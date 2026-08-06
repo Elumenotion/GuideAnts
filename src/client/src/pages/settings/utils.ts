@@ -18,7 +18,11 @@ import {
   CanonicalLocalRuntimeConfig,
   CatalogEditState,
 } from './types';
-import { normalizeParameterSurface } from './parameterSurface';
+import {
+  normalizeParameterSurface,
+  providerSupportsRowOwnedRequestShaping,
+  validateOptionalJsonObject,
+} from './parameterSurface';
 import { getServiceProviderDisplayName } from './constants/displayLabels';
 import {
   buildLocalModelAddModelRequest,
@@ -314,6 +318,16 @@ export function createCatalogEditStateFromModel(model: SettingsModelDto): Catalo
   };
 }
 
+/** Returns the trimmed JSON object, or undefined when the field is blank or an empty object. */
+function normalizeBehaviorJson(json: string, label: string): string | undefined {
+  const error = validateOptionalJsonObject(json, label);
+  if (error) {
+    throw new Error(error);
+  }
+  const trimmed = json.trim();
+  return trimmed.length === 0 || trimmed === '{}' ? undefined : trimmed;
+}
+
 export function buildAddModelRequest(state: AddModelWizardState): AddModelRequest {
   const provider = state.provider.trim();
   if (!provider) {
@@ -342,6 +356,19 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
   };
   if (parameterSurface.reasoningChoicesJson) {
     providerConfig.reasoningChoicesJson = parameterSurface.reasoningChoicesJson;
+  }
+  if (providerSupportsRowOwnedRequestShaping(provider)) {
+    const thinkingControlJson = normalizeBehaviorJson(state.thinkingControlJson, 'Thinking control JSON');
+    if (thinkingControlJson) {
+      providerConfig.thinkingControlJson = thinkingControlJson;
+    }
+    const requestFieldsJson = normalizeBehaviorJson(
+      state.requestFieldsWhenToolsPresentJson,
+      'Extra request fields JSON',
+    );
+    if (requestFieldsJson) {
+      providerConfig.requestFieldsWhenToolsPresentJson = requestFieldsJson;
+    }
   }
   return {
     provider,
@@ -399,8 +426,9 @@ export function buildCatalogEditRequest(
     combineSystemAndDeveloperMessages: state.combineSystemAndDeveloperMessages,
     thoughtBlockPattern: normalizeOptionalString(state.thoughtBlockPattern),
     samplingParametersJson: parameterSurface.samplingParametersJson,
-    thinkingControlJson: state.thinkingControlJson.trim() || '{}',
-    requestFieldsWhenToolsPresentJson: state.requestFieldsWhenToolsPresentJson.trim() || '{}',
+    thinkingControlJson: normalizeBehaviorJson(state.thinkingControlJson, 'Thinking control JSON') ?? '{}',
+    requestFieldsWhenToolsPresentJson:
+      normalizeBehaviorJson(state.requestFieldsWhenToolsPresentJson, 'Extra request fields JSON') ?? '{}',
     isActive: state.isActive,
     displayOrder: normalizeDisplayOrder(state.displayOrder),
   };
