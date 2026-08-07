@@ -26,6 +26,7 @@ import Pending from '../pages/Pending';
 import ChangePassword from '../pages/ChangePassword';
 import OAuthCallback from '../pages/OAuthCallback';
 import CliAuthorize from '../pages/CliAuthorize';
+import NotFoundPage from '../pages/NotFound';
 import { ProtectedRoute } from './ProtectedRoute';
 
 function ProjectProviderWrapper({ children }: { children: React.ReactNode }) {
@@ -95,6 +96,7 @@ const AppContent = () => {
       <Route path="/projects/:projectId/guides/assistant/:assistantId/usage" element={withAdminProtection(withProjectProvider(<GuideUsagePage />))} />
       <Route path="/projects/:projectId/guides/assistant/new" element={withAdminProtection(withProjectProvider(<AssistantEditor />))} />
       <Route path="/projects/:projectId/guides/assistant/:assistantId" element={withAdminProtection(withProjectProvider(<AssistantEditor />))} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 };
