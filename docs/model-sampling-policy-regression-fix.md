@@ -36,6 +36,24 @@ flowchart LR
 
 `BackfillNonLocalModelRowAuthority` copies missing non-local sampling/reasoning fields from linked runtime profiles once, then clears non-local `RuntimeConfigJson` profile pointers.
 
+## Row-Owned Request Shaping (`hf-inference-chat`, `openrouter-chat`)
+
+Both clients also honor the row's `ThinkingControlJson` and `RequestFieldsWhenToolsPresentJson`, projected onto
+`ProviderChatBehavior` by `RoutingChatCompletionClientFactory`:
+
+- **Thinking control** — when the row defines actions for the selected reasoning choice, they replace the client's
+  built-in reasoning mapping (OpenRouter's `reasoning` object, Hugging Face's `reasoning_effort`). This is how a model
+  reaches `chat_template_kwargs.enable_thinking`, which is what actually toggles thinking on Qwen/GLM-style models
+  behind the HF router. Choices the control does not cover keep the built-in mapping.
+- **Extra request fields** — merged into every completion body (`parallel_tool_calls`, `seed`, …). Sampling parameters
+  remain numeric-only, so this is the route for non-numeric body fields. `RuntimeProfileRequestFieldsValidator` accepts
+  **primitives only**; a field whose value is an object (OpenRouter `reasoning`, `provider`) has to go through a
+  `RequestField` thinking action instead. Note the sharp edge: an object value here throws during row parse, and the
+  non-local resolver treats a failed parse as "no behavior", silently dropping the row's thinking control as well.
+
+Both default to `{}` (unconfigured), which leaves request bodies byte-identical to before. Other non-local providers
+build typed request bodies and ignore these columns, so the catalog editor hides the fields for them.
+
 ## Adding a New Compatible Cloud Model
 
 1. Add the catalog row via Settings (or API) with the desired `SamplingParametersJson` / `ReasoningChoicesJson`.

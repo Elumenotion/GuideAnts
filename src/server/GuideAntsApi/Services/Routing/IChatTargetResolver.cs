@@ -6,12 +6,15 @@ namespace GuideAntsApi.Services.Routing;
 /// <summary>
 /// A resolved chat dispatch target. Carries the raw catalog row so the validator
 /// and the routing factory can fan out without issuing another DB query.
+/// <paramref name="ChatBehavior"/> is the row-owned chat behavior. llama-cpp requires it;
+/// providers that accept row-owned request shaping (Hugging Face, OpenRouter) use it when
+/// configured and fall back to their built-in mapping when it is empty.
 /// </summary>
 public sealed record ChatTarget(
     string ModelId,
     string Provider,
     string? RuntimeConfigJson,
-    GuideAntsApi.Services.LlamaCpp.RuntimeProfileData? LlamaChatBehavior = null);
+    GuideAntsApi.Services.LlamaCpp.RuntimeProfileData? ChatBehavior = null);
 
 public interface IChatTargetResolver
 {
@@ -80,10 +83,12 @@ public sealed class ChatTargetResolver : IChatTargetResolver
                 serviceId: "Chat");
         }
 
-        GuideAntsApi.Services.LlamaCpp.RuntimeProfileData? llamaBehavior = null;
-        if (string.Equals(row.Provider.Trim(), "llama-cpp", StringComparison.OrdinalIgnoreCase))
+        var provider = row.Provider.Trim();
+        var isLlama = string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase);
+        GuideAntsApi.Services.LlamaCpp.RuntimeProfileData? chatBehavior;
+        try
         {
-            llamaBehavior = GuideAntsApi.Services.LlamaCpp.RuntimeProfileDataJson.FromJsonStrings(
+            chatBehavior = GuideAntsApi.Services.LlamaCpp.RuntimeProfileDataJson.FromJsonStrings(
                 row.ModelId,
                 row.CombineSystemAndDeveloperMessages,
                 row.ThoughtBlockPattern,
@@ -93,7 +98,13 @@ public sealed class ChatTargetResolver : IChatTargetResolver
                 row.DisplayName,
                 row.Description);
         }
+        catch (InvalidOperationException) when (!isLlama)
+        {
+            // Non-local rows only opt in to row-owned request shaping; a malformed surface must not
+            // take chat down, so fall back to the provider client's built-in request mapping.
+            chatBehavior = null;
+        }
 
-        return new ChatTarget(row.ModelId, row.Provider.Trim(), row.RuntimeConfigJson, llamaBehavior);
+        return new ChatTarget(row.ModelId, provider, row.RuntimeConfigJson, chatBehavior);
     }
 }

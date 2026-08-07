@@ -48,9 +48,9 @@ public sealed class SandboxWireJwtServiceTests
     [TestMethod]
     public void ResolveAllowedEndpoints_respects_disabled_flags()
     {
-        var endpoints = SandboxWireEnvironmentProvisioner.ResolveAllowedEndpoints(new Models.Guides.SandboxWireApiConfigDto
+        var endpoints = SandboxWireEnvironmentProvisioner.ResolveAllowedEndpoints(new GuideAntsApi.Models.Guides.SandboxWireApiConfigDto
         {
-            EndpointFlags = new Models.Guides.PublishedWireApiEndpointFlagsDto
+            EndpointFlags = new GuideAntsApi.Models.Guides.PublishedWireApiEndpointFlagsDto
             {
                 Models = true,
                 ChatCompletions = false,

@@ -153,7 +153,16 @@ export async function sandboxAdminGetAptPackages(): Promise<SandboxAdminCallResu
 }
 
 export async function sandboxAdminApply(scope: SandboxGuideScope): Promise<SandboxAdminCallResult> {
-  return callSandboxAdminEndpoint('POST', 'apply', { query: buildGuideScopeQuery(scope) });
+  return callSandboxAdminEndpoint('POST', 'apply', {
+    query: buildGuideScopeQuery(scope),
+    body: JSON.stringify({ targets: ['pip', 'installScripts'] }),
+  });
+}
+
+export async function sandboxAdminApplyApt(): Promise<SandboxAdminCallResult> {
+  return callSandboxAdminEndpoint('POST', 'apply', {
+    body: JSON.stringify({ targets: ['apt'] }),
+  });
 }
 
 export async function sandboxAdminGetApplyJob(jobId: string): Promise<SandboxAdminCallResult> {

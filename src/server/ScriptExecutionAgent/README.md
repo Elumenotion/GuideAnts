@@ -72,7 +72,21 @@ All admin requests require `X-Script-Agent-Admin-Token`.
 
 Scoped `install-scripts.json` stores ordered setup scripts (`Python` or `Bash`) that run after pip requirements during apply and on replay. Each script's last status is recorded in `applied-state.json`.
 
-`POST /admin/apply` runs synchronous preflight (requirements/apt validation plus pip/apt dry-run when installs are needed) and returns `400` on preflight failure. When preflight passes it returns `202 Accepted` with a `jobId` and starts background apply work detached from the HTTP request (default timeout: 60 minutes via `SCRIPT_EXECUTION_ADMIN_APPLY_TIMEOUT_MINUTES`). Poll `GET /admin/apply/jobs/{jobId}` for `queued`, `running`, `succeeded`, or `failed` status. Preflight timeout defaults to 120 seconds (`SCRIPT_EXECUTION_ADMIN_APPLY_PREFLIGHT_TIMEOUT_SECONDS`).
+`POST /admin/apply` runs synchronous preflight for the requested **targets** only, then returns `400` on preflight failure. When preflight passes it returns `202 Accepted` with a `jobId` and starts background apply work detached from the HTTP request (default timeout: 60 minutes via `SCRIPT_EXECUTION_ADMIN_APPLY_TIMEOUT_MINUTES`). Poll `GET /admin/apply/jobs/{jobId}` for `queued`, `running`, `succeeded`, or `failed` status. Preflight timeout defaults to 120 seconds (`SCRIPT_EXECUTION_ADMIN_APPLY_PREFLIGHT_TIMEOUT_SECONDS`).
+
+Apply request body (JSON, optional — defaults apply when omitted):
+
+```json
+{ "targets": ["apt"] }
+```
+
+| Caller intent | Scope | Targets | Work performed |
+|---|---|---|---|
+| OS packages | Global (no `projectId`/`guideId`) | `["apt"]` | Reconcile `apt-packages.txt` onto container rootfs |
+| Python + scripts | Scoped (`projectId` + `guideId`) | `["pip", "installScripts"]` | Update **that** guide's durable `python-venv/` only |
+| Defaults | Omitted body | Global → `apt`; scoped → `pip` + `installScripts` | Same as above |
+
+Global apply never walks scoped venvs. Scoped apply never touches apt. Startup reconcile is **apt-only**; scoped pip venvs on the durable volume are source of truth and are ensured on demand at `/execute`.
 
 `GET`/`PUT /admin/requirements` and `POST /admin/apply` operate on global state unless both `projectId` and `guideId` query parameters are provided. Scoped requests affect the shared `project + guide` Python venv used by all matching notebooks.
 
@@ -98,6 +112,8 @@ Python runtime state is scoped by `project + guide`:
 All notebooks in the same project that use the same guide share that venv. Scoped requirements are applied into the scoped venv before Python execution. If a scoped `requirements.txt` does not exist, the agent uses the global admin `requirements.txt` as the fallback requirements source for that scope.
 
 Scoped venvs extend the image-provided Python runtime instead of replacing it. By default on Linux, the agent links the scoped venv to `/opt/venv` site-packages with a `.pth` file. Packages installed into the scoped venv remain first on `sys.path`, and baked image packages remain available as a fallback. Set `SCRIPT_EXECUTION_BASE_PYTHON_VENV` to override the base runtime venv path or leave it unset on non-AI images.
+
+Scoped pip apply and prune only inspect packages installed under the scoped venv's own `site-packages` directory. Inherited base-runtime packages are never treated as unmanaged guide requirements.
 
 The optional `environment` object on `/execute` is a per-run injection surface. Values are placed only into the launched script process environment; they are not persisted by the ScriptExecutionAgent and are not written to scope state.
 
@@ -150,8 +166,12 @@ That volume stores:
 - global `apt-packages.txt`
 - global `applied-state.json`
 - scoped state under `scopes/project-{projectId:N}/guide-{guideId:N}/`
+  - `requirements.txt`, `install-scripts.json`, `applied-state.json`
+  - `python-venv/` — **durable pip source of truth** (survives container restart/replace)
 
 The volume survives container restart and normal `docker compose down` / `up`. It is removed by `docker compose down -v` or manual volume deletion.
+
+**Durable vs ephemeral:** scoped `python-venv/` trees live on this volume and are not reinstalled on process start. Only apt packages (container rootfs) are re-materialized at startup and via global apply with `targets: ["apt"]`.
 
 ## Container Integration
 

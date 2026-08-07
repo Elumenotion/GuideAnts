@@ -74,7 +74,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         if (provider == Provider.LlamaCpp)
         {
             var localRuntime = LocalRuntimeConfigurationParser.ParseRequired(target.ModelId, target.RuntimeConfigJson);
-            if (target.LlamaChatBehavior?.ThinkingControl?.ChoiceActions is not { Count: > 0 })
+            if (target.ChatBehavior?.ThinkingControl?.ChoiceActions is not { Count: > 0 })
             {
                 throw new RoutingException(
                     RoutingErrorCodes.ModelNotReady,
@@ -85,7 +85,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
                     providerSection: "LlamaCpp");
             }
 
-            var llamaProfile = ToLlamaCppProfileData(target.LlamaChatBehavior);
+            var llamaProfile = ToLlamaCppProfileData(target.ChatBehavior);
 
             return _llamaCppFactory.CreateClientForProfile(
                 localRuntime.RouterModelId,
@@ -101,8 +101,14 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
             Provider.AzureOpenAiChat => _azureOpenAiChatFactory.CreateClient(target.ModelId, httpClient),
             Provider.AzureOpenAiResponses => _azureOpenAiResponsesFactory.CreateClient(target.ModelId, httpClient),
             Provider.GoogleGeminiChat => _googleGeminiFactory.CreateClient(target.ModelId, httpClient),
-            Provider.HuggingFaceInferenceChat => _huggingFaceFactory.CreateClient(target.ModelId, httpClient),
-            Provider.OpenRouterChat => _openRouterFactory.CreateClient(target.ModelId, httpClient),
+            Provider.HuggingFaceInferenceChat => _huggingFaceFactory.CreateClientForBehavior(
+                target.ModelId,
+                ToProviderChatBehavior(target.ChatBehavior),
+                httpClient),
+            Provider.OpenRouterChat => _openRouterFactory.CreateClientForBehavior(
+                target.ModelId,
+                ToProviderChatBehavior(target.ChatBehavior),
+                httpClient),
             _ => throw new RoutingException(
                 RoutingErrorCodes.ProviderNotReady,
                 $"Unsupported provider for model '{target.ModelId}'.",
@@ -144,6 +150,42 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         GoogleGeminiChat,
         HuggingFaceInferenceChat,
         OpenRouterChat
+    }
+
+    /// <summary>
+    /// Projects the row-owned chat behavior onto the provider-agnostic shape used by the
+    /// OpenAI-compatible clients. Returns null when the row configures neither thinking control
+    /// nor extra request fields so those clients keep their built-in request mapping.
+    /// </summary>
+    internal static ProviderChatBehavior? ToProviderChatBehavior(RuntimeProfileData? data)
+    {
+        if (data == null)
+        {
+            return null;
+        }
+
+        var thinking = data.ThinkingControl?.ChoiceActions is { Count: > 0 } ? data.ThinkingControl : null;
+        var hasExtraFields = data.RequestFieldsWhenToolsPresent is { Count: > 0 };
+        if (thinking == null && !hasExtraFields)
+        {
+            return null;
+        }
+
+        var thinkingControl = thinking == null
+            ? null
+            : new ProviderThinkingControl(
+                thinking.DefaultChoice,
+                thinking.ChoiceActions.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => (IReadOnlyList<ProviderChatBehaviorAction>)kvp.Value.Select(action =>
+                        new ProviderChatBehaviorAction(
+                            (ProviderChatBehaviorActionTarget)(int)action.Target,
+                            action.Key,
+                            action.Value)).ToList()));
+
+        return new ProviderChatBehavior(
+            thinkingControl,
+            hasExtraFields ? data.RequestFieldsWhenToolsPresent : null);
     }
 
     private static LlamaCppRuntimeProfileData ToLlamaCppProfileData(RuntimeProfileData data)

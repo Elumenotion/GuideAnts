@@ -104,6 +104,9 @@ internal static class SettingsModelOnboardingSupport
     {
         var samplingParametersJson = GetProviderConfigString(request.ProviderConfig, "samplingParametersJson");
         var reasoningChoicesJson = GetProviderConfigString(request.ProviderConfig, "reasoningChoicesJson");
+        // Optional row-owned request shaping; only providers whose clients honor it send these.
+        var thinkingControlJson = GetProviderConfigString(request.ProviderConfig, "thinkingControlJson");
+        var requestFieldsJson = GetProviderConfigString(request.ProviderConfig, "requestFieldsWhenToolsPresentJson");
 
         return new CreateSettingsModelRequest(
             ModelId: request.Catalog.ModelId.Trim(),
@@ -115,8 +118,8 @@ internal static class SettingsModelOnboardingSupport
             CombineSystemAndDeveloperMessages: true,
             ThoughtBlockPattern: null,
             SamplingParametersJson: string.IsNullOrWhiteSpace(samplingParametersJson) ? "{}" : samplingParametersJson.Trim(),
-            ThinkingControlJson: "{}",
-            RequestFieldsWhenToolsPresentJson: "{}",
+            ThinkingControlJson: string.IsNullOrWhiteSpace(thinkingControlJson) ? "{}" : thinkingControlJson.Trim(),
+            RequestFieldsWhenToolsPresentJson: string.IsNullOrWhiteSpace(requestFieldsJson) ? "{}" : requestFieldsJson.Trim(),
             IsActive: request.Catalog.IsActive,
             DisplayOrder: request.Catalog.DisplayOrder);
     }

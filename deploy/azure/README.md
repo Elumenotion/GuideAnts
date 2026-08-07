@@ -10,7 +10,8 @@ no local llama/ASR/TTS/SD containers.
 
 | Requirement | Notes |
 |-------------|-------|
-| Azure subscription | **Contributor** on the target subscription/resource group is sufficient |
+| Azure subscription | **Contributor** on the target resource group is sufficient for deploy |
+| Empty resource group | **Must exist before deploy** — see [Resource group naming](#resource-group-naming). AZBuilder and similar roles usually cannot create RGs; ask an admin if needed. |
 | [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) | `az login` completed |
 | PowerShell 7+ **or** Bash | Windows: `pwsh`; Linux/macOS: `bash` |
 | `dotnet ef` global tool | Installed automatically by deploy script if missing |
@@ -18,15 +19,43 @@ no local llama/ASR/TTS/SD containers.
 
 **GHCR images must be public** (default org: `elumenotion`). No registry credentials are configured.
 
+### Resource group naming
+
+Bicep is resource-group scoped; the deploy script does **not** create the RG. It targets a fixed name derived from the same flags you pass to deploy:
+
+```text
+rg-{AppNamePrefix}-{EnvironmentName}
+```
+
+| Deploy flag | Default | Role in RG name |
+|-------------|---------|-----------------|
+| `-AppNamePrefix` / `--app-name-prefix` | `guideants` | Middle segment |
+| `-EnvironmentName` / `--environment-name` | `dev` | Final segment |
+
+Examples:
+
+| Deploy command args | Required RG name |
+|---------------------|------------------|
+| (defaults) or `-EnvironmentName dev -AppNamePrefix guideants` | `rg-guideants-dev` |
+| `-EnvironmentName staging` | `rg-guideants-staging` |
+| `-AppNamePrefix myco -EnvironmentName prod` | `rg-myco-prod` |
+
+Create that exact group (and use the same location you will pass as `-Location` / `--location`, default `East US 2`) before running deploy. If the names do not match, deploy exits with “resource group does not exist.”
+
 ## Quick start
 
 ```powershell
 cd deploy/azure
 
-# 1. Copy parameter files (optional — deploy script accepts CLI flags)
+# 1. Create the resource group — name must match AppNamePrefix + EnvironmentName below
+#    Pattern: rg-{AppNamePrefix}-{EnvironmentName}
+az group create --name rg-guideants-dev --location "East US 2"
+
+# 2. Copy parameter files (optional — deploy script accepts CLI flags)
 Copy-Item parameters.example.json parameters.local.json
 
-# 2. Deploy (generates secrets, provisions infra + apps, runs migrations)
+# 3. Deploy (generates secrets, provisions infra + apps, runs migrations)
+#    These two flags must match the RG created in step 1:
 ./deploy.ps1 `
   -EnvironmentName dev `
   -AppNamePrefix guideants `
@@ -40,8 +69,10 @@ SQL password rules: 8+ chars, upper/lower/number/symbol; must **not** contain th
 Bash equivalent:
 
 ```bash
+# RG name must match --app-name-prefix + --environment-name (defaults: guideants + dev)
+az group create --name rg-guideants-dev --location "East US 2"
 chmod +x deploy.sh scripts/*.sh
-./deploy.sh --environment-name dev --image-tag main --sql-admin-password 'G4-Deploy!xK9mQ2vL'
+./deploy.sh --environment-name dev --app-name-prefix guideants --image-tag main --sql-admin-password 'G4-Deploy!xK9mQ2vL'
 ```
 
 When complete, the script prints your application URL.

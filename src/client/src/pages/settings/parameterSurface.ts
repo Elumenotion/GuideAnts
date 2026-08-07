@@ -85,6 +85,34 @@ export function validateReasoningChoicesJson(json: string): string | null {
   }
 }
 
+/**
+ * Providers whose chat clients honor row-owned request shaping (ThinkingControlJson and
+ * RequestFieldsWhenToolsPresentJson). The other non-local clients build their request bodies
+ * from typed shapes and ignore those columns, so the editor does not offer them there.
+ */
+const ROW_OWNED_REQUEST_SHAPING_PROVIDERS = new Set(['hf-inference-chat', 'openrouter-chat']);
+
+export function providerSupportsRowOwnedRequestShaping(provider: string): boolean {
+  return ROW_OWNED_REQUEST_SHAPING_PROVIDERS.has(provider.trim().toLowerCase());
+}
+
+/** Validates an optional JSON-object field: blank and `{}` both mean "not configured". */
+export function validateOptionalJsonObject(json: string, label: string): string | null {
+  const trimmed = json.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return `${label} must be a JSON object.`;
+    }
+    return null;
+  } catch {
+    return `${label} must be valid JSON.`;
+  }
+}
+
 export function normalizeParameterSurface(surface: NonLocalParameterSurface): NonLocalParameterSurface {
   const samplingError = validateSamplingParametersJson(surface.samplingParametersJson);
   if (samplingError) {
