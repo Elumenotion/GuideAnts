@@ -4,23 +4,37 @@ interface SecretInputProps {
   /** When true, a secret is already stored server-side (value is not echoed). */
   storedHasValue?: boolean;
   placeholder?: string;
+  id?: string;
+  disabled?: boolean;
+  tabIndex?: number;
 }
 
 const STORED_PLACEHOLDER = 'Stored — leave blank to keep; type to replace';
 
-export function SecretInput({ value, onChange, storedHasValue = false, placeholder }: SecretInputProps) {
+export function SecretInput({
+  value,
+  onChange,
+  storedHasValue = false,
+  placeholder,
+  id,
+  disabled,
+  tabIndex,
+}: SecretInputProps) {
   const showStoredHint = storedHasValue && value === '';
   const effectivePlaceholder = showStoredHint ? STORED_PLACEHOLDER : placeholder;
 
   return (
     <div className="space-y-1">
       <input
+        id={id}
         type="password"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
         placeholder={effectivePlaceholder}
         autoComplete="new-password"
+        disabled={disabled}
+        tabIndex={tabIndex}
         aria-label={showStoredHint ? 'API key or secret credential' : undefined}
       />
       {showStoredHint ? (

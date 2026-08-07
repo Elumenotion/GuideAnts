@@ -94,9 +94,10 @@ public sealed partial class ApplicationSettingsService
         }
 
         var protector = GetProtector();
+        var rawCurrentPayload = ApplicationSettingsJson.DeserializeObject(row.JsonValue);
         var decryptedCurrent = ApplicationSettingsJson.DecryptSecrets(
             definition,
-            ApplicationSettingsJson.DeserializeObject(row.JsonValue),
+            rawCurrentPayload,
             _settingsSecretsOptionsMonitor.CurrentValue,
             protector.Protect);
 
@@ -118,9 +119,18 @@ public sealed partial class ApplicationSettingsService
             return (null, validationErrors, false);
         }
 
+        // Secrets whose plaintext is unchanged keep their original ciphertext instead of being
+        // re-encrypted with a fresh nonce, so saves that only touch a sibling field (e.g. Resource)
+        // don't churn the stored ApiKey bytes.
+        var preservedForEncryption = ApplicationSettingsJson.PreserveUnchangedSecretCiphertext(
+            definition,
+            rawCurrentPayload,
+            decryptedCurrent,
+            merged);
+
         var encrypted = ApplicationSettingsJson.EncryptSecrets(
             definition,
-            merged,
+            preservedForEncryption,
             _settingsSecretsOptionsMonitor.CurrentValue);
         row.JsonValue = ApplicationSettingsJson.Serialize(encrypted);
         row.SchemaVersion = definition.SchemaVersion;

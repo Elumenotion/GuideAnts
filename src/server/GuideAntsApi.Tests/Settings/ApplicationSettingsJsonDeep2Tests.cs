@@ -190,6 +190,38 @@ public sealed class ApplicationSettingsJsonDeep2Tests
     }
 
     [TestMethod]
+    public void EncryptSecrets_SkipsEncV2PrefixedValues()
+    {
+        var definition = SecretDefinition();
+        var options = ValidOptions();
+
+        var result = ApplicationSettingsJson.EncryptSecrets(
+            definition,
+            new JsonObject { ["ApiKey"] = "encv2::already::encoded" },
+            options);
+
+        result["ApiKey"]!.GetValue<string>().Should().Be("encv2::already::encoded");
+    }
+
+    [TestMethod]
+    public void EncryptSecrets_SkipsLegacyEncPrefixedValues_ToAvoidDoubleWrapping()
+    {
+        // DecryptSecrets preserves an enc:: value verbatim when it fails to decrypt (no legacy
+        // protector supplied, or the cipher is corrupt). EncryptSecrets must not treat that
+        // leftover "enc::..." string as plaintext and encrypt it - that would permanently
+        // corrupt the secret into a double-wrapped, undecryptable value on the very next save.
+        var definition = SecretDefinition();
+        var options = ValidOptions();
+
+        var result = ApplicationSettingsJson.EncryptSecrets(
+            definition,
+            new JsonObject { ["ApiKey"] = "enc::CfDJ8undecryptable" },
+            options);
+
+        result["ApiKey"]!.GetValue<string>().Should().Be("enc::CfDJ8undecryptable");
+    }
+
+    [TestMethod]
     public void DecryptSecrets_LeavesValue_WhenEncV2EnvelopeMalformed()
     {
         var definition = SecretDefinition();
@@ -293,6 +325,53 @@ public sealed class ApplicationSettingsJsonDeep2Tests
             new JsonObject());
 
         merged["ApiKey"]!.GetValue<string>().Should().Be("existing-secret");
+    }
+
+    [TestMethod]
+    public void PreserveUnchangedSecretCiphertext_RestoresOriginalCiphertext_WhenPlaintextUnchanged()
+    {
+        var definition = SecretDefinition();
+        var rawCurrentPayload = new JsonObject { ["ApiKey"] = "encv2::k1::original-ciphertext" };
+        var decryptedCurrent = new JsonObject { ["ApiKey"] = "same-secret" };
+        // Simulates a save that only touched a sibling field: MergeForUpdate carried the
+        // decrypted plaintext through unchanged (e.g. because the client omitted ApiKey, or
+        // sent SECRET_MASK).
+        var merged = new JsonObject { ["ApiKey"] = "same-secret" };
+
+        var result = ApplicationSettingsJson.PreserveUnchangedSecretCiphertext(
+            definition, rawCurrentPayload, decryptedCurrent, merged);
+
+        result["ApiKey"]!.GetValue<string>().Should().Be("encv2::k1::original-ciphertext");
+    }
+
+    [TestMethod]
+    public void PreserveUnchangedSecretCiphertext_LeavesNewPlaintext_WhenSecretActuallyChanged()
+    {
+        var definition = SecretDefinition();
+        var rawCurrentPayload = new JsonObject { ["ApiKey"] = "encv2::k1::original-ciphertext" };
+        var decryptedCurrent = new JsonObject { ["ApiKey"] = "old-secret" };
+        var merged = new JsonObject { ["ApiKey"] = "brand-new-secret" };
+
+        var result = ApplicationSettingsJson.PreserveUnchangedSecretCiphertext(
+            definition, rawCurrentPayload, decryptedCurrent, merged);
+
+        result["ApiKey"]!.GetValue<string>().Should().Be("brand-new-secret");
+    }
+
+    [TestMethod]
+    public void PreserveUnchangedSecretCiphertext_DoesNotRestore_WhenOriginalWasLegacyEncoding()
+    {
+        // A legacy enc:: value should still be upgraded to encv2:: on an unrelated save rather
+        // than preserved verbatim, so legacy rows eventually migrate off DataProtection.
+        var definition = SecretDefinition();
+        var rawCurrentPayload = new JsonObject { ["ApiKey"] = "enc::legacy-cipher" };
+        var decryptedCurrent = new JsonObject { ["ApiKey"] = "same-secret" };
+        var merged = new JsonObject { ["ApiKey"] = "same-secret" };
+
+        var result = ApplicationSettingsJson.PreserveUnchangedSecretCiphertext(
+            definition, rawCurrentPayload, decryptedCurrent, merged);
+
+        result["ApiKey"]!.GetValue<string>().Should().Be("same-secret");
     }
 
     [TestMethod]

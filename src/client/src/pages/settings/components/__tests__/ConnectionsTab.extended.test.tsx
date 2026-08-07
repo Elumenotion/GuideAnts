@@ -110,6 +110,8 @@ describe('ConnectionsTab extended', () => {
   });
 
   it('preserves stored secrets when the api key field is left empty on save', async () => {
+    // The stored ApiKey is preserved by omitting it from the save payload entirely (not by
+    // resending SECRET_MASK) - see prepareSectionPayloadForSave / MergeForUpdate.
     const user = userEvent.setup();
     renderConnectionsTab();
 
@@ -124,11 +126,12 @@ describe('ConnectionsTab extended', () => {
         expect.objectContaining({
           payload: expect.objectContaining({
             Organization: 'org-updated',
-            ApiKey: '********',
           }),
         }),
       );
     });
+    const [, request] = vi.mocked(api.settings.updateSection).mock.calls[0];
+    expect('ApiKey' in (request.payload as Record<string, unknown>)).toBe(false);
   });
 
   it('resets unsaved draft edits back to the loaded section payload', async () => {
