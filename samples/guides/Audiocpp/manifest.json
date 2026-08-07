@@ -1,0 +1,21 @@
+{
+  "name": "Audiocpp ",
+  "description": "Use skills for audiocpp to allow features that are not supported by GuideAnts, like built-in TTS/ASR:  voice cloning, deterministic synthesis, forced languages, speaker diarization, and TTS families GuideAnts doesn\u0027t ship.",
+  "defaultModel": null,
+  "defaultAssistant": null,
+  "tools": [
+    {
+      "type": "generate_podcast"
+    },
+    {
+      "type": "run_python"
+    },
+    {
+      "type": "search_notebook"
+    },
+    {
+      "type": "search_project"
+    }
+  ],
+  "crew": []
+}
