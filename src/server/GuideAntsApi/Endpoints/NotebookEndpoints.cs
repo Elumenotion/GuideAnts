@@ -355,6 +355,29 @@ try
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status409Conflict);
 
+        // Delete a notebook file or folder by relative path (supports folders, which have no fileId)
+        fileGroup.MapDelete("/", async (
+            Guid projectId,
+            Guid notebookId,
+            [FromQuery] string path,
+            INotebookFileService fsService) =>
+        {
+            try
+            {
+                var success = await fsService.DeleteAsync(projectId, notebookId, path);
+                if (!success) return Results.NotFound(new { message = "The file or folder was not found." });
+                return Results.NoContent();
+            }
+            catch (InvalidOperationException ex) { return Results.Conflict(new { message = ex.Message }); }
+            catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
+        })
+        .WithName("DeleteNotebookItemByPath")
+        .RequireAuthorization("RequireContributor")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status409Conflict);
+
         // Rename a notebook file or folder by relative path (supports linked/mounted entries)
         fileGroup.MapPatch("/rename", async (
             Guid projectId,

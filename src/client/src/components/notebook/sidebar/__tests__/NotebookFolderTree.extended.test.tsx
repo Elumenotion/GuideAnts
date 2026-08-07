@@ -199,6 +199,18 @@ describe('NotebookFolderTree extended coverage', () => {
     fireEvent.click(document.body);
   });
 
+  // userEvent.setup() installs its own navigator.clipboard stub internally,
+  // so our mock must be defined *after* that call or it gets overwritten.
+  const setupClipboard = () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    return { user, writeText };
+  };
+
   describe('folder context menu', () => {
     it('renames folder from context menu', async () => {
       const user = userEvent.setup();
@@ -462,10 +474,30 @@ describe('NotebookFolderTree extended coverage', () => {
   });
 
   describe('read-only mode', () => {
+    // Mirrors how NotebookSidebar actually wires these props: it passes
+    // undefined for edit-only handlers when canEdit is false, rather than
+    // relying on the folder menu itself to stay closed.
+    const readOnlyOverrides = {
+      canEdit: false,
+      onCreateFolder: undefined,
+      onRenameFolder: undefined,
+      onDeleteFolder: undefined,
+      onUploadToFolder: undefined,
+    } as const;
+
     it('skips edit actions when canEdit is false', () => {
-      renderTree({ canEdit: false });
+      renderTree(readOnlyOverrides);
       fireEvent.contextMenu(screen.getByText('Docs'));
       expect(screen.queryByText('Rename')).not.toBeInTheDocument();
+      expect(screen.queryByText('Create Subfolder')).not.toBeInTheDocument();
+      expect(screen.queryByText('Upload Files')).not.toBeInTheDocument();
+      expect(screen.queryByText('New Markdown File')).not.toBeInTheDocument();
+    });
+
+    it('still opens the folder menu with Copy path when canEdit is false', () => {
+      renderTree(readOnlyOverrides);
+      fireEvent.contextMenu(screen.getByText('Docs'));
+      expect(screen.getByText('Copy path')).toBeInTheDocument();
     });
   });
 
@@ -920,6 +952,131 @@ describe('NotebookFolderTree extended coverage', () => {
       await waitFor(() => {
         expect(screen.getByText('LocalEmpty')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('copy path', () => {
+    it('copies a file path to the clipboard scoped under the notebook name', async () => {
+      const { user, writeText } = setupClipboard();
+      renderTree();
+
+      fireEvent.contextMenu(screen.getByText('readme.txt'));
+      await user.click(await findPortalButton('Copy path'));
+
+      expect(writeText).toHaveBeenCalledWith('/Test Notebook/readme.txt');
+    });
+
+    it('copies a folder path to the clipboard scoped under the notebook name', async () => {
+      const { user, writeText } = setupClipboard();
+      renderTree();
+
+      fireEvent.contextMenu(screen.getByText('Docs'));
+      await user.click(await findPortalButton('Copy path'));
+
+      expect(writeText).toHaveBeenCalledWith('/Test Notebook/Docs');
+    });
+
+    it('does not show Copy path for the root folder', () => {
+      renderTree();
+      fireEvent.contextMenu(screen.getByText('Test Notebook'));
+      expect(screen.queryByText('Copy path')).not.toBeInTheDocument();
+    });
+
+    it('copies multiple selected paths joined by newlines, each scoped under the notebook name', async () => {
+      const { user, writeText } = setupClipboard();
+      renderTree();
+
+      fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+      fireEvent.contextMenu(screen.getByText('readme.txt'));
+      await user.click(await findPortalButton(/Copy \d+ Paths?/));
+
+      expect(writeText).toHaveBeenCalledWith('/Test Notebook/Assets\n/Test Notebook/Docs\n/Test Notebook/readme.txt');
+    });
+
+    it('falls back to a bare root-relative path when notebookName is not provided', async () => {
+      const { user, writeText } = setupClipboard();
+      renderTree({ notebookName: undefined });
+
+      fireEvent.contextMenu(screen.getByText('readme.txt'));
+      await user.click(await findPortalButton('Copy path'));
+
+      expect(writeText).toHaveBeenCalledWith('/readme.txt');
+    });
+  });
+
+  describe('folder row click behavior', () => {
+    it('plain click on a folder row still toggles its expansion', () => {
+      renderTree();
+
+      expect(screen.queryByText('notes.md')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('Docs'));
+      expect(screen.getByText('notes.md')).toBeInTheDocument();
+    });
+
+    it('shift-click selects a range of folders without toggling expansion', async () => {
+      renderTree();
+
+      // Anchor on Assets (a childless folder, so its own expand state is unobservable),
+      // then shift-click Docs to extend the range selection.
+      fireEvent.click(screen.getByText('Assets'));
+      fireEvent.click(screen.getByText('Docs'), { shiftKey: true });
+
+      // Docs must stay collapsed - the shift-click should only select, not expand it.
+      expect(screen.queryByText('notes.md')).not.toBeInTheDocument();
+
+      // Both folders should now be selected: Delete should offer to remove 2 items.
+      fireEvent.keyDown(window, { key: 'Delete' });
+      await waitFor(() => {
+        expect(screen.getByText(/Confirm Deletion/)).toBeInTheDocument();
+      });
+      expect(screen.getByText(/2 items/)).toBeInTheDocument();
+    });
+
+    it('shift-clicked folders are visibly highlighted, same as multi-selected files', () => {
+      renderTree();
+
+      fireEvent.click(screen.getByText('Assets'));
+      fireEvent.click(screen.getByText('Docs'), { shiftKey: true });
+
+      const assetsRow = screen.getByText('Assets').closest('.group');
+      const docsRow = screen.getByText('Docs').closest('.group');
+      expect(assetsRow).toHaveClass('bg-blue-100');
+      expect(docsRow).toHaveClass('bg-blue-100');
+    });
+
+    it('ctrl-click selects a folder without toggling expansion', () => {
+      renderTree();
+
+      fireEvent.click(screen.getByText('Docs'), { ctrlKey: true });
+
+      expect(screen.queryByText('notes.md')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('multi-select folder context menu', () => {
+    it('shows Copy N Paths when right-clicking a folder within a multi-selection', async () => {
+      const { user, writeText } = setupClipboard();
+      renderTree();
+
+      fireEvent.click(screen.getByText('Assets'));
+      fireEvent.click(screen.getByText('readme.txt'), { ctrlKey: true });
+
+      fireEvent.contextMenu(screen.getByText('Assets'));
+      await user.click(await findPortalButton(/Copy \d+ Paths?/));
+
+      expect(writeText).toHaveBeenCalledWith('/Test Notebook/Assets\n/Test Notebook/readme.txt');
+    });
+
+    it('right-clicking a folder outside the current selection collapses to just that folder', () => {
+      renderTree();
+
+      fireEvent.click(screen.getByText('readme.txt'));
+      fireEvent.click(screen.getByText('Docs'), { ctrlKey: true });
+
+      // Assets was never part of the [readme.txt, Docs] selection.
+      fireEvent.contextMenu(screen.getByText('Assets'));
+      expect(screen.queryByText(/Copy \d+ Paths?/)).not.toBeInTheDocument();
+      expect(screen.getByText('Copy path')).toBeInTheDocument();
     });
   });
 

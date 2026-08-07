@@ -203,13 +203,19 @@ describe('ChatModelConfigurator', () => {
     expect(within(reasoning).getByRole('option', { name: 'Medium' })).toHaveValue('medium');
     expect(screen.queryByRole('slider', { name: /temperature/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('slider', { name: /top p/i })).not.toBeInTheDocument();
-    expect(onChange).toHaveBeenCalledWith({
-      modelId: 'claude-haiku-4-5-20251001',
-      temperature: null,
-      topP: null,
-      reasoningEffort: 'medium',
-      samplingOverrides: {},
-    });
+    // The normalization onChange fires from an effect that runs after the async
+    // catalog fetch resolves, so it can land after this assertion under load - wait
+    // for it instead of asserting synchronously (matches the pattern used above for
+    // the equivalent "clears stale reasoning effort" case).
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith({
+        modelId: 'claude-haiku-4-5-20251001',
+        temperature: null,
+        topP: null,
+        reasoningEffort: 'medium',
+        samplingOverrides: {},
+      })
+    );
   });
 
   it('locks reasoning controls when the catalog exposes only one reasoning choice', async () => {
