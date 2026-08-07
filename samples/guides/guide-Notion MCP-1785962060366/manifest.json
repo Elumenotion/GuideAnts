@@ -1,0 +1,7 @@
+{
+  "name": "Notion MCP",
+  "description": "A guide using Notion\u0027s MCP that can securely access and update Notion pages and databases, allowing it to retrieve information and automate workspace tasks.",
+  "defaultModel": null,
+  "defaultAssistant": null,
+  "crew": []
+}
