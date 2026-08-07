@@ -1145,7 +1145,9 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
         {
             try
             {
-                await ScriptExecutionScopeRuntime.EnsurePythonVenvAsync(scope, scopeOptions, logger, CancellationToken.None);
+                // EnsureScopeRequirementsForExecutionAsync ensures the venv itself internally; a
+                // separate EnsurePythonVenvAsync call here would consume the "just created" signal
+                // before it gets there, defeating its just-provisioned-vs-already-established check.
                 await ScriptExecutionScopeRuntime.EnsureScopeRequirementsForExecutionAsync(scope, scopeOptions, adminOptions, logger, CancellationToken.None);
             }
             catch (Exception ex) when (!scopeOptions.RequireScopedPythonVenv)
@@ -1567,7 +1569,14 @@ internal static class ScriptExecutionScopeRuntime
         }
     }
 
-    public static async Task EnsurePythonVenvAsync(
+    /// <summary>
+    /// Ensures the scope's Python venv exists, creating it if necessary. Returns true only when
+    /// this call actually created a brand-new venv (durable volume was empty/lost); false when an
+    /// existing venv was reused as-is. Callers use this to distinguish "just provisioned from
+    /// scratch" from "already-established venv that a script legitimately modified" so on-demand
+    /// execution can self-heal the former without silently reversing the latter.
+    /// </summary>
+    public static async Task<bool> EnsurePythonVenvAsync(
         ScriptExecutionScope scope,
         ScriptExecutionScopeOptions options,
         ILogger logger,
@@ -1576,7 +1585,7 @@ internal static class ScriptExecutionScopeRuntime
         if (File.Exists(scope.PythonExecutablePath))
         {
             EnsureBasePythonRuntimeExtension(scope, options, logger);
-            return;
+            return false;
         }
 
         var venvLock = VenvLocks.GetOrAdd(scope.PythonVenvPath, static _ => new SemaphoreSlim(1, 1));
@@ -1586,7 +1595,7 @@ internal static class ScriptExecutionScopeRuntime
             if (File.Exists(scope.PythonExecutablePath))
             {
                 EnsureBasePythonRuntimeExtension(scope, options, logger);
-                return;
+                return false;
             }
 
             var venvParent = Path.GetDirectoryName(scope.PythonVenvPath);
@@ -1614,7 +1623,7 @@ internal static class ScriptExecutionScopeRuntime
                             scope.ProjectId,
                             scope.GuideScopeId,
                             LogValueSanitizer.Sanitize(command));
-                        return;
+                        return true;
                     }
 
                     TryDeletePythonVenvDirectory(scope.PythonVenvPath);
@@ -1648,7 +1657,7 @@ internal static class ScriptExecutionScopeRuntime
                             scope.ProjectId,
                             scope.GuideScopeId,
                             LogValueSanitizer.Sanitize(command));
-                        return;
+                        return true;
                     }
 
                     TryDeletePythonVenvDirectory(scope.PythonVenvPath);
@@ -1814,7 +1823,7 @@ internal static class ScriptExecutionScopeRuntime
         CancellationToken cancellationToken)
     {
         EnsureScopeDirectory(scope);
-        await EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
+        var venvJustCreated = await EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
 
         // Serialize requirement installs per venv so a background startup reconcile and an
         // on-demand execution never run two pip processes against the same environment.
@@ -1838,11 +1847,18 @@ internal static class ScriptExecutionScopeRuntime
             var requirementsHash = ComputeSha256(requirementsText);
             var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
             var scopedSitePackagesPath = ResolveScopedSitePackagesPath(scope.PythonVenvPath);
-            var missingTopLevelPackages = await GetMissingTopLevelPackagesAsync(
-                scope.PythonExecutablePath,
-                scopedSitePackagesPath,
-                desiredTopLevelPackages,
-                cancellationToken);
+            // Only check for packages missing from an already-established venv when it was just
+            // (re)provisioned from scratch this call - e.g. the durable volume was empty/lost.
+            // Once a venv exists, a package a script legitimately removed via its own pip call
+            // must stay removed until an explicit /admin/apply, not get silently reinstalled on
+            // the very next /execute.
+            var missingTopLevelPackages = venvJustCreated
+                ? await GetMissingTopLevelPackagesAsync(
+                    scope.PythonExecutablePath,
+                    scopedSitePackagesPath,
+                    desiredTopLevelPackages,
+                    cancellationToken)
+                : Array.Empty<string>();
             if (requirementsHash == appliedState.RequirementsHash && missingTopLevelPackages.Count == 0)
             {
                 return;
