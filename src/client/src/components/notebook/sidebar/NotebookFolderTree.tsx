@@ -9,6 +9,7 @@ import { useMultiSelect, UseMultiSelectReturn } from '../../../hooks/useMultiSel
 import { useListKeyboardNavigation } from '../../../hooks/useListKeyboardNavigation';
 import { useSidebarKeyboardShortcuts } from '../../../hooks/useSidebarKeyboardShortcuts';
 import { useLongPress } from '../../../hooks/useLongPress';
+import { useCopyPath } from '../../../hooks/useCopyPath';
 
 import { getContentTypeFromFileName, formatFileSize } from '../../../utils/fileUtils';
 import { notebookPathMatches } from '../../../utils/notebookPath';
@@ -393,7 +394,6 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   }, [onPreviewFile]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    if (!canEdit) return;
     window.dispatchEvent(new Event('close-context-menus'));
     registerOpenMenu(() => {
       setShowContextMenu(false);
@@ -401,9 +401,15 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
     });
     e.preventDefault();
     e.stopPropagation();
+    // Preserve an existing multi-selection when right-clicking one of its
+    // members (so bulk actions can target the whole selection); otherwise
+    // collapse to just this folder, matching file right-click behavior.
+    if (context && folder.relativePath && !context.multiSelect.isSelected(folder.relativePath)) {
+      context.multiSelect.setSelection([folder.relativePath]);
+    }
     setContextMenuPosition({ x: e.clientX, y: e.clientY });
     setShowContextMenu(true);
-  }, [canEdit, registerOpenMenu]);
+  }, [registerOpenMenu, context, folder.relativePath]);
 
   const handleStartRename = useCallback(() => {
     setIsEditing(true);
@@ -682,6 +688,17 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
     setShowFileContextMenu(false);
   }, [onSetHomePage, selectedContextFile, homePageFileId]);
 
+  const { copyPaths } = useCopyPath();
+  const handleCopyPaths = useCallback((paths: string[]) => {
+    setShowContextMenu(false);
+    setShowFileContextMenu(false);
+    // Scope paths under the notebook name so identically-named folders in
+    // different notebooks don't produce indistinguishable copied paths.
+    const namespace = notebookName?.trim().replace(/^\/+|\/+$/g, '');
+    const scopedPaths = namespace ? paths.map(p => `${namespace}/${p}`) : paths;
+    void copyPaths(scopedPaths);
+  }, [copyPaths, notebookName]);
+
   const handleDownloadFile = useCallback(async () => {
     if (!selectedContextFile || !projectId || !notebookId) {
       setShowFileContextMenu(false);
@@ -891,6 +908,72 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
     [context]);
   const selectedFileIsLinked = isLinkedFile(selectedContextFile);
 
+  const collectNotebookFilesRecursively = useCallback((node: NotebookFolderTreeDto): NotebookFileDto[] => {
+    let files = [...node.files];
+    for (const sub of node.subFolders) {
+      files = files.concat(collectNotebookFilesRecursively(sub));
+    }
+    return files;
+  }, []);
+
+  const handleDownloadSelectedFolders = useCallback(async () => {
+    if (!context) {
+      setShowContextMenu(false);
+      return;
+    }
+    const selectedItems = context.multiSelect.getSelectedItems();
+    setShowContextMenu(false);
+
+    const filesToDownload: NotebookFileDto[] = [];
+    for (const item of selectedItems) {
+      if (item.type === 'folder') {
+        filesToDownload.push(...collectNotebookFilesRecursively(item.data as NotebookFolderTreeDto));
+      } else {
+        filesToDownload.push(item.data as NotebookFileDto);
+      }
+    }
+
+    if (filesToDownload.length === 0) {
+      showToast({ type: 'info', title: 'Nothing to download', message: 'The selected folder(s) contain no files.' });
+      return;
+    }
+
+    await handleDownloadFiles(filesToDownload);
+  }, [context, collectNotebookFilesRecursively, handleDownloadFiles, showToast]);
+
+  const handleDeleteSelectedTreeItems = useCallback(async () => {
+    if (!context) return;
+    const selectedItems = context.multiSelect.getSelectedItems();
+    const fileIds = selectedItems
+      .filter(item => item.type === 'file' && !isLinkedFile(item.data as NotebookFileDto))
+      .map(item => item.id);
+    const folderPaths = selectedItems
+      .filter(item => item.type === 'folder')
+      .map(item => item.id)
+      .filter(path => !(context.getMountForPath(path) || context.getEnclosingMount(path)));
+
+    if (onDeleteFile) {
+      for (const id of fileIds) {
+        await onDeleteFile(id);
+      }
+    }
+
+    if (folderPaths.length > 0 && onDeleteFolder) {
+      for (const path of folderPaths) {
+        await onDeleteFolder(path);
+        // Server never persists a truly-empty folder, so a delete of one that
+        // never got a file is a harmless no-op there. Clear the local placeholder
+        // too, or it reappears in the tree on the next merge.
+        context.removeLocalEmptyFolder(path);
+      }
+    }
+
+    try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
+    context.multiSelect.clearSelection();
+    setShowContextMenu(false);
+    setShowFileContextMenu(false);
+  }, [context, isLinkedFile, onDeleteFile, onDeleteFolder]);
+
   const renderHostMountMenuItems = () => {
     if (!context?.isAdmin) {
       return null;
@@ -969,9 +1052,14 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
     <>
       <div className="folder-tree-item">
         <div
-          className={`group flex items-center py-0.5 px-2 text-sm cursor-pointer hover:bg-gray-100 ${
+          className={`group flex items-center py-0.5 px-2 text-sm cursor-pointer ${
+            (context?.multiSelect.isSelected(folder.relativePath || '') ||
+              (selectedItem?.type === 'notebookFiles' && selectedItem.id === (folder.relativePath || '')))
+              ? 'bg-blue-100'
+              : 'hover:bg-gray-100'
+          } ${
             selectedItem?.type === 'notebookFiles' && selectedItem.id === (folder.relativePath || '')
-              ? 'bg-blue-100 text-blue-600'
+              ? 'text-blue-600'
               : ''
           }  ${
             dragOverFolder === (folder.relativePath || '') ? 'ring-2 ring-blue-400 bg-blue-50' : ''
@@ -979,8 +1067,13 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
           style={{ paddingLeft: `${paddingLeft}px` }}
           onClick={(e) => {
              if (isEditing) return;
-             // Single click on folder row toggles expansion (common file explorer UX)
-             toggleExpand();
+             // Single click on folder row toggles expansion (common file explorer UX).
+             // A shift/ctrl/cmd-click is a selection modifier, not a navigation action —
+             // it should only extend/toggle the selection, matching how file rows behave,
+             // not also flip this folder's expansion state.
+             if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                 toggleExpand();
+             }
              if (folder.relativePath && context) {
                  context.multiSelect.handleClick(folder.relativePath, e);
                  context.setFocusedId(folder.relativePath);
@@ -1087,14 +1180,49 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
         )}
       </div>
 
-      {showContextMenu && canEdit && createPortal(
+      {showContextMenu && createPortal(
         <div ref={menuRef} className="fixed bg-white shadow-lg rounded-lg py-1 z-[9999]" style={{ top: contextMenuPosition.y, left: contextMenuPosition.x }} onClick={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()} data-tour-id="notebook.folder.context-menu">
-          {onRenameFolder && !isMountRoot && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
-          {!isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>}
-          {onCreateFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={openCreateSubfolderInput}>Create Subfolder</button>}
-          {onUploadToFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onUploadToFolder(folder.relativePath); }}>Upload Files</button>}
-          {onDeleteFolder && !isMountRoot && !isLinkedFolder && <button className={`block w-full text-left px-4 py-2 text-sm ${hasChildren ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-gray-100'}`} onClick={hasChildren ? undefined : handleDeleteFolder} disabled={hasChildren} title={hasChildren ? 'Cannot delete folder with contents' : 'Delete folder'}>Delete</button>}
-          {renderHostMountMenuItems()}
+          {context?.multiSelect.selectedCount && context.multiSelect.selectedCount > 1 ? (
+            (() => {
+              const selectedItems = context.multiSelect.getSelectedItems();
+              const selectedCount = context.multiSelect.selectedCount;
+              const deletableFileIds = selectedItems
+                .filter(item => item.type === 'file' && !isLinkedFile(item.data as NotebookFileDto))
+                .map(item => item.id);
+              const deletableFolderPaths = selectedItems
+                .filter(item => item.type === 'folder')
+                .map(item => item.id)
+                .filter(path => !(context.getMountForPath(path) || context.getEnclosingMount(path)));
+              const deletableCount = deletableFileIds.length + deletableFolderPaths.length;
+              return (
+                <>
+                  <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleDownloadSelectedFolders}>
+                    Download {selectedCount} Item{selectedCount > 1 ? 's' : ''}
+                  </button>
+                  <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => {
+                    handleCopyPaths(selectedItems.map(i => i.data.relativePath));
+                  }}>
+                    Copy {selectedCount} Path{selectedCount > 1 ? 's' : ''}
+                  </button>
+                  {canEdit && onDeleteFile && deletableCount > 0 && (
+                    <button className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100" onClick={handleDeleteSelectedTreeItems}>
+                      Delete {deletableCount} Item{deletableCount > 1 ? 's' : ''}
+                    </button>
+                  )}
+                </>
+              );
+            })()
+          ) : (
+            <>
+              {onRenameFolder && !isMountRoot && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
+              {canEdit && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>}
+              {onCreateFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={openCreateSubfolderInput}>Create Subfolder</button>}
+              {onUploadToFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onUploadToFolder(folder.relativePath); }}>Upload Files</button>}
+              {!isRootFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => handleCopyPaths([folder.relativePath])}>Copy path</button>}
+              {onDeleteFolder && !isMountRoot && !isLinkedFolder && <button className={`block w-full text-left px-4 py-2 text-sm ${hasChildren ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-gray-100'}`} onClick={hasChildren ? undefined : handleDeleteFolder} disabled={hasChildren} title={hasChildren ? 'Cannot delete folder with contents' : 'Delete folder'}>Delete</button>}
+              {renderHostMountMenuItems()}
+            </>
+          )}
         </div>,
         document.body
       )}
@@ -1132,33 +1260,13 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
                               Download {fileCount} File{fileCount > 1 ? 's' : ''}
                           </button>
                       )}
-                      {canEdit && onDeleteFile && deletableItemCount > 0 && (
-                      <button className="block w-full text-left px-4 py-1.5 text-sm text-red-600 hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={async () => {
-                          if (!context) return;
-                          const selectedItems = context.multiSelect.getSelectedItems();
-                          const fileIds = selectedItems
-                            .filter(i => i.type === 'file' && !isLinkedFile(i.data as NotebookFileDto))
-                            .map(i => i.id);
-                          const folderIds = selectedItems
-                            .filter(i => i.type === 'folder')
-                            .map(i => i.id)
-                            .filter(path => !(context.getMountForPath(path) || context.getEnclosingMount(path)));
-                          
-                          // TODO: Handle folder delete if supported here or via parent
-                          // Current props: onDeleteFile (single), onDeleteFolder (single)
-                          
-                          for (const id of fileIds) {
-                              await onDeleteFile(id);
-                          }
-                          
-                          if (folderIds.length > 0 && onDeleteFolder) {
-                              for (const path of folderIds) await onDeleteFolder(path);
-                          }
-
-                          try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
-                          context.multiSelect.clearSelection();
-                          setShowFileContextMenu(false);
+                      <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => {
+                          handleCopyPaths(selectedItems.map(item => item.data.relativePath));
                       }}>
+                          Copy {selectedItems.length} Path{selectedItems.length > 1 ? 's' : ''}
+                      </button>
+                      {canEdit && onDeleteFile && deletableItemCount > 0 && (
+                      <button className="block w-full text-left px-4 py-1.5 text-sm text-red-600 hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDeleteSelectedTreeItems}>
                           Delete {deletableItemCount} Item{deletableItemCount > 1 ? 's' : ''}
                       </button>
                   )}
@@ -1171,6 +1279,7 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
                   {onPreviewFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { if (selectedContextFile) onPreviewFile(selectedContextFile); setShowFileContextMenu(false); }}>Preview</button>}
                   {canEdit && !selectedFileIsLinked && onPublishToProject && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { if (selectedContextFile) onPublishToProject([selectedContextFile]); setShowFileContextMenu(false); }}>Publish to Project</button>}
                   <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDownloadFile}>Download</button>
+                  {selectedContextFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => handleCopyPaths([selectedContextFile.relativePath])}>Copy path</button>}
                   {canEdit && (onRenameFile || selectedFileIsLinked) && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleStartFileRename}>Rename</button>}
                   {canEdit && !selectedFileIsLinked && onSetHomePage && selectedContextFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleToggleHomePage}>{homePageFileId === selectedContextFile.id ? 'Clear as Home Page' : 'Set as Notebook Home Page'}</button>}
                   {canEdit && !selectedFileIsLinked && <button className="block w-full text-left px-4 py-1.5 text-sm text-red-600 hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDeleteFile}>
@@ -1709,13 +1818,18 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
         }
 
         if (folderIds.length > 0 && onDeleteFolder) {
-            for (const path of folderIds) await onDeleteFolder(path);
+            for (const path of folderIds) {
+                await onDeleteFolder(path);
+                // Clear any local empty-folder placeholder so it doesn't reappear
+                // on the next tree merge (the server never persists an empty folder).
+                removeLocalEmptyFolder(path);
+            }
         }
-        
+
         try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
         multiSelect.clearSelection();
         setShowBatchDeleteConfirm(false);
-    }, [multiSelect, onDeleteFile, onDeleteFolder, hostMounts]);
+    }, [multiSelect, onDeleteFile, onDeleteFolder, hostMounts, removeLocalEmptyFolder]);
 
   const handleDeleteSelected = useCallback(async () => {
         if (multiSelect.selectedCount === 0) return;

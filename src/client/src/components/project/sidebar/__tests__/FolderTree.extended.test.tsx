@@ -188,6 +188,18 @@ describe('FolderTree extended coverage', () => {
     fireEvent.click(document.body);
   });
 
+  // userEvent.setup() installs its own navigator.clipboard stub internally,
+  // so our mock must be defined *after* that call or it gets overwritten.
+  const setupClipboard = () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    return { user, writeText };
+  };
+
   it('deletes empty folder after confirmation', async () => {
     const user = userEvent.setup();
     const { props } = renderTree();
@@ -708,6 +720,85 @@ describe('FolderTree extended coverage', () => {
       rerender(<FolderTree {...props} activeSection="notebooks" />);
       fireEvent.keyDown(window, { key: 'Delete' });
       expect(screen.queryByText(/Confirm Deletion/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('copy path', () => {
+    it('copies a file path to the clipboard as root-relative', async () => {
+      const { user, writeText } = setupClipboard();
+      renderTree();
+
+      fireEvent.contextMenu(screen.getByText('notes.txt'));
+      await user.click(await findPortalButton('Copy path'));
+
+      expect(writeText).toHaveBeenCalledWith('/notes.txt');
+    });
+
+    it('copies a folder path to the clipboard as root-relative', async () => {
+      const { user, writeText } = setupClipboard();
+      renderTree();
+
+      fireEvent.contextMenu(screen.getByText('Archive'));
+      await user.click(await findPortalButton('Copy path'));
+
+      expect(writeText).toHaveBeenCalledWith('/Archive');
+    });
+
+    it('does not show Copy path for the root folder', () => {
+      renderTree();
+      fireEvent.contextMenu(screen.getByText('Project'));
+      expect(screen.queryByText('Copy path')).not.toBeInTheDocument();
+    });
+
+    it('copies multiple selected paths joined by newlines', async () => {
+      const { user, writeText } = setupClipboard();
+      renderTree();
+
+      fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+      fireEvent.contextMenu(screen.getByText('notes.txt'));
+      await user.click(await findPortalButton(/Copy \d+ Paths/));
+
+      expect(writeText).toHaveBeenCalledWith('/Archive\n/guide.md\n/notes.txt');
+    });
+  });
+
+  describe('folder multi-select highlight', () => {
+    it('shift-clicked folders are visibly highlighted, same as multi-selected files', () => {
+      renderTree();
+
+      // Anchor on a file, then shift-click the folder to extend the range onto it.
+      fireEvent.click(screen.getByText('guide.md'));
+      fireEvent.click(screen.getByText('Archive'), { shiftKey: true });
+
+      const archiveRow = screen.getByText('Archive').closest('.group');
+      expect(archiveRow).toHaveClass('bg-blue-100');
+    });
+  });
+
+  describe('multi-select folder context menu', () => {
+    it('shows Copy N Paths when right-clicking a folder within a multi-selection', async () => {
+      const { user, writeText } = setupClipboard();
+      renderTree();
+
+      fireEvent.click(screen.getByText('guide.md'));
+      fireEvent.click(screen.getByText('Archive'), { shiftKey: true });
+
+      fireEvent.contextMenu(screen.getByText('Archive'));
+      await user.click(await findPortalButton(/Copy \d+ Paths/));
+
+      expect(writeText).toHaveBeenCalledWith('/Archive\n/guide.md');
+    });
+
+    it('right-clicking a folder outside the current selection collapses to just that folder', () => {
+      renderTree();
+
+      fireEvent.click(screen.getByText('guide.md'));
+      fireEvent.click(screen.getByText('notes.txt'), { shiftKey: true });
+
+      // Archive was never part of the [guide.md, notes.txt] selection.
+      fireEvent.contextMenu(screen.getByText('Archive'));
+      expect(screen.queryByText(/Copy \d+ Paths/)).not.toBeInTheDocument();
+      expect(screen.getByText('Copy path')).toBeInTheDocument();
     });
   });
 
