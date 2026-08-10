@@ -462,10 +462,28 @@ export function withSecretPreserved(value: string, hasStoredValue: boolean): str
   return hasStoredValue ? SECRET_MASK : '';
 }
 
+function getSecretPropertyNames(
+  section: SettingsSectionDto,
+  schema: SettingsSectionSchemaDto | undefined,
+): string[] {
+  if (schema) {
+    return schema.properties.filter((property) => property.isSecret).map((property) => property.name);
+  }
+  // Schema fetch can fail independently of the section fetch; secretHasValue always carries an
+  // entry for every secret property on the section itself (see MaskSecrets server-side), so it
+  // is a reliable fallback that keeps the omit-on-blank guard below active either way.
+  return section.secretHasValue ? Object.keys(section.secretHasValue) : [];
+}
+
 /**
  * Normalizes a Connections-tab draft immediately before
- * {@code PUT /api/settings/sections/{name}} so untouched or cleared secret
- * inputs do not overwrite stored secrets with an empty string.
+ * {@code PUT /api/settings/sections/{name}} so an untouched secret input is omitted from the
+ * save payload entirely, rather than sent as a value. {@code MergeForUpdate} server-side treats
+ * a missing property as "keep the existing stored secret" (see ApplicationSettingsJson.cs), so
+ * omission - not a mask placeholder - is what preserves it. This also means a field a password
+ * manager autofilled without the user noticing is only sent if it is non-blank, same as any
+ * other edit; the mask-placeholder approach previously here relied on the input always holding
+ * literal "********" until deliberately changed, which autofill silently defeats.
  */
 export function prepareSectionPayloadForSave(
   draft: Record<string, unknown>,
@@ -473,17 +491,40 @@ export function prepareSectionPayloadForSave(
   schema: SettingsSectionSchemaDto | undefined,
 ): Record<string, unknown> {
   const payload = clonePayload(draft);
-  const secretPropertyNames =
-    schema?.properties.filter((property) => property.isSecret).map((property) => property.name) ?? [];
+  const secretPropertyNames = getSecretPropertyNames(section, schema);
 
   for (const propertyName of secretPropertyNames) {
-    payload[propertyName] = withSecretPreserved(
-      getInputTextValue(payload[propertyName]),
-      Boolean(section.secretHasValue?.[propertyName]),
-    );
+    const raw = getInputTextValue(payload[propertyName]).trim();
+    if (raw.length > 0) {
+      payload[propertyName] = raw;
+      continue;
+    }
+
+    if (section.secretHasValue?.[propertyName]) {
+      delete payload[propertyName];
+    } else {
+      payload[propertyName] = '';
+    }
   }
 
   return payload;
+}
+
+/**
+ * Seeds a freshly-loaded section's draft with blank values for secrets that already have a
+ * stored value, instead of the literal {@code SECRET_MASK} placeholder the server echoes back.
+ * Used by ConnectionsTab so an untouched secret input renders empty - matching the "leave blank
+ * to keep" contract in {@link SecretInput} - rather than holding a fixed sentinel string that a
+ * browser password manager can match against and silently overwrite.
+ */
+export function stripStoredSecretPlaceholders(section: SettingsSectionDto): Record<string, unknown> {
+  const draft = clonePayload(section.payload);
+  for (const propertyName of Object.keys(section.secretHasValue ?? {})) {
+    if (section.secretHasValue?.[propertyName]) {
+      draft[propertyName] = '';
+    }
+  }
+  return draft;
 }
 
 export function getSectionSchema(schema: SettingsSchemaDto | null, sectionName: string) {

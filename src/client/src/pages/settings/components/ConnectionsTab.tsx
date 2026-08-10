@@ -18,8 +18,6 @@ import {
 } from '../constants/connectionSections';
 import { getConnectionSectionDisplayName } from '../constants/displayLabels';
 import {
-  SECRET_MASK,
-  clonePayload,
   getErrorMessage,
   getInputTextValue,
   getSectionSchema,
@@ -28,8 +26,10 @@ import {
   parseFieldValue,
   payloadSignature,
   prepareSectionPayloadForSave,
+  stripStoredSecretPlaceholders,
 } from '../utils';
 import { TextActionButton } from './shared/ActionButtons';
+import { SecretInput } from './inputs/SecretInput';
 
 /**
  * Phase D (R-5.3 / R-5.5 / R-5.6 / R-8.1 / R-10.3): the Connections tab.
@@ -196,7 +196,7 @@ export function ConnectionsTab({
         } else {
           setSectionPreservedDraft(null);
         }
-        setSectionDraft(clonePayload(next.payload));
+        setSectionDraft(stripStoredSecretPlaceholders(next));
       } catch (error) {
         setSectionError(getErrorMessage(error, `Failed to load section ${sectionName}.`));
         setSectionData(null);
@@ -267,7 +267,7 @@ export function ConnectionsTab({
     if (!sectionData) {
       return;
     }
-    setSectionDraft(clonePayload(sectionData.payload));
+    setSectionDraft(stripStoredSecretPlaceholders(sectionData));
   }, [sectionData]);
 
   const handleDiscardPreservedDraft = useCallback(() => {
@@ -296,7 +296,7 @@ export function ConnectionsTab({
         payload: prepareSectionPayloadForSave(sectionDraft, sectionData, selectedSchema),
       });
       setSectionData(updated);
-      setSectionDraft(clonePayload(updated.payload));
+      setSectionDraft(stripStoredSecretPlaceholders(updated));
       setSectionPreservedDraft(null);
       onRefreshSectionSummaries();
       showToast({ type: 'success', title: `Saved ${getConnectionSectionDisplayName(updated.sectionName)}` });
@@ -334,7 +334,13 @@ export function ConnectionsTab({
     onRefreshSectionSummaries();
   }, [selectedSection, loadSection, loadUsage, loadOverview, onRefreshSectionSummaries]);
 
-  const isDirty = sectionData ? payloadSignature(sectionDraft) !== payloadSignature(sectionData.payload) : false;
+  // Compared against the same blanked-secret baseline the draft was seeded from (see
+  // stripStoredSecretPlaceholders), not the raw sectionData.payload - that still carries
+  // SECRET_MASK for stored secrets, which would make every section with a stored secret look
+  // dirty immediately after load even with no edits.
+  const isDirty = sectionData
+    ? payloadSignature(sectionDraft) !== payloadSignature(stripStoredSecretPlaceholders(sectionData))
+    : false;
 
   const { requiredProperties, optionalProperties } = useMemo(() => {
     if (!selectedSection || !selectedSchema) {
@@ -734,10 +740,25 @@ function FieldEditor({ section, property, value, disabled, onValueChange, tabInd
           />
           Enabled
         </label>
+      ) : property.isSecret ? (
+        // Left blank on load (see loadSection / handleResetDraft) rather than pre-filled with
+        // SECRET_MASK, and rendered with autoComplete="new-password" rather than "off" - browser
+        // password managers ignore autoComplete="off" on password inputs and will silently
+        // autofill a saved credential into this field when it sits next to a text input like
+        // Resource, overwriting the stored secret on save. See prepareSectionPayloadForSave,
+        // which omits this field entirely from the save payload while it stays blank.
+        <SecretInput
+          id={fieldInputId}
+          value={getInputTextValue(value)}
+          onChange={(next) => onValueChange(property.name, next)}
+          storedHasValue={Boolean(section.secretHasValue?.[property.name])}
+          disabled={disabled}
+          tabIndex={tabIndex}
+        />
       ) : (
         <input
           id={fieldInputId}
-          type={property.isSecret ? 'password' : property.valueType === 'int' ? 'number' : 'text'}
+          type={property.valueType === 'int' ? 'number' : 'text'}
           value={getInputTextValue(value)}
           onChange={(event) => onValueChange(property.name, parseFieldValue(event.target.value, property))}
           className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
@@ -746,14 +767,6 @@ function FieldEditor({ section, property, value, disabled, onValueChange, tabInd
           disabled={disabled}
           tabIndex={tabIndex}
         />
-      )}
-
-      {property.isSecret && (
-        <p className="text-xs text-gray-500">
-          {section.secretHasValue?.[property.name]
-            ? `A secret is stored. Keep ${SECRET_MASK} to preserve it, or type a new value.`
-            : 'No secret stored yet. Enter a value to save one.'}
-        </p>
       )}
     </div>
   );

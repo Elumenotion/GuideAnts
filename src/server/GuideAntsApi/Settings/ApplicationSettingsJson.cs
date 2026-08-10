@@ -109,6 +109,14 @@ public static class ApplicationSettingsJson
                 continue;
             }
 
+            if (raw.StartsWith(LegacySecretCipherPrefix, StringComparison.Ordinal))
+            {
+                // A legacy enc:: value that failed to decrypt (DecryptSecrets preserves the
+                // original string on failure) must not be re-encrypted as if it were plaintext -
+                // doing so would permanently corrupt the secret into a double-wrapped value.
+                continue;
+            }
+
             var encrypted = EncryptEncV2(raw, activeKeyId, activeKeyBytes);
             copy[secret.Name] = encrypted;
         }
@@ -220,6 +228,57 @@ public static class ApplicationSettingsJson
         }
 
         return merged;
+    }
+
+    /// <summary>
+    /// Rewrites any secret in <paramref name="merged"/> whose plaintext is unchanged from
+    /// <paramref name="decryptedCurrent"/> back to its original ciphertext from
+    /// <paramref name="rawCurrentPayload"/>, when that ciphertext is already <c>encv2::</c>-encoded.
+    /// <see cref="EncryptSecrets"/> skips values already in that form, so callers who apply this
+    /// before encrypting get a byte-stable secret ciphertext for saves that did not actually
+    /// change the secret (e.g. editing a sibling field like Resource) instead of a fresh
+    /// re-encryption with a new nonce on every save.
+    /// </summary>
+    public static JsonObject PreserveUnchangedSecretCiphertext(
+        SettingsSectionDefinition definition,
+        JsonObject rawCurrentPayload,
+        JsonObject decryptedCurrent,
+        JsonObject merged)
+    {
+        var result = CloneObject(merged);
+
+        foreach (var secret in definition.Properties.Where(p => p.IsSecret))
+        {
+            if (!result.TryGetPropertyValue(secret.Name, out var mergedNode))
+            {
+                continue;
+            }
+
+            var mergedPlaintext = NodeToString(mergedNode);
+            var currentPlaintext = decryptedCurrent.TryGetPropertyValue(secret.Name, out var currentNode)
+                ? NodeToString(currentNode)
+                : string.Empty;
+
+            if (!string.Equals(mergedPlaintext, currentPlaintext, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!rawCurrentPayload.TryGetPropertyValue(secret.Name, out var rawNode))
+            {
+                continue;
+            }
+
+            var rawValue = NodeToString(rawNode);
+            if (!rawValue.StartsWith(SecretCipherPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            result[secret.Name] = rawValue;
+        }
+
+        return result;
     }
 
     public static JsonObject CanonicalizeToDefinition(SettingsSectionDefinition definition, JsonObject payload)

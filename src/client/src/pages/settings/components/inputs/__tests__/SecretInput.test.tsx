@@ -21,4 +21,20 @@ describe('SecretInput', () => {
     await userEvent.type(input, 'abc');
     expect(onChange).toHaveBeenCalled();
   });
+
+  it('uses autoComplete="new-password" so browser password managers do not autofill it', () => {
+    // autoComplete="off" is ignored by password managers on type="password" inputs; this is
+    // the attribute that actually suppresses the Foundry Connections autofill-overwrite bug.
+    render(<SecretInput value="" onChange={() => {}} />);
+    const input = document.querySelector('input[type="password"]') as HTMLInputElement;
+    expect(input.autocomplete).toBe('new-password');
+  });
+
+  it('forwards id, disabled, and tabIndex for use in a labelled form grid', () => {
+    render(<SecretInput value="" onChange={() => {}} id="Section-ApiKey" disabled tabIndex={3} />);
+    const input = document.getElementById('Section-ApiKey') as HTMLInputElement;
+    expect(input).toBeInTheDocument();
+    expect(input.disabled).toBe(true);
+    expect(input.tabIndex).toBe(3);
+  });
 });
