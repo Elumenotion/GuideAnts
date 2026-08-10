@@ -21,12 +21,20 @@ export const catalogFixture: LlamaCatalogResponseDto = {
       defaults: {
         catalogModelId: 'qwen3.6-35b-a3b-local',
         routerModelId: 'Qwen3.6-35B-A3B-GGUF',
-        runtimeProfileId: 'qwen3_6',
         targetDirectory: 'Qwen3.6-35B-A3B-GGUF',
         mmproj: { path: 'mmproj-F16.gguf' },
         routerPreset: {
           'ctx-size': '131072',
           'image-min-tokens': '1024',
+        },
+        chatBehavior: {
+          combineSystemAndDeveloperMessages: true,
+          samplingParametersJson: {},
+          thinkingControlJson: {
+            defaultChoice: 'medium',
+            choiceActions: { medium: [] },
+          },
+          requestFieldsWhenToolsPresent: { parallel_tool_calls: true },
         },
       },
       quantMetadata: {
@@ -53,7 +61,6 @@ export const catalogFixture: LlamaCatalogResponseDto = {
       defaults: {
         catalogModelId: 'qwen3.6-35b-a3b-mtp-local',
         routerModelId: 'Qwen3.6-35B-A3B-MTP-GGUF',
-        runtimeProfileId: 'qwen3_6',
         targetDirectory: 'Qwen3.6-35B-A3B-MTP-GGUF',
         mmproj: { path: 'mmproj-F16.gguf' },
         routerPreset: {
@@ -61,6 +68,15 @@ export const catalogFixture: LlamaCatalogResponseDto = {
           'image-min-tokens': '1024',
           'spec-type': 'draft-mtp',
           'spec-draft-n-max': '2',
+        },
+        chatBehavior: {
+          combineSystemAndDeveloperMessages: true,
+          samplingParametersJson: {},
+          thinkingControlJson: {
+            defaultChoice: 'medium',
+            choiceActions: { medium: [] },
+          },
+          requestFieldsWhenToolsPresent: { parallel_tool_calls: true },
         },
       },
       quantMetadata: {

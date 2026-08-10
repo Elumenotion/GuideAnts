@@ -98,7 +98,6 @@ public sealed class LocalModelInstallationService : ILocalModelInstallationServi
             QuantId: installation.QuantId,
             QuantLabel: installation.QuantLabel,
             RouterModelId: installation.RouterModelId ?? string.Empty,
-            RuntimeProfileId: string.Empty,
             TargetDirectory: installation.TargetDirectory ?? string.Empty,
             ModelArtifacts: InstallationArtifactRecords.Parse(installation.ModelArtifactsJson),
             ProjectorArtifacts: InstallationArtifactRecords.Parse(installation.ProjectorArtifactsJson),

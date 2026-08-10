@@ -55,7 +55,6 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         IHuggingFaceTokenResolver tokenResolver,
         ILlamaServerRuntimeClient llamaClient,
         ILlamaRuntimeCoordinator coordinator,
-        IRuntimeProfileResolver runtimeProfileResolver,
         ILogger<LocalModelLifecycleOperationService> logger)
     {
         _db = db;

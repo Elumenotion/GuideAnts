@@ -78,6 +78,12 @@ Every command should print a version. If any fail, fix the install before moving
 
 ---
 
+## Contributors — catalog models and chat behavior
+
+Before adding **any** catalog model (OpenAI, Anthropic, Gemini, HF, OpenRouter, Azure, llama-cpp) or any feature touching sampling / reasoning / thinking control, read **[model-chat-behavior-contract.md](model-chat-behavior-contract.md)**. Chat behavior is owned by each `Models` row at runtime for every provider; runtime profiles are a local install copy bridge only.
+
+---
+
 # 1. Cross-Cutting / Host Requirements
 
 These are needed regardless of which lane you work in.
@@ -246,7 +252,7 @@ So local API URL = `http://localhost:5106` (which is what the client `.env.devel
 
 ### Bootstrap requirements
 
-On first boot the API seeds `Resources/bootstrap/` data (guides, assistants, runtime profiles `qwen3_5`, `qwen3_6`, `gemma4`). Seeding is idempotent.
+On first boot the API seeds `Resources/bootstrap/` data (guides, assistants, runtime-profile **install templates**). Chat behavior at inference is read from catalog `Models` rows after install. Seeding is idempotent. See [model-chat-behavior-contract.md](model-chat-behavior-contract.md).
 
 ---
 

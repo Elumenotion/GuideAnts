@@ -48,14 +48,6 @@ public sealed class ModelOwnedChatBehaviorTests
         target.ChatBehavior.ThoughtBlockPattern.Should().Be("<think>");
     }
 
-    [TestMethod]
-    public void RoutingChatCompletionClientFactory_DoesNotDependOnRuntimeProfileResolver()
-    {
-        var constructor = typeof(RoutingChatCompletionClientFactory).GetConstructors().Single();
-        var parameterTypes = constructor.GetParameters().Select(p => p.ParameterType).ToList();
-
-        parameterTypes.Should().NotContain(typeof(IRuntimeProfileResolver));
-    }
 
     [TestMethod]
     public async Task CreateGuideAsync_LlamaModel_UsesModelOwnedBehavior_NotRuntimeProfileResolver()
@@ -77,17 +69,13 @@ public sealed class ModelOwnedChatBehaviorTests
         });
         await context.SaveChangesAsync();
 
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>(MockBehavior.Strict);
-        var service = GuidesServiceTestHelper.CreateGuidesService(context, runtimeProfileResolver.Object);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
 
         var dto = MinimalCreateGuideDto("Guide") with { ModelId = "qwen-local", ReasoningEffort = "medium" };
 
         var created = await service.CreateGuideAsync(dto);
         var details = await service.GetGuideAsync(created.Id);
         details!.ReasoningEffort.Should().Be("medium");
-        runtimeProfileResolver.Verify(
-            r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never);
     }
 
     [TestMethod]

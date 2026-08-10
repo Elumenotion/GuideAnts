@@ -34,20 +34,17 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
     private readonly ApplicationDbContext _db;
     private readonly ILlamaRuntimeAdminClient _adminClient;
     private readonly IHuggingFaceTokenResolver _tokenResolver;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly ILogger<LocalModelOperationService> _logger;
 
     public LocalModelOperationService(
         ApplicationDbContext db,
         ILlamaRuntimeAdminClient adminClient,
         IHuggingFaceTokenResolver tokenResolver,
-        IRuntimeProfileResolver runtimeProfileResolver,
         ILogger<LocalModelOperationService> logger)
     {
         _db = db;
         _adminClient = adminClient;
         _tokenResolver = tokenResolver;
-        _runtimeProfileResolver = runtimeProfileResolver;
         _logger = logger;
     }
 
@@ -405,12 +402,6 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
             var runtimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
                 new LocalRuntimeConfiguration(immutableInput.RouterModelId));
 
-            var profile = await _runtimeProfileResolver
-                .ResolveAsync(immutableInput.RuntimeProfileId, cancellationToken)
-                .ConfigureAwait(false);
-            var reasoningChoicesJson = ModelChatBehavior.DeriveReasoningChoicesJson(
-                JsonSerializer.Serialize(profile.ThinkingControl));
-
             var now = DateTime.UtcNow;
             var model = new Model
             {
@@ -418,13 +409,13 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
                 DisplayName = immutableInput.CatalogDisplayName,
                 Provider = "llama-cpp",
                 Description = immutableInput.CatalogDescription,
-                ReasoningChoicesJson = reasoningChoicesJson,
+                ReasoningChoicesJson = immutableInput.ReasoningChoicesJson,
                 RuntimeConfigJson = runtimeConfigJson,
-                CombineSystemAndDeveloperMessages = profile.CombineSystemAndDeveloperMessages,
-                ThoughtBlockPattern = profile.ThoughtBlockPattern,
-                SamplingParametersJson = JsonSerializer.Serialize(profile.SamplingParameters),
-                ThinkingControlJson = JsonSerializer.Serialize(profile.ThinkingControl),
-                RequestFieldsWhenToolsPresentJson = JsonSerializer.Serialize(profile.RequestFieldsWhenToolsPresent),
+                CombineSystemAndDeveloperMessages = immutableInput.CombineSystemAndDeveloperMessages,
+                ThoughtBlockPattern = immutableInput.ThoughtBlockPattern,
+                SamplingParametersJson = immutableInput.SamplingParametersJson,
+                ThinkingControlJson = immutableInput.ThinkingControlJson,
+                RequestFieldsWhenToolsPresentJson = immutableInput.RequestFieldsWhenToolsPresentJson,
                 IsActive = immutableInput.CatalogIsActive,
                 DisplayOrder = immutableInput.CatalogDisplayOrder,
                 Created = now,

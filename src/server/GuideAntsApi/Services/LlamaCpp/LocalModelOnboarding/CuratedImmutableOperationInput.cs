@@ -22,9 +22,14 @@ public sealed record CuratedImmutableOperationInput(
     IReadOnlyList<string> ModelFiles,
     IReadOnlyList<string> MmprojFiles,
     string RouterModelId,
-    string RuntimeProfileId,
     string TargetDirectory,
     IReadOnlyDictionary<string, string> RouterPreset,
+    string SamplingParametersJson,
+    string? ReasoningChoicesJson,
+    string ThinkingControlJson,
+    string RequestFieldsWhenToolsPresentJson,
+    bool CombineSystemAndDeveloperMessages,
+    string? ThoughtBlockPattern,
     IReadOnlyList<CuratedArtifactMetadataInput>? ArtifactMetadata = null)
 {
     private static readonly JsonSerializerOptions CanonicalJsonOptions = new()

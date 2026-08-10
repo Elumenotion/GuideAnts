@@ -75,7 +75,6 @@ namespace GuideAntsApi.DataModel
         public DbSet<AssistantConversationStarter> AssistantConversationStarters { get; set; } = null!;
         public DbSet<PublishedGuide> PublishedGuides { get; set; } = null!;
         public DbSet<ApplicationSetting> ApplicationSettings { get; set; } = null!;
-        public DbSet<RuntimeProfile> RuntimeProfiles { get; set; } = null!;
         public DbSet<LocalModelInstallation> LocalModelInstallations { get; set; } = null!;
         public DbSet<LocalModelOperation> LocalModelOperations { get; set; } = null!;
         public DbSet<HostFolderMount> HostFolderMounts { get; set; } = null!;
@@ -431,13 +430,6 @@ namespace GuideAntsApi.DataModel
                 b.Property(x => x.CreatedUtc).HasDefaultValueSql("GETUTCDATE()");
                 b.Property(x => x.UpdatedUtc).HasDefaultValueSql("GETUTCDATE()");
                 b.Property(x => x.RowVersion).IsRowVersion();
-            });
-
-            modelBuilder.Entity<RuntimeProfile>(b =>
-            {
-                b.Property(x => x.SamplingParametersJson).HasColumnType("nvarchar(max)").IsRequired();
-                b.Property(x => x.ThinkingControlJson).HasColumnType("nvarchar(max)").IsRequired();
-                b.Property(x => x.RequestFieldsWhenToolsPresentJson).HasColumnType("nvarchar(max)").IsRequired().HasDefaultValue("{}");
             });
 
             modelBuilder.Entity<LocalModelInstallation>(b =>

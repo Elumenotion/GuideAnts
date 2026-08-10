@@ -20,13 +20,20 @@ public sealed record LlamaCatalogMmprojDto(
     string? Repository = null,
     string? Revision = null);
 
+public sealed record LlamaCatalogChatBehaviorDto(
+    bool CombineSystemAndDeveloperMessages,
+    string? ThoughtBlockPattern,
+    JsonElement SamplingParametersJson,
+    JsonElement ThinkingControlJson,
+    JsonElement? RequestFieldsWhenToolsPresent);
+
 public sealed record LlamaCatalogDefaultsDto(
     string CatalogModelId,
     string RouterModelId,
-    string RuntimeProfileId,
     string TargetDirectory,
     LlamaCatalogMmprojDto? Mmproj,
-    IReadOnlyDictionary<string, string> RouterPreset);
+    IReadOnlyDictionary<string, string> RouterPreset,
+    LlamaCatalogChatBehaviorDto ChatBehavior);
 
 public sealed record LlamaCatalogQuantGuidanceDto(
     string Summary);

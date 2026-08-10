@@ -12,9 +12,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using GuideAntsApi.Tests.TestUtils;
 using Moq;
-
-namespace GuideAntsApi.Tests.Services.LlamaCpp;
 
 [TestClass]
 public sealed class LlamaNegativeContractTests
@@ -219,7 +218,7 @@ public sealed class LlamaNegativeContractTests
     }
 
     [TestMethod]
-    public async Task Lifecycle_FinalizationFailure_SetsCatalogFinalizationErrorCode()
+    public async Task Lifecycle_Finalization_Completes_WithRowOwnedImmutableInput()
     {
         await using var db = CreateDb();
         var input = CreateImmutableInput();
@@ -238,21 +237,17 @@ public sealed class LlamaNegativeContractTests
         });
         await db.SaveChangesAsync();
 
-        var profileResolver = new Mock<IRuntimeProfileResolver>(MockBehavior.Strict);
-        profileResolver
-            .Setup(x => x.ResolveAsync("qwen3_6", It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("profile missing"));
-
         var operationService = new LocalModelOperationService(
             db,
             new Mock<ILlamaRuntimeAdminClient>(MockBehavior.Strict).Object,
             Mock.Of<IHuggingFaceTokenResolver>(),
-            profileResolver.Object,
             NullLogger<LocalModelOperationService>.Instance);
 
         var status = await operationService.ReconcileAndGetStatusAsync(operationId, CancellationToken.None);
-        status.Status.Should().Be("catalogFinalization");
-        status.Error!.Code.Should().Be(CuratedInstallErrorCodes.CatalogFinalization);
+        status.Status.Should().Be("completed");
+
+        var model = await db.Models.SingleAsync(m => m.ModelId == input.CatalogModelId);
+        model.ThinkingControlJson.Should().Contain("medium");
     }
 
     [TestMethod]
@@ -263,8 +258,7 @@ public sealed class LlamaNegativeContractTests
 
         var resolver = new CuratedInstallResolver(
             CreateAdminClient(Revision, "q6_k_xl").Object,
-            tokenResolver.Object,
-            CreateProfileResolver().Object);
+            tokenResolver.Object);
         var request = CreateCuratedRequest();
         var command = LocalModelOnboardingCommand.FromAddModelRequest(request);
 
@@ -281,8 +275,7 @@ public sealed class LlamaNegativeContractTests
         adminClient ??= CreateAdminClient(headRevision, quantId).Object;
         return new CuratedInstallResolver(
             adminClient,
-            CreateTokenResolver().Object,
-            CreateProfileResolver().Object);
+            CreateTokenResolver().Object);
     }
 
     private static Mock<ILlamaRuntimeAdminClient> CreateAdminClient(string headRevision, string quantId)
@@ -318,10 +311,9 @@ public sealed class LlamaNegativeContractTests
                     "qwen3.6-35b-a3b-mtp",
                     new LlamaCatalogDisplayDto("Qwen", "desc", [], "Apache-2.0", "https://example.com"),
                     new LlamaCatalogSourceDto("unsloth/Qwen3.6-35B-A3B-MTP-GGUF", "main"),
-                    new LlamaCatalogDefaultsDto(
+                    LlamaCatalogTestHelpers.CreateDefaults(
                         "qwen3.6-35b-a3b-mtp-local",
                         "Qwen3.6-35B-A3B-MTP-GGUF",
-                        "qwen3_6",
                         "Qwen3.6-35B-A3B-MTP-GGUF",
                         requireMmproj ? new LlamaCatalogMmprojDto("mmproj.gguf") : null,
                         new Dictionary<string, string> { ["ctx-size"] = "131072" }),
@@ -362,7 +354,6 @@ public sealed class LlamaNegativeContractTests
             configuration,
             settingsService,
             Mock.Of<IChatTargetValidator>(),
-            Mock.Of<IRuntimeProfileResolver>(),
             Mock.Of<ILlamaRuntimeInventoryService>(),
             tokenResolver,
             CreateResolver(),
@@ -383,19 +374,33 @@ public sealed class LlamaNegativeContractTests
         return tokenResolver;
     }
 
-    private static Mock<IRuntimeProfileResolver> CreateProfileResolver()
+    private static CuratedImmutableOperationInput CreateImmutableInput()
     {
-        var resolver = new Mock<IRuntimeProfileResolver>();
-        resolver
-            .Setup(x => x.ResolveAsync("qwen3_6", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RuntimeProfileData(
-                "qwen3_6",
-                true,
-                null,
-                new Dictionary<string, SamplingParameterDefinition>(),
-                new ThinkingControl("medium", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
-                new Dictionary<string, JsonElement>()));
-        return resolver;
+        var chatBehavior = LlamaCatalogTestHelpers.RowOwnedChatBehaviorFields();
+        return new CuratedImmutableOperationInput(
+            "qwen3.6-35b-a3b-mtp",
+            "2026-07-10",
+            "qwen3.6-35b-a3b-mtp-local",
+            "Qwen",
+            "desc",
+            null,
+            true,
+            "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+            "main",
+            Revision,
+            "q6_k_xl",
+            "Q6_K_XL",
+            ["model.gguf"],
+            [],
+            "Qwen3.6-35B-A3B-MTP-GGUF",
+            "Qwen3.6-35B-A3B-MTP-GGUF",
+            new Dictionary<string, string> { ["ctx-size"] = "131072" },
+            chatBehavior.Sampling,
+            chatBehavior.Reasoning,
+            chatBehavior.Thinking,
+            chatBehavior.RequestFields,
+            chatBehavior.Combine,
+            chatBehavior.Thought);
     }
 
     private static AddModelRequest CreateCuratedRequest(Func<AddModelInstallDto, AddModelInstallDto>? mutate = null)
@@ -436,7 +441,6 @@ public sealed class LlamaNegativeContractTests
                 CreateTokenResolver().Object,
                 new Mock<ILlamaServerRuntimeClient>(MockBehavior.Strict).Object,
                 coordinator,
-                CreateProfileResolver().Object,
                 NullLogger<LocalModelLifecycleOperationService>.Instance),
             new Mock<ILlamaRuntimeAdminClient>(MockBehavior.Strict).Object,
             CreateTokenResolver().Object,
@@ -457,31 +461,9 @@ public sealed class LlamaNegativeContractTests
             CreateTokenResolver().Object,
             new Mock<ILlamaServerRuntimeClient>(MockBehavior.Strict).Object,
             coordinator,
-            CreateProfileResolver().Object,
             NullLogger<LocalModelLifecycleOperationService>.Instance));
         return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
-
-    private static CuratedImmutableOperationInput CreateImmutableInput() =>
-        new(
-            "qwen3.6-35b-a3b-mtp",
-            "2026-07-10",
-            "qwen3.6-35b-a3b-mtp-local",
-            "Qwen",
-            "desc",
-            null,
-            true,
-            "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
-            "main",
-            Revision,
-            "q6_k_xl",
-            "Q6_K_XL",
-            ["model.gguf"],
-            [],
-            "Qwen3.6-35B-A3B-MTP-GGUF",
-            "qwen3_6",
-            "Qwen3.6-35B-A3B-MTP-GGUF",
-            new Dictionary<string, string> { ["ctx-size"] = "131072" });
 
     private static void SeedInstallation(ApplicationDbContext db)
     {
@@ -517,21 +499,6 @@ public sealed class LlamaNegativeContractTests
             CreatedUtc = now,
             UpdatedUtc = now,
             RowVersion = [1, 0, 0, 0, 0, 0, 0, 0],
-        });
-        db.SaveChanges();
-    }
-
-    private static void SeedRuntimeProfile(ApplicationDbContext db)
-    {
-        db.RuntimeProfiles.Add(new RuntimeProfile
-        {
-            ProfileId = "qwen3_6",
-            DisplayName = "Qwen 3.6",
-            SamplingParametersJson = "{}",
-            ThinkingControlJson = """{"defaultChoice":"medium","choiceActions":{"medium":[]}}""",
-            ProvidersJson = """["llama-cpp"]""",
-            RequestFieldsWhenToolsPresentJson = """{"parallel_tool_calls":true}""",
-            Created = DateTime.UtcNow,
         });
         db.SaveChanges();
     }

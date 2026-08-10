@@ -30,7 +30,6 @@ public sealed record LocalModelOnboardingCommand(
     string? CatalogDescription,
     int? CatalogDisplayOrder,
     bool CatalogIsActive,
-    string RuntimeProfileId,
     string SamplingParametersJson,
     string? ReasoningChoicesJson,
     string ThinkingControlJson,
@@ -82,7 +81,6 @@ public sealed record LocalModelOnboardingCommand(
         }
 
         var routerModelId = (install.RouterModelId ?? string.Empty).Trim();
-        var runtimeProfileId = (install.RuntimeProfileId ?? string.Empty).Trim();
         var providerConfig = request.ProviderConfig;
         var samplingParametersJson = GetProviderConfigString(providerConfig, "samplingParametersJson") ?? "{}";
         var reasoningChoicesJson = GetProviderConfigString(providerConfig, "reasoningChoicesJson");
@@ -132,7 +130,6 @@ public sealed record LocalModelOnboardingCommand(
                 : request.Catalog.Description.Trim(),
             CatalogDisplayOrder: request.Catalog.DisplayOrder,
             CatalogIsActive: request.Catalog.IsActive,
-            RuntimeProfileId: runtimeProfileId,
             SamplingParametersJson: samplingParametersJson,
             ReasoningChoicesJson: reasoningChoicesJson,
             ThinkingControlJson: thinkingControlJson,

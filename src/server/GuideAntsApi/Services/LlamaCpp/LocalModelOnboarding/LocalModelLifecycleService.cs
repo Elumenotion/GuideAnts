@@ -175,7 +175,6 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             ModelFiles: modelFiles,
             MmprojFiles: mmprojFiles,
             RouterModelId: installation.RouterModelId!,
-            RuntimeProfileId: definition.Defaults.RuntimeProfileId,
             TargetDirectory: installation.TargetDirectory!,
             RouterPreset: routerPreset,
             ObsoleteRepositoryPaths: obsoletePaths,
@@ -252,7 +251,6 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             ModelFiles: modelFiles,
             MmprojFiles: mmprojFiles,
             RouterModelId: installation.RouterModelId,
-            RuntimeProfileId: definition?.Defaults.RuntimeProfileId ?? string.Empty,
             TargetDirectory: installation.TargetDirectory,
             RouterPreset: preset);
 

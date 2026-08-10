@@ -12,8 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-
-namespace GuideAntsApi.Tests.Services.LlamaCpp.LocalModelOnboarding;
+using GuideAntsApi.Tests.TestUtils;
 
 [TestClass]
 public sealed class CuratedInstallTests
@@ -204,9 +203,7 @@ public sealed class CuratedInstallTests
     [TestMethod]
     public async Task OperationService_FinalizationRetry_CommitsModelAndProvenance()
     {
-        await using var db = CreateDbContext();
-        SeedRuntimeProfile(db);
-        var input = CreateImmutableInput(singleGguf: true);
+        await using var db = CreateDbContext();        var input = CreateImmutableInput(singleGguf: true);
         var operationId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         db.LocalModelOperations.Add(new LocalModelOperation
         {
@@ -239,9 +236,7 @@ public sealed class CuratedInstallTests
     [TestMethod]
     public async Task OperationService_ReconcileExistingInstall_UpdatesProjectorProvenance()
     {
-        await using var db = CreateDbContext();
-        SeedRuntimeProfile(db);
-        var input = CreateImmutableInput(singleGguf: true);
+        await using var db = CreateDbContext();        var input = CreateImmutableInput(singleGguf: true);
         var now = DateTime.UtcNow;
 
         // Prior text-only install: catalog row + provenance with NO projector recorded.
@@ -309,9 +304,7 @@ public sealed class CuratedInstallTests
     [TestMethod]
     public async Task OperationService_ApiRestart_ResumesFromCatalogFinalization()
     {
-        await using var db = CreateDbContext();
-        SeedRuntimeProfile(db);
-        var input = CreateImmutableInput(singleGguf: false);
+        await using var db = CreateDbContext();        var input = CreateImmutableInput(singleGguf: false);
         var operationId = Guid.Parse("33333333-3333-3333-3333-333333333333");
         db.LocalModelOperations.Add(new LocalModelOperation
         {
@@ -339,9 +332,7 @@ public sealed class CuratedInstallTests
     [TestMethod]
     public async Task OperationService_Downloading_ReportsAdminProgress()
     {
-        await using var db = CreateDbContext();
-        SeedRuntimeProfile(db);
-        var input = CreateImmutableInput(singleGguf: true);
+        await using var db = CreateDbContext();        var input = CreateImmutableInput(singleGguf: true);
         var operationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
         db.LocalModelOperations.Add(new LocalModelOperation
         {
@@ -390,9 +381,7 @@ public sealed class CuratedInstallTests
     [TestMethod]
     public async Task OperationService_LlamaAdminCompleted_MovesToCatalogFinalization()
     {
-        await using var db = CreateDbContext();
-        SeedRuntimeProfile(db);
-        var input = CreateImmutableInput(singleGguf: true);
+        await using var db = CreateDbContext();        var input = CreateImmutableInput(singleGguf: true);
         var operationId = Guid.Parse("44444444-4444-4444-4444-444444444444");
         db.LocalModelOperations.Add(new LocalModelOperation
         {
@@ -430,9 +419,7 @@ public sealed class CuratedInstallTests
     [TestMethod]
     public async Task OperationService_Downloading_DoesNotRestartLlamaAdminWorker()
     {
-        await using var db = CreateDbContext();
-        SeedRuntimeProfile(db);
-        var input = CreateImmutableInput(singleGguf: true);
+        await using var db = CreateDbContext();        var input = CreateImmutableInput(singleGguf: true);
         var operationId = Guid.Parse("66666666-6666-6666-6666-666666666666");
         db.LocalModelOperations.Add(new LocalModelOperation
         {
@@ -499,16 +486,10 @@ public sealed class CuratedInstallTests
         var tokenResolver = new Mock<IHuggingFaceTokenResolver>();
         tokenResolver.Setup(x => x.Resolve()).Returns("hf_token");
 
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-        runtimeProfileResolver
-            .Setup(x => x.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateRuntimeProfile());
-
         return new LocalModelOnboardingValidator(
             configuration,
             settingsService.Object,
             chatTargetValidator.Object,
-            runtimeProfileResolver.Object,
             inventoryService.Object,
             tokenResolver.Object,
             resolver ?? CreateResolver(CreateAdminClient()),
@@ -520,15 +501,9 @@ public sealed class CuratedInstallTests
         var tokenResolver = new Mock<IHuggingFaceTokenResolver>();
         tokenResolver.Setup(x => x.Resolve()).Returns("hf_token");
 
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-        runtimeProfileResolver
-            .Setup(x => x.ResolveAsync("qwen3_6", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateRuntimeProfile());
-
         return new CuratedInstallResolver(
             adminClient,
-            tokenResolver.Object,
-            runtimeProfileResolver.Object);
+            tokenResolver.Object);
     }
 
     private static LocalModelOperationService CreateOperationService(
@@ -538,16 +513,10 @@ public sealed class CuratedInstallTests
         var tokenResolver = new Mock<IHuggingFaceTokenResolver>();
         tokenResolver.Setup(x => x.Resolve()).Returns("hf_token");
 
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-        runtimeProfileResolver
-            .Setup(x => x.ResolveAsync("qwen3_6", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateRuntimeProfile());
-
         return new LocalModelOperationService(
             db,
             adminClient ?? new Mock<ILlamaRuntimeAdminClient>(MockBehavior.Strict).Object,
             tokenResolver.Object,
-            runtimeProfileResolver.Object,
             NullLogger<LocalModelOperationService>.Instance);
     }
 
@@ -599,13 +568,12 @@ public sealed class CuratedInstallTests
                         License: "Apache-2.0",
                         DocumentationUrl: "https://example.com"),
                     Source: new LlamaCatalogSourceDto("unsloth/Qwen3.6-35B-A3B-MTP-GGUF", "main"),
-                    Defaults: new LlamaCatalogDefaultsDto(
-                        CatalogModelId: "qwen3.6-35b-a3b-mtp-local",
-                        RouterModelId: "Qwen3.6-35B-A3B-MTP-GGUF",
-                        RuntimeProfileId: "qwen3_6",
-                        TargetDirectory: "Qwen3.6-35B-A3B-MTP-GGUF",
-                        Mmproj: new LlamaCatalogMmprojDto("mmproj-F16.gguf"),
-                        RouterPreset: new Dictionary<string, string>
+                    Defaults: LlamaCatalogTestHelpers.CreateDefaults(
+                        "qwen3.6-35b-a3b-mtp-local",
+                        "Qwen3.6-35B-A3B-MTP-GGUF",
+                        "Qwen3.6-35B-A3B-MTP-GGUF",
+                        new LlamaCatalogMmprojDto("mmproj-F16.gguf"),
+                        new Dictionary<string, string>
                         {
                             ["ctx-size"] = "131072",
                             ["image-min-tokens"] = "1024",
@@ -652,8 +620,10 @@ public sealed class CuratedInstallTests
             Projector: new LlamaProjectorArtifactDto("mmproj-F16.gguf", 900_000_000));
     }
 
-    private static CuratedImmutableOperationInput CreateImmutableInput(bool singleGguf) =>
-        new(
+    private static CuratedImmutableOperationInput CreateImmutableInput(bool singleGguf)
+    {
+        var chatBehavior = LlamaCatalogTestHelpers.RowOwnedChatBehaviorFields();
+        return new CuratedImmutableOperationInput(
             DefinitionId: "qwen3.6-35b-a3b-mtp",
             DefinitionVersion: "2026-07-10",
             CatalogModelId: "qwen3.6-35b-a3b-mtp-local",
@@ -675,7 +645,6 @@ public sealed class CuratedInstallTests
                 ],
             MmprojFiles: ["mmproj-F16.gguf"],
             RouterModelId: "Qwen3.6-35B-A3B-MTP-GGUF",
-            RuntimeProfileId: "qwen3_6",
             TargetDirectory: "Qwen3.6-35B-A3B-MTP-GGUF",
             RouterPreset: new Dictionary<string, string>
             {
@@ -683,7 +652,14 @@ public sealed class CuratedInstallTests
                 ["image-min-tokens"] = "1024",
                 ["spec-type"] = "draft-mtp",
                 ["spec-draft-n-max"] = "2",
-            });
+            },
+            SamplingParametersJson: chatBehavior.Sampling,
+            ReasoningChoicesJson: chatBehavior.Reasoning,
+            ThinkingControlJson: chatBehavior.Thinking,
+            RequestFieldsWhenToolsPresentJson: chatBehavior.RequestFields,
+            CombineSystemAndDeveloperMessages: chatBehavior.Combine,
+            ThoughtBlockPattern: chatBehavior.Thought);
+    }
 
     private static AddModelRequest CreateCuratedRequest(Func<AddModelInstallDto, AddModelInstallDto>? mutate = null)
     {
@@ -712,37 +688,6 @@ public sealed class CuratedInstallTests
             Install: install);
     }
 
-    private static void SeedRuntimeProfile(ApplicationDbContext db)
-    {
-        db.RuntimeProfiles.Add(new RuntimeProfile
-        {
-            ProfileId = "qwen3_6",
-            DisplayName = "Qwen 3.6",
-            SamplingParametersJson = "{}",
-            ThinkingControlJson = """{"defaultChoice":"medium","choiceActions":{"medium":[]}}""",
-            ProvidersJson = """["llama-cpp"]""",
-            RequestFieldsWhenToolsPresentJson = """{"parallel_tool_calls":true}""",
-            Created = DateTime.UtcNow,
-        });
-        db.SaveChanges();
-    }
-
-    private static RuntimeProfileData CreateRuntimeProfile() =>
-        new(
-            ProfileId: "qwen3_6",
-            CombineSystemAndDeveloperMessages: true,
-            ThoughtBlockPattern: null,
-            SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
-            ThinkingControl: new ThinkingControl(
-                "medium",
-                new Dictionary<string, IReadOnlyList<ThinkingAction>>
-                {
-                    ["medium"] = Array.Empty<ThinkingAction>(),
-                }),
-            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>
-            {
-                ["parallel_tool_calls"] = JsonDocument.Parse("true").RootElement,
-            });
 
     private static ApplicationDbContext CreateDbContext()
     {

@@ -26,7 +26,6 @@ public sealed record ChangeQuantImmutableInput(
     IReadOnlyList<string> ModelFiles,
     IReadOnlyList<string> MmprojFiles,
     string RouterModelId,
-    string RuntimeProfileId,
     string TargetDirectory,
     IReadOnlyDictionary<string, string> RouterPreset,
     IReadOnlyList<string> ObsoleteRepositoryPaths,
@@ -77,7 +76,6 @@ public sealed record RepairImmutableInput(
     IReadOnlyList<string> ModelFiles,
     IReadOnlyList<string> MmprojFiles,
     string RouterModelId,
-    string RuntimeProfileId,
     string TargetDirectory,
     IReadOnlyDictionary<string, string> RouterPreset,
     IReadOnlyList<CuratedArtifactMetadataInput>? ArtifactMetadata = null)

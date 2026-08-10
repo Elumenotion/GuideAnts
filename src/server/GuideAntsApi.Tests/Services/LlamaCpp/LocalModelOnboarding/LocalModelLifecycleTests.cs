@@ -15,9 +15,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using GuideAntsApi.Tests.TestUtils;
 using Moq;
-
-namespace GuideAntsApi.Tests.Services.LlamaCpp.LocalModelOnboarding;
 
 [TestClass]
 public sealed class LocalModelLifecycleTests
@@ -103,7 +102,6 @@ public sealed class LocalModelLifecycleTests
                 ["model-q6.gguf"],
                 [],
                 "qwen-local",
-                "qwen3_6",
                 "qwen-local",
                 new Dictionary<string, string> { ["ctx-size"] = "8192" }).ToJson(),
             Status = "provenanceFinalization",
@@ -233,7 +231,6 @@ public sealed class LocalModelLifecycleTests
             new Mock<IHuggingFaceTokenResolver>().Object,
             new Mock<ILlamaServerRuntimeClient>(MockBehavior.Strict).Object,
             new Mock<ILlamaRuntimeCoordinator>().Object,
-            new Mock<IRuntimeProfileResolver>(MockBehavior.Strict).Object,
             NullLogger<LocalModelLifecycleOperationService>.Instance);
     }
 
@@ -253,10 +250,10 @@ public sealed class LocalModelLifecycleTests
                         new LlamaCatalogDefaultsDto(
                             "qwen-local",
                             "qwen-local",
-                            "qwen3_6",
                             "qwen-local",
                             null,
-                            new Dictionary<string, string> { ["ctx-size"] = "8192" }),
+                            new Dictionary<string, string> { ["ctx-size"] = "8192" },
+                            LlamaCatalogTestHelpers.CreateChatBehaviorDto()),
                         new LlamaCatalogQuantMetadataDto(),
                         new LlamaCatalogHardwareNotesDto("notes", "large")),
                 ]));

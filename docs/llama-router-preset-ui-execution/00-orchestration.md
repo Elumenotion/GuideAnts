@@ -1,5 +1,9 @@
 # Curated Local Llama — Execution & Orchestration Guide
 
+> **Stale — chat behavior authority:** Model catalog rows own chat behavior at inference.
+> See [model-chat-behavior-contract.md](../model-chat-behavior-contract.md). Task briefs that
+> treat runtime profiles as ongoing authority or require new profile entities are obsolete.
+
 Last updated: 2026-07-10
 
 This is the conductor document for fully executing

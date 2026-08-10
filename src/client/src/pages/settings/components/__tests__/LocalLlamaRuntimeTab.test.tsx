@@ -20,7 +20,6 @@ const inventoryRow = {
   runtimeState: 'unloaded',
   notebookReferenceCount: 0,
   artifactPath: '/models/llama',
-  runtimeProfileId: 'profile-1',
   hasModelFile: true,
   hasMmprojFile: false,
 };

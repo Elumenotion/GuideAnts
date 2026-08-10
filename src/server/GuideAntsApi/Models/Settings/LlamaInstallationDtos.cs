@@ -18,7 +18,6 @@ public sealed record LlamaInstallationDetailDto(
     string? QuantId,
     string? QuantLabel,
     string RouterModelId,
-    string RuntimeProfileId,
     string TargetDirectory,
     IReadOnlyList<InstallationArtifactDto> ModelArtifacts,
     IReadOnlyList<InstallationArtifactDto> ProjectorArtifacts,

@@ -15,16 +15,13 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
 {
     private readonly ILlamaRuntimeAdminClient _adminClient;
     private readonly IHuggingFaceTokenResolver _tokenResolver;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
 
     public CuratedInstallResolver(
         ILlamaRuntimeAdminClient adminClient,
-        IHuggingFaceTokenResolver tokenResolver,
-        IRuntimeProfileResolver runtimeProfileResolver)
+        IHuggingFaceTokenResolver tokenResolver)
     {
         _adminClient = adminClient;
         _tokenResolver = tokenResolver;
-        _runtimeProfileResolver = runtimeProfileResolver;
     }
 
     public async Task<CuratedImmutableOperationInput> ResolveAsync(
@@ -242,18 +239,24 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
 
         try
         {
-            await _runtimeProfileResolver.ResolveAsync(defaults.RuntimeProfileId, cancellationToken).ConfigureAwait(false);
+            ManifestChatBehavior.Validate(defaults.ChatBehavior, catalogId);
         }
         catch (InvalidOperationException ex)
         {
             throw new AddModelException(
-                "RUNTIME_PROFILE_NOT_FOUND",
+                CuratedInstallErrorCodes.PresetInvalid,
                 step: "validation",
                 message: ex.Message,
-                remediation: "Ensure runtime profiles are seeded and retry.");
+                remediation: "Fix chatBehavior in the catalog manifest for this definition.");
         }
 
         var routerPreset = RouterPresetValidator.ValidateAndNormalize(defaults.RouterPreset);
+        var chatBehavior = defaults.ChatBehavior;
+        var samplingParametersJson = ManifestChatBehavior.SerializeSamplingParameters(chatBehavior);
+        var thinkingControlJson = ManifestChatBehavior.SerializeThinkingControl(chatBehavior);
+        var requestFieldsWhenToolsPresentJson =
+            ManifestChatBehavior.SerializeRequestFieldsWhenToolsPresent(chatBehavior);
+        var reasoningChoicesJson = ManifestChatBehavior.DeriveReasoningChoicesJson(chatBehavior);
 
         var modelFiles = quant.Files.Select(f => f.Path).ToList();
         var mmprojFiles = quantsAtCommit.Projector is null
@@ -288,9 +291,14 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
             ModelFiles: modelFiles,
             MmprojFiles: mmprojFiles,
             RouterModelId: defaults.RouterModelId.Trim(),
-            RuntimeProfileId: defaults.RuntimeProfileId.Trim(),
             TargetDirectory: defaults.TargetDirectory.Trim(),
             RouterPreset: routerPreset,
+            SamplingParametersJson: samplingParametersJson,
+            ReasoningChoicesJson: reasoningChoicesJson,
+            ThinkingControlJson: thinkingControlJson,
+            RequestFieldsWhenToolsPresentJson: requestFieldsWhenToolsPresentJson,
+            CombineSystemAndDeveloperMessages: chatBehavior.CombineSystemAndDeveloperMessages,
+            ThoughtBlockPattern: chatBehavior.ThoughtBlockPattern,
             ArtifactMetadata: artifactMetadata);
     }
 

@@ -423,7 +423,6 @@ export interface AddModelInstallCuratedDto {
 export interface AddModelInstallDto {
   source: 'huggingface' | 'existingAlias' | 'curated';
   routerModelId?: string;
-  runtimeProfileId?: string;
   huggingFace?: AddModelInstallHuggingFaceDto;
   existingAlias?: AddModelInstallExistingAliasDto;
   curated?: AddModelInstallCuratedDto;
@@ -454,44 +453,6 @@ export interface AddModelOperationDto {
 export interface AddModelResponse {
   operationId?: string;
   addOperation: AddModelOperationDto;
-}
-
-export interface SettingsRuntimeProfileDto {
-  profileId: string;
-  displayName: string;
-  description?: string;
-  combineSystemAndDeveloperMessages: boolean;
-  thoughtBlockPattern?: string;
-  samplingParametersJson: string;
-  thinkingControlJson: string;
-  requestFieldsWhenToolsPresentJson?: string;
-  providers: string[];
-  created: string;
-  updated?: string;
-}
-
-export interface CreateRuntimeProfileRequest {
-  profileId: string;
-  displayName: string;
-  description?: string;
-  combineSystemAndDeveloperMessages: boolean;
-  thoughtBlockPattern?: string;
-  samplingParametersJson: string;
-  thinkingControlJson: string;
-  requestFieldsWhenToolsPresentJson?: string;
-  providers?: string[];
-}
-
-export interface UpdateRuntimeProfileRequest {
-  profileId: string;
-  displayName: string;
-  description?: string;
-  combineSystemAndDeveloperMessages: boolean;
-  thoughtBlockPattern?: string;
-  samplingParametersJson: string;
-  thinkingControlJson: string;
-  requestFieldsWhenToolsPresentJson?: string;
-  providers?: string[];
 }
 
 export interface EmbeddingsRebuildResponse {
@@ -556,7 +517,6 @@ export interface StartModelDownloadRequest {
    */
   catalogModelId?: string;
   catalogDisplayName?: string;
-  catalogRuntimeProfileId?: string;
   catalogDescription?: string;
   catalogIsActive?: boolean;
   catalogDisplayOrder?: number;
@@ -597,13 +557,21 @@ export interface LlamaCatalogMmprojDto {
   revision?: string | null;
 }
 
+export interface LlamaCatalogChatBehaviorDto {
+  combineSystemAndDeveloperMessages: boolean;
+  thoughtBlockPattern?: string | null;
+  samplingParametersJson: Record<string, unknown>;
+  thinkingControlJson: Record<string, unknown>;
+  requestFieldsWhenToolsPresent?: Record<string, unknown> | null;
+}
+
 export interface LlamaCatalogDefaultsDto {
   catalogModelId: string;
   routerModelId: string;
-  runtimeProfileId: string;
   targetDirectory: string;
   mmproj: LlamaCatalogMmprojDto | null;
   routerPreset: Record<string, string>;
+  chatBehavior: LlamaCatalogChatBehaviorDto;
 }
 
 export interface LlamaCatalogQuantGuidanceDto {
@@ -873,7 +841,6 @@ export interface LlamaInstallationDetailDto {
   quantId?: string | null;
   quantLabel?: string | null;
   routerModelId: string;
-  runtimeProfileId: string;
   targetDirectory: string;
   modelArtifacts: InstallationArtifactDto[];
   projectorArtifacts: InstallationArtifactDto[];

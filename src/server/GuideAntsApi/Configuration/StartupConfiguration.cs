@@ -99,7 +99,6 @@ public static class StartupConfiguration
         services.AddScoped<IProjectService, ProjectService>();
         services.AddSingleton<ISettingsSectionRegistry, SettingsSectionRegistry>();
         services.AddSingleton<IProviderConfigurationResolver, ProviderConfigurationResolver>();
-        services.AddSingleton<IRuntimeProfileResolver, RuntimeProfileResolver>();
         services.AddSingleton<IServiceEditorMetadataProvider, ServiceEditorMetadataProvider>();
         services.AddSingleton<IChatDefaultsStore, ChatDefaultsStore>();
         services.AddScoped<IApplicationSettingsService, ApplicationSettingsService>();
@@ -111,7 +110,6 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSessionService, GuideAntsApi.Services.SystemGuide.SystemGuideSessionService>();
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideCatalogFilter, GuideAntsApi.Services.SystemGuide.SystemGuideCatalogFilter>();
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSandboxAdminProxy, GuideAntsApi.Services.SystemGuide.SystemGuideSandboxAdminProxy>();
-        services.AddScoped<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder, GuideAntsApi.Services.Bootstrap.RuntimeProfileSeeder>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IBundleDefinitionMigrationService, GuideAntsApi.Services.Bootstrap.BundleDefinitionMigrationService>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IBundleDefinitionProjectionService, GuideAntsApi.Services.Bootstrap.BundleDefinitionProjectionService>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IImageGenerationBundleDefinitionBootstrapper, GuideAntsApi.Services.Bootstrap.ImageGenerationBundleDefinitionBootstrapper>();

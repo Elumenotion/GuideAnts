@@ -1,4 +1,4 @@
-"""Live manifest-drift suite for all 14 curated repositories.
+"""Live manifest-drift suite for all 15 curated repositories.
 
 Run explicitly (not part of default deterministic unit discovery):
 
@@ -43,14 +43,14 @@ class LiveManifestDriftTests(unittest.TestCase):
         cls.token = _resolve_live_token()
         llama_catalog.cached_manifest.cache_clear()
         cls.manifest = cached_manifest()
-        if len(cls.manifest.get("models", [])) != 14:
-            raise AssertionError(f"Expected 14 manifest definitions, found {len(cls.manifest.get('models', []))}")
+        if len(cls.manifest.get("models", [])) != 15:
+            raise AssertionError(f"Expected 15 manifest definitions, found {len(cls.manifest.get('models', []))}")
         global _manifest_ids
         _manifest_ids = [str(model["id"]) for model in cls.manifest["models"] if isinstance(model.get("id"), str)]
 
-    def test_manifest_has_fourteen_named_entries(self) -> None:
+    def test_manifest_has_fifteen_named_entries(self) -> None:
         ids = [model["id"] for model in self.manifest["models"]]
-        self.assertEqual(14, len(set(ids)))
+        self.assertEqual(15, len(set(ids)))
 
     def _resolve_entry(self, catalog_id: str) -> None:
         try:

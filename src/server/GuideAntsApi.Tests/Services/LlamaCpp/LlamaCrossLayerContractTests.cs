@@ -48,9 +48,6 @@ public sealed class LlamaCrossLayerContractTests
     [TestMethod]
     public async Task CatalogQuantCuratedFlow_ProducesDurableOperation()
     {
-        await using var db = CreateDb();
-        SeedRuntimeProfile(db);
-
         var catalogJson = File.ReadAllText(Path.Combine(ContractsDir, "catalog-get-response.fixture.json"));
         var catalog = JsonSerializer.Deserialize<LlamaCatalogResponseDto>(catalogJson, SerializerOptions)!;
         var definition = catalog.Models[0];
@@ -58,8 +55,7 @@ public sealed class LlamaCrossLayerContractTests
         var adminClient = CreateAdminClient();
         var resolver = new CuratedInstallResolver(
             adminClient,
-            CreateTokenResolver().Object,
-            CreateProfileResolver().Object);
+            CreateTokenResolver().Object);
 
         var request = new AddModelRequest(
             Provider: "llama-cpp",
@@ -155,21 +151,6 @@ public sealed class LlamaCrossLayerContractTests
         return new ApplicationDbContext(options);
     }
 
-    private static void SeedRuntimeProfile(ApplicationDbContext db)
-    {
-        db.RuntimeProfiles.Add(new RuntimeProfile
-        {
-            ProfileId = "qwen3_6",
-            DisplayName = "Qwen 3.6",
-            SamplingParametersJson = "{}",
-            ThinkingControlJson = """{"defaultChoice":"medium","choiceActions":{"medium":[]}}""",
-            ProvidersJson = """["llama-cpp"]""",
-            RequestFieldsWhenToolsPresentJson = """{"parallel_tool_calls":true}""",
-            Created = DateTime.UtcNow,
-        });
-        db.SaveChanges();
-    }
-
     private static Mock<IHuggingFaceTokenResolver> CreateTokenResolver()
     {
         var tokenResolver = new Mock<IHuggingFaceTokenResolver>();
@@ -177,20 +158,6 @@ public sealed class LlamaCrossLayerContractTests
         return tokenResolver;
     }
 
-    private static Mock<IRuntimeProfileResolver> CreateProfileResolver()
-    {
-        var resolver = new Mock<IRuntimeProfileResolver>();
-        resolver
-            .Setup(x => x.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RuntimeProfileData(
-                "qwen3_6",
-                true,
-                null,
-                new Dictionary<string, SamplingParameterDefinition>(),
-                new ThinkingControl("medium", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
-                new Dictionary<string, JsonElement>()));
-        return resolver;
-    }
 
     private static ILlamaRuntimeAdminClient CreateAdminClient()
     {
