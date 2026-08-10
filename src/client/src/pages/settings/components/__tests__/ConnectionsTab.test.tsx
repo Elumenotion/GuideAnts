@@ -63,7 +63,7 @@ const sectionData = {
   schemaVersion: 1,
   rowVersion: 'row-1',
   updatedUtc: '2026-01-01T00:00:00Z',
-  payload: { Organization: 'org-1' },
+  payload: { ApiKey: '********', Organization: 'org-1' },
   secretHasValue: { ApiKey: true },
 };
 
@@ -131,6 +131,58 @@ describe('ConnectionsTab', () => {
       );
     });
     expect(props.onRefreshSectionSummaries).toHaveBeenCalled();
+  });
+
+  it('renders a stored secret blank rather than the mask, and omits it from the save payload when untouched', async () => {
+    // Regression for the Microsoft Foundry Connections bug: editing a sibling field (here,
+    // Organization) must not resend the ApiKey at all, so nothing a password manager may have
+    // autofilled into the (now blank, not mask-prefilled) key field can leak into the request.
+    const user = userEvent.setup();
+    renderConnectionsTab();
+
+    const organizationInput = await screen.findByDisplayValue('org-1');
+
+    const apiKeyInput = document.getElementById('OpenAI-ApiKey') as HTMLInputElement;
+    expect(apiKeyInput).toBeInTheDocument();
+    expect(apiKeyInput.value).toBe('');
+    expect(apiKeyInput.type).toBe('password');
+    expect(apiKeyInput.autocomplete).toBe('new-password');
+
+    await user.clear(organizationInput);
+    await user.type(organizationInput, 'org-updated');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(api.settings.updateSection).toHaveBeenCalledWith(
+        'OpenAI',
+        expect.objectContaining({
+          rowVersion: 'row-1',
+          payload: expect.objectContaining({ Organization: 'org-updated' }),
+        }),
+      );
+    });
+    const [, request] = vi.mocked(api.settings.updateSection).mock.calls[0];
+    expect('ApiKey' in (request.payload as Record<string, unknown>)).toBe(false);
+  });
+
+  it('sends a newly typed secret value on save', async () => {
+    const user = userEvent.setup();
+    renderConnectionsTab();
+
+    await screen.findByDisplayValue('org-1');
+    const apiKeyInput = document.getElementById('OpenAI-ApiKey') as HTMLInputElement;
+
+    await user.type(apiKeyInput, 'sk-new-real-key');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(api.settings.updateSection).toHaveBeenCalledWith(
+        'OpenAI',
+        expect.objectContaining({
+          payload: expect.objectContaining({ ApiKey: 'sk-new-real-key' }),
+        }),
+      );
+    });
   });
 
   it('surfaces section load failures', async () => {

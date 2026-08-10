@@ -52,7 +52,11 @@ export function CoreConnectionStep({
           type="password"
           value={apiKey}
           onChange={(event) => onChange({ apiKey: event.target.value })}
-          autoComplete="off"
+          // autoComplete="off" is ignored by browser password managers on password inputs; this
+          // field sits directly after a plain-text "Resource" input, which password managers
+          // treat as a login-form shape and will silently autofill into the field below,
+          // overwriting the SECRET_MASK sentinel this form relies on to detect "unchanged".
+          autoComplete="new-password"
           className={`w-full rounded border px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 ${
             errors.apiKey ? 'border-red-500' : 'border-gray-300'
           }`}

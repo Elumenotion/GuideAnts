@@ -28,6 +28,7 @@ import {
   parseFieldValue,
   parseRuntimeProfileId,
   payloadSignature,
+  stripStoredSecretPlaceholders,
   withSecretPreserved,
 } from '../utils';
 
@@ -348,13 +349,16 @@ describe('settings utility helpers', () => {
     expect(withSecretPreserved('', false)).toBe('');
   });
 
-  it('prepareSectionPayloadForSave preserves stored secrets omitted from draft', () => {
+  it('prepareSectionPayloadForSave omits a stored secret left blank in the draft', () => {
+    // Regression for the Microsoft Foundry Connections bug: an untouched secret field must be
+    // dropped from the save payload entirely (not sent as SECRET_MASK), so a value a password
+    // manager silently autofilled into the field is never sent unless the input is non-blank.
     const section: SettingsSectionDto = {
       sectionName: 'HuggingFace',
       schemaVersion: 1,
       rowVersion: 'rv',
       updatedUtc: '2026-01-01T00:00:00Z',
-      payload: { Token: SECRET_MASK, RouterBaseUrl: 'https://router.huggingface.co/v1' },
+      payload: { Token: '', RouterBaseUrl: 'https://router.huggingface.co/v1' },
       secretHasValue: { Token: true },
     };
     const schema: SettingsSectionSchemaDto = {
@@ -368,13 +372,107 @@ describe('settings utility helpers', () => {
     };
 
     const payload = prepareSectionPayloadForSave(
-      { RouterBaseUrl: 'https://example.com' },
+      { Token: '', RouterBaseUrl: 'https://example.com' },
       section,
       schema,
     );
 
-    expect(payload.Token).toBe(SECRET_MASK);
+    expect('Token' in payload).toBe(false);
     expect(payload.RouterBaseUrl).toBe('https://example.com');
+  });
+
+  it('prepareSectionPayloadForSave sends a non-blank secret as typed', () => {
+    const section: SettingsSectionDto = {
+      sectionName: 'HuggingFace',
+      schemaVersion: 1,
+      rowVersion: 'rv',
+      updatedUtc: '2026-01-01T00:00:00Z',
+      payload: { Token: '', RouterBaseUrl: 'https://router.huggingface.co/v1' },
+      secretHasValue: { Token: true },
+    };
+    const schema: SettingsSectionSchemaDto = {
+      sectionName: 'HuggingFace',
+      schemaVersion: 1,
+      hasSecrets: true,
+      properties: [
+        { name: 'Token', valueType: 'string', isSecret: true, isEditable: true, isRequired: true },
+        { name: 'RouterBaseUrl', valueType: 'string', isSecret: false, isEditable: true, isRequired: false },
+      ],
+    };
+
+    const payload = prepareSectionPayloadForSave(
+      { Token: 'hf_new_token', RouterBaseUrl: 'https://router.huggingface.co/v1' },
+      section,
+      schema,
+    );
+
+    expect(payload.Token).toBe('hf_new_token');
+  });
+
+  it('prepareSectionPayloadForSave keeps sending empty string when no secret is stored yet', () => {
+    const section: SettingsSectionDto = {
+      sectionName: 'HuggingFace',
+      schemaVersion: 1,
+      rowVersion: 'rv',
+      updatedUtc: '2026-01-01T00:00:00Z',
+      payload: { Token: '', RouterBaseUrl: '' },
+      secretHasValue: { Token: false },
+    };
+    const schema: SettingsSectionSchemaDto = {
+      sectionName: 'HuggingFace',
+      schemaVersion: 1,
+      hasSecrets: true,
+      properties: [
+        { name: 'Token', valueType: 'string', isSecret: true, isEditable: true, isRequired: true },
+        { name: 'RouterBaseUrl', valueType: 'string', isSecret: false, isEditable: true, isRequired: false },
+      ],
+    };
+
+    const payload = prepareSectionPayloadForSave({ Token: '', RouterBaseUrl: '' }, section, schema);
+
+    // No stored secret to preserve - sending '' still lets server-side required-field
+    // validation reject the save, same as before this change.
+    expect(payload.Token).toBe('');
+  });
+
+  it('prepareSectionPayloadForSave falls back to section.secretHasValue when schema failed to load', () => {
+    // Guards the hazard noted in the investigation: if getSchema() errored, schema is
+    // undefined - the guard must still find the secret fields instead of skipping the
+    // omit-on-blank normalization entirely.
+    const section: SettingsSectionDto = {
+      sectionName: 'AzureOpenAI',
+      schemaVersion: 1,
+      rowVersion: 'rv',
+      updatedUtc: '2026-01-01T00:00:00Z',
+      payload: { Resource: 'my-foundry', ApiKey: '' },
+      secretHasValue: { ApiKey: true },
+    };
+
+    const payload = prepareSectionPayloadForSave(
+      { Resource: 'new-foundry-resource', ApiKey: '' },
+      section,
+      undefined,
+    );
+
+    expect('ApiKey' in payload).toBe(false);
+    expect(payload.Resource).toBe('new-foundry-resource');
+  });
+
+  it('stripStoredSecretPlaceholders blanks stored secrets and leaves other fields untouched', () => {
+    const section: SettingsSectionDto = {
+      sectionName: 'AzureOpenAI',
+      schemaVersion: 1,
+      rowVersion: 'rv',
+      updatedUtc: '2026-01-01T00:00:00Z',
+      payload: { Resource: 'my-foundry', ApiKey: SECRET_MASK, ApiVersion: '2025-04-01-preview' },
+      secretHasValue: { ApiKey: true },
+    };
+
+    const draft = stripStoredSecretPlaceholders(section);
+
+    expect(draft.ApiKey).toBe('');
+    expect(draft.Resource).toBe('my-foundry');
+    expect(draft.ApiVersion).toBe('2025-04-01-preview');
   });
 
   it('formats valid ISO timestamps', () => {

@@ -199,6 +199,148 @@ public sealed class ApplicationSettingsServiceDeepTests
         reloaded!.Payload["Default"]!.GetValue<string>().Should().Be("Information");
     }
 
+    [TestMethod]
+    public async Task UpdateSectionAsync_ResourceOnlyEdit_LeavesApiKeyCiphertextByteIdentical()
+    {
+        // Regression for the Microsoft Foundry Connections bug: editing Resource alone must not
+        // touch the stored ApiKey - neither its plaintext, nor (as a secondary guarantee) its
+        // ciphertext bytes in the row, which would needlessly churn on every unrelated save.
+        const string foundrySection = "AzureOpenAI";
+        var configuration = BuildConfigurationWithFoundryConnection();
+
+        await using var db = CreateDbContext();
+        var service = CreateService(db, configuration);
+        await service.BootstrapAsync(configuration);
+
+        var section = await service.GetSectionAsync(foundrySection);
+        section.Should().NotBeNull();
+        section!.SecretHasValue["ApiKey"].Should().BeTrue();
+
+        var rawBefore = await db.ApplicationSettings.AsNoTracking()
+            .SingleAsync(x => x.SectionName == foundrySection);
+        var apiKeyCiphertextBefore = System.Text.Json.Nodes.JsonNode.Parse(rawBefore.JsonValue)!["ApiKey"]!.GetValue<string>();
+        apiKeyCiphertextBefore.Should().StartWith("encv2::");
+
+        // Only Resource is present in the incoming payload, mirroring what the fixed client now
+        // sends (the ApiKey field is omitted entirely rather than round-tripping a mask).
+        var result = await service.UpdateSectionAsync(
+            foundrySection,
+            new UpdateSettingsSectionRequest(section.RowVersion, new JsonObject
+            {
+                ["Resource"] = "new-foundry-resource"
+            }));
+
+        result.ConcurrencyConflict.Should().BeFalse();
+        result.ValidationErrors.Should().BeEmpty();
+        result.Section.Should().NotBeNull();
+        result.Section!.Payload["Resource"]!.GetValue<string>().Should().Be("new-foundry-resource");
+        result.Section.SecretHasValue["ApiKey"].Should().BeTrue();
+
+        var rawAfter = await db.ApplicationSettings.AsNoTracking()
+            .SingleAsync(x => x.SectionName == foundrySection);
+        var apiKeyCiphertextAfter = System.Text.Json.Nodes.JsonNode.Parse(rawAfter.JsonValue)!["ApiKey"]!.GetValue<string>();
+
+        apiKeyCiphertextAfter.Should().Be(apiKeyCiphertextBefore);
+    }
+
+    [TestMethod]
+    public async Task UpdateSectionAsync_ResourceOnlyEdit_KeepsApiKeyPlaintextRecoverable()
+    {
+        const string foundrySection = "AzureOpenAI";
+        var configuration = BuildConfigurationWithFoundryConnection();
+
+        await using var db = CreateDbContext();
+        var service = CreateService(db, configuration);
+        await service.BootstrapAsync(configuration);
+        var section = await service.GetSectionAsync(foundrySection);
+
+        await service.UpdateSectionAsync(
+            foundrySection,
+            new UpdateSettingsSectionRequest(section!.RowVersion, new JsonObject
+            {
+                ["Resource"] = "another-resource"
+            }));
+
+        // Route through GetSectionAsync (masked) plus a direct decrypt to confirm the real
+        // plaintext key used for authenticating to Foundry actually survived the save.
+        var protector = ApplicationSettingsJson.CreateLegacyProtector(AppContext.BaseDirectory);
+        var raw = await db.ApplicationSettings.AsNoTracking().SingleAsync(x => x.SectionName == foundrySection);
+        var decrypted = ApplicationSettingsJson.DecryptSecrets(
+            new SettingsSectionRegistry().All.Single(s => s.SectionName == foundrySection),
+            ApplicationSettingsJson.DeserializeObject(raw.JsonValue),
+            new SettingsSecretsOptions
+            {
+                ActiveKeyId = "tests",
+                Keys = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
+                }
+            },
+            protector);
+
+        decrypted["ApiKey"]!.GetValue<string>().Should().Be("original-foundry-key");
+    }
+
+    [TestMethod]
+    public async Task UpdateSectionAsync_ResourceEditWithMaskedApiKey_LeavesApiKeyCiphertextByteIdentical()
+    {
+        // The Add-AI-Services wizard still sends SECRET_MASK explicitly (rather than omitting
+        // the field) for an untouched key - that path must get the same ciphertext stability.
+        const string foundrySection = "AzureOpenAI";
+        var configuration = BuildConfigurationWithFoundryConnection();
+
+        await using var db = CreateDbContext();
+        var service = CreateService(db, configuration);
+        await service.BootstrapAsync(configuration);
+        var section = await service.GetSectionAsync(foundrySection);
+
+        var rawBefore = await db.ApplicationSettings.AsNoTracking()
+            .SingleAsync(x => x.SectionName == foundrySection);
+        var apiKeyCiphertextBefore = System.Text.Json.Nodes.JsonNode.Parse(rawBefore.JsonValue)!["ApiKey"]!.GetValue<string>();
+
+        var result = await service.UpdateSectionAsync(
+            foundrySection,
+            new UpdateSettingsSectionRequest(section!.RowVersion, new JsonObject
+            {
+                ["Resource"] = "wizard-updated-resource",
+                ["ApiKey"] = ApplicationSettingsJson.SecretMask
+            }));
+
+        result.ValidationErrors.Should().BeEmpty();
+        result.Section!.Payload["Resource"]!.GetValue<string>().Should().Be("wizard-updated-resource");
+
+        var rawAfter = await db.ApplicationSettings.AsNoTracking()
+            .SingleAsync(x => x.SectionName == foundrySection);
+        var apiKeyCiphertextAfter = System.Text.Json.Nodes.JsonNode.Parse(rawAfter.JsonValue)!["ApiKey"]!.GetValue<string>();
+
+        apiKeyCiphertextAfter.Should().Be(apiKeyCiphertextBefore);
+    }
+
+    private static IConfiguration BuildConfigurationWithFoundryConnection()
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["SettingsSecrets:ActiveKeyId"] = "tests",
+            ["SettingsSecrets:Keys:tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=",
+            ["Ui:RootPath"] = "./ui",
+            ["LlamaCpp:BaseUrl"] = "http://localhost:8110/llama-cpp",
+            ["ServiceRouting:Containers:guideants-ai:BaseUrl"] = "http://localhost:8110/sandbox",
+            ["LocalServiceHosts:SpeechTranscriptionBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:SpeechSynthesisBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:ImageGenerationBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:EmbeddingsBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:MediaBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:DocumentIntelligenceBaseUrl"] = "http://localhost:5001",
+            ["GoogleGeminiApi:ApiKey"] = "test-gemini-key",
+            ["AzureOpenAI:Resource"] = "original-foundry-resource",
+            ["AzureOpenAI:ApiKey"] = "original-foundry-key"
+        };
+
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
+            .Build();
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

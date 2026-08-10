@@ -58,7 +58,7 @@ gtts==2.2.3
 h2==4.4.1
 h5netcdf==1.6.1
 h5py==3.8.0
-hpack==4.1.0
+hpack==4.2.0
 html5lib==1.1
 httptools==0.6.4
 hypercorn==0.14.3
@@ -135,7 +135,7 @@ pyluach==2.2.0
 pymc==4.0.1
 pymupdf==1.21.1
 pynacl==1.6.2
-pyopenssl==26.2.0
+pyopenssl==26.4.0
 pypandoc==1.6.3
 pypdf>=4.0.0,<6
 pypdf2==1.28.6
