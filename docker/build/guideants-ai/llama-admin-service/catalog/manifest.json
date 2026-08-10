@@ -773,6 +773,712 @@
       }
     },
     {
+      "id": "muse-glimmer-30b",
+      "display": {
+        "name": "Muse Glimmer 30B",
+        "description": "Meta Superintelligence Labs dense 30B vision model for local agentic and coding workflows.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
+        "license": "Apache-2.0",
+        "documentationUrl": "https://huggingface.co/unsloth/Muse-Glimmer-30B-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
+      },
+      "source": {
+        "repository": "unsloth/Muse-Glimmer-30B-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "muse-glimmer-30b-local",
+        "routerModelId": "Muse-Glimmer-30B-GGUF",
+        "targetDirectory": "Muse-Glimmer-30B-GGUF",
+        "mmproj": {
+          "path": "mmproj-Muse-Glimmer-30B-BF16.gguf"
+        },
+        "routerPreset": {
+          "ctx-size": "131072",
+          "image-min-tokens": "1024",
+          "image-max-tokens": "4096"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "high",
+            "choiceActions": {
+              "low": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "Reasoning strength: low\n"
+                }
+              ],
+              "medium": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "Reasoning strength: medium\n"
+                }
+              ],
+              "high": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "Reasoning strength: high\n"
+                }
+              ],
+              "xhigh": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "Reasoning strength: xhigh\n"
+                }
+              ]
+            }
+          },
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": true
+          }
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL"
+        ],
+        "guidance": {
+          "UD-Q4_K_XL": {
+            "summary": "Curator default. Best quality/size balance on Unsloth Dynamic 2.0."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when memory allows."
+          }
+        }
+      },
+      "hardwareNotes": {
+        "summary": "Dense ~30B vision model with a perception encoder. Typical install: 18GB+ RAM/VRAM at UD-Q4_K_XL.",
+        "contextClass": "large"
+      }
+    },
+    {
+      "id": "gemma4-31b",
+      "display": {
+        "name": "Gemma 4 31B IT QAT",
+        "description": "Primary Google multimodal recommendation for local Gemma 4.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
+        "license": "Gemma",
+        "documentationUrl": "https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ],
+        "primaryRecommendation": true
+      },
+      "source": {
+        "repository": "unsloth/gemma-4-31B-it-qat-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "gemma4-31b-local",
+        "routerModelId": "gemma-4-31B-it-qat-GGUF",
+        "targetDirectory": "gemma-4-31B-it-qat-GGUF",
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
+        "routerPreset": {
+          "ctx-size": "131072",
+          "image-min-tokens": "280",
+          "image-max-tokens": "280"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "enabled",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "<|think|>\n"
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": true
+          }
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL"
+        ],
+        "guidance": {
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for Gemma 4 31B QAT."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when memory allows."
+          }
+        }
+      },
+      "hardwareNotes": {
+        "summary": "Large dense Gemma 4 with QAT. Typical install: 32GB+ unified memory or VRAM.",
+        "contextClass": "large"
+      }
+    },
+    {
+      "id": "gemma4-26b-a4b",
+      "display": {
+        "name": "Gemma 4 26B A4B IT",
+        "description": "MoE sweet spot for Gemma 4 multimodal workloads.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
+        "license": "Gemma",
+        "documentationUrl": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
+      },
+      "source": {
+        "repository": "unsloth/gemma-4-26B-A4B-it-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "gemma4-26b-a4b-local",
+        "routerModelId": "gemma-4-26B-A4B-it-GGUF",
+        "targetDirectory": "gemma-4-26B-A4B-it-GGUF",
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
+        "routerPreset": {
+          "ctx-size": "131072",
+          "image-min-tokens": "280",
+          "image-max-tokens": "280"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "enabled",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "<|think|>\n"
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": true
+          }
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL"
+        ],
+        "guidance": {
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for Gemma 4 MoE."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when memory allows."
+          }
+        }
+      },
+      "hardwareNotes": {
+        "summary": "Gemma 4 MoE with ~4B active parameters. Typical install: 24GB+ VRAM.",
+        "contextClass": "large"
+      }
+    },
+    {
+      "id": "gemma4-12b",
+      "display": {
+        "name": "Gemma 4 12B IT",
+        "description": "Mid-size Gemma 4 multimodal model.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
+        "license": "Gemma",
+        "documentationUrl": "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
+      },
+      "source": {
+        "repository": "unsloth/gemma-4-12b-it-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "gemma4-12b-local",
+        "routerModelId": "gemma-4-12b-it-GGUF",
+        "targetDirectory": "gemma-4-12b-it-GGUF",
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
+        "routerPreset": {
+          "ctx-size": "131072",
+          "image-min-tokens": "280",
+          "image-max-tokens": "280"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "enabled",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "<|think|>\n"
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": true
+          }
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "Q4_K_M"
+        ],
+        "guidance": {
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for 12B Gemma 4."
+          },
+          "Q4_K_M": {
+            "summary": "Lower memory footprint."
+          }
+        }
+      },
+      "hardwareNotes": {
+        "summary": "Dense 12B vision model. Typical install: 16GB+ VRAM.",
+        "contextClass": "large"
+      }
+    },
+    {
+      "id": "gemma4-e4b",
+      "display": {
+        "name": "Gemma 4 E4B IT",
+        "description": "Compact Gemma 4 multimodal model. Audio label is display-only in v1.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use",
+          "Audio"
+        ],
+        "license": "Gemma",
+        "documentationUrl": "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
+      },
+      "source": {
+        "repository": "unsloth/gemma-4-E4B-it-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "gemma4-e4b-local",
+        "routerModelId": "gemma-4-E4B-it-GGUF",
+        "targetDirectory": "gemma-4-E4B-it-GGUF",
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
+        "routerPreset": {
+          "ctx-size": "65536",
+          "image-min-tokens": "280",
+          "image-max-tokens": "280"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "enabled",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "<|think|>\n"
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": true
+          }
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "Q4_K_M"
+        ],
+        "guidance": {
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for compact Gemma 4."
+          },
+          "Q4_K_M": {
+            "summary": "Lowest practical memory."
+          }
+        }
+      },
+      "hardwareNotes": {
+        "summary": "Compact Gemma 4 MoE. Typical install: 12GB+ VRAM.",
+        "contextClass": "compact"
+      }
+    },
+    {
       "id": "qwen3.5-35b-a3b",
       "display": {
         "name": "Qwen 3.5 35B A3B",
@@ -1357,552 +2063,6 @@
       }
     },
     {
-      "id": "gemma4-31b",
-      "display": {
-        "name": "Gemma 4 31B IT QAT",
-        "description": "Primary Google multimodal recommendation for local Gemma 4.",
-        "labels": [
-          "Text",
-          "Vision",
-          "Reasoning",
-          "Tool use"
-        ],
-        "license": "Gemma",
-        "documentationUrl": "https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF",
-        "recommendedQuantLabels": [
-          "UD-Q4_K_XL"
-        ],
-        "primaryRecommendation": true
-      },
-      "source": {
-        "repository": "unsloth/gemma-4-31B-it-qat-GGUF",
-        "revision": "main"
-      },
-      "defaults": {
-        "catalogModelId": "gemma4-31b-local",
-        "routerModelId": "gemma-4-31B-it-qat-GGUF",
-        "targetDirectory": "gemma-4-31B-it-qat-GGUF",
-        "mmproj": {
-          "path": "mmproj-F16.gguf"
-        },
-        "routerPreset": {
-          "ctx-size": "131072",
-          "image-min-tokens": "280",
-          "image-max-tokens": "280"
-        },
-        "chatBehavior": {
-          "combineSystemAndDeveloperMessages": true,
-          "samplingParametersJson": {
-            "temperature": {
-              "key": "temperature",
-              "label": "Temperature",
-              "description": "Controls randomness: lower is focused, higher is creative",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 0,
-              "exposedInGuideBuilder": true
-            },
-            "top_p": {
-              "key": "top_p",
-              "label": "Top P",
-              "description": "Nucleus sampling: controls diversity of token selection",
-              "min": 0.0,
-              "max": 1.0,
-              "step": 0.05,
-              "default": 0.95,
-              "displayOrder": 1,
-              "exposedInGuideBuilder": true
-            },
-            "top_k": {
-              "key": "top_k",
-              "label": "Top K",
-              "description": "Limits number of token candidates considered",
-              "min": 1,
-              "max": 100,
-              "step": 1,
-              "default": 64,
-              "displayOrder": 2,
-              "exposedInGuideBuilder": true
-            },
-            "presence_penalty": {
-              "key": "presence_penalty",
-              "label": "Presence Penalty",
-              "description": "Reduces repetition (disabled by default, use only if you see looping)",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 0.0,
-              "displayOrder": 3,
-              "exposedInGuideBuilder": false
-            },
-            "repetition_penalty": {
-              "key": "repetition_penalty",
-              "label": "Repetition Penalty",
-              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
-              "min": 1.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 4,
-              "exposedInGuideBuilder": false
-            }
-          },
-          "thinkingControlJson": {
-            "defaultChoice": "enabled",
-            "choiceActions": {
-              "none": [
-                {
-                  "target": "RequestField",
-                  "key": "reasoning_format",
-                  "value": "none"
-                }
-              ],
-              "enabled": [
-                {
-                  "target": "SystemMessagePrefix",
-                  "key": "",
-                  "value": "<|think|>\n"
-                }
-              ]
-            }
-          },
-          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
-          "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
-          }
-        }
-      },
-      "quantMetadata": {
-        "recommendedLabels": [
-          "UD-Q4_K_XL",
-          "UD-Q5_K_XL"
-        ],
-        "guidance": {
-          "UD-Q4_K_XL": {
-            "summary": "Curator default for Gemma 4 31B QAT."
-          },
-          "UD-Q5_K_XL": {
-            "summary": "Higher quality when memory allows."
-          }
-        }
-      },
-      "hardwareNotes": {
-        "summary": "Large dense Gemma 4 with QAT. Typical install: 32GB+ unified memory or VRAM.",
-        "contextClass": "large"
-      }
-    },
-    {
-      "id": "gemma4-26b-a4b",
-      "display": {
-        "name": "Gemma 4 26B A4B IT",
-        "description": "MoE sweet spot for Gemma 4 multimodal workloads.",
-        "labels": [
-          "Text",
-          "Vision",
-          "Reasoning",
-          "Tool use"
-        ],
-        "license": "Gemma",
-        "documentationUrl": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF",
-        "recommendedQuantLabels": [
-          "UD-Q4_K_XL"
-        ]
-      },
-      "source": {
-        "repository": "unsloth/gemma-4-26B-A4B-it-GGUF",
-        "revision": "main"
-      },
-      "defaults": {
-        "catalogModelId": "gemma4-26b-a4b-local",
-        "routerModelId": "gemma-4-26B-A4B-it-GGUF",
-        "targetDirectory": "gemma-4-26B-A4B-it-GGUF",
-        "mmproj": {
-          "path": "mmproj-F16.gguf"
-        },
-        "routerPreset": {
-          "ctx-size": "131072",
-          "image-min-tokens": "280",
-          "image-max-tokens": "280"
-        },
-        "chatBehavior": {
-          "combineSystemAndDeveloperMessages": true,
-          "samplingParametersJson": {
-            "temperature": {
-              "key": "temperature",
-              "label": "Temperature",
-              "description": "Controls randomness: lower is focused, higher is creative",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 0,
-              "exposedInGuideBuilder": true
-            },
-            "top_p": {
-              "key": "top_p",
-              "label": "Top P",
-              "description": "Nucleus sampling: controls diversity of token selection",
-              "min": 0.0,
-              "max": 1.0,
-              "step": 0.05,
-              "default": 0.95,
-              "displayOrder": 1,
-              "exposedInGuideBuilder": true
-            },
-            "top_k": {
-              "key": "top_k",
-              "label": "Top K",
-              "description": "Limits number of token candidates considered",
-              "min": 1,
-              "max": 100,
-              "step": 1,
-              "default": 64,
-              "displayOrder": 2,
-              "exposedInGuideBuilder": true
-            },
-            "presence_penalty": {
-              "key": "presence_penalty",
-              "label": "Presence Penalty",
-              "description": "Reduces repetition (disabled by default, use only if you see looping)",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 0.0,
-              "displayOrder": 3,
-              "exposedInGuideBuilder": false
-            },
-            "repetition_penalty": {
-              "key": "repetition_penalty",
-              "label": "Repetition Penalty",
-              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
-              "min": 1.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 4,
-              "exposedInGuideBuilder": false
-            }
-          },
-          "thinkingControlJson": {
-            "defaultChoice": "enabled",
-            "choiceActions": {
-              "none": [
-                {
-                  "target": "RequestField",
-                  "key": "reasoning_format",
-                  "value": "none"
-                }
-              ],
-              "enabled": [
-                {
-                  "target": "SystemMessagePrefix",
-                  "key": "",
-                  "value": "<|think|>\n"
-                }
-              ]
-            }
-          },
-          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
-          "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
-          }
-        }
-      },
-      "quantMetadata": {
-        "recommendedLabels": [
-          "UD-Q4_K_XL",
-          "UD-Q5_K_XL"
-        ],
-        "guidance": {
-          "UD-Q4_K_XL": {
-            "summary": "Curator default for Gemma 4 MoE."
-          },
-          "UD-Q5_K_XL": {
-            "summary": "Higher quality when memory allows."
-          }
-        }
-      },
-      "hardwareNotes": {
-        "summary": "Gemma 4 MoE with ~4B active parameters. Typical install: 24GB+ VRAM.",
-        "contextClass": "large"
-      }
-    },
-    {
-      "id": "gemma4-12b",
-      "display": {
-        "name": "Gemma 4 12B IT",
-        "description": "Mid-size Gemma 4 multimodal model.",
-        "labels": [
-          "Text",
-          "Vision",
-          "Reasoning",
-          "Tool use"
-        ],
-        "license": "Gemma",
-        "documentationUrl": "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF",
-        "recommendedQuantLabels": [
-          "UD-Q4_K_XL"
-        ]
-      },
-      "source": {
-        "repository": "unsloth/gemma-4-12b-it-GGUF",
-        "revision": "main"
-      },
-      "defaults": {
-        "catalogModelId": "gemma4-12b-local",
-        "routerModelId": "gemma-4-12b-it-GGUF",
-        "targetDirectory": "gemma-4-12b-it-GGUF",
-        "mmproj": {
-          "path": "mmproj-F16.gguf"
-        },
-        "routerPreset": {
-          "ctx-size": "131072",
-          "image-min-tokens": "280",
-          "image-max-tokens": "280"
-        },
-        "chatBehavior": {
-          "combineSystemAndDeveloperMessages": true,
-          "samplingParametersJson": {
-            "temperature": {
-              "key": "temperature",
-              "label": "Temperature",
-              "description": "Controls randomness: lower is focused, higher is creative",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 0,
-              "exposedInGuideBuilder": true
-            },
-            "top_p": {
-              "key": "top_p",
-              "label": "Top P",
-              "description": "Nucleus sampling: controls diversity of token selection",
-              "min": 0.0,
-              "max": 1.0,
-              "step": 0.05,
-              "default": 0.95,
-              "displayOrder": 1,
-              "exposedInGuideBuilder": true
-            },
-            "top_k": {
-              "key": "top_k",
-              "label": "Top K",
-              "description": "Limits number of token candidates considered",
-              "min": 1,
-              "max": 100,
-              "step": 1,
-              "default": 64,
-              "displayOrder": 2,
-              "exposedInGuideBuilder": true
-            },
-            "presence_penalty": {
-              "key": "presence_penalty",
-              "label": "Presence Penalty",
-              "description": "Reduces repetition (disabled by default, use only if you see looping)",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 0.0,
-              "displayOrder": 3,
-              "exposedInGuideBuilder": false
-            },
-            "repetition_penalty": {
-              "key": "repetition_penalty",
-              "label": "Repetition Penalty",
-              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
-              "min": 1.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 4,
-              "exposedInGuideBuilder": false
-            }
-          },
-          "thinkingControlJson": {
-            "defaultChoice": "enabled",
-            "choiceActions": {
-              "none": [
-                {
-                  "target": "RequestField",
-                  "key": "reasoning_format",
-                  "value": "none"
-                }
-              ],
-              "enabled": [
-                {
-                  "target": "SystemMessagePrefix",
-                  "key": "",
-                  "value": "<|think|>\n"
-                }
-              ]
-            }
-          },
-          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
-          "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
-          }
-        }
-      },
-      "quantMetadata": {
-        "recommendedLabels": [
-          "UD-Q4_K_XL",
-          "Q4_K_M"
-        ],
-        "guidance": {
-          "UD-Q4_K_XL": {
-            "summary": "Curator default for 12B Gemma 4."
-          },
-          "Q4_K_M": {
-            "summary": "Lower memory footprint."
-          }
-        }
-      },
-      "hardwareNotes": {
-        "summary": "Dense 12B vision model. Typical install: 16GB+ VRAM.",
-        "contextClass": "large"
-      }
-    },
-    {
-      "id": "gemma4-e4b",
-      "display": {
-        "name": "Gemma 4 E4B IT",
-        "description": "Compact Gemma 4 multimodal model. Audio label is display-only in v1.",
-        "labels": [
-          "Text",
-          "Vision",
-          "Reasoning",
-          "Tool use",
-          "Audio"
-        ],
-        "license": "Gemma",
-        "documentationUrl": "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF",
-        "recommendedQuantLabels": [
-          "UD-Q4_K_XL"
-        ]
-      },
-      "source": {
-        "repository": "unsloth/gemma-4-E4B-it-GGUF",
-        "revision": "main"
-      },
-      "defaults": {
-        "catalogModelId": "gemma4-e4b-local",
-        "routerModelId": "gemma-4-E4B-it-GGUF",
-        "targetDirectory": "gemma-4-E4B-it-GGUF",
-        "mmproj": {
-          "path": "mmproj-F16.gguf"
-        },
-        "routerPreset": {
-          "ctx-size": "65536",
-          "image-min-tokens": "280",
-          "image-max-tokens": "280"
-        },
-        "chatBehavior": {
-          "combineSystemAndDeveloperMessages": true,
-          "samplingParametersJson": {
-            "temperature": {
-              "key": "temperature",
-              "label": "Temperature",
-              "description": "Controls randomness: lower is focused, higher is creative",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 0,
-              "exposedInGuideBuilder": true
-            },
-            "top_p": {
-              "key": "top_p",
-              "label": "Top P",
-              "description": "Nucleus sampling: controls diversity of token selection",
-              "min": 0.0,
-              "max": 1.0,
-              "step": 0.05,
-              "default": 0.95,
-              "displayOrder": 1,
-              "exposedInGuideBuilder": true
-            },
-            "top_k": {
-              "key": "top_k",
-              "label": "Top K",
-              "description": "Limits number of token candidates considered",
-              "min": 1,
-              "max": 100,
-              "step": 1,
-              "default": 64,
-              "displayOrder": 2,
-              "exposedInGuideBuilder": true
-            },
-            "presence_penalty": {
-              "key": "presence_penalty",
-              "label": "Presence Penalty",
-              "description": "Reduces repetition (disabled by default, use only if you see looping)",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 0.0,
-              "displayOrder": 3,
-              "exposedInGuideBuilder": false
-            },
-            "repetition_penalty": {
-              "key": "repetition_penalty",
-              "label": "Repetition Penalty",
-              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
-              "min": 1.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 4,
-              "exposedInGuideBuilder": false
-            }
-          },
-          "thinkingControlJson": {
-            "defaultChoice": "enabled",
-            "choiceActions": {
-              "none": [
-                {
-                  "target": "RequestField",
-                  "key": "reasoning_format",
-                  "value": "none"
-                }
-              ],
-              "enabled": [
-                {
-                  "target": "SystemMessagePrefix",
-                  "key": "",
-                  "value": "<|think|>\n"
-                }
-              ]
-            }
-          },
-          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
-          "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
-          }
-        }
-      },
-      "quantMetadata": {
-        "recommendedLabels": [
-          "UD-Q4_K_XL",
-          "Q4_K_M"
-        ],
-        "guidance": {
-          "UD-Q4_K_XL": {
-            "summary": "Curator default for compact Gemma 4."
-          },
-          "Q4_K_M": {
-            "summary": "Lowest practical memory."
-          }
-        }
-      },
-      "hardwareNotes": {
-        "summary": "Compact Gemma 4 MoE. Typical install: 12GB+ VRAM.",
-        "contextClass": "compact"
-      }
-    },
-    {
       "id": "gpt-oss-20b",
       "display": {
         "name": "gpt-oss 20B",
@@ -2299,166 +2459,6 @@
       },
       "hardwareNotes": {
         "summary": "MoE coding model with ~3B active parameters. Typical install: 24GB+ VRAM.",
-        "contextClass": "large"
-      }
-    },
-    {
-      "id": "muse-glimmer-30b",
-      "display": {
-        "name": "Muse Glimmer 30B",
-        "description": "Meta Superintelligence Labs dense 30B vision model for local agentic and coding workflows.",
-        "labels": [
-          "Text",
-          "Vision",
-          "Reasoning",
-          "Tool use"
-        ],
-        "license": "Apache-2.0",
-        "documentationUrl": "https://huggingface.co/unsloth/Muse-Glimmer-30B-GGUF",
-        "recommendedQuantLabels": [
-          "UD-Q4_K_XL"
-        ]
-      },
-      "source": {
-        "repository": "unsloth/Muse-Glimmer-30B-GGUF",
-        "revision": "main"
-      },
-      "defaults": {
-        "catalogModelId": "muse-glimmer-30b-local",
-        "routerModelId": "Muse-Glimmer-30B-GGUF",
-        "targetDirectory": "Muse-Glimmer-30B-GGUF",
-        "mmproj": {
-          "path": "mmproj-BF16.gguf"
-        },
-        "routerPreset": {
-          "ctx-size": "131072",
-          "image-min-tokens": "1024",
-          "image-max-tokens": "4096"
-        },
-        "chatBehavior": {
-          "combineSystemAndDeveloperMessages": true,
-          "samplingParametersJson": {
-            "temperature": {
-              "key": "temperature",
-              "label": "Temperature",
-              "description": "Controls randomness: lower is focused, higher is creative",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 0,
-              "exposedInGuideBuilder": true
-            },
-            "top_p": {
-              "key": "top_p",
-              "label": "Top P",
-              "description": "Nucleus sampling: controls diversity of token selection",
-              "min": 0.0,
-              "max": 1.0,
-              "step": 0.05,
-              "default": 0.95,
-              "displayOrder": 1,
-              "exposedInGuideBuilder": true
-            },
-            "top_k": {
-              "key": "top_k",
-              "label": "Top K",
-              "description": "Limits number of token candidates considered",
-              "min": 1,
-              "max": 100,
-              "step": 1,
-              "default": 64,
-              "displayOrder": 2,
-              "exposedInGuideBuilder": true
-            },
-            "min_p": {
-              "key": "min_p",
-              "label": "Min P",
-              "description": "Minimum probability threshold for token selection",
-              "min": 0.0,
-              "max": 1.0,
-              "step": 0.01,
-              "default": 0.0,
-              "displayOrder": 3,
-              "exposedInGuideBuilder": false
-            },
-            "presence_penalty": {
-              "key": "presence_penalty",
-              "label": "Presence Penalty",
-              "description": "Reduces repetition (disabled by default, use only if you see looping)",
-              "min": 0.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 0.0,
-              "displayOrder": 4,
-              "exposedInGuideBuilder": false
-            },
-            "repetition_penalty": {
-              "key": "repetition_penalty",
-              "label": "Repetition Penalty",
-              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
-              "min": 1.0,
-              "max": 2.0,
-              "step": 0.1,
-              "default": 1.0,
-              "displayOrder": 5,
-              "exposedInGuideBuilder": false
-            }
-          },
-          "thinkingControlJson": {
-            "defaultChoice": "high",
-            "choiceActions": {
-              "low": [
-                {
-                  "target": "SystemMessagePrefix",
-                  "key": "",
-                  "value": "Reasoning strength: low\n"
-                }
-              ],
-              "medium": [
-                {
-                  "target": "SystemMessagePrefix",
-                  "key": "",
-                  "value": "Reasoning strength: medium\n"
-                }
-              ],
-              "high": [
-                {
-                  "target": "SystemMessagePrefix",
-                  "key": "",
-                  "value": "Reasoning strength: high\n"
-                }
-              ],
-              "xhigh": [
-                {
-                  "target": "SystemMessagePrefix",
-                  "key": "",
-                  "value": "Reasoning strength: xhigh\n"
-                }
-              ]
-            }
-          },
-          "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
-          }
-        }
-      },
-      "quantMetadata": {
-        "recommendedLabels": [
-          "UD-Q4_K_XL",
-          "UD-Q5_K_XL"
-        ],
-        "guidance": {
-          "UD-Q4_K_XL": {
-            "summary": "Curator default. Best quality/size balance on Unsloth Dynamic 2.0."
-          },
-          "UD-Q5_K_XL": {
-            "summary": "Higher quality when memory allows."
-          }
-        }
-      },
-      "hardwareNotes": {
-        "summary": "Dense ~30B vision model with a perception encoder. Typical install: 18GB+ RAM/VRAM at UD-Q4_K_XL.",
         "contextClass": "large"
       }
     }
