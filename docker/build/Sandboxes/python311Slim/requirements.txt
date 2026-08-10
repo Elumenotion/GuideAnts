@@ -12,7 +12,7 @@ camelot-py==0.10.1
 chardet==3.0.4
 cmudict==1.0.32
 countryinfo==0.1.2
-cryptography==48.0.1
+cryptography==50.0.0
 cssselect2==0.8.0
 databricks-sql-connector==0.9.1
 dnspython==2.7.0
@@ -38,7 +38,7 @@ geographiclib==1.52
 geopy==2.2.0
 graphviz==0.17
 gtts==2.2.3
-h2==4.3.0
+h2==4.4.1
 hpack==4.1.0
 html5lib==1.1
 httptools==0.6.4
@@ -134,7 +134,7 @@ tifffile==2025.3.13
 toml==0.10.2
 types-dataclasses==0.6.6
 types-python-dateutil==2.9.0.20241206
-ujson==5.12.1
+ujson==5.13.0
 uvicorn==0.19.0
 uvloop==0.21.0
 wand==0.6.13
@@ -145,5 +145,5 @@ wordcloud==1.9.2
 wsproto==1.2.0
 xlsxwriter==3.2.2
 xml-python==0.4.3
-yt-dlp==2026.6.9
+yt-dlp==2026.7.4
 zopfli==0.2.3.post1
