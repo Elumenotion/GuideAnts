@@ -1,2 +1,5 @@
-# Admin-managed apt packages.
-# Example smoke-test package: jq
+# SOX evidence skills: OCR and PDF tooling (global admin-managed apt packages)
+tesseract-ocr
+tesseract-ocr-eng
+ghostscript
+poppler-utils

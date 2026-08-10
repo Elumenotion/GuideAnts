@@ -67,7 +67,8 @@ numpy-financial==1.0.0
 odfpy==1.4.1
 openai>=2.44.0
 opencv-python==4.8.1.78
-openpyxl==3.0.10
+openpyxl==3.1.5
+ocrmypdf>=16.0.0,<18
 orjson==3.11.6
 oscrypto==1.3.0
 patsy==1.0.1
@@ -98,6 +99,7 @@ pymupdf==1.21.1
 pynacl==1.6.2
 pyopenssl==26.2.0
 pypandoc==1.6.3
+pypdf>=4.0.0,<6
 pypdf2==1.28.6
 pyphen==0.17.2
 pyshp==2.3.1
