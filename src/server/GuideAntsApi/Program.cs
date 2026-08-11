@@ -219,10 +219,6 @@ public class Program
             guideAntsSystemSeeder.SeedAsync().GetAwaiter().GetResult();
             LogPhase("GuideAntsSystemSeeder");
 
-            var runtimeProfileSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder>();
-            runtimeProfileSeeder.SeedAsync().GetAwaiter().GetResult();
-            LogPhase("RuntimeProfileSeeder");
-
             var localServiceAutoSelector = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector>();
             localServiceAutoSelector.AutoSelectAsync().GetAwaiter().GetResult();
             LogPhase("LocalServiceAutoSelector");

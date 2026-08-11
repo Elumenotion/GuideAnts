@@ -18,7 +18,6 @@ namespace GuideAntsApi.Tests.Services.LlamaCpp;
 public class NotebookModelRuntimeServiceTests
 {
     private Mock<ILlamaServerRuntimeClient> _mockLlamaClient = null!;
-    private Mock<IRuntimeProfileResolver> _mockRuntimeProfileResolver = null!;
     private Mock<IChatModelResolver> _mockChatModelResolver = null!;
     private Mock<ILocalAiStartupWarmupService> _mockLocalAiWarmupService = null!;
     private Mock<ILocalAiWarmupService> _mockLocalAiWarmup = null!;
@@ -33,7 +32,6 @@ public class NotebookModelRuntimeServiceTests
         ResetOperationState();
 
         _mockLlamaClient = new Mock<ILlamaServerRuntimeClient>();
-        _mockRuntimeProfileResolver = new Mock<IRuntimeProfileResolver>();
         _mockChatModelResolver = new Mock<IChatModelResolver>();
         _mockLocalAiWarmupService = new Mock<ILocalAiStartupWarmupService>();
         // Default: pass the entity id through unchanged (Direct), which preserves the
@@ -78,7 +76,6 @@ public class NotebookModelRuntimeServiceTests
         _service = new NotebookModelRuntimeService(
             _context,
             _mockLlamaClient.Object,
-            _mockRuntimeProfileResolver.Object,
             _cache,
             new LlamaRuntimeCoordinator(),
             _mockChatModelResolver.Object,
@@ -485,7 +482,6 @@ public class NotebookModelRuntimeServiceTests
         var serviceWithLimitedCache = new NotebookModelRuntimeService(
             _context,
             _mockLlamaClient.Object,
-            _mockRuntimeProfileResolver.Object,
             limitedCache,
             new LlamaRuntimeCoordinator(),
             _mockChatModelResolver.Object,

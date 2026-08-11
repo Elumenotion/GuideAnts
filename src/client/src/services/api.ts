@@ -11,13 +11,10 @@ import {
     AddModelResponse,
     SettingsModelDto,
     SettingsReadinessDto,
-    SettingsRuntimeProfileDto,
     SettingsSchemaDto,
     SettingsSectionDto,
     SettingsSectionSummaryDto,
-    CreateRuntimeProfileRequest,
     UpdateSettingsModelRequest,
-    UpdateRuntimeProfileRequest,
     UpdateSettingsSectionRequest,
     EmbeddingsRebuildResponse,
     LlamaRuntimeInventoryItemDto,
@@ -1406,29 +1403,6 @@ export const api = {
 
         deleteModel: (modelId: string) =>
             callApi<void>(`/settings/models/${encodeURIComponent(modelId)}`, {
-                method: 'DELETE',
-            }),
-
-        getRuntimeProfiles: () =>
-            callApi<SettingsRuntimeProfileDto[]>('/settings/runtime-profiles'),
-
-        getRuntimeProfile: (profileId: string) =>
-            callApi<SettingsRuntimeProfileDto>(`/settings/runtime-profiles/${encodeURIComponent(profileId)}`),
-
-        createRuntimeProfile: (request: CreateRuntimeProfileRequest) =>
-            callApi<SettingsRuntimeProfileDto>('/settings/runtime-profiles', {
-                method: 'POST',
-                body: JSON.stringify(request),
-            }),
-
-        updateRuntimeProfile: (profileId: string, request: UpdateRuntimeProfileRequest) =>
-            callApi<SettingsRuntimeProfileDto>(`/settings/runtime-profiles/${encodeURIComponent(profileId)}`, {
-                method: 'PUT',
-                body: JSON.stringify(request),
-            }),
-
-        deleteRuntimeProfile: (profileId: string) =>
-            callApi<void>(`/settings/runtime-profiles/${encodeURIComponent(profileId)}`, {
                 method: 'DELETE',
             }),
 

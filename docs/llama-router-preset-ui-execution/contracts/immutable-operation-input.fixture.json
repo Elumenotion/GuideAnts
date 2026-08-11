@@ -11,11 +11,16 @@
     "mmproj-F16.gguf"
   ],
   "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF",
-  "runtimeProfileId": "qwen3_6",
+  "targetDirectory": "Qwen3.6-35B-A3B-MTP-GGUF",
   "routerPreset": {
     "ctx-size": "131072",
     "image-min-tokens": "1024",
     "spec-type": "draft-mtp",
     "spec-draft-n-max": "2"
-  }
+  },
+  "samplingParametersJson": "{}",
+  "reasoningChoicesJson": ["medium"],
+  "thinkingControlJson": "{\"defaultChoice\":\"medium\",\"choiceActions\":{\"medium\":[]}}",
+  "requestFieldsWhenToolsPresentJson": "{\"parallel_tool_calls\":true}",
+  "combineSystemAndDeveloperMessages": true
 }

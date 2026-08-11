@@ -33,7 +33,7 @@ class LlamaSchemaTests(unittest.TestCase):
 
     def test_shipped_manifest_validates(self) -> None:
         validate_manifest_instance(self.manifest)
-        self.assertEqual(14, len(self.manifest["models"]))
+        self.assertEqual(15, len(self.manifest["models"]))
 
     def test_rejects_file_arrays_on_definition(self) -> None:
         bad = copy.deepcopy(self.manifest["models"][0])
@@ -94,6 +94,14 @@ class LlamaSchemaTests(unittest.TestCase):
         text_only["defaults"]["routerPreset"]["spec-type"] = "draft-mtp"
         text_only["defaults"]["routerPreset"]["spec-draft-n-max"] = "2"
         text_only["defaults"]["routerPreset"]["image-min-tokens"] = "1024"
+        with self.assertRaises(CatalogValidationError):
+            validate_manifest_instance(bad)
+
+
+    def test_rejects_companion_mmproj_destination_collision(self) -> None:
+        bad = copy.deepcopy(self.manifest)
+        muse = next(m for m in bad["models"] if m["id"] == "muse-glimmer-30b")
+        muse["defaults"]["companionArtifacts"] = [{"path": muse["defaults"]["mmproj"]["path"]}]
         with self.assertRaises(CatalogValidationError):
             validate_manifest_instance(bad)
 

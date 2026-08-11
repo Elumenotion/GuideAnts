@@ -1559,6 +1559,10 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<string>("CompanionArtifactsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("CreatedUtc")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime2")
@@ -2691,59 +2695,6 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("GuideId", "Active");
 
                     b.ToTable("PublishedGuides");
-                });
-
-            modelBuilder.Entity("GuideAntsApi.DataModel.Models.RuntimeProfile", b =>
-                {
-                    b.Property<string>("ProfileId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<bool>("CombineSystemAndDeveloperMessages")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime>("Created")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasDefaultValueSql("GETUTCDATE()");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(1024)
-                        .HasColumnType("nvarchar(1024)");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<string>("ProvidersJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("RequestFieldsWhenToolsPresentJson")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("nvarchar(max)")
-                        .HasDefaultValue("{}");
-
-                    b.Property<string>("SamplingParametersJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ThinkingControlJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ThoughtBlockPattern")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<DateTime?>("Updated")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("ProfileId");
-
-                    b.ToTable("RuntimeProfiles");
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.SemiStructuredProjectData", b =>

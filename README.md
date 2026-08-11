@@ -117,6 +117,7 @@ Dev checkouts without a release `images.env` use floating `:main` tags; release 
 - [Installer README](installer/README.md) – portable quick start, wizard, GPU/ROCm, mounts, updates
 - [Setup guide](docs/setup-guide.md) – installation and configuration
 - [Local AI setup guide](docs/local-ai-setup-guide.md) – wizard-driven fully local configuration (ASR, TTS, embeddings, image gen)
+- [Model chat behavior contract](docs/model-chat-behavior-contract.md) – **catalog row authority for all providers** (cloud + local); read before adding models
 - [Developer config guide](docs/developer-config-guide.md) – configuration reference for contributors
 - [Auth flow](docs/auth-flow.md) – authentication architecture
 - [Project and notebook files system](docs/project-and-notebook-files-system.md) – file and content management

@@ -30,7 +30,8 @@ public sealed class StubLlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
             RequestedRevision: catalogVersion ?? "main",
             ResolvedRevision: resolvedRevision ?? catalogVersion ?? "main",
             Quants: [],
-            Projector: null));
+            Projector: null,
+            Companions: []));
 
     public Task<LlamaAdminRouterEntriesResponseDto> GetRouterEntriesAsync(
         CancellationToken cancellationToken = default) =>

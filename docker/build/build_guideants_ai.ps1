@@ -288,6 +288,15 @@ switch ($Backend) {
     }
 }
 
+# Upstream llama.cpp server images copied into each backend's deps image.
+$llamaCppImageByBackend = @{
+    cpu    = 'ghcr.io/ggml-org/llama.cpp:server'
+    cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    rocm   = 'ghcr.io/ggml-org/llama.cpp:server-rocm'
+    slim   = 'ghcr.io/ggml-org/llama.cpp:server'
+    vulkan = 'ghcr.io/ggml-org/llama.cpp:server-vulkan'
+}
+
 # Build a unique tag per build, and also maintain a stable backend-specific latest tag.
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
@@ -403,6 +412,13 @@ try {
     if ($RebuildBase -or -not $depsExists) {
         if ($RebuildBase) {
             Write-Host "Rebuilding dependency image without cache..." -ForegroundColor Yellow
+            $llamaCppImage = $llamaCppImageByBackend[$Backend]
+            Write-Host "RebuildBase: pulling latest upstream llama.cpp image ($llamaCppImage)..." -ForegroundColor Yellow
+            docker pull $llamaCppImage
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Failed to pull upstream llama.cpp image '$llamaCppImage' for RebuildBase"
+                exit 1
+            }
         }
         else {
             Write-Host "Dependency image not found. Building $depsTag..." -ForegroundColor Cyan
@@ -411,6 +427,7 @@ try {
         $depsBuildArgs = @('buildx', 'build', '--load')
         if ($RebuildBase) {
             $depsBuildArgs += '--no-cache'
+            $depsBuildArgs += '--pull'
         }
         else {
             $depsBuildArgs += @(

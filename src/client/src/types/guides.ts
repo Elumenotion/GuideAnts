@@ -403,7 +403,6 @@ export interface CrewMemberLimitDto {
 // Catalog types
 export interface LocalRuntimeDescriptorDto {
   routerModelId: string;
-  runtimeProfileId: string;
   loadParams?: Record<string, unknown>;
 }
 

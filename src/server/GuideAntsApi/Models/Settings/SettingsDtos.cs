@@ -253,7 +253,6 @@ public sealed record AddModelInstallCuratedDto(
 public sealed record AddModelInstallDto(
     string Source,
     string? RouterModelId = null,
-    string? RuntimeProfileId = null,
     AddModelInstallHuggingFaceDto? HuggingFace = null,
     AddModelInstallExistingAliasDto? ExistingAlias = null,
     AddModelInstallCuratedDto? Curated = null,
@@ -281,41 +280,6 @@ public sealed record AddModelOperationDto(
 public sealed record AddModelResponse(
     string? OperationId,
     AddModelOperationDto AddOperation);
-
-public sealed record SettingsRuntimeProfileDto(
-    string ProfileId,
-    string DisplayName,
-    string? Description,
-    bool CombineSystemAndDeveloperMessages,
-    string? ThoughtBlockPattern,
-    string SamplingParametersJson,
-    string ThinkingControlJson,
-    string RequestFieldsWhenToolsPresentJson,
-    IReadOnlyList<string> Providers,
-    DateTime Created,
-    DateTime? Updated);
-
-public sealed record CreateRuntimeProfileRequest(
-    string ProfileId,
-    string DisplayName,
-    string? Description,
-    bool CombineSystemAndDeveloperMessages,
-    string? ThoughtBlockPattern,
-    string SamplingParametersJson,
-    string ThinkingControlJson,
-    string RequestFieldsWhenToolsPresentJson = "{}",
-    IReadOnlyList<string>? Providers = null);
-
-public sealed record UpdateRuntimeProfileRequest(
-    string ProfileId,
-    string DisplayName,
-    string? Description,
-    bool CombineSystemAndDeveloperMessages,
-    string? ThoughtBlockPattern,
-    string SamplingParametersJson,
-    string ThinkingControlJson,
-    string RequestFieldsWhenToolsPresentJson = "{}",
-    IReadOnlyList<string>? Providers = null);
 
 public sealed record EmbeddingsRebuildResponse(
     Guid JobId,
@@ -382,6 +346,7 @@ public sealed record ExactStartModelDownloadRequest(
     string ResolvedRevision,
     IReadOnlyList<string> ModelFiles,
     IReadOnlyList<string> MmprojFiles,
+    IReadOnlyList<string> CompanionFiles,
     string Alias,
     string TargetDirectory,
     IReadOnlyDictionary<string, string> Preset,
@@ -400,7 +365,6 @@ public sealed record StartModelDownloadRequest(
     // auto-registration; the operator can create the row manually via Settings.
     string? CatalogModelId = null,
     string? CatalogDisplayName = null,
-    string? CatalogRuntimeProfileId = null,
     string? CatalogDescription = null,
     bool? CatalogIsActive = null,
     int? CatalogDisplayOrder = null,

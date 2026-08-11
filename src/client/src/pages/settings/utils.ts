@@ -224,26 +224,6 @@ function normalizeDisplayOrder(value: string): number | undefined {
   return parsed;
 }
 
-export function parseRuntimeProfileId(runtimeConfigJson?: string): string {
-  if (!runtimeConfigJson) return '';
-  try {
-    const raw = JSON.parse(runtimeConfigJson) as Record<string, unknown>;
-    if (typeof raw.runtimeProfileId === 'string') {
-      return raw.runtimeProfileId;
-    }
-    if (typeof raw.RuntimeProfileId === 'string') {
-      return raw.RuntimeProfileId;
-    }
-    const key = Object.keys(raw).find((k) => k.toLowerCase() === 'runtimeprofileid');
-    if (key && typeof raw[key] === 'string') {
-      return raw[key] as string;
-    }
-    return '';
-  } catch {
-    return '';
-  }
-}
-
 export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): CanonicalLocalRuntimeConfig | null {
   if (!localRuntimeJson) {
     return null;
@@ -264,7 +244,6 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
     }
 
     const routerModelId = getCaseInsensitive(parsed, 'routerModelId');
-    const runtimeProfileId = getCaseInsensitive(parsed, 'runtimeProfileId');
     if (typeof routerModelId !== 'string') {
       return null;
     }
@@ -272,9 +251,6 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
     const normalized: CanonicalLocalRuntimeConfig = {
       routerModelId,
     };
-    if (typeof runtimeProfileId === 'string') {
-      normalized.runtimeProfileId = runtimeProfileId;
-    }
 
     const loadParams = getCaseInsensitive(parsed, 'loadParams');
     if (loadParams && typeof loadParams === 'object' && !Array.isArray(loadParams)) {

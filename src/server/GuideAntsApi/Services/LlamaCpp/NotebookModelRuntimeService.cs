@@ -19,7 +19,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
     private readonly ApplicationDbContext _context;
     private readonly ILlamaServerRuntimeClient _llamaClient;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly IMemoryCache _cache;
     private readonly ILlamaRuntimeCoordinator _coordinator;
     private readonly IChatModelResolver _chatModelResolver;
@@ -37,7 +36,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     public NotebookModelRuntimeService(
         ApplicationDbContext context,
         ILlamaServerRuntimeClient llamaClient,
-        IRuntimeProfileResolver runtimeProfileResolver,
         IMemoryCache cache,
         ILlamaRuntimeCoordinator coordinator,
         IChatModelResolver chatModelResolver,
@@ -47,7 +45,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     {
         _context = context;
         _llamaClient = llamaClient;
-        _runtimeProfileResolver = runtimeProfileResolver;
         _cache = cache;
         _coordinator = coordinator;
         _chatModelResolver = chatModelResolver;
@@ -692,7 +689,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     private ModelRuntimeConfigDto ToLocalRuntimeDescriptor(string modelId, string runtimeConfigJson)
     {
         var parsed = LocalRuntimeConfigurationParser.Parse(modelId, runtimeConfigJson);
-        return new ModelRuntimeConfigDto(parsed.RouterModelId, null);
+        return new ModelRuntimeConfigDto(parsed.RouterModelId);
     }
 }
 
