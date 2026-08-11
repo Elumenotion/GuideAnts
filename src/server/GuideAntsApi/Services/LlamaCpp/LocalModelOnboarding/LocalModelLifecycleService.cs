@@ -154,7 +154,8 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
         var routerPreset = RouterPresetValidator.ValidateAndNormalize(definition.Defaults.RouterPreset);
         var modelFiles = quant.Files.Select(f => f.Path).ToList();
         var mmprojFiles = quants.Projector is null ? Array.Empty<string>() : new[] { quants.Projector.Path };
-        var companionFiles = quants.Companions.Select(c => c.Path).ToList();
+        var companions = quants.Companions ?? Array.Empty<LlamaProjectorArtifactDto>();
+        var companionFiles = companions.Select(c => c.Path).ToList();
 
         var oldPaths = InstallationArtifactRecords.Parse(installation.ModelArtifactsJson)
             .Concat(InstallationArtifactRecords.Parse(installation.ProjectorArtifactsJson))
@@ -181,7 +182,7 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             TargetDirectory: installation.TargetDirectory!,
             RouterPreset: routerPreset,
             ObsoleteRepositoryPaths: obsoletePaths,
-            ArtifactMetadata: BuildArtifactMetadata(quant, quants.Projector, quants.Companions));
+            ArtifactMetadata: BuildArtifactMetadata(quant, quants.Projector, companions));
 
         var wasLoaded = await CaptureLoadedStateAsync(installation.RouterModelId!, cancellationToken).ConfigureAwait(false);
         var operation = await _operationService

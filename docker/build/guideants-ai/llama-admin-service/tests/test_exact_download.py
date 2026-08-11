@@ -86,12 +86,24 @@ class ExactDownloadTests(unittest.TestCase):
                 digest=None,
             )
         )
-        self.assertFalse(
+        # operationId is audit-only; identity match ignores it across retries.
+        self.assertTrue(
             resume_metadata_matches(
                 meta_path,
                 operation_id="op-2",
                 repository="org/repo",
                 resolved_revision="abc",
+                repository_path="a.gguf",
+                expected_size=10,
+                digest=None,
+            )
+        )
+        self.assertFalse(
+            resume_metadata_matches(
+                meta_path,
+                operation_id="op-1",
+                repository="org/repo",
+                resolved_revision="def",
                 repository_path="a.gguf",
                 expected_size=10,
                 digest=None,

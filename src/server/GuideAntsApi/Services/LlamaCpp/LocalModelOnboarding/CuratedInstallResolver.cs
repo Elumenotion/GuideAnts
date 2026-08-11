@@ -262,9 +262,10 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
         var mmprojFiles = quantsAtCommit.Projector is null
             ? Array.Empty<string>()
             : new[] { quantsAtCommit.Projector.Path };
-        var companionFiles = quantsAtCommit.Companions.Select(c => c.Path).ToList();
+        var companions = quantsAtCommit.Companions ?? Array.Empty<LlamaProjectorArtifactDto>();
+        var companionFiles = companions.Select(c => c.Path).ToList();
 
-        var artifactMetadata = BuildArtifactMetadata(quant, quantsAtCommit.Projector, quantsAtCommit.Companions);
+        var artifactMetadata = BuildArtifactMetadata(quant, quantsAtCommit.Projector, companions);
 
         var catalogModelId = string.IsNullOrWhiteSpace(request.Catalog.ModelId)
             ? defaults.CatalogModelId.Trim()
