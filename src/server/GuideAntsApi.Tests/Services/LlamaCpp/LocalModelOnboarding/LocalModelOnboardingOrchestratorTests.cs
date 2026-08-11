@@ -20,7 +20,6 @@ public class LocalModelOnboardingOrchestratorTests
     public async Task OnboardAsync_ExistingAlias_ReturnsSyncResult()
     {
         var settingsService = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>(MockBehavior.Strict);
         var downloadService = new Mock<IHuggingFaceModelDownloadService>(MockBehavior.Strict);
         CreateSettingsModelRequest? createRequest = null;
 
@@ -58,7 +57,6 @@ public class LocalModelOnboardingOrchestratorTests
         await using var db = CreateDbContext();
         var orchestrator = CreateOrchestrator(
             settingsService.Object,
-            runtimeProfileResolver.Object,
             downloadService.Object,
             adminClient: adminClient.Object,
             db: db);
@@ -72,7 +70,6 @@ public class LocalModelOnboardingOrchestratorTests
         result.AddOperation.Kind.Should().Be("sync");
         result.AddOperation.Status.Should().Be("completed");
         settingsService.Verify(x => x.CreateModelAsync(It.IsAny<CreateSettingsModelRequest>(), It.IsAny<CancellationToken>()), Times.Once);
-        runtimeProfileResolver.Verify(x => x.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         createRequest!.ThinkingControlJson.Should().Be("""{"defaultChoice":"medium","choiceActions":{}}""");
         createRequest.CombineSystemAndDeveloperMessages.Should().BeFalse();
         downloadService.Verify(x => x.StartDownloadAsync(It.IsAny<StartModelDownloadRequest>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -83,12 +80,7 @@ public class LocalModelOnboardingOrchestratorTests
     public async Task OnboardAsync_HuggingFace_ReturnsAsyncResult()
     {
         var settingsService = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>(MockBehavior.Strict);
         var downloadService = new Mock<IHuggingFaceModelDownloadService>(MockBehavior.Strict);
-
-        runtimeProfileResolver
-            .Setup(x => x.ResolveAsync("qwen3_6", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateRuntimeProfile());
 
         downloadService
             .Setup(x => x.StartDownloadAsync(It.IsAny<StartModelDownloadRequest>(), It.IsAny<CancellationToken>()))
@@ -102,7 +94,6 @@ public class LocalModelOnboardingOrchestratorTests
 
         var orchestrator = CreateOrchestrator(
             settingsService.Object,
-            runtimeProfileResolver.Object,
             downloadService.Object);
 
         var request = CreateLocalRequest(LocalModelInstallSources.HuggingFace);
@@ -120,12 +111,7 @@ public class LocalModelOnboardingOrchestratorTests
     public async Task OnboardAsync_HuggingFaceConflictOperation_IsReused()
     {
         var settingsService = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>(MockBehavior.Strict);
         var downloadService = new Mock<IHuggingFaceModelDownloadService>(MockBehavior.Strict);
-
-        runtimeProfileResolver
-            .Setup(x => x.ResolveAsync("qwen3_6", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateRuntimeProfile());
 
         downloadService
             .Setup(x => x.StartDownloadAsync(It.IsAny<StartModelDownloadRequest>(), It.IsAny<CancellationToken>()))
@@ -139,7 +125,6 @@ public class LocalModelOnboardingOrchestratorTests
 
         var orchestrator = CreateOrchestrator(
             settingsService.Object,
-            runtimeProfileResolver.Object,
             downloadService.Object);
 
         var request = CreateLocalRequest(LocalModelInstallSources.HuggingFace);
@@ -155,7 +140,6 @@ public class LocalModelOnboardingOrchestratorTests
     public async Task GetOperationStatusAsync_LegacyDownload_DelegatesToDownloadService()
     {
         var settingsService = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>(MockBehavior.Strict);
         var downloadService = new Mock<IHuggingFaceModelDownloadService>(MockBehavior.Strict);
 
         downloadService
@@ -170,7 +154,6 @@ public class LocalModelOnboardingOrchestratorTests
 
         var orchestrator = CreateOrchestrator(
             settingsService.Object,
-            runtimeProfileResolver.Object,
             downloadService.Object);
 
         var op = await orchestrator.GetOperationStatusAsync("op-123", CancellationToken.None);
@@ -182,7 +165,6 @@ public class LocalModelOnboardingOrchestratorTests
 
     private static LocalModelOnboardingOrchestrator CreateOrchestrator(
         IApplicationSettingsService settingsService,
-        IRuntimeProfileResolver runtimeProfileResolver,
         IHuggingFaceModelDownloadService downloadService,
         ICuratedInstallResolver? curatedInstallResolver = null,
         ILocalModelOperationService? operationService = null,
@@ -192,7 +174,6 @@ public class LocalModelOnboardingOrchestratorTests
     {
         return new LocalModelOnboardingOrchestrator(
             settingsService,
-            runtimeProfileResolver,
             downloadService,
             curatedInstallResolver ?? new Mock<ICuratedInstallResolver>(MockBehavior.Strict).Object,
             operationService ?? new Mock<ILocalModelOperationService>(MockBehavior.Strict).Object,
@@ -220,23 +201,6 @@ public class LocalModelOnboardingOrchestratorTests
         return new ApplicationDbContext(options);
     }
 
-    private static RuntimeProfileData CreateRuntimeProfile()
-    {
-        return new RuntimeProfileData(
-            ProfileId: "qwen3_6",
-            CombineSystemAndDeveloperMessages: true,
-            ThoughtBlockPattern: null,
-            SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
-            ThinkingControl: new ThinkingControl(
-                "medium",
-                new Dictionary<string, IReadOnlyList<ThinkingAction>>
-                {
-                    ["minimal"] = Array.Empty<ThinkingAction>(),
-                    ["medium"] = Array.Empty<ThinkingAction>(),
-                }),
-            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>());
-    }
-
     private static AddModelRequest CreateLocalRequest(string source)
     {
         return new AddModelRequest(
@@ -251,9 +215,6 @@ public class LocalModelOnboardingOrchestratorTests
             Install: new AddModelInstallDto(
                 Source: source,
                 RouterModelId: "qwen-local",
-                RuntimeProfileId: string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
-                    ? "qwen3_6"
-                    : null,
                 HuggingFace: string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
                     ? new AddModelInstallHuggingFaceDto(
                         Repository: "unsloth/Qwen3.6-9B-GGUF",

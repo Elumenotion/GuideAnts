@@ -8,10 +8,17 @@
       "display": {
         "name": "Qwen 3.6 35B A3B",
         "description": "Primary curated local model. Vision, reasoning, and tool use.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use"],
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
         "license": "Apache-2.0",
         "documentationUrl": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"],
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ],
         "primaryRecommendation": true
       },
       "source": {
@@ -21,20 +28,171 @@
       "defaults": {
         "catalogModelId": "qwen3.6-35b-a3b-local",
         "routerModelId": "Qwen3.6-35B-A3B-GGUF",
-        "runtimeProfileId": "qwen3_6",
         "targetDirectory": "Qwen3.6-35B-A3B-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
         "routerPreset": {
           "ctx-size": "131072",
           "image-min-tokens": "1024"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.7,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.8,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (0=off, 1.5 recommended for general use, may reduce quality at higher values)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.5,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": true
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "medium",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                },
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 1024
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "high": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 8192
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "UD-Q5_K_XL", "Q4_K_M"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL",
+          "Q4_K_M"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default. Best quality/size balance on Unsloth Dynamic 2.0." },
-          "UD-Q5_K_XL": { "summary": "Higher quality when memory allows." },
-          "Q4_K_M": { "summary": "Lower memory footprint with acceptable quality." }
+          "UD-Q4_K_XL": {
+            "summary": "Curator default. Best quality/size balance on Unsloth Dynamic 2.0."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when memory allows."
+          },
+          "Q4_K_M": {
+            "summary": "Lower memory footprint with acceptable quality."
+          }
         }
       },
       "hardwareNotes": {
@@ -47,10 +205,17 @@
       "display": {
         "name": "Qwen 3.6 27B",
         "description": "Dense Qwen 3.6 model for single-GPU installs with vision support.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use"],
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
         "license": "Apache-2.0",
         "documentationUrl": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"]
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
       },
       "source": {
         "repository": "unsloth/Qwen3.6-27B-GGUF",
@@ -59,20 +224,171 @@
       "defaults": {
         "catalogModelId": "qwen3.6-27b-local",
         "routerModelId": "Qwen3.6-27B-GGUF",
-        "runtimeProfileId": "qwen3_6",
         "targetDirectory": "Qwen3.6-27B-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
         "routerPreset": {
           "ctx-size": "131072",
           "image-min-tokens": "1024"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.7,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.8,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (0=off, 1.5 recommended for general use, may reduce quality at higher values)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.5,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": true
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "medium",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                },
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 1024
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "high": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 8192
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "UD-Q5_K_XL", "Q4_K_M"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL",
+          "Q4_K_M"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default for dense 27B installs." },
-          "UD-Q5_K_XL": { "summary": "Higher quality when VRAM allows." },
-          "Q4_K_M": { "summary": "Practical minimum for 24GB class GPUs." }
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for dense 27B installs."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when VRAM allows."
+          },
+          "Q4_K_M": {
+            "summary": "Practical minimum for 24GB class GPUs."
+          }
         }
       },
       "hardwareNotes": {
@@ -85,7 +401,13 @@
       "display": {
         "name": "Qwen 3.6 35B A3B (MTP)",
         "description": "Faster inference with llama.cpp draft-mtp and vision support.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use", "MTP"],
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use",
+          "MTP"
+        ],
         "license": "Apache-2.0",
         "documentationUrl": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
       },
@@ -96,20 +418,165 @@
       "defaults": {
         "catalogModelId": "qwen3.6-35b-a3b-mtp-local",
         "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF",
-        "runtimeProfileId": "qwen3_6",
         "targetDirectory": "Qwen3.6-35B-A3B-MTP-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
         "routerPreset": {
           "ctx-size": "131072",
           "image-min-tokens": "1024",
           "spec-type": "draft-mtp",
           "spec-draft-n-max": "2"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.7,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.8,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (0=off, 1.5 recommended for general use, may reduce quality at higher values)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.5,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": true
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "medium",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                },
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 1024
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "high": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 8192
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Unsloth-recommended Dynamic quant for MTP repos." }
+          "UD-Q4_K_XL": {
+            "summary": "Unsloth-recommended Dynamic quant for MTP repos."
+          }
         }
       },
       "hardwareNotes": {
@@ -122,7 +589,13 @@
       "display": {
         "name": "Qwen 3.6 27B (MTP)",
         "description": "Dense Qwen 3.6 MTP variant with draft-mtp and vision support.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use", "MTP"],
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use",
+          "MTP"
+        ],
         "license": "Apache-2.0",
         "documentationUrl": "https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF"
       },
@@ -133,20 +606,165 @@
       "defaults": {
         "catalogModelId": "qwen3.6-27b-mtp-local",
         "routerModelId": "Qwen3.6-27B-MTP-GGUF",
-        "runtimeProfileId": "qwen3_6",
         "targetDirectory": "Qwen3.6-27B-MTP-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
         "routerPreset": {
           "ctx-size": "131072",
           "image-min-tokens": "1024",
           "spec-type": "draft-mtp",
           "spec-draft-n-max": "2"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.7,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.8,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (0=off, 1.5 recommended for general use, may reduce quality at higher values)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.5,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": true
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "medium",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                },
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 1024
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "high": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 8192
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Recommended Dynamic quant for 27B MTP." }
+          "UD-Q4_K_XL": {
+            "summary": "Recommended Dynamic quant for 27B MTP."
+          }
         }
       },
       "hardwareNotes": {
@@ -155,116 +773,168 @@
       }
     },
     {
-      "id": "qwen3.5-35b-a3b",
+      "id": "muse-glimmer-30b",
       "display": {
-        "name": "Qwen 3.5 35B A3B",
-        "description": "Qwen 3.5 MoE with vision, reasoning, and tool use.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use"],
+        "name": "Muse Glimmer 30B",
+        "description": "Meta Superintelligence Labs dense 30B vision model for local agentic and coding workflows.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
         "license": "Apache-2.0",
-        "documentationUrl": "https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"]
+        "documentationUrl": "https://huggingface.co/unsloth/Muse-Glimmer-30B-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
       },
       "source": {
-        "repository": "unsloth/Qwen3.5-35B-A3B-GGUF",
+        "repository": "unsloth/Muse-Glimmer-30B-GGUF",
         "revision": "main"
       },
       "defaults": {
-        "catalogModelId": "qwen3.5-35b-a3b-local",
-        "routerModelId": "Qwen3.5-35B-A3B-GGUF",
-        "runtimeProfileId": "qwen3_5",
-        "targetDirectory": "Qwen3.5-35B-A3B-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
+        "catalogModelId": "muse-glimmer-30b-local",
+        "routerModelId": "Muse-Glimmer-30B-GGUF",
+        "targetDirectory": "Muse-Glimmer-30B-GGUF",
+        "mmproj": {
+          "path": "mmproj-Muse-Glimmer-30B-BF16.gguf"
+        },
+        "companionArtifacts": [
+          {
+            "path": "dflash-kquant.gguf"
+          }
+        ],
         "routerPreset": {
           "ctx-size": "131072",
-          "image-min-tokens": "1024"
+          "image-min-tokens": "1024",
+          "image-max-tokens": "4096"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "high",
+            "choiceActions": {
+              "low": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "Reasoning strength: low\n"
+                }
+              ],
+              "medium": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "Reasoning strength: medium\n"
+                }
+              ],
+              "high": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "Reasoning strength: high\n"
+                }
+              ],
+              "xhigh": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "Reasoning strength: xhigh\n"
+                }
+              ]
+            }
+          },
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "UD-Q5_K_XL", "Q4_K_M"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default for Qwen 3.5 MoE." },
-          "UD-Q5_K_XL": { "summary": "Higher quality when memory allows." },
-          "Q4_K_M": { "summary": "Lower memory footprint." }
+          "UD-Q4_K_XL": {
+            "summary": "Curator default. Best quality/size balance on Unsloth Dynamic 2.0."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when memory allows."
+          }
         }
       },
       "hardwareNotes": {
-        "summary": "MoE with active parameters similar to 3B per token. Typical install: 24GB+ VRAM.",
+        "summary": "Dense ~30B vision model with a perception encoder. Typical install: 18GB+ RAM/VRAM at UD-Q4_K_XL.",
         "contextClass": "large"
-      }
-    },
-    {
-      "id": "qwen3.5-27b",
-      "display": {
-        "name": "Qwen 3.5 27B",
-        "description": "Dense Qwen 3.5 model with vision support.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use"],
-        "license": "Apache-2.0",
-        "documentationUrl": "https://huggingface.co/unsloth/Qwen3.5-27B-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"]
-      },
-      "source": {
-        "repository": "unsloth/Qwen3.5-27B-GGUF",
-        "revision": "main"
-      },
-      "defaults": {
-        "catalogModelId": "qwen3.5-27b-local",
-        "routerModelId": "Qwen3.5-27B-GGUF",
-        "runtimeProfileId": "qwen3_5",
-        "targetDirectory": "Qwen3.5-27B-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
-        "routerPreset": {
-          "ctx-size": "131072",
-          "image-min-tokens": "1024"
-        }
-      },
-      "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "UD-Q5_K_XL", "Q4_K_M"],
-        "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default for dense 27B." },
-          "UD-Q5_K_XL": { "summary": "Higher quality when VRAM allows." },
-          "Q4_K_M": { "summary": "Practical minimum for 24GB class GPUs." }
-        }
-      },
-      "hardwareNotes": {
-        "summary": "Dense 27B vision model. Typical install: 24GB+ VRAM at UD-Q4_K_XL.",
-        "contextClass": "large"
-      }
-    },
-    {
-      "id": "qwen3.5-9b",
-      "display": {
-        "name": "Qwen 3.5 9B",
-        "description": "Minimum viable dev and smoke-test model with vision.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use"],
-        "license": "Apache-2.0",
-        "documentationUrl": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"]
-      },
-      "source": {
-        "repository": "unsloth/Qwen3.5-9B-GGUF",
-        "revision": "main"
-      },
-      "defaults": {
-        "catalogModelId": "qwen3.5-9b-local",
-        "routerModelId": "Qwen3.5-9B-GGUF",
-        "runtimeProfileId": "qwen3_5",
-        "targetDirectory": "Qwen3.5-9B-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
-        "routerPreset": {
-          "ctx-size": "65536",
-          "image-min-tokens": "1024"
-        }
-      },
-      "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "Q4_K_M"],
-        "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default for compact installs." },
-          "Q4_K_M": { "summary": "Lowest practical memory for smoke tests." }
-        }
-      },
-      "hardwareNotes": {
-        "summary": "Compact vision model for dev and CI smoke tests. Typical install: 12GB+ VRAM.",
-        "contextClass": "compact"
       }
     },
     {
@@ -272,10 +942,17 @@
       "display": {
         "name": "Gemma 4 31B IT QAT",
         "description": "Primary Google multimodal recommendation for local Gemma 4.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use"],
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
         "license": "Gemma",
         "documentationUrl": "https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"],
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ],
         "primaryRecommendation": true
       },
       "source": {
@@ -285,20 +962,111 @@
       "defaults": {
         "catalogModelId": "gemma4-31b-local",
         "routerModelId": "gemma-4-31B-it-qat-GGUF",
-        "runtimeProfileId": "gemma4",
         "targetDirectory": "gemma-4-31B-it-qat-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
         "routerPreset": {
           "ctx-size": "131072",
           "image-min-tokens": "280",
           "image-max-tokens": "280"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "enabled",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "<|think|>\n"
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "UD-Q5_K_XL"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default for Gemma 4 31B QAT." },
-          "UD-Q5_K_XL": { "summary": "Higher quality when memory allows." }
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for Gemma 4 31B QAT."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when memory allows."
+          }
         }
       },
       "hardwareNotes": {
@@ -311,10 +1079,17 @@
       "display": {
         "name": "Gemma 4 26B A4B IT",
         "description": "MoE sweet spot for Gemma 4 multimodal workloads.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use"],
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
         "license": "Gemma",
         "documentationUrl": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"]
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
       },
       "source": {
         "repository": "unsloth/gemma-4-26B-A4B-it-GGUF",
@@ -323,20 +1098,111 @@
       "defaults": {
         "catalogModelId": "gemma4-26b-a4b-local",
         "routerModelId": "gemma-4-26B-A4B-it-GGUF",
-        "runtimeProfileId": "gemma4",
         "targetDirectory": "gemma-4-26B-A4B-it-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
         "routerPreset": {
           "ctx-size": "131072",
           "image-min-tokens": "280",
           "image-max-tokens": "280"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "enabled",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "<|think|>\n"
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "UD-Q5_K_XL"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default for Gemma 4 MoE." },
-          "UD-Q5_K_XL": { "summary": "Higher quality when memory allows." }
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for Gemma 4 MoE."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when memory allows."
+          }
         }
       },
       "hardwareNotes": {
@@ -349,10 +1215,17 @@
       "display": {
         "name": "Gemma 4 12B IT",
         "description": "Mid-size Gemma 4 multimodal model.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use"],
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
         "license": "Gemma",
         "documentationUrl": "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"]
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
       },
       "source": {
         "repository": "unsloth/gemma-4-12b-it-GGUF",
@@ -361,20 +1234,111 @@
       "defaults": {
         "catalogModelId": "gemma4-12b-local",
         "routerModelId": "gemma-4-12b-it-GGUF",
-        "runtimeProfileId": "gemma4",
         "targetDirectory": "gemma-4-12b-it-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
         "routerPreset": {
           "ctx-size": "131072",
           "image-min-tokens": "280",
           "image-max-tokens": "280"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "enabled",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "<|think|>\n"
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "Q4_K_M"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "Q4_K_M"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default for 12B Gemma 4." },
-          "Q4_K_M": { "summary": "Lower memory footprint." }
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for 12B Gemma 4."
+          },
+          "Q4_K_M": {
+            "summary": "Lower memory footprint."
+          }
         }
       },
       "hardwareNotes": {
@@ -387,10 +1351,18 @@
       "display": {
         "name": "Gemma 4 E4B IT",
         "description": "Compact Gemma 4 multimodal model. Audio label is display-only in v1.",
-        "labels": ["Text", "Vision", "Reasoning", "Tool use", "Audio"],
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use",
+          "Audio"
+        ],
         "license": "Gemma",
         "documentationUrl": "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"]
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
       },
       "source": {
         "repository": "unsloth/gemma-4-E4B-it-GGUF",
@@ -399,20 +1371,111 @@
       "defaults": {
         "catalogModelId": "gemma4-e4b-local",
         "routerModelId": "gemma-4-E4B-it-GGUF",
-        "runtimeProfileId": "gemma4",
         "targetDirectory": "gemma-4-E4B-it-GGUF",
-        "mmproj": { "path": "mmproj-F16.gguf" },
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
         "routerPreset": {
           "ctx-size": "65536",
           "image-min-tokens": "280",
           "image-max-tokens": "280"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 64,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (disabled by default, use only if you see looping)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled, use only if you see looping)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "enabled",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "SystemMessagePrefix",
+                  "key": "",
+                  "value": "<|think|>\n"
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "Q4_K_M"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "Q4_K_M"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default for compact Gemma 4." },
-          "Q4_K_M": { "summary": "Lowest practical memory." }
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for compact Gemma 4."
+          },
+          "Q4_K_M": {
+            "summary": "Lowest practical memory."
+          }
         }
       },
       "hardwareNotes": {
@@ -421,14 +1484,603 @@
       }
     },
     {
+      "id": "qwen3.5-35b-a3b",
+      "display": {
+        "name": "Qwen 3.5 35B A3B",
+        "description": "Qwen 3.5 MoE with vision, reasoning, and tool use.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
+        "license": "Apache-2.0",
+        "documentationUrl": "https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
+      },
+      "source": {
+        "repository": "unsloth/Qwen3.5-35B-A3B-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "qwen3.5-35b-a3b-local",
+        "routerModelId": "Qwen3.5-35B-A3B-GGUF",
+        "targetDirectory": "Qwen3.5-35B-A3B-GGUF",
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
+        "routerPreset": {
+          "ctx-size": "131072",
+          "image-min-tokens": "1024"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.7,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.8,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (0=off, 1.5 recommended for general use, may reduce quality at higher values)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.5,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": true
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "medium",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                },
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 1024
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "high": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 8192
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL",
+          "Q4_K_M"
+        ],
+        "guidance": {
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for Qwen 3.5 MoE."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when memory allows."
+          },
+          "Q4_K_M": {
+            "summary": "Lower memory footprint."
+          }
+        }
+      },
+      "hardwareNotes": {
+        "summary": "MoE with active parameters similar to 3B per token. Typical install: 24GB+ VRAM.",
+        "contextClass": "large"
+      }
+    },
+    {
+      "id": "qwen3.5-27b",
+      "display": {
+        "name": "Qwen 3.5 27B",
+        "description": "Dense Qwen 3.5 model with vision support.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
+        "license": "Apache-2.0",
+        "documentationUrl": "https://huggingface.co/unsloth/Qwen3.5-27B-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
+      },
+      "source": {
+        "repository": "unsloth/Qwen3.5-27B-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "qwen3.5-27b-local",
+        "routerModelId": "Qwen3.5-27B-GGUF",
+        "targetDirectory": "Qwen3.5-27B-GGUF",
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
+        "routerPreset": {
+          "ctx-size": "131072",
+          "image-min-tokens": "1024"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.7,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.8,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (0=off, 1.5 recommended for general use, may reduce quality at higher values)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.5,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": true
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "medium",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                },
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 1024
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "high": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 8192
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL",
+          "Q4_K_M"
+        ],
+        "guidance": {
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for dense 27B."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when VRAM allows."
+          },
+          "Q4_K_M": {
+            "summary": "Practical minimum for 24GB class GPUs."
+          }
+        }
+      },
+      "hardwareNotes": {
+        "summary": "Dense 27B vision model. Typical install: 24GB+ VRAM at UD-Q4_K_XL.",
+        "contextClass": "large"
+      }
+    },
+    {
+      "id": "qwen3.5-9b",
+      "display": {
+        "name": "Qwen 3.5 9B",
+        "description": "Minimum viable dev and smoke-test model with vision.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use"
+        ],
+        "license": "Apache-2.0",
+        "documentationUrl": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
+      },
+      "source": {
+        "repository": "unsloth/Qwen3.5-9B-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "qwen3.5-9b-local",
+        "routerModelId": "Qwen3.5-9B-GGUF",
+        "targetDirectory": "Qwen3.5-9B-GGUF",
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
+        "routerPreset": {
+          "ctx-size": "65536",
+          "image-min-tokens": "1024"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.7,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.8,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (0=off, 1.5 recommended for general use, may reduce quality at higher values)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.5,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": true
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "medium",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                },
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 1024
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "high": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 8192
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "Q4_K_M"
+        ],
+        "guidance": {
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for compact installs."
+          },
+          "Q4_K_M": {
+            "summary": "Lowest practical memory for smoke tests."
+          }
+        }
+      },
+      "hardwareNotes": {
+        "summary": "Compact vision model for dev and CI smoke tests. Typical install: 12GB+ VRAM.",
+        "contextClass": "compact"
+      }
+    },
+    {
       "id": "gpt-oss-20b",
       "display": {
         "name": "gpt-oss 20B",
         "description": "OpenAI gpt-oss reasoning model via official llama.cpp GGUF conversion.",
-        "labels": ["Reasoning", "Tool use"],
+        "labels": [
+          "Reasoning",
+          "Tool use"
+        ],
         "license": "Apache-2.0",
         "documentationUrl": "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF",
-        "recommendedQuantLabels": ["Q4_K_M"]
+        "recommendedQuantLabels": [
+          "Q4_K_M"
+        ]
       },
       "source": {
         "repository": "ggml-org/gpt-oss-20b-GGUF",
@@ -437,19 +2089,84 @@
       "defaults": {
         "catalogModelId": "gpt-oss-20b-local",
         "routerModelId": "gpt-oss-20b-GGUF",
-        "runtimeProfileId": "gpt_oss",
         "targetDirectory": "gpt-oss-20b-GGUF",
         "mmproj": null,
         "routerPreset": {
           "ctx-size": "131072"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": false,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 1.0,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "medium",
+            "choiceActions": {
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.reasoning_effort",
+                  "value": "low"
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.reasoning_effort",
+                  "value": "medium"
+                }
+              ],
+              "high": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.reasoning_effort",
+                  "value": "high"
+                }
+              ]
+            }
+          },
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["Q4_K_M", "Q5_K_M", "Q8_0"],
+        "recommendedLabels": [
+          "Q4_K_M",
+          "Q5_K_M",
+          "Q8_0"
+        ],
         "guidance": {
-          "Q4_K_M": { "summary": "Curator default for gpt-oss 20B." },
-          "Q5_K_M": { "summary": "Higher quality when memory allows." },
-          "Q8_0": { "summary": "Near-full quality; largest practical install." }
+          "Q4_K_M": {
+            "summary": "Curator default for gpt-oss 20B."
+          },
+          "Q5_K_M": {
+            "summary": "Higher quality when memory allows."
+          },
+          "Q8_0": {
+            "summary": "Near-full quality; largest practical install."
+          }
         }
       },
       "hardwareNotes": {
@@ -462,10 +2179,15 @@
       "display": {
         "name": "DeepSeek R1 Distill Qwen 14B",
         "description": "Distilled reasoning model with redacted_thinking blocks.",
-        "labels": ["Reasoning", "Math"],
+        "labels": [
+          "Reasoning",
+          "Math"
+        ],
         "license": "MIT",
         "documentationUrl": "https://huggingface.co/unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF",
-        "recommendedQuantLabels": ["Q4_K_M"]
+        "recommendedQuantLabels": [
+          "Q4_K_M"
+        ]
       },
       "source": {
         "repository": "unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF",
@@ -474,19 +2196,100 @@
       "defaults": {
         "catalogModelId": "deepseek-r1-14b-local",
         "routerModelId": "DeepSeek-R1-Distill-Qwen-14B-GGUF",
-        "runtimeProfileId": "deepseek_r1",
         "targetDirectory": "DeepSeek-R1-Distill-Qwen-14B-GGUF",
         "mmproj": null,
         "routerPreset": {
           "ctx-size": "131072"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.6,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Token candidate limit",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "enabled",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["Q4_K_M", "UD-Q4_K_XL", "Q5_K_M"],
+        "recommendedLabels": [
+          "Q4_K_M",
+          "UD-Q4_K_XL",
+          "Q5_K_M"
+        ],
         "guidance": {
-          "Q4_K_M": { "summary": "Curator default for R1 distill." },
-          "UD-Q4_K_XL": { "summary": "Unsloth Dynamic quant when available." },
-          "Q5_K_M": { "summary": "Higher quality when memory allows." }
+          "Q4_K_M": {
+            "summary": "Curator default for R1 distill."
+          },
+          "UD-Q4_K_XL": {
+            "summary": "Unsloth Dynamic quant when available."
+          },
+          "Q5_K_M": {
+            "summary": "Higher quality when memory allows."
+          }
         }
       },
       "hardwareNotes": {
@@ -499,10 +2302,16 @@
       "display": {
         "name": "Qwen3 Coder 30B A3B Instruct",
         "description": "Agentic coding model with XML-style tool calling.",
-        "labels": ["Coding", "Tool use", "Agentic"],
+        "labels": [
+          "Coding",
+          "Tool use",
+          "Agentic"
+        ],
         "license": "Apache-2.0",
         "documentationUrl": "https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-        "recommendedQuantLabels": ["UD-Q4_K_XL"]
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
       },
       "source": {
         "repository": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
@@ -511,19 +2320,146 @@
       "defaults": {
         "catalogModelId": "qwen3-coder-30b-local",
         "routerModelId": "Qwen3-Coder-30B-A3B-Instruct-GGUF",
-        "runtimeProfileId": "qwen3_coder",
         "targetDirectory": "Qwen3-Coder-30B-A3B-Instruct-GGUF",
         "mmproj": null,
         "routerPreset": {
           "ctx-size": "131072"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.7,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.8,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Token candidate limit",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.05,
+              "default": 1.05,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "none",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                },
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "enabled": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 1024
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 4096
+                }
+              ],
+              "high": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "RequestField",
+                  "key": "thinking_budget_tokens",
+                  "value": 8192
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
         }
       },
       "quantMetadata": {
-        "recommendedLabels": ["UD-Q4_K_XL", "UD-Q5_K_XL", "Q4_K_M"],
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q5_K_XL",
+          "Q4_K_M"
+        ],
         "guidance": {
-          "UD-Q4_K_XL": { "summary": "Curator default for Qwen3 Coder MoE." },
-          "UD-Q5_K_XL": { "summary": "Higher quality when memory allows." },
-          "Q4_K_M": { "summary": "Lower memory footprint." }
+          "UD-Q4_K_XL": {
+            "summary": "Curator default for Qwen3 Coder MoE."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality when memory allows."
+          },
+          "Q4_K_M": {
+            "summary": "Lower memory footprint."
+          }
         }
       },
       "hardwareNotes": {

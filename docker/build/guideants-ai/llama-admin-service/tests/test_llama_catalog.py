@@ -23,7 +23,7 @@ class LlamaCatalogServiceTests(unittest.TestCase):
         self.assertEqual(1, response["schemaVersion"])
         self.assertEqual("llama", response["task"])
         self.assertEqual("2026-07-10", response["catalogVersion"])
-        self.assertEqual(14, len(response["models"]))
+        self.assertEqual(15, len(response["models"]))
         self.assertNotIn("selectedQuant", response)
         self.assertNotIn("defaultQuant", response)
 

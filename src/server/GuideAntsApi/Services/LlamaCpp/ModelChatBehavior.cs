@@ -4,6 +4,11 @@ using GuideAntsApi.Models.Settings;
 
 namespace GuideAntsApi.Services.LlamaCpp;
 
+/// <summary>
+/// Maps catalog <see cref="GuideAntsApi.DataModel.Models.Model"/> chat-behavior columns
+/// to profile-shaped data for routing and chat clients. Model rows are authority at inference
+/// for every provider. See docs/model-chat-behavior-contract.md.
+/// </summary>
 public static class ModelChatBehavior
 {
     public static RuntimeProfileData ToRuntimeProfileData(Model model)
@@ -51,15 +56,6 @@ public static class ModelChatBehavior
         model.SamplingParametersJson = JsonSerializer.Serialize(profile.SamplingParameters);
         model.ThinkingControlJson = JsonSerializer.Serialize(profile.ThinkingControl);
         model.RequestFieldsWhenToolsPresentJson = JsonSerializer.Serialize(profile.RequestFieldsWhenToolsPresent);
-    }
-
-    public static void ApplyFromRuntimeProfileEntity(Model model, RuntimeProfile profile)
-    {
-        model.CombineSystemAndDeveloperMessages = profile.CombineSystemAndDeveloperMessages;
-        model.ThoughtBlockPattern = profile.ThoughtBlockPattern;
-        model.SamplingParametersJson = profile.SamplingParametersJson;
-        model.ThinkingControlJson = profile.ThinkingControlJson;
-        model.RequestFieldsWhenToolsPresentJson = profile.RequestFieldsWhenToolsPresentJson;
     }
 
     public static CreateSettingsModelRequest BuildCreateRequest(

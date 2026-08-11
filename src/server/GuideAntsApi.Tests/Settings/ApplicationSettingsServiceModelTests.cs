@@ -87,25 +87,6 @@ public sealed class ApplicationSettingsServiceModelTests
         updated.DisplayName.Should().Be("DeepSeek Updated");
     }
 
-    [TestMethod]
-    public async Task CreateModelAsync_RejectsNonLocalRuntimeProfilePointer()
-    {
-        await using var db = CreateDbContext();
-        var service = CreateService(db, BuildConfiguration());
-
-        var act = async () => await service.CreateModelAsync(new CreateSettingsModelRequest(
-            ModelId: "gpt-4o",
-            DisplayName: "GPT-4o",
-            Provider: "openai-chat",
-            Description: null,
-            ReasoningChoicesJson: null,
-            RuntimeConfigJson: """{"runtimeProfileId":"openai_chat_standard"}""",
-            IsActive: true,
-            DisplayOrder: null));
-
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*cannot persist runtimeProfileId*");
-    }
 
     private static ApplicationDbContext CreateDbContext()
     {
@@ -153,16 +134,12 @@ public sealed class ApplicationSettingsServiceModelTests
                 ["tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
             }
         });
-
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-
         return new ApplicationSettingsService(
             db,
             new SettingsSectionRegistry(),
             environment.Object,
             configuration,
-            settingsSecrets.Object,
-            runtimeProfileResolver.Object);
+            settingsSecrets.Object);
     }
 }
 

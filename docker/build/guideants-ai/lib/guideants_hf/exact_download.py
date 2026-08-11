@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from guideants_hf.operation_journal import hash_immutable_input
 from guideants_hf.path_safety import PathSafetyError, destination_name, ensure_inside_root, normalize_repository_relative_path
-from guideants_hf.transport import download_hf_file
+from guideants_hf.transport import IncompleteDownloadError, download_hf_file
 
 
 class ExactDownloadError(ValueError):
@@ -52,6 +52,23 @@ def _resume_identity(
     }
 
 
+def _resume_identity_for_match(
+    *,
+    repository: str,
+    resolved_revision: str,
+    repository_path: str,
+    expected_size: int | None,
+    digest: str | None,
+) -> dict[str, Any]:
+    return {
+        "repository": repository,
+        "resolvedRevision": resolved_revision,
+        "repositoryPath": repository_path,
+        "expectedSize": expected_size,
+        "digest": digest,
+    }
+
+
 def resume_metadata_matches(
     meta_path: str,
     *,
@@ -71,15 +88,16 @@ def resume_metadata_matches(
         return False
     if not isinstance(stored, dict):
         return False
-    expected = _resume_identity(
-        operation_id=operation_id,
+    expected = _resume_identity_for_match(
         repository=repository,
         resolved_revision=resolved_revision,
         repository_path=repository_path,
         expected_size=expected_size,
         digest=digest,
     )
-    return stored == expected
+    # operationId is audit-only; retries may reuse partial bytes across operation ids.
+    comparable = {key: stored.get(key) for key in expected}
+    return comparable == expected
 
 
 def write_resume_metadata(
@@ -189,16 +207,18 @@ def build_artifact_specs(
     *,
     model_files: list[str],
     mmproj_files: list[str],
+    companion_files: list[str] | None = None,
     store_root: str,
     target_subdir: str,
     artifact_metadata: list[dict[str, Any]] | None,
-) -> tuple[str, list[ArtifactSpec], list[ArtifactSpec]]:
+) -> tuple[str, list[ArtifactSpec], list[ArtifactSpec], list[ArtifactSpec]]:
     from guideants_hf.path_safety import validate_ordered_artifact_paths
 
     validate_shard_group(model_files)
-    target_dir, model_pairs, mmproj_pairs = validate_ordered_artifact_paths(
+    target_dir, model_pairs, mmproj_pairs, companion_pairs = validate_ordered_artifact_paths(
         model_files,
         mmproj_files,
+        companion_files,
         store_root=store_root,
         target_subdir=target_subdir,
     )
@@ -227,7 +247,7 @@ def build_artifact_specs(
             )
         return specs
 
-    return target_dir, to_specs(model_pairs), to_specs(mmproj_pairs)
+    return target_dir, to_specs(model_pairs), to_specs(mmproj_pairs), to_specs(companion_pairs)
 
 
 def stage_download_file(
@@ -271,14 +291,21 @@ def stage_download_file(
         digest=spec.digest,
     )
 
-    download_hf_file(
-        repository,
-        spec.repository_path,
-        staged_dest,
-        token,
-        revision=resolved_revision,
-        progress_callback=progress_callback,
-    )
+    try:
+        download_hf_file(
+            repository,
+            spec.repository_path,
+            staged_dest,
+            token,
+            revision=resolved_revision,
+            progress_callback=progress_callback,
+            expected_size=spec.expected_size,
+        )
+    except IncompleteDownloadError as exc:
+        raise ExactDownloadError(
+            "DOWNLOAD_TRUNCATED",
+            f"{exc}. Partial file preserved for resume.",
+        ) from exc
     verify_file_integrity(staged_dest, expected_size=spec.expected_size, digest=spec.digest)
     if os.path.exists(meta_path):
         os.remove(meta_path)
@@ -318,6 +345,7 @@ def build_immutable_input(
     resolved_revision: str,
     model_files: list[str],
     mmproj_files: list[str],
+    companion_files: list[str] | None = None,
     alias: str,
     target_directory: str,
     preset: dict[str, str],
@@ -329,6 +357,7 @@ def build_immutable_input(
         "resolvedRevision": resolved_revision.strip(),
         "modelFiles": [normalize_repository_relative_path(path) for path in model_files],
         "mmprojFiles": [normalize_repository_relative_path(path) for path in mmproj_files],
+        "companionFiles": [normalize_repository_relative_path(path) for path in (companion_files or [])],
         "routerModelId": alias.strip(),
         "targetDirectory": target_directory.strip().strip("/\\"),
         "routerPreset": dict(preset),

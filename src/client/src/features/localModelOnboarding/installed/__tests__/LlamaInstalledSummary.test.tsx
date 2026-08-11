@@ -7,7 +7,6 @@ vi.mock('../../../../services/api', () => ({
     settings: {
       getLlamaInstallationDetail: vi.fn(),
       getLlamaRouterEntries: vi.fn(),
-      getRuntimeProfile: vi.fn(),
     },
   },
 }));
@@ -28,7 +27,6 @@ describe('LlamaInstalledSummary', () => {
     vi.mocked(api.settings.getLlamaInstallationDetail).mockResolvedValue({
       modelId: 'llama/qwen',
       routerModelId: 'Qwen3.5-9B-GGUF',
-      runtimeProfileId: 'qwen3_6',
       catalogId: 'qwen3.5-9b',
       runtimeState: 'unloaded',
       loaded: false,

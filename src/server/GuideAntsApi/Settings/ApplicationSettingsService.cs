@@ -25,12 +25,6 @@ public partial interface IApplicationSettingsService
     Task<SettingsModelDto?> UpdateModelAsync(string modelId, UpdateSettingsModelRequest request, CancellationToken cancellationToken = default);
     Task<bool> DeleteModelAsync(string modelId, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<SettingsRuntimeProfileDto>> GetRuntimeProfilesAsync(CancellationToken cancellationToken = default);
-    Task<SettingsRuntimeProfileDto?> GetRuntimeProfileAsync(string profileId, CancellationToken cancellationToken = default);
-    Task<SettingsRuntimeProfileDto> CreateRuntimeProfileAsync(CreateRuntimeProfileRequest request, CancellationToken cancellationToken = default);
-    Task<SettingsRuntimeProfileDto?> UpdateRuntimeProfileAsync(string profileId, UpdateRuntimeProfileRequest request, CancellationToken cancellationToken = default);
-    Task<bool> DeleteRuntimeProfileAsync(string profileId, CancellationToken cancellationToken = default);
-
     Task<IReadOnlyList<ServiceModeDto>> GetServiceModesAsync(string serviceName, CancellationToken cancellationToken = default);
     Task<ServiceEditorStateDto> GetServiceEditorStateAsync(string serviceId, CancellationToken cancellationToken = default);
     Task<ServiceEditorStateDto> SetServiceActiveProviderAsync(string serviceId, string providerId, CancellationToken cancellationToken = default);
@@ -85,7 +79,6 @@ public sealed partial class ApplicationSettingsService(
     IWebHostEnvironment environment,
     IConfiguration configuration,
     IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptionsMonitor,
-    IRuntimeProfileResolver runtimeProfileResolver,
     IServiceEditorMetadataProvider? metadataProvider = null,
     ILlamaRouterIniSyncService? llamaRouterIniSync = null,
     ITtsRuntimeTimeoutSyncService? ttsRuntimeTimeoutSync = null,
@@ -96,7 +89,6 @@ public sealed partial class ApplicationSettingsService(
     private readonly IWebHostEnvironment _environment = environment;
     private readonly IConfiguration _configuration = configuration;
     private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptionsMonitor = settingsSecretsOptionsMonitor;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver = runtimeProfileResolver;
     private readonly IServiceEditorMetadataProvider? _injectedMetadataProvider = metadataProvider;
     private readonly ILlamaRouterIniSyncService? _llamaRouterIniSync = llamaRouterIniSync;
     private readonly ITtsRuntimeTimeoutSyncService? _ttsRuntimeTimeoutSync = ttsRuntimeTimeoutSync;

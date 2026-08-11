@@ -2,7 +2,6 @@ import type { AddModelRequest, LlamaCatalogDefinitionDto } from '../../../types/
 
 const CURATED_FORBIDDEN_INSTALL_KEYS = [
   'routerModelId',
-  'runtimeProfileId',
   'huggingFace',
   'existingAlias',
   'routerContextSize',

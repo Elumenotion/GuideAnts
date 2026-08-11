@@ -55,7 +55,6 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         IHuggingFaceTokenResolver tokenResolver,
         ILlamaServerRuntimeClient llamaClient,
         ILlamaRuntimeCoordinator coordinator,
-        IRuntimeProfileResolver runtimeProfileResolver,
         ILogger<LocalModelLifecycleOperationService> logger)
     {
         _db = db;
@@ -397,6 +396,9 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         installation.ProjectorArtifactsJson = InstallationArtifactRecords.SerializeFromPaths(
             input.TargetDirectory,
             input.MmprojFiles);
+        installation.CompanionArtifactsJson = InstallationArtifactRecords.SerializeFromPaths(
+            input.TargetDirectory,
+            input.CompanionFiles);
         installation.RouterPresetSnapshotJson = JsonSerializer.Serialize(input.RouterPreset);
         installation.UpdatedUtc = DateTime.UtcNow;
 
@@ -460,6 +462,7 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
             TargetDirectory = input.TargetDirectory,
             ModelArtifactsJson = InstallationArtifactRecords.SerializeFromPaths(input.TargetDirectory, input.ModelFiles),
             ProjectorArtifactsJson = InstallationArtifactRecords.SerializeFromPaths(input.TargetDirectory, input.MmprojFiles),
+            CompanionArtifactsJson = InstallationArtifactRecords.SerializeFromPaths(input.TargetDirectory, input.CompanionFiles),
             RouterPresetSnapshotJson = JsonSerializer.Serialize(input.RouterPreset),
             CreatedUtc = now,
             UpdatedUtc = now,

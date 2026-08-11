@@ -1,8 +1,10 @@
 # Settings Architecture and Extension Guide
 
-Last updated: 2026-05-25
+Last updated: 2026-08-10
 
 This document is the architecture reference for the Settings subsystem.
+
+**Model chat behavior authority:** [model-chat-behavior-contract.md](model-chat-behavior-contract.md) — every catalog `Models` row (cloud, API, and llama-cpp) owns sampling, reasoning, and request shaping at runtime. Runtime profiles are a local install copy bridge only, not a separate cloud vs local contract.
 
 It describes the full path from UI surfaces (Settings page and Home onboarding wizard), through HTTP/API and server domain services, into SQL persistence, and back into runtime configuration consumption.
 
@@ -17,8 +19,8 @@ Settings is database-backed and database-primary.
 Primary SQL stores for Settings:
 
 - `ApplicationSettings` table (row-per-section JSON payload; includes `ChatDefaults`, provider sections, `ServiceModes`, telemetry, runtime overrides)
-- `Models` table (chat model catalog)
-- `RuntimeProfiles` table (parameter/thinking profile contracts)
+- `Models` table (chat model catalog — **owns chat behavior columns** at runtime)
+- `RuntimeProfiles` table (bootstrap install templates for **local** curated/legacy onboarding — copied to model rows at install; cloud models never use this path at runtime or onboarding)
 
 Critical consequence:
 
@@ -271,13 +273,18 @@ Important behaviors:
 - Provider-aware reasoning choice validation
 - Post-persist llama router sync when applicable
 
-## 5.3 Runtime profile domain
+## 5.3 Runtime profile domain (local install templates — not runtime authority)
 
-`ApplicationSettingsService.RuntimeProfiles.cs`:
+`ApplicationSettingsService.RuntimeProfiles.cs` and `RuntimeProfileSeeder` maintain bootstrap JSON in `Resources/bootstrap/runtime-profiles/`.
 
-- CRUD for runtime profiles
-- JSON validation for `SamplingParametersJson` and `ThinkingControlJson`
-- Provider filtering metadata (`Providers` list)
+**All providers** read chat behavior from `Models` row columns at inference. Runtime profiles are **not** used for OpenAI, Anthropic, Gemini, HF, OpenRouter, or Azure catalog onboarding.
+
+Profiles remain only for **local** install copy:
+
+- Curated llama install: manifest `runtimeProfileId` → copy onto new model row
+- Legacy custom HF / attach-alias: profile picker at install → copy onto model row
+
+There is no Runtime Profiles tab in Settings. See [model-chat-behavior-contract.md](model-chat-behavior-contract.md).
 
 ## 5.4 Service editor and service mode domain
 
@@ -372,24 +379,19 @@ Stores chat target catalog rows and metadata:
 
 - `ModelId` PK
 - `Provider`, `DisplayName`, `Description`
-- `RuntimeConfigJson`
+- `RuntimeConfigJson` (llama-cpp: `routerModelId` only)
 - `ReasoningChoicesJson`
+- `SamplingParametersJson`, `ThinkingControlJson`, `RequestFieldsWhenToolsPresentJson`
+- `CombineSystemAndDeveloperMessages`, `ThoughtBlockPattern`
 - `IsActive`, `DisplayOrder`
 
-This table is the authoritative source for selectable chat models in Settings and routing.
+This table is the authoritative source for selectable chat models, parameter surfaces in guide/assistant builders, and chat request shaping at inference time.
 
 ## 7.3 `RuntimeProfiles` table
 
 Entity: `RuntimeProfile`.
 
-Stores model-family request shaping contract and UI exposure metadata:
-
-- `SamplingParametersJson`
-- `ThinkingControlJson`
-- `ProvidersJson`
-- message normalization fields
-
-This table is the authoritative source for model parameter/thinking profile definitions.
+Bootstrap install templates seeded from `Resources/bootstrap/runtime-profiles/*.json`. Used when **local** models are installed (curated manifest or legacy HF path): fields are copied to `Models` rows at install. **Cloud catalog models do not use this table at onboarding or inference.** Do not add profiles for new GPT, Gemini, or Claude entries. See [model-chat-behavior-contract.md](model-chat-behavior-contract.md).
 
 ## 7.4 Assistant model reference fields
 
@@ -521,7 +523,8 @@ ServicesTab / Wizard optional services
 | Section contract | Settings registry | code (`SettingsSectionRegistry`) | `SettingsSectionRegistry.cs` |
 | Section values | DB row per section | `ApplicationSettings` | `ApplicationSetting.cs`, `ApplicationSettingsService.Sections.cs` |
 | Model list | DB catalog | `Models` table | `Model.cs`, `ApplicationSettingsService.Models.cs` |
-| Runtime profile list | DB catalog | `RuntimeProfiles` table | `RuntimeProfile.cs`, `ApplicationSettingsService.RuntimeProfiles.cs` |
+| Chat behavior at inference (all providers) | DB catalog row | `Models` chat-behavior columns | `Model.cs`, `ModelChatBehavior.cs` |
+| Local install profile templates | DB + bootstrap JSON | `RuntimeProfiles` table | `RuntimeProfile.cs`, `RuntimeProfileSeeder.cs` |
 | Runtime projection | config provider | flattened `IConfiguration` | `ApplicationSettingsConfigurationProvider.cs`, `Program.cs` |
 | Chat model resolution | routing service | `IChatModelResolver` output | `ChatModelResolver.cs` |
 | Chat turn execution | conversation runtime | `ExecutionPolicy` | `ConversationService.cs` (+ downstream chat runtime) |

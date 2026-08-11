@@ -6,7 +6,6 @@ public static class SettingsEndpoints
     {
         app.MapSettingsCoreEndpoints();
         app.MapSettingsModelsEndpoints();
-        app.MapSettingsRuntimeProfilesEndpoints();
         app.MapSettingsServiceEditorEndpoints();
         app.MapSettingsServiceLocalModelsEndpoints();
         app.MapSettingsImageGenerationBundleDefinitionsEndpoints();

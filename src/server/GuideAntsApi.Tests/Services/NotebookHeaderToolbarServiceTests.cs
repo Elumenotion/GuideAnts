@@ -376,7 +376,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                         ReasoningChoicesJson: null,
                         IsActive: true,
                         DisplayOrder: 2,
-                        RuntimeConfig: new ModelRuntimeConfigDto("mistral-local", "default"),
+                        RuntimeConfig: new ModelRuntimeConfigDto("mistral-local"),
                         SamplingParameterPolicy: null,
                         ReasoningChoices: null,
                         DefaultReasoningChoice: null)
@@ -501,7 +501,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                         ReasoningChoicesJson: null,
                         IsActive: true,
                         DisplayOrder: 1,
-                        RuntimeConfig: new ModelRuntimeConfigDto("qwen-local", "default"),
+                        RuntimeConfig: new ModelRuntimeConfigDto("qwen-local"),
                         SamplingParameterPolicy: null,
                         ReasoningChoices: null,
                         DefaultReasoningChoice: null)

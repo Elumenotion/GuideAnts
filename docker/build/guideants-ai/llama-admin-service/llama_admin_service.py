@@ -729,6 +729,7 @@ class ExactDownloadRequest(BaseModel):
     resolvedRevision: str
     modelFiles: list[str]
     mmprojFiles: list[str] = []
+    companionFiles: list[str] = []
     alias: str
     targetDirectory: str
     preset: dict[str, str]
@@ -995,6 +996,7 @@ def _immutable_input_download_identity(immutable_input: dict[str, Any]) -> dict[
         "resolvedRevision": str(immutable_input.get("resolvedRevision") or "").strip(),
         "modelFiles": list(immutable_input.get("modelFiles") or []),
         "mmprojFiles": list(immutable_input.get("mmprojFiles") or []),
+        "companionFiles": list(immutable_input.get("companionFiles") or []),
         "routerModelId": normalize_alias(str(immutable_input.get("routerModelId") or immutable_input.get("alias") or "")),
         "targetDirectory": str(immutable_input.get("targetDirectory") or "").strip().strip("/\\"),
         "presetMode": str(immutable_input.get("presetMode") or "replace"),
@@ -1009,6 +1011,7 @@ def _exact_download_request_identity(request: ExactDownloadRequest) -> dict[str,
             "resolvedRevision": request.resolvedRevision,
             "modelFiles": request.modelFiles,
             "mmprojFiles": request.mmprojFiles,
+            "companionFiles": request.companionFiles,
             "routerModelId": request.alias,
             "targetDirectory": request.targetDirectory,
             "presetMode": request.presetMode,
@@ -1047,6 +1050,7 @@ def _exact_download_request_from_journal(journal_record) -> ExactDownloadRequest
         resolvedRevision=str(immutable_input.get("resolvedRevision") or ""),
         modelFiles=[str(path) for path in (immutable_input.get("modelFiles") or [])],
         mmprojFiles=[str(path) for path in (immutable_input.get("mmprojFiles") or [])],
+        companionFiles=[str(path) for path in (immutable_input.get("companionFiles") or [])],
         alias=normalize_alias(
             str(immutable_input.get("routerModelId") or immutable_input.get("alias") or journal_record.alias)
         ),
@@ -1056,6 +1060,15 @@ def _exact_download_request_from_journal(journal_record) -> ExactDownloadRequest
         artifactMetadata=artifact_metadata,
         hfToken=None,
     )
+
+
+def _exact_download_staging_dir(target_directory: str) -> str:
+    target_subdir = target_directory.strip().strip("/\\")
+    if not target_subdir:
+        raise ValueError("targetDirectory is required.")
+    staging_dir = os.path.abspath(os.path.join(STAGING_ROOT, target_subdir))
+    ensure_inside_root(STAGING_ROOT, staging_dir)
+    return staging_dir
 
 
 def _maybe_resume_exact_download_from_journal(journal_record) -> None:
@@ -1085,7 +1098,8 @@ def run_exact_download_operation(operation_id: str, request: ExactDownloadReques
     alias = normalize_alias(request.alias)
     alias_lock = get_alias_lock(alias)
     alias_lock.acquire()
-    staging_dir = os.path.join(STAGING_ROOT, operation_id)
+    staging_dir = _exact_download_staging_dir(request.targetDirectory)
+    completed_successfully = False
     try:
         preset = normalize_preset_map(request.preset)
         immutable_input = build_immutable_input(
@@ -1093,6 +1107,7 @@ def run_exact_download_operation(operation_id: str, request: ExactDownloadReques
             resolved_revision=request.resolvedRevision,
             model_files=request.modelFiles,
             mmproj_files=request.mmprojFiles,
+            companion_files=request.companionFiles,
             alias=alias,
             target_directory=request.targetDirectory,
             preset=preset,
@@ -1128,16 +1143,17 @@ def run_exact_download_operation(operation_id: str, request: ExactDownloadReques
         metadata_payload = [
             item.model_dump(exclude_none=True) for item in (request.artifactMetadata or [])
         ]
-        target_dir, model_specs, mmproj_specs = build_artifact_specs(
+        target_dir, model_specs, mmproj_specs, companion_specs = build_artifact_specs(
             model_files=request.modelFiles,
             mmproj_files=request.mmprojFiles,
+            companion_files=request.companionFiles,
             store_root=MODEL_STORE_ROOT,
             target_subdir=request.targetDirectory,
             artifact_metadata=metadata_payload,
         )
         os.makedirs(staging_dir, exist_ok=True)
         token = (request.hfToken or "").strip() or None
-        all_specs = model_specs + mmproj_specs
+        all_specs = model_specs + mmproj_specs + companion_specs
         total = len(all_specs)
 
         for idx, spec in enumerate(all_specs):
@@ -1231,19 +1247,39 @@ def run_exact_download_operation(operation_id: str, request: ExactDownloadReques
             log_line="Completed.",
             completed_at=utc_now_iso(),
         )
+        completed_successfully = True
     except (ExactDownloadError, PresetValidationError, PathSafetyError, OperationJournalError, ValueError) as exc:
         code = getattr(exc, "code", type(exc).__name__)
         message = str(exc)
         log_event("llama_admin_exact_download_failed", operationId=operation_id, errorType=code, error=message)
-        fail_operation(operation_id, message)
-        if OPERATION_JOURNAL.get(operation_id) is not None:
+        if isinstance(exc, ExactDownloadError) and code == "DOWNLOAD_TRUNCATED":
+            journal_record = OPERATION_JOURNAL.get(operation_id)
+            progress = journal_record.progress if journal_record is not None else None
             OPERATION_JOURNAL.update(
                 operation_id,
-                status="failed",
+                status="downloading",
                 error_message=message,
                 log_line=message,
-                completed_at=utc_now_iso(),
+                completed_at=None,
             )
+            update_operation(
+                operation_id,
+                status="downloading",
+                progress=progress,
+                error_message=message,
+                log_line=message,
+                completed_at=None,
+            )
+        else:
+            fail_operation(operation_id, message)
+            if OPERATION_JOURNAL.get(operation_id) is not None:
+                OPERATION_JOURNAL.update(
+                    operation_id,
+                    status="failed",
+                    error_message=message,
+                    log_line=message,
+                    completed_at=utc_now_iso(),
+                )
     except Exception as exc:
         log_event("llama_admin_exact_download_failed", operationId=operation_id, errorType=type(exc).__name__, error=str(exc))
         fail_operation(operation_id, str(exc))
@@ -1258,7 +1294,7 @@ def run_exact_download_operation(operation_id: str, request: ExactDownloadReques
     finally:
         alias_lock.release()
         DOWNLOAD_WORKERS.pop(operation_id, None)
-        if os.path.isdir(staging_dir):
+        if completed_successfully and os.path.isdir(staging_dir):
             shutil.rmtree(staging_dir, ignore_errors=True)
 
 

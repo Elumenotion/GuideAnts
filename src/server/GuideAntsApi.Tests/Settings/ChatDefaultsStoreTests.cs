@@ -167,7 +167,6 @@ public sealed class ChatDefaultsStoreTests
             environment.Object,
             configuration,
             settingsSecrets.Object,
-            new Mock<IRuntimeProfileResolver>().Object,
             chatDefaultsStore: chatDefaultsStore);
     }
 }

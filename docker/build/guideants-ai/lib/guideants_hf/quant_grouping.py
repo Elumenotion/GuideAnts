@@ -202,24 +202,23 @@ def group_repository_quants(files: list[dict[str, Any]]) -> list[dict[str, Any]]
     return groups
 
 
-def resolve_projector(
-    mmproj_spec: dict[str, Any] | None,
+def resolve_repository_artifact(
+    artifact_spec: dict[str, Any],
     *,
     model_repository: str,
     model_revision: str,
     model_files: list[dict[str, Any]],
     token: str | None,
     resolve_external_files,
-) -> dict[str, Any] | None:
-    if mmproj_spec is None:
-        return None
-
-    path = str(mmproj_spec.get("path", "")).strip()
+    not_found_code: str,
+    not_found_label: str,
+) -> dict[str, Any]:
+    path = str(artifact_spec.get("path", "")).strip()
     if not path:
-        raise QuantGroupingError("PROJECTOR_NOT_FOUND", "Projector path is required when mmproj is set.")
+        raise QuantGroupingError(not_found_code, f"{not_found_label} path is required.")
 
-    repository = str(mmproj_spec.get("repository") or model_repository).strip()
-    revision = str(mmproj_spec.get("revision") or model_revision).strip() or model_revision
+    repository = str(artifact_spec.get("repository") or model_repository).strip()
+    revision = str(artifact_spec.get("revision") or model_revision).strip() or model_revision
     search_files = model_files
     if repository != model_repository.strip() or revision != model_revision:
         search_files = resolve_external_files(repository, revision, token)
@@ -243,9 +242,68 @@ def resolve_projector(
             return payload
 
     raise QuantGroupingError(
-        "PROJECTOR_NOT_FOUND",
-        f"Declared projector '{path}' was not found at revision '{revision}'.",
+        not_found_code,
+        f"Declared {not_found_label.lower()} '{path}' was not found at revision '{revision}'.",
     )
+
+
+def resolve_projector(
+    mmproj_spec: dict[str, Any] | None,
+    *,
+    model_repository: str,
+    model_revision: str,
+    model_files: list[dict[str, Any]],
+    token: str | None,
+    resolve_external_files,
+) -> dict[str, Any] | None:
+    if mmproj_spec is None:
+        return None
+
+    return resolve_repository_artifact(
+        mmproj_spec,
+        model_repository=model_repository,
+        model_revision=model_revision,
+        model_files=model_files,
+        token=token,
+        resolve_external_files=resolve_external_files,
+        not_found_code="PROJECTOR_NOT_FOUND",
+        not_found_label="Projector",
+    )
+
+
+def resolve_companion_artifacts(
+    companion_specs: list[dict[str, Any]] | None,
+    *,
+    model_repository: str,
+    model_revision: str,
+    model_files: list[dict[str, Any]],
+    token: str | None,
+    resolve_external_files,
+) -> list[dict[str, Any]]:
+    if not companion_specs:
+        return []
+
+    companions: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for spec in companion_specs:
+        if not isinstance(spec, dict):
+            raise QuantGroupingError("COMPANION_NOT_FOUND", "Each companion artifact must be an object.")
+        resolved = resolve_repository_artifact(
+            spec,
+            model_repository=model_repository,
+            model_revision=model_revision,
+            model_files=model_files,
+            token=token,
+            resolve_external_files=resolve_external_files,
+            not_found_code="COMPANION_NOT_FOUND",
+            not_found_label="Companion artifact",
+        )
+        path = str(resolved.get("path", "")).strip()
+        if path in seen_paths:
+            raise QuantGroupingError("COMPANION_DUPLICATE", f"Duplicate companion artifact path '{path}'.")
+        seen_paths.add(path)
+        companions.append(resolved)
+    return companions
 
 
 def enrich_quant_guidance(quants: list[dict[str, Any]], quant_metadata: dict[str, Any] | None) -> list[dict[str, Any]]:

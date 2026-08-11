@@ -1,4 +1,8 @@
-# Model Parameter Surface — Row-Owned Non-Local Contract
+# Model Parameter Surface — Cloud & API Providers
+
+> **Universal contract (all providers, including llama-cpp):** [model-chat-behavior-contract.md](model-chat-behavior-contract.md)
+>
+> This document is a **focused deep-dive on cloud/API catalog rows** (`openai-chat`, `anthropic`, `google-gemini-chat`, `hf-inference-chat`, `openrouter-chat`, Azure variants). The same row-owned authority applies to llama-cpp; local install bridge details are in the canonical contract.
 
 ## Problem Statement
 

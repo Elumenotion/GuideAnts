@@ -26,7 +26,6 @@ public interface ILocalModelOnboardingOrchestrator
 public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrchestrator
 {
     private readonly IApplicationSettingsService _settingsService;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly IHuggingFaceModelDownloadService _downloadService;
     private readonly ICuratedInstallResolver _curatedInstallResolver;
     private readonly ILocalModelOperationService _operationService;
@@ -39,7 +38,6 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
 
     public LocalModelOnboardingOrchestrator(
         IApplicationSettingsService settingsService,
-        IRuntimeProfileResolver runtimeProfileResolver,
         IHuggingFaceModelDownloadService downloadService,
         ICuratedInstallResolver curatedInstallResolver,
         ILocalModelOperationService operationService,
@@ -51,7 +49,6 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
         ILogger<LocalModelOnboardingOrchestrator> logger)
     {
         _settingsService = settingsService;
-        _runtimeProfileResolver = runtimeProfileResolver;
         _downloadService = downloadService;
         _curatedInstallResolver = curatedInstallResolver;
         _operationService = operationService;
@@ -147,16 +144,8 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
         CancellationToken cancellationToken)
     {
         var localRuntimeJson = BuildLlamaLocalRuntimeJson(command);
-        var usesRowOwnedChatBehavior = string.Equals(
-            command.InstallSource,
-            LocalModelInstallSources.ExistingAlias,
-            StringComparison.OrdinalIgnoreCase);
-        var profile = usesRowOwnedChatBehavior
-            ? command.ToRowOwnedRuntimeProfileData()
-            : await _runtimeProfileResolver
-                .ResolveAsync(command.RuntimeProfileId.Trim(), cancellationToken)
-                .ConfigureAwait(false);
-        var reasoningChoicesJson = usesRowOwnedChatBehavior
+        var profile = command.ToRowOwnedRuntimeProfileData();
+        var reasoningChoicesJson = command.HasProviderConfigChatBehavior
             ? command.ReasoningChoicesJson
             : ModelChatBehavior.DeriveReasoningChoicesJson(
                 System.Text.Json.JsonSerializer.Serialize(profile.ThinkingControl));
@@ -251,12 +240,16 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
 
             if (IsCuratedInstall(kind))
             {
-                var curated = await _operationService
-                    .GetStatusAsync(operationGuid, cancellationToken)
-                    .ConfigureAwait(false);
-                if (curated is not null)
+                try
                 {
+                    var curated = await _operationService
+                        .ReconcileAndGetStatusAsync(operationGuid, cancellationToken)
+                        .ConfigureAwait(false);
                     return MapCuratedToLegacyDownloadDto(curated);
+                }
+                catch (InvalidOperationException)
+                {
+                    return null;
                 }
             }
             else if (kind is not null)
@@ -369,7 +362,6 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
             TargetDirectory: command.TargetDirectory!,
             CatalogModelId: command.CatalogModelId,
             CatalogDisplayName: command.CatalogDisplayName,
-            CatalogRuntimeProfileId: command.RuntimeProfileId,
             CatalogDescription: command.CatalogDescription,
             CatalogIsActive: command.CatalogIsActive,
             CatalogDisplayOrder: command.CatalogDisplayOrder,

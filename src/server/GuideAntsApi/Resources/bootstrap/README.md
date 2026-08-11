@@ -29,14 +29,6 @@ extract the ZIP into a named subfolder here, and remove any `model`,
 `defaultModel`, `temperature`, `top_p`, and `reasoning_effort` fields
 from `manifest.json`.
 
-### `runtime-profiles/`
-
-Llama-cpp runtime profile templates (R-6.7, R-8.1). One JSON file per
-profile keyed by `profileId`. Seeded directly into the `RuntimeProfiles`
-table if no row with that ID exists.
-
-Current templates: `qwen3_5`, `qwen3_6`, `gemma4`.
-
 ### `provider-stack-profiles/`
 
 Provider stack profile definitions used by the Add AI Services wizard.

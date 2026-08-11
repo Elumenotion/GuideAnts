@@ -37,6 +37,7 @@ public sealed class LocalModelPersistencePhase1BTests
             TargetDirectory = "Qwen3.6-35B-A3B-MTP-GGUF",
             ModelArtifactsJson = """[{"repositoryPath":"a.gguf","installedRelativePath":"a/a.gguf","byteSize":1}]""",
             ProjectorArtifactsJson = "[]",
+            CompanionArtifactsJson = "[]",
             RouterPresetSnapshotJson = """{"ctx-size":"131072"}""",
             RowVersion = DefaultRowVersion
         });
@@ -93,6 +94,7 @@ public sealed class LocalModelPersistencePhase1BTests
             ManagementMode = "operatorManaged",
             ModelArtifactsJson = "[]",
             ProjectorArtifactsJson = "[]",
+            CompanionArtifactsJson = "[]",
             RouterPresetSnapshotJson = "{}",
             RowVersion = DefaultRowVersion
         });

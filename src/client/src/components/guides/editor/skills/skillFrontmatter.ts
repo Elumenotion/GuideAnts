@@ -1,5 +1,4 @@
-// @ts-expect-error js-yaml ships without bundled types in this project
-import yaml from 'js-yaml';
+import { dump, load } from 'js-yaml';
 import {
   normalizeSkillDescription,
 } from './skillDescriptionLimits';
@@ -134,7 +133,7 @@ export function parseSkillFrontmatter(markdown: string): SkillFrontmatterParseRe
   const yamlText = extractFrontmatterYaml(markdown);
   let root: Record<string, unknown> | null;
   try {
-    root = asRecord(yaml.load(yamlText));
+    root = asRecord(load(yamlText));
   } catch (error) {
     throw toSkillFrontmatterParseError(error, markdown, yamlText);
   }
@@ -235,7 +234,7 @@ export function buildCanonicalSkillMarkdown(input: {
     metadata,
   };
 
-  const yamlBody = yaml.dump(frontmatter, { lineWidth: 120, noRefs: true }).trimEnd();
+  const yamlBody = dump(frontmatter, { lineWidth: 120, noRefs: true }).trimEnd();
   const body = input.body.trimStart();
   return `---\n${yamlBody}\n---\n${body ? `\n${body}` : '\n'}`;
 }
