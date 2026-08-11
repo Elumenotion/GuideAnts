@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
@@ -118,7 +119,11 @@ app.MapPost("/execute", async (HttpContext context, ILogger<Program> logger) =>
 
         var request = await JsonSerializer.DeserializeAsync<ScriptExecutionRequest>(
             context.Request.Body,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+            new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                Converters = { new JsonStringEnumConverter() }
+            },
             context.RequestAborted);
 
         if (request is null)

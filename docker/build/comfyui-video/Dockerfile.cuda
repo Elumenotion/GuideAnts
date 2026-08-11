@@ -1,0 +1,133 @@
+# syntax=docker/dockerfile:1.7
+
+ARG CUDA_BASE_IMAGE=nvidia/cuda:13.0.0-runtime-ubuntu24.04@sha256:4757e6477d94d56fd8230e15b7d59956750c983a47a42584f44dbe143090da82
+ARG DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:8.0-noble
+ARG GA_COMFYUI_VIDEO_DEPS_IMAGE=comfyui-video-deps
+
+FROM ubuntu:24.04 AS script-exec-builder
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY script-agent-exec/ga-script-exec.c /tmp/ga-script-exec.c
+RUN gcc -O2 -Wall -Wextra -Werror -o /usr/local/bin/ga-script-exec /tmp/ga-script-exec.c
+
+FROM ${DOTNET_RUNTIME_IMAGE} AS dotnet-runtime
+
+FROM ${CUDA_BASE_IMAGE} AS source-builder
+ARG COMFYUI_COMMIT=fe4195f7f4275f2626cbafc703acc3ddde1e5490
+ARG WANVIDEO_COMMIT=088128b224242e110d3906c6750e9a3a348a659b
+ARG KJNODES_COMMIT=073efb07419f56cc714e099a82e49fbc23ad9263
+ARG VHS_COMMIT=4ee72c065db22c9d96c2427954dc69e7b908444b
+ARG MEL_COMMIT=92c86854e6654f4aacc97484471af95c98ea16d4
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    git clone --filter=blob:none --no-checkout https://github.com/comfyanonymous/ComfyUI.git /opt/ComfyUI; \
+    git -C /opt/ComfyUI fetch --depth 1 origin "$COMFYUI_COMMIT"; \
+    git -C /opt/ComfyUI checkout --detach "$COMFYUI_COMMIT"; \
+    printf '%s\n' "$COMFYUI_COMMIT" > /opt/ComfyUI/.guideants-source-commit
+RUN set -eux; mkdir -p /opt/ComfyUI/custom_nodes; \
+    clone_pin() { name="$1"; url="$2"; commit="$3"; dest="/opt/ComfyUI/custom_nodes/$name"; \
+      git clone --filter=blob:none --no-checkout "$url" "$dest"; \
+      git -C "$dest" fetch --depth 1 origin "$commit"; \
+      git -C "$dest" checkout --detach "$commit"; \
+      printf '%s\n' "$commit" > "$dest/.guideants-source-commit"; }; \
+    clone_pin ComfyUI-WanVideoWrapper https://github.com/kijai/ComfyUI-WanVideoWrapper.git "$WANVIDEO_COMMIT"; \
+    clone_pin ComfyUI-KJNodes https://github.com/kijai/ComfyUI-KJNodes.git "$KJNODES_COMMIT"; \
+    clone_pin ComfyUI-VideoHelperSuite https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git "$VHS_COMMIT"; \
+    clone_pin ComfyUI-MelBandRoFormer https://github.com/kijai/ComfyUI-MelBandRoFormer.git "$MEL_COMMIT"; \
+    find /opt/ComfyUI -type d -name .git -prune -exec rm -rf '{}' +
+
+FROM ${CUDA_BASE_IMAGE} AS pydeps-builder
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential git python3.12 python3.12-dev python3.12-venv \
+       libgl1 libglib2.0-0 libsndfile1 ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+RUN python3.12 -m venv "$VIRTUAL_ENV"
+COPY --from=source-builder /opt/ComfyUI /opt/ComfyUI
+COPY constraints/ /tmp/constraints/
+COPY adapter/requirements.txt /tmp/adapter-requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --upgrade "pip>=25.2,<26" "setuptools>=80,<82" "wheel>=0.45,<1" \
+    && python -m pip install -r /tmp/constraints/cuda13.txt \
+    && python -m pip install -c /tmp/constraints/cuda13.txt \
+         -r /opt/ComfyUI/requirements.txt \
+         -r /opt/ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper/requirements.txt \
+         -r /opt/ComfyUI/custom_nodes/ComfyUI-KJNodes/requirements.txt \
+         -r /opt/ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt \
+         -r /opt/ComfyUI/custom_nodes/ComfyUI-MelBandRoFormer/requirements.txt \
+         -r /tmp/adapter-requirements.txt \
+    && python -m pip check
+
+FROM ${CUDA_BASE_IMAGE} AS deps-cuda13
+ENV DEBIAN_FRONTEND=noninteractive \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    HF_HOME=/cache/huggingface \
+    TORCH_HOME=/cache/torch \
+    XDG_CACHE_HOME=/cache/xdg \
+    PYTHONUNBUFFERED=1
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates curl ffmpeg gosu libgl1 libglib2.0-0 libgomp1 \
+       libicu74 libsndfile1 nginx python3.12 python3.12-venv \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
+RUN ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet
+COPY --from=pydeps-builder /opt/venv /opt/venv
+COPY --from=source-builder /opt/ComfyUI /opt/ComfyUI
+
+FROM ${GA_COMFYUI_VIDEO_DEPS_IMAGE} AS final-cuda13
+LABEL com.nvidia.cuda.version="13.0.0" \
+      com.nvidia.volumes.needed="nvidia_driver" \
+      org.guideants.component="comfyui-video" \
+      org.guideants.workflow="infinitetalk-i2v-v1"
+ENV FILE_STORAGE_ROOT=/app/ContentFiles \
+    SCRIPT_EXECUTION_ADMIN_API_ENABLED=true \
+    SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin \
+    SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes \
+    SCRIPT_EXECUTION_BASE_PYTHON_VENV=/opt/venv \
+    COMFYUI_MODELS_DIR=/models \
+    COMFYUI_HOST=127.0.0.1 \
+    COMFYUI_PORT=8188 \
+    VIDEO_ADAPTER_HOST=127.0.0.1 \
+    VIDEO_ADAPTER_PORT=8190 \
+    VIDEO_JOBS_ROOT=/var/lib/guideants/comfyui-video/jobs \
+    VIDEO_WORKFLOW_PATH=/opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1.json \
+    VIDEO_MODEL_MANIFEST=/opt/guideants/comfyui-video/catalog/manifest.json \
+    VIDEO_MAX_CONCURRENT_JOBS=1 \
+    VIDEO_JOB_TIMEOUT_SECONDS=3600
+RUN groupadd --gid 10001 guideants \
+    && useradd --uid 10001 --gid guideants --create-home --shell /bin/bash guideants \
+    && rm -f /etc/nginx/sites-enabled/default
+COPY ScriptExecutionAgent/ /app/script-agent/
+COPY adapter/ /app/adapter/
+COPY client/ /opt/venv/lib/python3.12/site-packages/
+COPY --from=script-exec-builder /usr/local/bin/ga-script-exec /usr/local/bin/ga-script-exec
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY catalog/ /opt/guideants/comfyui-video/catalog/
+COPY workflows/ /opt/guideants/comfyui-video/workflows/
+COPY scripts/ /opt/guideants/comfyui-video/scripts/
+COPY source-lock.json /opt/guideants/comfyui-video/source-lock.json
+RUN chmod 0755 /usr/local/bin/ga-script-exec /opt/guideants/comfyui-video/scripts/*.py \
+      /opt/guideants/comfyui-video/scripts/entrypoint.sh \
+    && chown -R guideants:guideants /app /opt/ComfyUI /opt/guideants/comfyui-video \
+    && python /opt/guideants/comfyui-video/scripts/verify-install.py --build
+VOLUME ["/models", "/cache", "/var/lib/guideants/script-agent-admin", "/app/ContentFiles"]
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl --fail --silent http://127.0.0.1/sandbox/health >/dev/null || exit 1
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/opt/guideants/comfyui-video/scripts/entrypoint.sh"]

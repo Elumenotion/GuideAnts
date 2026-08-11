@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "baseImage": {
+    "reference": "nvidia/cuda:13.0.0-runtime-ubuntu24.04@sha256:4757e6477d94d56fd8230e15b7d59956750c983a47a42584f44dbe143090da82",
+    "platform": "linux/amd64",
+    "platformDigest": "sha256:4757e6477d94d56fd8230e15b7d59956750c983a47a42584f44dbe143090da82",
+    "indexDigest": "sha256:95318efecfd68ab3d109da5277863257b06137c84f34a87f38de970d5cd035d3",
+    "verifiedAt": "2026-08-10"
+  },
+  "python": "3.12",
+  "pytorch": {
+    "version": "2.11.0+cu130",
+    "index": "https://download.pytorch.org/whl/cu130",
+    "attention": "sdpa"
+  },
+  "sources": [
+    {"name": "ComfyUI", "repository": "https://github.com/comfyanonymous/ComfyUI.git", "commit": "fe4195f7f4275f2626cbafc703acc3ddde1e5490"},
+    {"name": "ComfyUI-WanVideoWrapper", "repository": "https://github.com/kijai/ComfyUI-WanVideoWrapper.git", "commit": "088128b224242e110d3906c6750e9a3a348a659b"},
+    {"name": "ComfyUI-KJNodes", "repository": "https://github.com/kijai/ComfyUI-KJNodes.git", "commit": "073efb07419f56cc714e099a82e49fbc23ad9263"},
+    {"name": "ComfyUI-VideoHelperSuite", "repository": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git", "commit": "4ee72c065db22c9d96c2427954dc69e7b908444b"},
+    {"name": "ComfyUI-MelBandRoFormer", "repository": "https://github.com/kijai/ComfyUI-MelBandRoFormer.git", "commit": "92c86854e6654f4aacc97484471af95c98ea16d4", "license": "UNRESOLVED"},
+    {"name": "InfiniteTalk", "repository": "https://github.com/MeiGen-AI/InfiniteTalk.git", "commit": "50aa0a94184315407a991ae804d9b58d6d311ba8", "embedded": false, "purpose": "upstream model and algorithm provenance; ComfyUI integration is provided by WanVideoWrapper"}
+  ],
+  "workflow": {
+    "id": "infinitetalk-i2v-v1",
+    "revision": 1,
+    "path": "workflows/infinitetalk-i2v-v1.json"
+  },
+  "modelCatalog": "catalog/manifest.json"
+}

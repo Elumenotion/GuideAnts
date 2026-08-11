@@ -1,0 +1,49 @@
+services:
+  comfyui-video:
+    image: ${GA_COMFYUI_VIDEO_CUDA_IMAGE:-guideants-comfyui:cuda13-latest}
+    restart: unless-stopped
+    init: true
+    gpus:
+      - driver: nvidia
+        device_ids:
+          - ${GA_COMFYUI_VIDEO_CUDA_VISIBLE_DEVICES:?Select exactly one GPU UUID or index}
+    ports:
+      - "127.0.0.1:${GA_COMFYUI_VIDEO_PORT:-8189}:80"
+    environment:
+      CUDA_VISIBLE_DEVICES: ${GA_COMFYUI_VIDEO_CUDA_VISIBLE_DEVICES:?Select exactly one GPU UUID or index}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      FILE_STORAGE_ROOT: /app/ContentFiles
+      HF_HOME: /cache/huggingface
+      TORCH_HOME: /cache/torch
+      XDG_CACHE_HOME: /cache/xdg
+      SCRIPT_EXECUTION_AGENT_TOKEN: ${GA_SCRIPT_AGENT_TOKEN:?Set GA_SCRIPT_AGENT_TOKEN}
+      SCRIPT_EXECUTION_ADMIN_TOKEN: ${GA_SCRIPT_AGENT_ADMIN_TOKEN:?Set GA_SCRIPT_AGENT_ADMIN_TOKEN}
+      SCRIPT_EXECUTION_ADMIN_STATE_DIR: /var/lib/guideants/script-agent-admin
+      SCRIPT_EXECUTION_SCOPE_STATE_ROOT: /var/lib/guideants/script-agent-admin/scopes
+      SCRIPT_EXECUTION_BASE_PYTHON_VENV: /opt/venv
+      SCRIPT_EXECUTION_TIMEOUT_SECONDS: ${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-3600}
+      VIDEO_ADMIN_TOKEN: ${GA_COMFYUI_VIDEO_ADMIN_TOKEN:?Set GA_COMFYUI_VIDEO_ADMIN_TOKEN}
+      VIDEO_MAX_CONCURRENT_JOBS: ${GA_COMFYUI_VIDEO_MAX_CONCURRENT_JOBS:-1}
+      VIDEO_JOB_TIMEOUT_SECONDS: ${GA_COMFYUI_VIDEO_JOB_TIMEOUT_SECONDS:-3600}
+    volumes:
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:?Set GA_CONTENT_FILES_HOST_PATH}
+        target: /app/ContentFiles
+      - type: volume
+        source: comfyui_video_models
+        target: /models
+      - type: volume
+        source: comfyui_video_cache
+        target: /cache
+      - type: volume
+        source: comfyui_script_state
+        target: /var/lib/guideants/script-agent-admin
+      - type: volume
+        source: comfyui_video_state
+        target: /var/lib/guideants/comfyui-video
+    shm_size: 8gb
+volumes:
+  comfyui_video_models:
+  comfyui_video_cache:
+  comfyui_script_state:
+  comfyui_video_state:

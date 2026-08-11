@@ -1,0 +1,22 @@
+# Shared, bounded Python 3.12 runtime constraints.
+aiohttp>=3.12.15,<4
+alembic>=1.16.4,<2
+av>=16,<17
+einops>=0.8.1,<1
+fastapi>=0.116.1,<1
+huggingface-hub>=0.34.4,<1
+numpy>=2.1.0,<3
+opencv-python-headless>=4.11.0.86,<5
+pillow>=11.3.0,<12
+psutil>=7.0.0,<8
+python-multipart>=0.0.20,<1
+pyyaml>=6.0.2,<7
+requests>=2.32.4,<3
+safetensors>=0.6.2,<1
+scipy>=1.16.1,<2
+soundfile>=0.13.1,<1
+sqlalchemy>=2.0.43,<3
+tqdm>=4.67.1,<5
+transformers>=4.55.0,<5
+uvicorn>=0.35.0,<1
+websocket-client>=1.8.0,<2

@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "bundles": {
+    "infinitetalk-i2v-v1": {
+      "workflow": "infinitetalk-i2v-v1",
+      "artifacts": [
+        {
+          "id": "wan-i2v-14b-480p",
+          "repository": "Kijai/WanVideo_comfy",
+          "revision": "3749c9968ce9c9de5fe9d418cab350abec0f119d",
+          "file": "Wan2_1-I2V-14B-480P_fp8_e4m3fn.safetensors",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/3749c9968ce9c9de5fe9d418cab350abec0f119d/Wan2_1-I2V-14B-480P_fp8_e4m3fn.safetensors",
+          "path": "diffusion_models/WanVideo/Wan2_1-I2V-14B-480P_fp8_e4m3fn.safetensors",
+          "size": 16993877896,
+          "sha256": "996dbad030df09b0b3c8e764f0fb5a81b98b220ab89524d6a9369e9ed882791f"
+        },
+        {
+          "id": "infinitetalk-single",
+          "repository": "Kijai/WanVideo_comfy",
+          "revision": "3749c9968ce9c9de5fe9d418cab350abec0f119d",
+          "file": "InfiniteTalk/Wan2_1-InfiniTetalk-Single_fp16.safetensors",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/3749c9968ce9c9de5fe9d418cab350abec0f119d/InfiniteTalk/Wan2_1-InfiniTetalk-Single_fp16.safetensors",
+          "path": "diffusion_models/WanVideo/InfiniteTalk/Wan2_1-InfiniTetalk-Single_fp16.safetensors",
+          "size": 5125258232,
+          "sha256": "bf212c5c647eaf1c019b2158d2edf4a360d97e38b746c4bac994fee485e09fc3"
+        },
+        {
+          "id": "wan-vae",
+          "repository": "Kijai/WanVideo_comfy",
+          "revision": "3749c9968ce9c9de5fe9d418cab350abec0f119d",
+          "file": "Wan2_1_VAE_bf16.safetensors",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/3749c9968ce9c9de5fe9d418cab350abec0f119d/Wan2_1_VAE_bf16.safetensors",
+          "path": "vae/Wan2_1_VAE_bf16.safetensors",
+          "size": 253806278,
+          "sha256": "1ab9a32cc2c740f6e39d80d367ce5dcc28db8c71b79b28670546b8973e9d75f9"
+        },
+        {
+          "id": "umt5-xxl",
+          "repository": "Kijai/WanVideo_comfy",
+          "revision": "3749c9968ce9c9de5fe9d418cab350abec0f119d",
+          "file": "umt5-xxl-enc-bf16.safetensors",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/3749c9968ce9c9de5fe9d418cab350abec0f119d/umt5-xxl-enc-bf16.safetensors",
+          "path": "text_encoders/umt5-xxl-enc-bf16.safetensors",
+          "size": 11361845464,
+          "sha256": "4fa971faf306cad919033d5bbe192e571dc08452f800cbf2ec3c73977c01b2cc"
+        },
+        {
+          "id": "clip-vision-h",
+          "repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+          "revision": "06e001fc51048fb03433a6fb25334de7836704a5",
+          "file": "split_files/clip_vision/clip_vision_h.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/06e001fc51048fb03433a6fb25334de7836704a5/split_files/clip_vision/clip_vision_h.safetensors",
+          "path": "clip_vision/clip_vision_h.safetensors",
+          "size": 1264219396,
+          "sha256": "64a7ef761bfccbadbaa3da77366aac4185a6c58fa5de5f589b42a65bcc21f161"
+        },
+        {
+          "id": "wav2vec2-chinese-base",
+          "repository": "Kijai/wav2vec2_safetensors",
+          "revision": "87847d3bc53702afda44078249e7c33e867827c4",
+          "file": "wav2vec2-chinese-base_fp16.safetensors",
+          "url": "https://huggingface.co/Kijai/wav2vec2_safetensors/resolve/87847d3bc53702afda44078249e7c33e867827c4/wav2vec2-chinese-base_fp16.safetensors",
+          "path": "wav2vec2/wav2vec2-chinese-base_fp16.safetensors",
+          "size": 190115368,
+          "sha256": "000813e441020f18cff844c969d2d5d4adc2a5ce46b2db1f23950b05d88805b4"
+        },
+        {
+          "id": "lightx2v-i2v-rank32",
+          "repository": "Kijai/WanVideo_comfy",
+          "revision": "3749c9968ce9c9de5fe9d418cab350abec0f119d",
+          "file": "Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank32_bf16.safetensors",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/3749c9968ce9c9de5fe9d418cab350abec0f119d/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank32_bf16.safetensors",
+          "path": "loras/WanVideo/lightx2v_I2V_14B_480p_cfg_step_distill_rank32_bf16.safetensors",
+          "size": 373424368,
+          "sha256": "f501375c1a4e34533fa1c08360059f8f849ebddd829ff5853e551c3fea991368"
+        }
+      ]
+    }
+  }
+}
