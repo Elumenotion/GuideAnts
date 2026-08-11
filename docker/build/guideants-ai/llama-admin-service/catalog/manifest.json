@@ -173,7 +173,7 @@
           },
           "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -369,7 +369,7 @@
           },
           "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -565,7 +565,7 @@
           },
           "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -753,7 +753,7 @@
           },
           "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -800,6 +800,11 @@
         "mmproj": {
           "path": "mmproj-Muse-Glimmer-30B-BF16.gguf"
         },
+        "companionArtifacts": [
+          {
+            "path": "dflash-kquant.gguf"
+          }
+        ],
         "routerPreset": {
           "ctx-size": "131072",
           "image-min-tokens": "1024",
@@ -909,7 +914,7 @@
             }
           },
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -1046,7 +1051,7 @@
           },
           "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -1182,7 +1187,7 @@
           },
           "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -1318,7 +1323,7 @@
           },
           "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -1455,7 +1460,7 @@
           },
           "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -1647,7 +1652,7 @@
           },
           "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -1843,7 +1848,7 @@
           },
           "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -2039,7 +2044,7 @@
           },
           "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -2142,7 +2147,7 @@
             }
           },
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },
@@ -2435,7 +2440,7 @@
           },
           "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
           "requestFieldsWhenToolsPresent": {
-            "parallel_tool_calls": true
+            "parallel_tool_calls": false
           }
         }
       },

@@ -21,6 +21,7 @@ public sealed record LlamaInstallationDetailDto(
     string TargetDirectory,
     IReadOnlyList<InstallationArtifactDto> ModelArtifacts,
     IReadOnlyList<InstallationArtifactDto> ProjectorArtifacts,
+    IReadOnlyList<InstallationArtifactDto> CompanionArtifacts,
     IReadOnlyDictionary<string, string> RouterPresetSnapshot,
     string RuntimeState,
     bool Loaded,

@@ -69,7 +69,8 @@ public sealed class LlamaNegativeContractTests
                         100,
                         [new LlamaQuantArtifactDto("shard-00001-of-00003.gguf", 50, 1, 3)]),
                 ],
-                null));
+                null,
+                []));
 
         var resolver = CreateResolver(adminClient.Object);
         var request = CreateCuratedRequest();
@@ -99,7 +100,8 @@ public sealed class LlamaNegativeContractTests
                 "main",
                 Revision,
                 [new LlamaQuantGroupDto("q6_k_xl", "Q6_K_XL", 100, [new LlamaQuantArtifactDto("model.gguf", 100)])],
-                null));
+                null,
+                []));
 
         var resolver = CreateResolver(adminClient.Object);
         var request = CreateCuratedRequest();
@@ -316,7 +318,7 @@ public sealed class LlamaNegativeContractTests
                         "Qwen3.6-35B-A3B-MTP-GGUF",
                         "Qwen3.6-35B-A3B-MTP-GGUF",
                         requireMmproj ? new LlamaCatalogMmprojDto("mmproj.gguf") : null,
-                        new Dictionary<string, string> { ["ctx-size"] = "131072" }),
+                        routerPreset: new Dictionary<string, string> { ["ctx-size"] = "131072" }),
                     new LlamaCatalogQuantMetadataDto(),
                     new LlamaCatalogHardwareNotesDto("notes", "large")),
             ]);
@@ -334,7 +336,8 @@ public sealed class LlamaNegativeContractTests
                     100,
                     [new LlamaQuantArtifactDto("Qwen3.6-35B-A3B-Q6_K_XL.gguf", 100)]),
             ],
-            null);
+            null,
+            []);
 
     private static LocalModelOnboardingValidator CreateValidator(
         IApplicationSettingsService? settingsService = null,
@@ -391,6 +394,7 @@ public sealed class LlamaNegativeContractTests
             "q6_k_xl",
             "Q6_K_XL",
             ["model.gguf"],
+            [],
             [],
             "Qwen3.6-35B-A3B-MTP-GGUF",
             "Qwen3.6-35B-A3B-MTP-GGUF",
@@ -495,6 +499,7 @@ public sealed class LlamaNegativeContractTests
             TargetDirectory = "qwen-local",
             ModelArtifactsJson = InstallationArtifactRecords.SerializeFromPaths("qwen-local", ["model-q6.gguf"]),
             ProjectorArtifactsJson = "[]",
+            CompanionArtifactsJson = "[]",
             RouterPresetSnapshotJson = """{"ctx-size":"8192"}""",
             CreatedUtc = now,
             UpdatedUtc = now,

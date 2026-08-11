@@ -59,6 +59,12 @@ public class LocalModelInstallation
     public string ProjectorArtifactsJson { get; set; } = "[]";
 
     /// <summary>
+    /// Ordered JSON array of companion artifact records (DFlash drafters, etc.).
+    /// </summary>
+    [Required]
+    public string CompanionArtifactsJson { get; set; } = "[]";
+
+    /// <summary>
     /// Complete alias preset snapshot written to router INI at install time.
     /// </summary>
     [Required]

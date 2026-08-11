@@ -101,6 +101,7 @@ public sealed class LocalModelInstallationService : ILocalModelInstallationServi
             TargetDirectory: installation.TargetDirectory ?? string.Empty,
             ModelArtifacts: InstallationArtifactRecords.Parse(installation.ModelArtifactsJson),
             ProjectorArtifacts: InstallationArtifactRecords.Parse(installation.ProjectorArtifactsJson),
+            CompanionArtifacts: InstallationArtifactRecords.Parse(installation.CompanionArtifactsJson),
             RouterPresetSnapshot: InstallationArtifactRecords.ParsePresetSnapshot(installation.RouterPresetSnapshotJson),
             RuntimeState: row?.RuntimeState ?? "unknown",
             Loaded: string.Equals(row?.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase),

@@ -38,6 +38,7 @@ public static class LlamaCatalogTestHelpers
         string routerModelId,
         string targetDirectory,
         LlamaCatalogMmprojDto? mmproj = null,
+        IReadOnlyList<LlamaCatalogCompanionArtifactDto>? companionArtifacts = null,
         IReadOnlyDictionary<string, string>? routerPreset = null,
         LlamaCatalogChatBehaviorDto? chatBehavior = null) =>
         new(
@@ -45,6 +46,7 @@ public static class LlamaCatalogTestHelpers
             routerModelId,
             targetDirectory,
             mmproj,
+            companionArtifacts,
             routerPreset ?? new Dictionary<string, string> { ["ctx-size"] = "8192" },
             chatBehavior ?? CreateChatBehaviorDto());
 

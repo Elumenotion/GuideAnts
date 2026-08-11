@@ -355,7 +355,7 @@ describe('AddModelWizard flow', () => {
 
     onPollFailureThreshold?.();
     await waitFor(() => {
-      expect(screen.getByText(/Failed to poll operation status/i)).toBeInTheDocument();
+      expect(screen.getByText(/Lost contact with the server while checking progress/i)).toBeInTheDocument();
     });
   });
 

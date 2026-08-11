@@ -642,7 +642,7 @@ public static class StartupConfiguration
                             .AsNoTracking()
                             .Where(userRole => userRole.UserId == userId)
                             .Select(userRole => new { userRole.User.SecurityStamp, userRole.Role })
-                            .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+                            .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
 
                         if (account is null || account.SecurityStamp != tokenSecurityStamp)
                         {

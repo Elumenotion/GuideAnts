@@ -111,6 +111,7 @@ public sealed class LlamaCrossLayerContractTests
             TargetDirectory = "qwen-local",
             ModelArtifactsJson = InstallationArtifactRecords.SerializeFromPaths("qwen-local", ["model-q6.gguf"]),
             ProjectorArtifactsJson = "[]",
+            CompanionArtifactsJson = "[]",
             RouterPresetSnapshotJson = """{"ctx-size":"8192"}""",
             CreatedUtc = now,
             UpdatedUtc = now,

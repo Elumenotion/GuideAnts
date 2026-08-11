@@ -98,5 +98,13 @@ class LlamaSchemaTests(unittest.TestCase):
             validate_manifest_instance(bad)
 
 
+    def test_rejects_companion_mmproj_destination_collision(self) -> None:
+        bad = copy.deepcopy(self.manifest)
+        muse = next(m for m in bad["models"] if m["id"] == "muse-glimmer-30b")
+        muse["defaults"]["companionArtifacts"] = [{"path": muse["defaults"]["mmproj"]["path"]}]
+        with self.assertRaises(CatalogValidationError):
+            validate_manifest_instance(bad)
+
+
 if __name__ == "__main__":
     unittest.main()

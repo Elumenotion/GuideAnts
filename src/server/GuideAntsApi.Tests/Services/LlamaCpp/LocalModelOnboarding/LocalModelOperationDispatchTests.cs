@@ -217,6 +217,7 @@ public sealed class LocalModelOperationDispatchTests
                 "abc123",
                 ["model-q6.gguf"],
                 [],
+                [],
                 "qwen-local",
                 "qwen-local",
                 new Dictionary<string, string> { ["ctx-size"] = "8192" }).ToJson(),
@@ -248,6 +249,7 @@ public sealed class LocalModelOperationDispatchTests
                             "qwen-local",
                             "qwen-local",
                             null,
+                            null,
                             new Dictionary<string, string> { ["ctx-size"] = "8192" },
                             LlamaCatalogTestHelpers.CreateChatBehaviorDto()),
                         new LlamaCatalogQuantMetadataDto(),
@@ -272,7 +274,8 @@ public sealed class LocalModelOperationDispatchTests
                         1000,
                         [new LlamaQuantArtifactDto("model-q4.gguf", 1000)]),
                 ],
-                null));
+                null,
+                []));
         return adminClient;
     }
 
@@ -304,6 +307,7 @@ public sealed class LocalModelOperationDispatchTests
             TargetDirectory = "qwen-local",
             ModelArtifactsJson = InstallationArtifactRecords.SerializeFromPaths("qwen-local", ["model-q6.gguf"]),
             ProjectorArtifactsJson = "[]",
+            CompanionArtifactsJson = "[]",
             RouterPresetSnapshotJson = JsonSerializer.Serialize(new Dictionary<string, string> { ["ctx-size"] = "8192" }),
             CreatedUtc = now,
             UpdatedUtc = now,

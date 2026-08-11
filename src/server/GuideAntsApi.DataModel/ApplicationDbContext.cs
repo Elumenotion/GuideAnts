@@ -436,6 +436,7 @@ namespace GuideAntsApi.DataModel
             {
                 b.Property(x => x.ModelArtifactsJson).HasColumnType("nvarchar(max)").IsRequired();
                 b.Property(x => x.ProjectorArtifactsJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.CompanionArtifactsJson).HasColumnType("nvarchar(max)").IsRequired();
                 b.Property(x => x.RouterPresetSnapshotJson).HasColumnType("nvarchar(max)").IsRequired();
                 b.Property(x => x.CreatedUtc).HasDefaultValueSql("GETUTCDATE()");
                 b.Property(x => x.UpdatedUtc).HasDefaultValueSql("GETUTCDATE()");

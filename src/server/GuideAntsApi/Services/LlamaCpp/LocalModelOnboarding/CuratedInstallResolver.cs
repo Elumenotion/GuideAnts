@@ -262,8 +262,9 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
         var mmprojFiles = quantsAtCommit.Projector is null
             ? Array.Empty<string>()
             : new[] { quantsAtCommit.Projector.Path };
+        var companionFiles = quantsAtCommit.Companions.Select(c => c.Path).ToList();
 
-        var artifactMetadata = BuildArtifactMetadata(quant, quantsAtCommit.Projector);
+        var artifactMetadata = BuildArtifactMetadata(quant, quantsAtCommit.Projector, quantsAtCommit.Companions);
 
         var catalogModelId = string.IsNullOrWhiteSpace(request.Catalog.ModelId)
             ? defaults.CatalogModelId.Trim()
@@ -290,6 +291,7 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
             QuantLabel: quant.Label,
             ModelFiles: modelFiles,
             MmprojFiles: mmprojFiles,
+            CompanionFiles: companionFiles,
             RouterModelId: defaults.RouterModelId.Trim(),
             TargetDirectory: defaults.TargetDirectory.Trim(),
             RouterPreset: routerPreset,
@@ -304,7 +306,8 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
 
     private static IReadOnlyList<CuratedArtifactMetadataInput> BuildArtifactMetadata(
         LlamaQuantGroupDto quant,
-        LlamaProjectorArtifactDto? projector)
+        LlamaProjectorArtifactDto? projector,
+        IReadOnlyList<LlamaProjectorArtifactDto> companions)
     {
         var items = quant.Files
             .Select(f => new CuratedArtifactMetadataInput(
@@ -320,6 +323,15 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
                 Path: projector.Path,
                 Size: projector.Size,
                 Digest: projector.GitOid ?? projector.LfsOid,
+                Etag: null));
+        }
+
+        foreach (var companion in companions)
+        {
+            items.Add(new CuratedArtifactMetadataInput(
+                Path: companion.Path,
+                Size: companion.Size,
+                Digest: companion.GitOid ?? companion.LfsOid,
                 Etag: null));
         }
 

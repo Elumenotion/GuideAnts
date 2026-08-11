@@ -57,7 +57,7 @@
         "revision": { "type": "string" }
       }
     },
-    "mmprojRef": {
+    "repositoryArtifactRef": {
       "type": "object",
       "required": ["path"],
       "additionalProperties": false,
@@ -66,6 +66,9 @@
         "repository": { "type": "string", "minLength": 3 },
         "revision": { "type": "string" }
       }
+    },
+    "mmprojRef": {
+      "$ref": "#/$defs/repositoryArtifactRef"
     },
     "routerPreset": {
       "type": "object",
@@ -107,6 +110,10 @@
             { "$ref": "#/$defs/mmprojRef" },
             { "type": "null" }
           ]
+        },
+        "companionArtifacts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/repositoryArtifactRef" }
         },
         "routerPreset": { "$ref": "#/$defs/routerPreset" },
         "chatBehavior": { "$ref": "#/$defs/chatBehavior" }

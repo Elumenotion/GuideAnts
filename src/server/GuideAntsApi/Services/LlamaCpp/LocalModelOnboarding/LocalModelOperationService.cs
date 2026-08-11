@@ -377,6 +377,7 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
             installation.TargetDirectory = immutableInput.TargetDirectory;
             installation.ModelArtifactsJson = BuildModelArtifactsJson(immutableInput);
             installation.ProjectorArtifactsJson = BuildProjectorArtifactsJson(immutableInput);
+            installation.CompanionArtifactsJson = BuildCompanionArtifactsJson(immutableInput);
             installation.RouterPresetSnapshotJson = JsonSerializer.Serialize(immutableInput.RouterPreset);
             installation.UpdatedUtc = now;
         }
@@ -438,6 +439,7 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
                 TargetDirectory = immutableInput.TargetDirectory,
                 ModelArtifactsJson = BuildModelArtifactsJson(immutableInput),
                 ProjectorArtifactsJson = BuildProjectorArtifactsJson(immutableInput),
+                CompanionArtifactsJson = BuildCompanionArtifactsJson(immutableInput),
                 RouterPresetSnapshotJson = JsonSerializer.Serialize(immutableInput.RouterPreset),
                 CreatedUtc = now,
                 UpdatedUtc = now,
@@ -528,6 +530,24 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
         }
 
         var artifacts = input.MmprojFiles.Select(path => new JsonObject
+        {
+            ["repositoryPath"] = path,
+            ["installedRelativePath"] = $"{input.TargetDirectory}/{Path.GetFileName(path)}",
+            ["byteSize"] = input.ArtifactMetadata?
+                .FirstOrDefault(a => string.Equals(a.Path, path, StringComparison.Ordinal))?.Size,
+        }).ToList<JsonNode?>();
+
+        return new JsonArray(artifacts.ToArray()).ToJsonString();
+    }
+
+    private static string BuildCompanionArtifactsJson(CuratedImmutableOperationInput input)
+    {
+        if (input.CompanionFiles.Count == 0)
+        {
+            return "[]";
+        }
+
+        var artifacts = input.CompanionFiles.Select(path => new JsonObject
         {
             ["repositoryPath"] = path,
             ["installedRelativePath"] = $"{input.TargetDirectory}/{Path.GetFileName(path)}",

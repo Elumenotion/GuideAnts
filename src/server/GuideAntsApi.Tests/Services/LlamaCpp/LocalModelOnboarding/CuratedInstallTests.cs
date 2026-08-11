@@ -269,6 +269,7 @@ public sealed class CuratedInstallTests
             TargetDirectory = input.TargetDirectory,
             ModelArtifactsJson = "[]",
             ProjectorArtifactsJson = "[]",
+            CompanionArtifactsJson = "[]",
             RouterPresetSnapshotJson = "{}",
             CreatedUtc = now,
             UpdatedUtc = now,
@@ -573,7 +574,7 @@ public sealed class CuratedInstallTests
                         "Qwen3.6-35B-A3B-MTP-GGUF",
                         "Qwen3.6-35B-A3B-MTP-GGUF",
                         new LlamaCatalogMmprojDto("mmproj-F16.gguf"),
-                        new Dictionary<string, string>
+                        routerPreset: new Dictionary<string, string>
                         {
                             ["ctx-size"] = "131072",
                             ["image-min-tokens"] = "1024",
@@ -617,7 +618,8 @@ public sealed class CuratedInstallTests
             RequestedRevision: "main",
             ResolvedRevision: revision,
             Quants: quants,
-            Projector: new LlamaProjectorArtifactDto("mmproj-F16.gguf", 900_000_000));
+            Projector: new LlamaProjectorArtifactDto("mmproj-F16.gguf", 900_000_000),
+            Companions: []);
     }
 
     private static CuratedImmutableOperationInput CreateImmutableInput(bool singleGguf)
@@ -644,6 +646,7 @@ public sealed class CuratedInstallTests
                     "Qwen3.6-35B-A3B-Q6_K_XL-00002-of-00002.gguf",
                 ],
             MmprojFiles: ["mmproj-F16.gguf"],
+            CompanionFiles: [],
             RouterModelId: "Qwen3.6-35B-A3B-MTP-GGUF",
             TargetDirectory: "Qwen3.6-35B-A3B-MTP-GGUF",
             RouterPreset: new Dictionary<string, string>

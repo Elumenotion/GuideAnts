@@ -346,6 +346,7 @@ public sealed record ExactStartModelDownloadRequest(
     string ResolvedRevision,
     IReadOnlyList<string> ModelFiles,
     IReadOnlyList<string> MmprojFiles,
+    IReadOnlyList<string> CompanionFiles,
     string Alias,
     string TargetDirectory,
     IReadOnlyDictionary<string, string> Preset,

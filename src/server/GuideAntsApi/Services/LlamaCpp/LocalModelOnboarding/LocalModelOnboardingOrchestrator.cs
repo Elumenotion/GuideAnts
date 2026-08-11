@@ -240,12 +240,16 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
 
             if (IsCuratedInstall(kind))
             {
-                var curated = await _operationService
-                    .GetStatusAsync(operationGuid, cancellationToken)
-                    .ConfigureAwait(false);
-                if (curated is not null)
+                try
                 {
+                    var curated = await _operationService
+                        .ReconcileAndGetStatusAsync(operationGuid, cancellationToken)
+                        .ConfigureAwait(false);
                     return MapCuratedToLegacyDownloadDto(curated);
+                }
+                catch (InvalidOperationException)
+                {
+                    return null;
                 }
             }
             else if (kind is not null)

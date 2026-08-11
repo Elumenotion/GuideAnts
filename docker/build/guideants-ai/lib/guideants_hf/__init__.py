@@ -19,6 +19,7 @@ from guideants_hf.repository import (
 from guideants_hf.transport import (
     HF_TIMEOUT_SECONDS,
     HTTP_USER_AGENT,
+    IncompleteDownloadError,
     RangeNotSatisfiable,
     build_regex_from_include_pattern,
     download_hf_file,
@@ -32,6 +33,7 @@ __all__ = [
     "build_regex_from_include_pattern",
     "download_catalog_entry_files",
     "download_hf_file",
+    "IncompleteDownloadError",
     "download_repo_file",
     "find_in_flight_operation",
     "group_repository_quants",

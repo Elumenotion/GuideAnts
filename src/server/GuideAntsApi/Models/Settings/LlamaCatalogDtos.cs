@@ -20,6 +20,11 @@ public sealed record LlamaCatalogMmprojDto(
     string? Repository = null,
     string? Revision = null);
 
+public sealed record LlamaCatalogCompanionArtifactDto(
+    string Path,
+    string? Repository = null,
+    string? Revision = null);
+
 public sealed record LlamaCatalogChatBehaviorDto(
     bool CombineSystemAndDeveloperMessages,
     string? ThoughtBlockPattern,
@@ -32,6 +37,7 @@ public sealed record LlamaCatalogDefaultsDto(
     string RouterModelId,
     string TargetDirectory,
     LlamaCatalogMmprojDto? Mmproj,
+    IReadOnlyList<LlamaCatalogCompanionArtifactDto>? CompanionArtifacts,
     IReadOnlyDictionary<string, string> RouterPreset,
     LlamaCatalogChatBehaviorDto ChatBehavior);
 
@@ -90,7 +96,8 @@ public sealed record LlamaCatalogQuantsResponseDto(
     string RequestedRevision,
     string ResolvedRevision,
     IReadOnlyList<LlamaQuantGroupDto> Quants,
-    LlamaProjectorArtifactDto? Projector);
+    LlamaProjectorArtifactDto? Projector,
+    IReadOnlyList<LlamaProjectorArtifactDto> Companions);
 
 public sealed class LlamaCatalogServiceException : Exception
 {
