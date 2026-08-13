@@ -8,6 +8,7 @@ import wave
 from pathlib import Path
 
 import pytest
+import guideants_video_adapter.core as core
 
 from guideants_video_adapter.core import (
     AdapterError,
@@ -134,6 +135,22 @@ def test_rejects_paths_and_unknown_parameters() -> None:
         validate_parameters({"custom_node": "anything"})
 
 
+def test_model_readiness_does_not_rehash_installed_artifacts(
+    service: tuple[AdapterService, FakeComfy], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter, _comfy = service
+    artifact = adapter.models_root / "infinitetalk" / "model.bin"
+
+    def unexpected_sha256_file(_path: Path) -> str:
+        raise AssertionError("readiness must not hash installed models")
+
+    monkeypatch.setattr(core, "_sha256_file", unexpected_sha256_file)
+    assert adapter.models()["ready"] is True
+    assert adapter.models()["ready"] is True
+    artifact.unlink()
+    assert adapter.models()["ready"] is False
+
+
 def test_rejects_oversized_payload(
     service: tuple[AdapterService, FakeComfy],
 ) -> None:
@@ -231,6 +248,150 @@ def test_job_uses_private_directory_and_materializes_result(
     assert comfy.submitted is not None
     assert comfy.submitted["2"]["inputs"]["width"] == 832
     assert comfy.submitted["2"]["inputs"]["frames"] == 150
+
+
+def test_image_edit_job_materializes_png(
+    service: tuple[AdapterService, FakeComfy], tmp_path: Path
+) -> None:
+    adapter, comfy = service
+    image_workflow = adapter.image_workflow_path
+    image_workflow.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "class_type": "TextEncodeQwenImageEditPlus",
+                    "inputs": {"prompt": "{{PROMPT}}", "image1": "{{INPUT_IMAGE}}"},
+                },
+                "2": {"class_type": "SaveImage", "inputs": {"steps": "{{STEPS}}"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact = adapter.models_root / "diffusion_models" / "qwen_edit.safetensors"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_bytes(b"qwen")
+    manifest = json.loads(adapter.manifest_path.read_text(encoding="utf-8"))
+    manifest["bundles"]["qwen-image-edit-v1"] = {
+        "artifacts": [
+            {
+                "path": "diffusion_models/qwen_edit.safetensors",
+                "size": 4,
+                "sha256": "0" * 64,
+                "url": "https://huggingface.co/example/resolve/abc/file.safetensors",
+            }
+        ]
+    }
+    adapter.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    comfy.object_info = lambda: {
+        "TextEncodeQwenImageEditPlus": {},
+        "FluxKontextMultiReferenceLatentMethod": {},
+        "CFGNorm": {},
+        "ImageScaleToTotalPixels": {},
+        "SaveImage": {},
+    }  # type: ignore[method-assign]
+    original_history = comfy.history
+
+    def image_history(prompt_id: str) -> dict:
+        if not comfy.history_ready.is_set():
+            return {}
+        return {
+            prompt_id: {
+                "status": {"status_str": "success"},
+                "outputs": {"13": {"images": [{"filename": "generated.png", "type": "output"}]}},
+            }
+        }
+
+    comfy.history = image_history  # type: ignore[method-assign]
+    comfy.download_output = lambda descriptor: b"fake-png"  # type: ignore[method-assign]
+    job = adapter.submit_image_job(
+        b"image",
+        "image/png",
+        "complete the scene",
+        "edited.png",
+        "qwen-image-edit-v1",
+        {"steps": 4, "cfg": 1.0},
+    )
+    comfy.history_ready.set()
+    for _ in range(1000):
+        if adapter.get_job(job.id).state == "completed":
+            break
+        threading.Event().wait(0.001)
+    completed = adapter.get_job(job.id)
+    assert completed.state == "completed"
+    result, filename = adapter.open_result(job.id)
+    assert filename == "edited.png"
+    assert result.read_bytes() == b"fake-png"
+    assert comfy.submitted is not None
+    assert comfy.submitted["1"]["inputs"]["prompt"] == "complete the scene"
+    assert comfy.submitted["2"]["inputs"]["steps"] == 4
+    comfy.history = original_history
+
+
+def test_image_generate_job_materializes_png(
+    service: tuple[AdapterService, FakeComfy],
+) -> None:
+    adapter, comfy = service
+    generate_workflow = adapter.image_generate_workflow_path
+    generate_workflow.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "class_type": "CLIPTextEncode",
+                    "inputs": {"text": "{{PROMPT}}"},
+                },
+                "2": {"class_type": "SaveImage", "inputs": {"steps": "{{STEPS}}"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact = adapter.models_root / "diffusion_models" / "qwen_image.safetensors"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_bytes(b"qwen")
+    manifest = json.loads(adapter.manifest_path.read_text(encoding="utf-8"))
+    manifest["bundles"]["qwen-image-v1"] = {
+        "artifacts": [
+            {
+                "path": "diffusion_models/qwen_image.safetensors",
+                "size": 4,
+                "sha256": "0" * 64,
+                "url": "https://huggingface.co/example/resolve/abc/file.safetensors",
+            }
+        ]
+    }
+    adapter.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    comfy.object_info = lambda: {"CLIPTextEncode": {}, "SaveImage": {}}  # type: ignore[method-assign]
+
+    def image_history(prompt_id: str) -> dict:
+        if not comfy.history_ready.is_set():
+            return {}
+        return {
+            prompt_id: {
+                "status": {"status_str": "success"},
+                "outputs": {"60": {"images": [{"filename": "generated.png", "type": "output"}]}},
+            }
+        }
+
+    comfy.history = image_history  # type: ignore[method-assign]
+    comfy.download_output = lambda descriptor: b"fake-gen-png"  # type: ignore[method-assign]
+    job = adapter.submit_image_generate_job(
+        "a futuristic CPU on a motherboard",
+        "generated.png",
+        "qwen-image-v1",
+        {"steps": 4, "cfg": 1.0},
+    )
+    comfy.history_ready.set()
+    for _ in range(1000):
+        if adapter.get_job(job.id).state == "completed":
+            break
+        threading.Event().wait(0.001)
+    completed = adapter.get_job(job.id)
+    assert completed.state == "completed"
+    result, filename = adapter.open_result(job.id)
+    assert filename == "generated.png"
+    assert result.read_bytes() == b"fake-gen-png"
+    assert comfy.submitted is not None
+    assert comfy.submitted["1"]["inputs"]["text"] == "a futuristic CPU on a motherboard"
+    assert comfy.submitted["2"]["inputs"]["steps"] == 4
 
 
 def test_readiness_fails_clearly_when_comfy_is_unavailable(

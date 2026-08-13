@@ -13,9 +13,9 @@ ROOT = Path("/opt/guideants/comfyui-video")
 
 
 def main() -> int:
-    workflow = json.loads(
-        (ROOT / "workflows" / "infinitetalk-i2v-v1.json").read_text(encoding="utf-8")
-    )
+    lock = json.loads((ROOT / "source-lock.json").read_text(encoding="utf-8"))
+    workflow_path = ROOT / lock["workflow"]["path"]
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
     if not workflow or any(
         not isinstance(node, dict)
         or not isinstance(node.get("class_type"), str)
@@ -42,7 +42,7 @@ def main() -> int:
     if missing:
         print(f"missing required ComfyUI node classes: {', '.join(missing)}", file=sys.stderr)
         return 1
-    print(f"workflow infinitetalk-i2v-v1 node classes and links validated")
+    print(f"workflow {lock['workflow']['id']} node classes and links validated")
     return 0
 
 

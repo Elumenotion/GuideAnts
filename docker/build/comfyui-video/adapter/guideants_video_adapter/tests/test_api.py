@@ -48,6 +48,9 @@ class StubService:
         assert job_id == JOB_ID
         return self.result, "result.mp4"
 
+    def submit_image_job(self, *args: object, **kwargs: object) -> Job:
+        return self.job
+
 
 def test_read_only_endpoints_and_result(tmp_path: Path) -> None:
     client = TestClient(create_app(StubService(tmp_path), admin_token="secret"))  # type: ignore[arg-type]

@@ -11,6 +11,8 @@ from guideants_video_client import (
     cancel_talking_head_job,
     get_talking_head_job,
     materialize_talking_head_result,
+    submit_image_edit,
+    submit_image_generate,
     submit_talking_head,
 )
 
@@ -126,4 +128,60 @@ def test_materialize_is_atomic_and_scoped(
         materialize_talking_head_result(
             JOB_ID, "../../outside.mp4", working_directory=output_dir
         )
+
+
+def test_submit_image_edit_streams_scoped_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _notebook, input_dir, output_dir = make_notebook(tmp_path)
+    (input_dir / "office.png").write_bytes(b"png")
+    captured: dict = {}
+
+    def fake_request(method: str, path: str, **kwargs: object) -> dict:
+        captured.update({"method": method, "path": path, **kwargs})
+        return {"jobId": JOB_ID, "state": "queued"}
+
+    monkeypatch.setattr(client_module, "_request", fake_request)
+    result = submit_image_edit(
+        image_path="../Input/office.png",
+        prompt="complete the scene",
+        output_filename="edited.png",
+        working_directory=output_dir,
+        parameters={"steps": 4, "cfg": 1.0},
+    )
+    assert result["jobId"] == JOB_ID
+    assert captured["path"] == "/v1/image/jobs"
+    body = captured["body"]
+    assert isinstance(body, bytes)
+    assert b"qwen-image-edit-v1" in body
+    assert b"complete the scene" in body
+    assert b'"steps":4' in body
+    assert b"png" in body
+
+
+def test_submit_image_generate_posts_form_without_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _notebook, _input_dir, output_dir = make_notebook(tmp_path)
+    captured: dict = {}
+
+    def fake_request(method: str, path: str, **kwargs: object) -> dict:
+        captured.update({"method": method, "path": path, **kwargs})
+        return {"jobId": JOB_ID, "state": "queued"}
+
+    monkeypatch.setattr(client_module, "_request", fake_request)
+    result = submit_image_generate(
+        prompt="a futuristic CPU on a motherboard",
+        output_filename="generated.png",
+        working_directory=output_dir,
+        parameters={"steps": 4, "cfg": 1.0},
+    )
+    assert result["jobId"] == JOB_ID
+    assert captured["path"] == "/v1/image/generate/jobs"
+    body = captured["body"]
+    assert isinstance(body, bytes)
+    assert b"qwen-image-v1" in body
+    assert b"a futuristic CPU on a motherboard" in body
+    assert b'"steps":4' in body
+    assert b'filename="' not in body
 

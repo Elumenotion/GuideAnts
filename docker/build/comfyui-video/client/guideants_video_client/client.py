@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8190"
+REQUEST_TIMEOUT_SECONDS = 180
 WORKFLOW_VERSION = "infinitetalk-i2v-v1"
 HEX_UUID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
@@ -93,7 +94,7 @@ def _request(
         f"{_base_url(base_url)}{path}", data=body, headers=headers, method=method
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             if output is not None:
                 while chunk := response.read(1024 * 1024):
                     output.write(chunk)
@@ -228,6 +229,144 @@ def materialize_talking_head_result(
             _request(
                 "GET",
                 f"/v1/talking-head/jobs/{urllib.parse.quote(job_id)}/result",
+                base_url=base_url,
+                output=output,
+            )
+        temporary = Path(temporary_name)
+        if temporary.stat().st_size == 0:
+            raise VideoClientError("video adapter returned an empty result")
+        os.replace(temporary, destination)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
+    return {
+        "jobId": job_id,
+        "outputPath": str(destination),
+        "bytes": destination.stat().st_size,
+    }
+
+
+IMAGE_WORKFLOW_VERSION = "qwen-image-edit-v1"
+IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-v1"
+
+
+def submit_image_edit(
+    image_path: str | os.PathLike[str],
+    prompt: str,
+    output_filename: str,
+    *,
+    workflow: str = IMAGE_WORKFLOW_VERSION,
+    working_directory: str | os.PathLike[str] | None = None,
+    parameters: dict[str, int | float] | None = None,
+    negative_prompt: str = " ",
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    """Upload a notebook-scoped image and submit the Qwen Image Edit workflow."""
+    if workflow != IMAGE_WORKFLOW_VERSION:
+        raise VideoClientError(f"unsupported workflow: {workflow}")
+    if not prompt.strip():
+        raise VideoClientError("prompt must be non-empty")
+    source = resolve_notebook_path(image_path, working_directory, must_exist=True)
+    if not source.is_file():
+        raise VideoClientError("image_path must identify a file")
+    source_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+    body, content_type = _multipart(
+        {
+            "prompt": prompt,
+            "output_filename": output_filename,
+            "workflow_version": IMAGE_WORKFLOW_VERSION,
+            "negative_prompt": negative_prompt,
+            "parameters": json.dumps(parameters or {}, separators=(",", ":")),
+        },
+        {
+            "source": (source.name, source.read_bytes(), source_type),
+        },
+    )
+    return _request(
+        "POST",
+        "/v1/image/jobs",
+        base_url=base_url,
+        body=body,
+        content_type=content_type,
+    )
+
+
+def submit_image_generate(
+    prompt: str,
+    output_filename: str,
+    *,
+    workflow: str = IMAGE_GENERATE_WORKFLOW_VERSION,
+    working_directory: str | os.PathLike[str] | None = None,
+    parameters: dict[str, int | float] | None = None,
+    negative_prompt: str = " ",
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    """Submit the Qwen Image 2512 text-to-image workflow (no source image)."""
+    if workflow != IMAGE_GENERATE_WORKFLOW_VERSION:
+        raise VideoClientError(f"unsupported workflow: {workflow}")
+    if not prompt.strip():
+        raise VideoClientError("prompt must be non-empty")
+    # Ensure caller is inside a notebook scope even though no input file is used.
+    resolve_notebook_path(".", working_directory, must_exist=False)
+    body, content_type = _multipart(
+        {
+            "prompt": prompt,
+            "output_filename": output_filename,
+            "workflow_version": IMAGE_GENERATE_WORKFLOW_VERSION,
+            "negative_prompt": negative_prompt,
+            "parameters": json.dumps(parameters or {}, separators=(",", ":")),
+        },
+        {},
+    )
+    return _request(
+        "POST",
+        "/v1/image/generate/jobs",
+        base_url=base_url,
+        body=body,
+        content_type=content_type,
+    )
+
+
+def get_image_job(job_id: str, *, base_url: str | None = None) -> dict[str, Any]:
+    """Read adapter-owned image job state."""
+    job_id = _job_id(job_id)
+    return _request(
+        "GET", f"/v1/image/jobs/{urllib.parse.quote(job_id)}", base_url=base_url
+    )
+
+
+def cancel_image_job(job_id: str, *, base_url: str | None = None) -> dict[str, Any]:
+    """Request cancellation for a queued or running image job."""
+    job_id = _job_id(job_id)
+    return _request(
+        "POST",
+        f"/v1/image/jobs/{urllib.parse.quote(job_id)}/cancel",
+        base_url=base_url,
+        body=b"",
+    )
+
+
+def materialize_image_result(
+    job_id: str,
+    output_path: str | os.PathLike[str],
+    *,
+    working_directory: str | os.PathLike[str] | None = None,
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    """Atomically write a completed image result inside the notebook scope."""
+    job_id = _job_id(job_id)
+    destination = resolve_notebook_path(output_path, working_directory, must_exist=False)
+    if destination.suffix.lower() != ".png":
+        raise VideoClientError("output_path must end in .png")
+    if not destination.parent.is_dir():
+        raise VideoClientError("output directory does not exist")
+    handle, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".part", dir=destination.parent
+    )
+    try:
+        with os.fdopen(handle, "wb") as output:
+            _request(
+                "GET",
+                f"/v1/image/jobs/{urllib.parse.quote(job_id)}/result",
                 base_url=base_url,
                 output=output,
             )

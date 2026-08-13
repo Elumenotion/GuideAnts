@@ -1,0 +1,6 @@
+-c common.txt
+
+# Known working Strix Halo / TheRock set from the documented January 2026 recipe.
+torch==2.11.0a0+rocm7.11.0a20260106
+torchaudio==2.10.0a0+rocm7.11.0a20260106
+torchvision==0.25.0a0+rocm7.11.0a20260106

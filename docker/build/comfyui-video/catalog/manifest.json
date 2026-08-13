@@ -75,6 +75,96 @@
           "sha256": "f501375c1a4e34533fa1c08360059f8f849ebddd829ff5853e551c3fea991368"
         }
       ]
+    },
+    "qwen-image-edit-v1": {
+      "workflow": "qwen-image-edit-v1",
+      "artifacts": [
+        {
+          "id": "qwen-image-edit-2511-fp8mixed",
+          "repository": "Comfy-Org/Qwen-Image-Edit_ComfyUI",
+          "revision": "4c7c4ea236326cbae56d403d22a03c6cd86ad9a0",
+          "file": "split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/4c7c4ea236326cbae56d403d22a03c6cd86ad9a0/split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+          "path": "diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+          "size": 20533762817,
+          "sha256": "c9fdc158e46d3b61ef75f21ae866ca2fe808bf4a53643120d1c1e87c19280a4e"
+        },
+        {
+          "id": "qwen-2.5-vl-7b-fp8-scaled",
+          "repository": "Comfy-Org/Qwen-Image_ComfyUI",
+          "revision": "46839d338df81ce625d5fae27d7e370314c0fbc9",
+          "file": "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/46839d338df81ce625d5fae27d7e370314c0fbc9/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "path": "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "size": 9384670680,
+          "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4"
+        },
+        {
+          "id": "qwen-image-vae",
+          "repository": "Comfy-Org/Qwen-Image_ComfyUI",
+          "revision": "46839d338df81ce625d5fae27d7e370314c0fbc9",
+          "file": "split_files/vae/qwen_image_vae.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/46839d338df81ce625d5fae27d7e370314c0fbc9/split_files/vae/qwen_image_vae.safetensors",
+          "path": "vae/qwen_image_vae.safetensors",
+          "size": 253806246,
+          "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+        },
+        {
+          "id": "qwen-image-edit-2511-lightning-4step-v1",
+          "repository": "lightx2v/Qwen-Image-Edit-2511-Lightning",
+          "revision": "d74eba145674fd7e31b949324e148e21e7118abd",
+          "file": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/d74eba145674fd7e31b949324e148e21e7118abd/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+          "path": "loras/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+          "size": 849608296,
+          "sha256": "22226e8d05d354bb356627d428809f5afd7819399b077238a2b70a82883a904f"
+        }
+      ]
+    },
+    "qwen-image-v1": {
+      "workflow": "qwen-image-v1",
+      "artifacts": [
+        {
+          "id": "qwen-image-2512-fp8-e4m3fn",
+          "repository": "Comfy-Org/Qwen-Image_ComfyUI",
+          "revision": "46839d338df81ce625d5fae27d7e370314c0fbc9",
+          "file": "split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/46839d338df81ce625d5fae27d7e370314c0fbc9/split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors",
+          "path": "diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors",
+          "size": 20430679144,
+          "sha256": "5dc80554d5d83390046a2f4a94ece06afb7700bf7b0aaf8bde9769793875876b"
+        },
+        {
+          "id": "qwen-2.5-vl-7b-fp8-scaled",
+          "repository": "Comfy-Org/Qwen-Image_ComfyUI",
+          "revision": "46839d338df81ce625d5fae27d7e370314c0fbc9",
+          "file": "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/46839d338df81ce625d5fae27d7e370314c0fbc9/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "path": "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "size": 9384670680,
+          "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4"
+        },
+        {
+          "id": "qwen-image-vae",
+          "repository": "Comfy-Org/Qwen-Image_ComfyUI",
+          "revision": "46839d338df81ce625d5fae27d7e370314c0fbc9",
+          "file": "split_files/vae/qwen_image_vae.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/46839d338df81ce625d5fae27d7e370314c0fbc9/split_files/vae/qwen_image_vae.safetensors",
+          "path": "vae/qwen_image_vae.safetensors",
+          "size": 253806246,
+          "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+        },
+        {
+          "id": "qwen-image-2512-lightning-4step-v1",
+          "repository": "lightx2v/Qwen-Image-2512-Lightning",
+          "revision": "a52649c9d0f6e1a248bff13f0df33bb8a2abdb52",
+          "file": "Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-2512-Lightning/resolve/a52649c9d0f6e1a248bff13f0df33bb8a2abdb52/Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors",
+          "path": "loras/Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors",
+          "size": 849608296,
+          "sha256": "de0d236e54ecf2c43b32447d13478c6eae0d361b1fed48c69675b084fa240d87"
+        }
+      ]
     }
   }
 }

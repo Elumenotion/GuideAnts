@@ -1,25 +1,42 @@
 [CmdletBinding()]
 param(
+    [ValidateSet('cuda13', 'rocm')]
+    [string]$Backend = 'rocm',
     [switch]$StartService,
     [string]$VideoHost = "http://127.0.0.1:8189",
     [string]$ScriptAgentToken = "local-script-agent-test-token",
     [string]$VideoAdminToken = "local-video-admin-test-token",
-    [string]$ComposeFile = "docker/compose/comfyui-video-cuda13.standalone.yml",
-    [string]$ContentFilesRoot = "tests/runtime/content-files",
+    [string]$ComposeFile = "",
+    [string]$ContentFilesRoot = "artifacts",
     [string]$ArtifactsRoot = "artifacts/infinitetalk",
+    [string]$SubmitFixture = "",
+    [string]$OutputName = "",
     [int]$ReadyTimeoutSeconds = 1800,
     [int]$JobTimeoutSeconds = 3600,
+    [int]$QueuedTimeoutSeconds = 300,
     [int]$PollSeconds = 10
 )
 
 $ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
 
 $ProjectId = "11111111-1111-1111-1111-111111111111"
 $NotebookId = "22222222-2222-2222-2222-222222222222"
 $GuideId = "33333333-3333-3333-3333-333333333333"
-$OutputName = "sample-cuda13-rtx5090.mp4"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+
+if ([string]::IsNullOrWhiteSpace($ComposeFile)) {
+    $ComposeFile = if ($Backend -eq 'rocm') {
+        'docker/compose/comfyui-video-rocm.standalone.yml'
+    } else {
+        'docker/compose/comfyui-video-cuda13.standalone.yml'
+    }
+}
+if ([string]::IsNullOrWhiteSpace($SubmitFixture)) {
+    $SubmitFixture = Join-Path $ArtifactsRoot 'submit-request.json'
+}
+if ([string]::IsNullOrWhiteSpace($OutputName)) {
+    $OutputName = if ($Backend -eq 'rocm') { 'sample-rocm-gfx1151.mp4' } else { 'sample-cuda13-rtx5090.mp4' }
+}
 
 function Resolve-RepoPath([string]$Path) {
     if ([IO.Path]::IsPathRooted($Path)) { return [IO.Path]::GetFullPath($Path) }
@@ -51,22 +68,64 @@ function Invoke-CurlJson {
     try { return $text | ConvertFrom-Json } catch { throw "'$Label' did not return JSON: $text" }
 }
 
-function Invoke-SandboxExecute([string]$Label, [hashtable]$Payload, [string]$PayloadPath) {
-    $Payload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $PayloadPath -Encoding utf8NoBOM
+function Write-Utf8NoBomFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Content
+    )
+    $encoding = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($Path, $Content, $encoding)
+}
+
+function ConvertTo-Hashtable($InputObject) {
+    if ($InputObject -is [hashtable]) { return $InputObject }
+    $hash = @{}
+    foreach ($property in $InputObject.PSObject.Properties) {
+        $hash[$property.Name] = $property.Value
+    }
+    return $hash
+}
+
+function ConvertTo-JsonPayload($Payload) {
+    $hash = ConvertTo-Hashtable $Payload
+    $obj = New-Object PSObject
+    foreach ($key in $hash.Keys) {
+        $obj | Add-Member -MemberType NoteProperty -Name $key -Value $hash[$key]
+    }
+    return ($obj | ConvertTo-Json -Depth 8 -Compress)
+}
+
+function Invoke-SandboxExecute([string]$Label, $Payload, [string]$PayloadPath) {
+    Write-Utf8NoBomFile -Path $PayloadPath -Content (ConvertTo-JsonPayload $Payload)
     $response = Invoke-CurlJson $Label @(
         "-H", "X-Script-Agent-Token: $ScriptAgentToken",
         "-H", "Content-Type: application/json",
         "--data-binary", "@$PayloadPath",
         "$VideoHost/sandbox/execute"
     )
-    if ($null -eq $response.exitCode -or [int]$response.exitCode -ne 0) {
-        throw "'$Label' script failed. stderr: $($response.standardError)"
+    $exitCode = Get-ResponseProperty $response 'ExitCode'
+    if ($null -eq $exitCode) { $exitCode = Get-ResponseProperty $response 'exitCode' }
+    if ($null -eq $exitCode -or [int]$exitCode -ne 0) {
+        $stderr = Get-ResponseProperty $response 'StandardError'
+        if ($null -eq $stderr) { $stderr = Get-ResponseProperty $response 'standardError' }
+        throw "'$Label' script failed. stderr: $stderr"
     }
-    try { return ([string]$response.standardOutput).Trim() | ConvertFrom-Json }
-    catch { throw "'$Label' stdout was not client JSON: $($response.standardOutput)" }
+    $stdout = Get-ResponseProperty $response 'StandardOutput'
+    if ($null -eq $stdout) { $stdout = Get-ResponseProperty $response 'standardOutput' }
+    try { return ([string]$stdout).Trim() | ConvertFrom-Json }
+    catch { throw "'$Label' stdout was not client JSON: $stdout" }
 }
 
 function Get-RequiredProperty($Object, [string]$Name, [string]$Context) {
+    if ($null -eq $Object) {
+        throw "$Context response is missing required '$Name'."
+    }
+    if ($Object -is [hashtable]) {
+        if (-not $Object.ContainsKey($Name) -or [string]::IsNullOrWhiteSpace([string]$Object[$Name])) {
+            throw "$Context response is missing required '$Name'."
+        }
+        return [string]$Object[$Name]
+    }
     $property = $Object.PSObject.Properties[$Name]
     if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
         throw "$Context response is missing required '$Name'."
@@ -74,16 +133,49 @@ function Get-RequiredProperty($Object, [string]$Name, [string]$Context) {
     return [string]$property.Value
 }
 
+function Get-ResponseProperty($Object, [string]$Name) {
+    if ($null -eq $Object) { return $null }
+    if ($Object -is [hashtable]) {
+        if ($Object.ContainsKey($Name)) { return $Object[$Name] }
+        return $null
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Clear-ComfyQueue {
+    $clearPath = Join-Path $ArtifactDir "queue-clear-request.json"
+    Write-Utf8NoBomFile -Path $clearPath -Content '{"clear": true}'
+    try {
+        docker exec compose-comfyui-video-1 curl -s -X POST http://127.0.0.1:8188/interrupt | Out-Null
+    } catch {
+        # ComfyUI may not be running inside docker during local script tests.
+    }
+    try {
+        docker exec compose-comfyui-video-1 curl -s -X POST http://127.0.0.1:8188/queue `
+            -H "Content-Type: application/json" `
+            --data-binary "@$clearPath" | Out-Null
+    } catch {
+        # Ignore queue clear failures when the service is not docker-managed.
+    }
+}
+
 if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) { throw "curl.exe is required." }
 if ($PollSeconds -lt 1) { throw "PollSeconds must be at least 1." }
 
 $Assets = Resolve-RepoPath "tests/assets/infinitetalk"
-$Avatar = Join-Path $Assets "avatar.png"
-$Voice = Join-Path $Assets "voice.wav"
-$Provenance = Join-Path $Assets "ASSET_PROVENANCE.md"
-Test-RequiredFile $Provenance "Asset provenance guidance is required."
-Test-RequiredFile $Avatar "Licensed avatar.png is not committed. Complete ASSET_PROVENANCE.md before running acceptance."
-Test-RequiredFile $Voice "Licensed voice.wav is not committed. Complete ASSET_PROVENANCE.md before running acceptance."
+$NotebookRoot = Join-Path (Resolve-RepoPath $ContentFilesRoot) "acceptance-project/authorized-notebook"
+$Avatar = Join-Path $NotebookRoot "Input/avatar.png"
+$Voice = Join-Path $NotebookRoot "Input/voice.wav"
+if (-not (Test-Path -LiteralPath $Avatar)) {
+    $Avatar = Join-Path $Assets "avatar.png"
+    $Voice = Join-Path $Assets "voice.wav"
+    $Provenance = Join-Path $Assets "ASSET_PROVENANCE.md"
+    Test-RequiredFile $Provenance "Asset provenance guidance is required."
+}
+Test-RequiredFile $Avatar "avatar.png is required in artifacts or tests/assets."
+Test-RequiredFile $Voice "voice.wav is required in artifacts or tests/assets."
 
 $avatarBytes = [IO.File]::ReadAllBytes($Avatar)
 $voiceBytes = [IO.File]::ReadAllBytes($Voice)
@@ -96,16 +188,28 @@ if ($voiceBytes.Length -lt 12 -or [Text.Encoding]::ASCII.GetString($voiceBytes, 
 if (-not (Get-Command ffprobe -ErrorAction SilentlyContinue)) { throw "ffprobe is required to verify the generated MP4." }
 
 $ContentRoot = Resolve-RepoPath $ContentFilesRoot
-$NotebookRoot = Join-Path $ContentRoot "acceptance-project/authorized-notebook"
 $InputDir = Join-Path $NotebookRoot "Input"
 $OutputDir = Join-Path $NotebookRoot "Output"
 $MetadataDir = Join-Path $NotebookRoot ".guideants"
 $ArtifactDir = Resolve-RepoPath $ArtifactsRoot
 New-Item -ItemType Directory -Force -Path $InputDir, $OutputDir, $MetadataDir, $ArtifactDir | Out-Null
-@{ ProjectId = $ProjectId; NotebookId = $NotebookId } |
-    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $MetadataDir "notebook.json") -Encoding utf8NoBOM
-Copy-Item -LiteralPath $Avatar -Destination (Join-Path $InputDir "avatar.png") -Force
-Copy-Item -LiteralPath $Voice -Destination (Join-Path $InputDir "voice.wav") -Force
+if (-not (Test-Path -LiteralPath (Join-Path $MetadataDir "notebook.json"))) {
+    Write-Utf8NoBomFile -Path (Join-Path $MetadataDir "notebook.json") -Content (@{ ProjectId = $ProjectId; NotebookId = $NotebookId } | ConvertTo-Json)
+}
+if ($Avatar -notlike "$InputDir*") {
+    Copy-Item -LiteralPath $Avatar -Destination (Join-Path $InputDir "avatar.png") -Force
+    Copy-Item -LiteralPath $Voice -Destination (Join-Path $InputDir "voice.wav") -Force
+}
+$submitPayloadPath = Resolve-RepoPath $SubmitFixture
+Test-RequiredFile $submitPayloadPath "Submit fixture is required."
+$submitPayload = ConvertTo-Hashtable (Get-Content -LiteralPath $submitPayloadPath -Raw | ConvertFrom-Json)
+if ($submitPayload.script -match "output_filename='[^']+'") {
+    $submitPayload.script = [regex]::Replace(
+        $submitPayload.script,
+        "output_filename='[^']+'",
+        "output_filename='$OutputName'"
+    )
+}
 Remove-Item -LiteralPath (Join-Path $OutputDir $OutputName) -Force -ErrorAction SilentlyContinue
 
 $script:TranscriptPath = Join-Path $ArtifactDir ("acceptance-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
@@ -117,23 +221,45 @@ if ($StartService) {
     Test-RequiredFile $Compose "Standalone compose file is required with -StartService."
     $env:GA_CONTENT_FILES_HOST_PATH = $ContentRoot
     $env:GA_SCRIPT_AGENT_TOKEN = $ScriptAgentToken
+    $env:GA_SCRIPT_AGENT_ADMIN_TOKEN = $ScriptAgentToken
     $env:GA_COMFYUI_VIDEO_ADMIN_TOKEN = $VideoAdminToken
+    if ($Backend -eq 'rocm') {
+        $libRocdxg = Resolve-RepoPath 'docker/volumes/rocm-wsl/lib/librocdxg.so'
+        if (-not (Test-Path -LiteralPath $libRocdxg)) {
+            $libRocdxg = Resolve-RepoPath 'installer/docker/volumes/rocm-wsl/lib/librocdxg.so'
+        }
+        if (-not (Test-Path -LiteralPath $libRocdxg)) {
+            throw "ROCm service start requires staged librocdxg at docker/volumes/rocm-wsl/lib/librocdxg.so"
+        }
+        $env:GA_ROCM_WSL_LIBROCDXG_HOST_PATH = $libRocdxg
+    }
     & docker compose -f $Compose up -d --no-deps comfyui-video
     if ($LASTEXITCODE -ne 0) { throw "Failed to start the standalone comfyui-video service." }
 }
 
-Invoke-CurlText "sandbox health" @("$VideoHost/sandbox/health") | Out-Null
+$serviceDeadline = (Get-Date).AddSeconds($ReadyTimeoutSeconds)
+do {
+    try {
+        Invoke-CurlText "sandbox health" @("$VideoHost/sandbox/health") | Out-Null
+        break
+    } catch {
+        if ((Get-Date) -ge $serviceDeadline) { throw }
+        Start-Sleep -Seconds $PollSeconds
+    }
+} while ($true)
 Invoke-CurlJson "video health" @("$VideoHost/video/health") | Out-Null
 Invoke-CurlJson "capabilities" @("$VideoHost/video/v1/capabilities") | Out-Null
 $readyDeadline = (Get-Date).AddSeconds($ReadyTimeoutSeconds)
 $modelsStatus = Invoke-CurlJson "models" @("-H", "X-Video-Admin-Token: $VideoAdminToken", "$VideoHost/video/v1/models")
-if ($modelsStatus.ready -eq $true) {
+if ((Get-ResponseProperty $modelsStatus 'ready') -eq $true) {
     Add-Content -LiteralPath $script:TranscriptPath -Value "models already ready; skipping install"
 } else {
+$installPayloadPath = Join-Path $ArtifactDir "model-install-request.json"
+Write-Utf8NoBomFile -Path $installPayloadPath -Content '{"bundle":"infinitetalk-i2v-v1"}'
 $install = Invoke-CurlJson "model install" @(
     "-H", "X-Video-Admin-Token: $VideoAdminToken",
     "-H", "Content-Type: application/json",
-    "--data", '{"bundle":"infinitetalk-i2v-v1"}',
+    "--data-binary", "@$installPayloadPath",
     "$VideoHost/video/v1/admin/models/install"
 )
 $installId = Get-RequiredProperty $install "installId" "model install"
@@ -161,9 +287,9 @@ do {
     }
 } while ($true)
 
-$submitFixture = Resolve-RepoPath "tests/requests/infinitetalk/execute-sample.json"
-$submitPayload = Get-Content -LiteralPath $submitFixture -Raw | ConvertFrom-Json -AsHashtable
-$submit = Invoke-SandboxExecute "submit" $submitPayload (Join-Path $ArtifactDir "submit-request.json")
+$submitFixture = $submitPayloadPath
+Clear-ComfyQueue
+$submit = Invoke-SandboxExecute "submit" $submitPayload (Join-Path $ArtifactDir "submit-execute-request.json")
 $jobId = Get-RequiredProperty $submit "jobId" "submit"
 
 $common = @{
@@ -171,30 +297,43 @@ $common = @{
     projectId = $ProjectId; notebookId = $NotebookId; guideId = $GuideId; timeoutSeconds = 600
 }
 $deadline = (Get-Date).AddSeconds($JobTimeoutSeconds)
+$queuedDeadline = (Get-Date).AddSeconds($QueuedTimeoutSeconds)
+$sawSampling = $false
 do {
     $statusPayload = $common.Clone()
     $statusPayload.script = "from guideants_video_client import get_talking_head_job`nimport json`nprint(json.dumps(get_talking_head_job('$jobId'), separators=(',', ':')))"
-    $status = Invoke-SandboxExecute "job status" $statusPayload (Join-Path $ArtifactDir "status-request.json")
+    $status = Invoke-SandboxExecute "job status" $statusPayload (Join-Path $ArtifactDir "status-execute-request.json")
     $state = (Get-RequiredProperty $status "state" "job status").ToLowerInvariant()
-    if ($status.progress) {
-        $progress = $status.progress
-        $message = if ($progress.message) { [string]$progress.message } else { $state }
-        $details = @($message)
-        if ($progress.node_class) { $details += "node=$($progress.node_class)" }
-        if ($null -ne $progress.step -and $null -ne $progress.max_steps) {
-            $details += "step=$($progress.step)/$($progress.max_steps)"
+    $progress = Get-ResponseProperty $status 'progress'
+    if ($null -ne $progress) {
+        $phase = (Get-ResponseProperty $progress 'phase')
+        if ($phase -in @('executing', 'sampling', 'completed')) {
+            $sawSampling = $true
+        }
+        $message = Get-ResponseProperty $progress 'message'
+        if ([string]::IsNullOrWhiteSpace([string]$message)) { $message = $state }
+        $details = @([string]$message)
+        $nodeClass = Get-ResponseProperty $progress 'node_class'
+        if (-not [string]::IsNullOrWhiteSpace([string]$nodeClass)) { $details += "node=$nodeClass" }
+        $step = Get-ResponseProperty $progress 'step'
+        $maxSteps = Get-ResponseProperty $progress 'max_steps'
+        if ($null -ne $step -and $null -ne $maxSteps) {
+            $details += "step=$step/$maxSteps"
         }
         Write-Host ("[job {0}] {1}" -f $jobId, ($details -join " | "))
     }
     if ($state -eq "completed") { break }
     if ($state -in @("failed", "cancelled")) { throw "Video job ended in state '$state'." }
+    if (-not $sawSampling -and (Get-Date) -ge $queuedDeadline) {
+        throw "Video job $jobId stayed queued for ${QueuedTimeoutSeconds}s without sampling progress."
+    }
     if ((Get-Date) -ge $deadline) { throw "Timed out waiting for video job $jobId." }
     Start-Sleep -Seconds $PollSeconds
 } while ($true)
 
 $materializePayload = $common.Clone()
 $materializePayload.script = "from guideants_video_client import materialize_talking_head_result`nimport json`nprint(json.dumps(materialize_talking_head_result('$jobId', '$OutputName'), separators=(',', ':')))"
-Invoke-SandboxExecute "materialize" $materializePayload (Join-Path $ArtifactDir "materialize-request.json") | Out-Null
+Invoke-SandboxExecute "materialize" $materializePayload (Join-Path $ArtifactDir "materialize-execute-request.json") | Out-Null
 
 $files = Invoke-CurlJson "sandbox files" @(
     "-H", "X-Script-Agent-Token: $ScriptAgentToken", "--get",

@@ -28,8 +28,27 @@ trap terminate TERM INT EXIT
 require_secret SCRIPT_EXECUTION_AGENT_TOKEN
 require_secret SCRIPT_EXECUTION_ADMIN_TOKEN
 require_secret VIDEO_ADMIN_TOKEN
-[[ -n "${CUDA_VISIBLE_DEVICES:-}" ]] || die "CUDA_VISIBLE_DEVICES must select exactly one GPU"
-[[ "$CUDA_VISIBLE_DEVICES" != *,* ]] || die "CUDA_VISIBLE_DEVICES must select one GPU, not a list"
+
+video_gpu_backend="${VIDEO_GPU_BACKEND:-cuda13}"
+case "$video_gpu_backend" in
+  cuda13)
+    [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]] || die "CUDA_VISIBLE_DEVICES must select exactly one GPU"
+    [[ "$CUDA_VISIBLE_DEVICES" != *,* ]] || die "CUDA_VISIBLE_DEVICES must select one GPU, not a list"
+    ;;
+  rocm)
+    [[ -n "${HIP_VISIBLE_DEVICES:-}" ]] || die "HIP_VISIBLE_DEVICES must select exactly one GPU"
+    [[ "$HIP_VISIBLE_DEVICES" != *,* ]] || die "HIP_VISIBLE_DEVICES must select one GPU, not a list"
+    export HSA_ENABLE_SDMA="${HSA_ENABLE_SDMA:-0}"
+    export HSA_USE_SVM="${HSA_USE_SVM:-0}"
+    export PYTORCH_HIP_ALLOC_CONF="${PYTORCH_HIP_ALLOC_CONF:-backend:native,expandable_segments:True,garbage_collection_threshold:0.7,max_split_size_mb:256}"
+    export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL="${TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL:-1}"
+    export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/cache/torch_inductor_comfy}"
+    export TORCHINDUCTOR_FX_GRAPH_CACHE="${TORCHINDUCTOR_FX_GRAPH_CACHE:-1}"
+    ;;
+  *)
+    die "unsupported VIDEO_GPU_BACKEND: $video_gpu_backend (expected cuda13 or rocm)"
+    ;;
+esac
 install -d -o "$RUN_USER" -g "$RUN_GROUP" \
   /app/ContentFiles /cache /models /run/nginx \
   /var/lib/guideants/script-agent-admin /var/lib/guideants/script-agent-admin/scopes \
@@ -42,11 +61,16 @@ ln -s /models /opt/ComfyUI/models
 
 gosu "$RUN_USER:$RUN_GROUP" python /opt/guideants/comfyui-video/scripts/verify-install.py
 
+declare -a comfy_args=(
+  --listen 127.0.0.1
+  --port 8188
+  --disable-auto-launch
+)
+if [[ "$video_gpu_backend" == "rocm" ]]; then
+  comfy_args+=(--gpu-only --disable-smart-memory)
+fi
 gosu "$RUN_USER:$RUN_GROUP" \
-  python /opt/ComfyUI/main.py \
-    --listen 127.0.0.1 \
-    --port 8188 \
-    --disable-auto-launch &
+  python /opt/ComfyUI/main.py "${comfy_args[@]}" &
 children+=("$!")
 
 for _ in $(seq 1 60); do

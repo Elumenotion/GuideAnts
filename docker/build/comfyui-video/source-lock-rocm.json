@@ -1,16 +1,17 @@
 {
   "schemaVersion": 1,
   "baseImage": {
-    "reference": "nvidia/cuda:13.0.0-runtime-ubuntu24.04@sha256:4757e6477d94d56fd8230e15b7d59956750c983a47a42584f44dbe143090da82",
+    "reference": "ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
     "platform": "linux/amd64",
-    "platformDigest": "sha256:4757e6477d94d56fd8230e15b7d59956750c983a47a42584f44dbe143090da82",
-    "indexDigest": "sha256:95318efecfd68ab3d109da5277863257b06137c84f34a87f38de970d5cd035d3",
-    "verifiedAt": "2026-08-10"
+    "platformDigest": "sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+    "indexDigest": "sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+    "verifiedAt": "2026-08-11"
   },
   "python": "3.12",
   "pytorch": {
-    "version": "2.11.0+cu130",
-    "index": "https://download.pytorch.org/whl/cu130",
+    "version": "2.11.0a0+rocm7.11.0a20260106",
+    "index": "https://rocm.nightlies.amd.com/v2/gfx1151/",
+    "target": "gfx1151",
     "attention": "sdpa"
   },
   "sources": [
@@ -23,8 +24,8 @@
   ],
   "workflow": {
     "id": "infinitetalk-i2v-v1",
-    "revision": 3,
-    "path": "workflows/infinitetalk-i2v-v1.json"
+    "revision": 4,
+    "path": "workflows/infinitetalk-i2v-v1-rocm.json"
   },
   "modelCatalog": "catalog/manifest.json"
 }

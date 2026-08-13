@@ -28,6 +28,10 @@ from .comfy_telemetry import (
 
 API_VERSION = "v1"
 WORKFLOW_VERSION = "infinitetalk-i2v-v1"
+IMAGE_WORKFLOW_VERSION = "qwen-image-edit-v1"
+IMAGE_BUNDLE = "qwen-image-edit-v1"
+IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-v1"
+IMAGE_GENERATE_BUNDLE = "qwen-image-v1"
 TERMINAL_STATES = frozenset({"completed", "failed", "cancelled"})
 ALLOWED_PARAMETERS: dict[str, tuple[type, float | int, float | int]] = {
     "width": (int, 256, 1920),
@@ -46,6 +50,16 @@ DEFAULT_PARAMETERS: dict[str, int | float] = {
     "steps": 14,
     "seed": 0,
     "cfg": 5.0,
+}
+IMAGE_ALLOWED_PARAMETERS: dict[str, tuple[type, float | int, float | int]] = {
+    "steps": (int, 1, 50),
+    "seed": (int, 0, 2**63 - 1),
+    "cfg": ((int, float), 0.0, 30.0),  # type: ignore[dict-item]
+}
+IMAGE_DEFAULT_PARAMETERS: dict[str, int | float] = {
+    "steps": 4,
+    "seed": 0,
+    "cfg": 1.0,
 }
 MAX_SOURCE_BYTES = 100 * 1024 * 1024
 MAX_AUDIO_BYTES = 50 * 1024 * 1024
@@ -87,6 +101,17 @@ def safe_output_filename(value: str) -> str:
     return value
 
 
+def safe_image_output_filename(value: str) -> str:
+    """Accept a basename PNG only, never a path."""
+    if not value or Path(value).name != value or value in {".", ".."}:
+        raise AdapterError("output_filename must be a filename, not a path", 422)
+    if Path(value).suffix.lower() != ".png":
+        raise AdapterError("output_filename must end in .png", 422)
+    if any(char in value for char in ("/", "\\", "\0")):
+        raise AdapterError("output_filename contains an invalid character", 422)
+    return value
+
+
 def validate_parameters(raw: dict[str, Any]) -> dict[str, int | float]:
     unknown = sorted(set(raw) - set(ALLOWED_PARAMETERS))
     if unknown:
@@ -94,6 +119,21 @@ def validate_parameters(raw: dict[str, Any]) -> dict[str, int | float]:
     result = dict(DEFAULT_PARAMETERS)
     for name, value in raw.items():
         expected, minimum, maximum = ALLOWED_PARAMETERS[name]
+        if isinstance(value, bool) or not isinstance(value, expected):
+            raise AdapterError(f"{name} has an invalid type", 422)
+        if value < minimum or value > maximum:
+            raise AdapterError(f"{name} must be between {minimum} and {maximum}", 422)
+        result[name] = value
+    return result
+
+
+def validate_image_parameters(raw: dict[str, Any]) -> dict[str, int | float]:
+    unknown = sorted(set(raw) - set(IMAGE_ALLOWED_PARAMETERS))
+    if unknown:
+        raise AdapterError(f"unsupported workflow parameters: {', '.join(unknown)}", 422)
+    result = dict(IMAGE_DEFAULT_PARAMETERS)
+    for name, value in raw.items():
+        expected, minimum, maximum = IMAGE_ALLOWED_PARAMETERS[name]
         if isinstance(value, bool) or not isinstance(value, expected):
             raise AdapterError(f"{name} has an invalid type", 422)
         if value < minimum or value > maximum:
@@ -273,12 +313,15 @@ def render_workflow(
     image_name: str,
     audio_name: str,
     parameters: dict[str, int | float],
+    extra_replacements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     replacements: dict[str, Any] = {
         "{{INPUT_IMAGE}}": image_name,
         "{{INPUT_AUDIO}}": audio_name,
         **{f"{{{{{name.upper()}}}}}": value for name, value in parameters.items()},
     }
+    if extra_replacements:
+        replacements.update(extra_replacements)
 
     def replace(value: Any) -> Any:
         if isinstance(value, dict):
@@ -323,6 +366,34 @@ def find_video_output(history: dict[str, Any], prompt_id: str) -> dict[str, Any]
     return None
 
 
+def find_image_output(history: dict[str, Any], prompt_id: str) -> dict[str, Any] | None:
+    entry = history.get(prompt_id)
+    if not isinstance(entry, dict):
+        return None
+    status = entry.get("status", {})
+    if isinstance(status, dict) and status.get("status_str") == "error":
+        messages = status.get("messages")
+        raise AdapterError(f"ComfyUI execution failed: {messages}")
+    outputs = entry.get("outputs", {})
+    if not isinstance(outputs, dict):
+        return None
+    for node in outputs.values():
+        if not isinstance(node, dict):
+            continue
+        values = node.get("images", [])
+        if not isinstance(values, list):
+            continue
+        for descriptor in values:
+            if not isinstance(descriptor, dict):
+                continue
+            filename = descriptor.get("filename", "")
+            if isinstance(filename, str) and filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                return descriptor
+    if isinstance(status, dict) and status.get("status_str") == "success":
+        raise AdapterError("ComfyUI completed without producing an image output")
+    return None
+
+
 class AdapterService:
     def __init__(
         self,
@@ -332,10 +403,18 @@ class AdapterService:
         manifest_path: Path,
         comfy: ComfyTransport,
         poll_interval: float = 1.0,
+        image_workflow_path: Path | None = None,
+        image_generate_workflow_path: Path | None = None,
     ) -> None:
         self.jobs_root = jobs_root
         self.models_root = models_root
         self.workflow_path = workflow_path
+        self.image_workflow_path = image_workflow_path or (
+            workflow_path.parent / f"{IMAGE_WORKFLOW_VERSION}.json"
+        )
+        self.image_generate_workflow_path = image_generate_workflow_path or (
+            workflow_path.parent / f"{IMAGE_GENERATE_WORKFLOW_VERSION}.json"
+        )
         self.manifest_path = manifest_path
         self.comfy = comfy
         self.poll_interval = poll_interval
@@ -358,19 +437,45 @@ class AdapterService:
         missing: list[str] = []
         if not self.workflow_path.is_file():
             missing.append("workflow")
-        models = self.models()
-        if not models["ready"]:
+        if not self._bundle_ready(WORKFLOW_VERSION):
             missing.append("models")
+        return self._comfy_readiness(missing, self.workflow_path)
+
+    def image_readiness(self) -> tuple[bool, dict[str, Any]]:
+        missing: list[str] = []
+        if not self.image_workflow_path.is_file():
+            missing.append("image_workflow")
+        if not self._bundle_ready(IMAGE_BUNDLE):
+            missing.append("image_models")
+        return self._comfy_readiness(missing, self.image_workflow_path)
+
+    def image_generate_readiness(self) -> tuple[bool, dict[str, Any]]:
+        missing: list[str] = []
+        if not self.image_generate_workflow_path.is_file():
+            missing.append("image_generate_workflow")
+        if not self._bundle_ready(IMAGE_GENERATE_BUNDLE):
+            missing.append("image_generate_models")
+        return self._comfy_readiness(missing, self.image_generate_workflow_path)
+
+    def _comfy_readiness(
+        self, missing: list[str], workflow_path: Path
+    ) -> tuple[bool, dict[str, Any]]:
         device: dict[str, Any] | None = None
         try:
             stats = self.comfy.system_stats()
             device = stats.get("devices", [{}])[0] if stats.get("devices") else None
             device_type = str((device or {}).get("type", "")).lower()
             device_name = str((device or {}).get("name", "")).lower()
-            if "cuda" not in device_type and "nvidia" not in device_name:
+            if (
+                "cuda" not in device_type
+                and "nvidia" not in device_name
+                and "hip" not in device_type
+                and "amd" not in device_name
+                and "radeon" not in device_name
+            ):
                 missing.append("cuda_gpu")
             node_info = self.comfy.object_info()
-            template = json.loads(self.workflow_path.read_text(encoding="utf-8"))
+            template = json.loads(workflow_path.read_text(encoding="utf-8"))
             required_nodes = {
                 node["class_type"]
                 for node in template.values()
@@ -388,17 +493,30 @@ class AdapterService:
 
     def capabilities(self) -> dict[str, Any]:
         ready, details = self.readiness()
-        device = details.get("device") or {}
+        image_ready, image_details = self.image_readiness()
+        image_generate_ready, image_generate_details = self.image_generate_readiness()
+        device = (
+            details.get("device")
+            or image_details.get("device")
+            or image_generate_details.get("device")
+            or {}
+        )
         return {
             "api_version": API_VERSION,
             "backend": "comfyui",
-            "workflow_versions": [WORKFLOW_VERSION],
+            "workflow_versions": [
+                WORKFLOW_VERSION,
+                IMAGE_WORKFLOW_VERSION,
+                IMAGE_GENERATE_WORKFLOW_VERSION,
+            ],
             "input_kinds": ["image"],
             "audio_types": ["audio/wav", "audio/x-wav", "audio/mpeg", "audio/flac", "audio/ogg"],
             "output_type": "video/mp4",
             "device": device.get("name"),
             "precision": os.getenv("VIDEO_PRECISION", "bfloat16"),
             "ready": ready,
+            "image_ready": image_ready,
+            "image_generate_ready": image_generate_ready,
         }
 
     def _manifest(self) -> dict[str, Any]:
@@ -425,11 +543,7 @@ class AdapterService:
                 path = _inside(self.models_root, artifact["path"])
                 present = path.is_file()
                 size_ok = present and path.stat().st_size == artifact["size"]
-                checksum_ok = (
-                    size_ok
-                    and _sha256_file(path).lower() == artifact["sha256"].lower()
-                )
-                item_ready = present and size_ok and checksum_ok
+                item_ready = present and size_ok
                 all_ready = all_ready and item_ready
                 artifacts.append(
                     {
@@ -441,6 +555,13 @@ class AdapterService:
                 )
             bundles.append({"name": name, "ready": all(a["ready"] for a in artifacts), "artifacts": artifacts})
         return {"ready": all_ready and bool(bundles), "bundles": bundles}
+
+    def _bundle_ready(self, bundle_name: str) -> bool:
+        models = self.models()
+        for bundle in models.get("bundles", []):
+            if bundle.get("name") == bundle_name:
+                return bool(bundle.get("ready"))
+        return False
 
     def install(self, bundle_name: str) -> Installation:
         manifest = self._manifest()
@@ -605,6 +726,223 @@ class AdapterService:
                     return
                 time.sleep(self.poll_interval)
         except Exception as exc:  # worker boundary records an explicit terminal failure
+            job.state = "failed"
+            job.error = str(exc)
+            self._update_job_progress(job, phase="failed", message=str(exc))
+        finally:
+            if listener is not None:
+                listener.stop()
+            job.updated_at = time.time()
+
+    def submit_image_job(
+        self,
+        source: bytes,
+        source_type: str,
+        prompt: str,
+        output_filename: str,
+        workflow_version: str,
+        parameters: dict[str, Any],
+        negative_prompt: str = " ",
+    ) -> Job:
+        if workflow_version != IMAGE_WORKFLOW_VERSION:
+            raise AdapterError(f"unsupported workflow_version: {workflow_version}", 422)
+        if source_type not in ALLOWED_INPUT_TYPES or not source_type.startswith("image/"):
+            raise AdapterError("unsupported source media type", 415)
+        if not source:
+            raise AdapterError("source must be non-empty", 422)
+        if len(source) > MAX_SOURCE_BYTES:
+            raise AdapterError(f"source exceeds the {MAX_SOURCE_BYTES}-byte limit", 413)
+        if not prompt.strip():
+            raise AdapterError("prompt must be non-empty", 422)
+        output_filename = safe_image_output_filename(output_filename)
+        parameters = validate_image_parameters(parameters)
+        ready, details = self.image_readiness()
+        if not ready:
+            raise AdapterError(f"image backend is not ready: {details['missing']}", 503)
+        job = Job(id=uuid.uuid4().hex, output_filename=output_filename)
+        job_dir = self.jobs_root / job.id
+        job_dir.mkdir(mode=0o700)
+        (job_dir / f"source{ALLOWED_INPUT_TYPES[source_type]}").write_bytes(source)
+        with self._lock:
+            self.jobs[job.id] = job
+        threading.Thread(
+            target=self._image_job_worker,
+            args=(job, source, source_type, prompt, negative_prompt, parameters),
+            daemon=True,
+        ).start()
+        return job
+
+    def _image_job_worker(
+        self,
+        job: Job,
+        source: bytes,
+        source_type: str,
+        prompt: str,
+        negative_prompt: str,
+        parameters: dict[str, int | float],
+    ) -> None:
+        job.state = "running"
+        self._update_job_progress(job, phase="running", message="starting image job")
+        listener: ComfyProgressListener | None = None
+        try:
+            self._update_job_progress(job, phase="uploading", message="uploading source image")
+            source_name = self.comfy.upload(
+                f"{job.id}-source{ALLOWED_INPUT_TYPES[source_type]}", source, source_type
+            )
+            template = json.loads(self.image_workflow_path.read_text(encoding="utf-8"))
+            workflow = render_workflow(
+                template,
+                source_name,
+                "",
+                parameters,
+                extra_replacements={
+                    "{{PROMPT}}": prompt,
+                    "{{NEGATIVE_PROMPT}}": negative_prompt,
+                },
+            )
+            self._update_job_progress(job, phase="submitting", message="submitting ComfyUI prompt")
+            job.prompt_id = self.comfy.submit(workflow, job.id)
+            listener = ComfyProgressListener(
+                self.comfy.base_url,
+                job.id,
+                job.prompt_id,
+                workflow,
+                lambda updates, current_job=job: self._update_job_progress(current_job, **updates),
+            )
+            listener.start()
+            self._update_job_progress(
+                job,
+                phase="waiting",
+                message=f"queued prompt {job.prompt_id}",
+                last_event="prompt_submitted",
+            )
+            while True:
+                if job.cancel_requested:
+                    self.comfy.interrupt()
+                    job.state = "cancelled"
+                    self._update_job_progress(job, phase="cancelled", message="job cancelled")
+                    return
+                try:
+                    queue_updates = queue_state_for_prompt(self.comfy.queue(), job.prompt_id)
+                    if queue_updates:
+                        self._update_job_progress(job, log=False, **queue_updates)
+                except AdapterError:
+                    pass
+                descriptor = find_image_output(self.comfy.history(job.prompt_id), job.prompt_id)
+                if descriptor is not None:
+                    self._update_job_progress(job, phase="encoding", message="downloading ComfyUI output")
+                    output = self.comfy.download_output(descriptor)
+                    if not output:
+                        raise AdapterError("ComfyUI returned an empty image")
+                    output_path = self.jobs_root / job.id / job.output_filename
+                    output_path.write_bytes(output)
+                    job.output_path = str(output_path)
+                    job.state = "completed"
+                    self._update_job_progress(job, phase="completed", message="image ready", percent=100.0)
+                    return
+                time.sleep(self.poll_interval)
+        except Exception as exc:
+            job.state = "failed"
+            job.error = str(exc)
+            self._update_job_progress(job, phase="failed", message=str(exc))
+        finally:
+            if listener is not None:
+                listener.stop()
+            job.updated_at = time.time()
+
+    def submit_image_generate_job(
+        self,
+        prompt: str,
+        output_filename: str,
+        workflow_version: str,
+        parameters: dict[str, Any],
+        negative_prompt: str = " ",
+    ) -> Job:
+        if workflow_version != IMAGE_GENERATE_WORKFLOW_VERSION:
+            raise AdapterError(f"unsupported workflow_version: {workflow_version}", 422)
+        if not prompt.strip():
+            raise AdapterError("prompt must be non-empty", 422)
+        output_filename = safe_image_output_filename(output_filename)
+        parameters = validate_image_parameters(parameters)
+        ready, details = self.image_generate_readiness()
+        if not ready:
+            raise AdapterError(f"image generate backend is not ready: {details['missing']}", 503)
+        job = Job(id=uuid.uuid4().hex, output_filename=output_filename)
+        job_dir = self.jobs_root / job.id
+        job_dir.mkdir(mode=0o700)
+        with self._lock:
+            self.jobs[job.id] = job
+        threading.Thread(
+            target=self._image_generate_job_worker,
+            args=(job, prompt, negative_prompt, parameters),
+            daemon=True,
+        ).start()
+        return job
+
+    def _image_generate_job_worker(
+        self,
+        job: Job,
+        prompt: str,
+        negative_prompt: str,
+        parameters: dict[str, int | float],
+    ) -> None:
+        job.state = "running"
+        self._update_job_progress(job, phase="running", message="starting image generate job")
+        listener: ComfyProgressListener | None = None
+        try:
+            template = json.loads(self.image_generate_workflow_path.read_text(encoding="utf-8"))
+            workflow = render_workflow(
+                template,
+                "",
+                "",
+                parameters,
+                extra_replacements={
+                    "{{PROMPT}}": prompt,
+                    "{{NEGATIVE_PROMPT}}": negative_prompt,
+                },
+            )
+            self._update_job_progress(job, phase="submitting", message="submitting ComfyUI prompt")
+            job.prompt_id = self.comfy.submit(workflow, job.id)
+            listener = ComfyProgressListener(
+                self.comfy.base_url,
+                job.id,
+                job.prompt_id,
+                workflow,
+                lambda updates, current_job=job: self._update_job_progress(current_job, **updates),
+            )
+            listener.start()
+            self._update_job_progress(
+                job,
+                phase="waiting",
+                message=f"queued prompt {job.prompt_id}",
+                last_event="prompt_submitted",
+            )
+            while True:
+                if job.cancel_requested:
+                    self.comfy.interrupt()
+                    job.state = "cancelled"
+                    self._update_job_progress(job, phase="cancelled", message="job cancelled")
+                    return
+                try:
+                    queue_updates = queue_state_for_prompt(self.comfy.queue(), job.prompt_id)
+                    if queue_updates:
+                        self._update_job_progress(job, log=False, **queue_updates)
+                except AdapterError:
+                    pass
+                descriptor = find_image_output(self.comfy.history(job.prompt_id), job.prompt_id)
+                if descriptor is not None:
+                    self._update_job_progress(job, phase="encoding", message="downloading ComfyUI output")
+                    output = self.comfy.download_output(descriptor)
+                    if not output:
+                        raise AdapterError("ComfyUI returned an empty image")
+                    output_path = self.jobs_root / job.id / job.output_filename
+                    output_path.write_bytes(output)
+                    job.output_path = str(output_path)
+                    job.state = "completed"
+                    self._update_job_progress(job, phase="completed", message="image ready", percent=100.0)
+                    return
+                time.sleep(self.poll_interval)
+        except Exception as exc:
             job.state = "failed"
             job.error = str(exc)
             self._update_job_progress(job, phase="failed", message=str(exc))

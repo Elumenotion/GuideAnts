@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
-ARG CUDA_BASE_IMAGE=nvidia/cuda:13.0.0-runtime-ubuntu24.04@sha256:4757e6477d94d56fd8230e15b7d59956750c983a47a42584f44dbe143090da82
+ARG UBUNTU_BASE_IMAGE=ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
 ARG DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:8.0-noble
 ARG GA_COMFYUI_VIDEO_DEPS_IMAGE=comfyui-video-deps
+ARG ROCM_VERSION=7.2.4
+ARG AMDGPU_VERSION=30.30.1
 
-FROM ubuntu:24.04 AS script-exec-builder
+FROM ${UBUNTU_BASE_IMAGE} AS script-exec-builder
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends gcc libc6-dev \
@@ -14,7 +16,7 @@ RUN gcc -O2 -Wall -Wextra -Werror -o /usr/local/bin/ga-script-exec /tmp/ga-scrip
 
 FROM ${DOTNET_RUNTIME_IMAGE} AS dotnet-runtime
 
-FROM ${CUDA_BASE_IMAGE} AS source-builder
+FROM ${UBUNTU_BASE_IMAGE} AS source-builder
 ARG COMFYUI_COMMIT=fe4195f7f4275f2626cbafc703acc3ddde1e5490
 ARG WANVIDEO_COMMIT=088128b224242e110d3906c6750e9a3a348a659b
 ARG KJNODES_COMMIT=073efb07419f56cc714e099a82e49fbc23ad9263
@@ -41,7 +43,33 @@ RUN set -eux; mkdir -p /opt/ComfyUI/custom_nodes; \
     clone_pin ComfyUI-MelBandRoFormer https://github.com/kijai/ComfyUI-MelBandRoFormer.git "$MEL_COMMIT"; \
     find /opt/ComfyUI -type d -name .git -prune -exec rm -rf '{}' +
 
-FROM ${CUDA_BASE_IMAGE} AS pydeps-builder
+FROM ${UBUNTU_BASE_IMAGE} AS runtime-rocm-base
+ARG ROCM_VERSION
+ARG AMDGPU_VERSION
+ENV DEBIAN_FRONTEND=noninteractive
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg libnuma1 \
+    && curl -sL https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - \
+    && printf "deb [arch=amd64] https://repo.radeon.com/rocm/apt/%s/ noble main" "$ROCM_VERSION" \
+        | tee /etc/apt/sources.list.d/rocm.list \
+    && printf "deb [arch=amd64] https://repo.radeon.com/amdgpu/%s/ubuntu noble main" "$AMDGPU_VERSION" \
+        | tee /etc/apt/sources.list.d/amdgpu.list \
+    && printf "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n" \
+        | tee /etc/apt/preferences.d/rocm-pin-600 \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libatomic1 libelf1 \
+        hip-runtime-amd rocblas rocsolver hipblas hipblaslt \
+        rocprofiler-register roctracer comgr hsa-rocr rocminfo \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && printf "/opt/rocm/lib\n" > /etc/ld.so.conf.d/rocm.conf \
+    && ldconfig
+ENV LD_LIBRARY_PATH=/opt/rocm/lib
+ENV PATH="/opt/rocm/bin:${PATH}"
+
+FROM runtime-rocm-base AS pydeps-builder
 ENV VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:$PATH \
     PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -57,8 +85,10 @@ COPY constraints/ /tmp/constraints/
 COPY adapter/requirements.txt /tmp/adapter-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --upgrade "pip>=25.2,<26" "setuptools>=80,<82" "wheel>=0.45,<1" \
-    && python -m pip install -r /tmp/constraints/cuda13.txt \
-    && python -m pip install -c /tmp/constraints/cuda13.txt \
+    && python -m pip install \
+         --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ \
+         -r /tmp/constraints/therock-gfx1151.txt \
+    && python -m pip install -c /tmp/constraints/therock-gfx1151.txt \
          -r /opt/ComfyUI/requirements.txt \
          -r /opt/ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper/requirements.txt \
          -r /opt/ComfyUI/custom_nodes/ComfyUI-KJNodes/requirements.txt \
@@ -67,13 +97,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
          -r /tmp/adapter-requirements.txt \
     && python -m pip check
 
-FROM ${CUDA_BASE_IMAGE} AS deps-cuda13
+FROM runtime-rocm-base AS deps-rocm
 ENV DEBIAN_FRONTEND=noninteractive \
     VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:$PATH \
-    LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64 \
-    NVIDIA_VISIBLE_DEVICES=all \
-    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    LD_LIBRARY_PATH=/opt/rocm/lib \
     HF_HOME=/cache/huggingface \
     TORCH_HOME=/cache/torch \
     XDG_CACHE_HOME=/cache/xdg \
@@ -89,27 +117,36 @@ RUN ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet
 COPY --from=pydeps-builder /opt/venv /opt/venv
 COPY --from=source-builder /opt/ComfyUI /opt/ComfyUI
 
-FROM ${GA_COMFYUI_VIDEO_DEPS_IMAGE} AS final-cuda13
-LABEL com.nvidia.cuda.version="13.0.0" \
-      com.nvidia.volumes.needed="nvidia_driver" \
-      org.guideants.component="comfyui-video" \
-      org.guideants.workflow="infinitetalk-i2v-v1"
+FROM ${GA_COMFYUI_VIDEO_DEPS_IMAGE} AS final-rocm
+LABEL org.guideants.component="comfyui-video" \
+      org.guideants.workflow="infinitetalk-i2v-v1" \
+      org.guideants.backend="rocm"
 ENV FILE_STORAGE_ROOT=/app/ContentFiles \
     SCRIPT_EXECUTION_ADMIN_API_ENABLED=true \
     SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin \
     SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes \
     SCRIPT_EXECUTION_BASE_PYTHON_VENV=/opt/venv \
-    VIDEO_GPU_BACKEND=cuda13 \
+    VIDEO_GPU_BACKEND=rocm \
     COMFYUI_MODELS_DIR=/models \
     COMFYUI_HOST=127.0.0.1 \
     COMFYUI_PORT=8188 \
     VIDEO_ADAPTER_HOST=127.0.0.1 \
     VIDEO_ADAPTER_PORT=8190 \
     VIDEO_JOBS_ROOT=/var/lib/guideants/comfyui-video/jobs \
-    VIDEO_WORKFLOW_PATH=/opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1.json \
+    VIDEO_WORKFLOW_PATH=/opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1-rocm.json \
     VIDEO_MODEL_MANIFEST=/opt/guideants/comfyui-video/catalog/manifest.json \
     VIDEO_MAX_CONCURRENT_JOBS=1 \
-    VIDEO_JOB_TIMEOUT_SECONDS=3600
+    VIDEO_JOB_TIMEOUT_SECONDS=3600 \
+    HSA_ENABLE_SDMA=0 \
+    HSA_USE_SVM=0 \
+    PYTORCH_HIP_ALLOC_CONF="backend:native,expandable_segments:True,garbage_collection_threshold:0.7,max_split_size_mb:256" \
+    TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1 \
+    TORCHINDUCTOR_CACHE_DIR=/cache/torch_inductor_comfy \
+    TORCHINDUCTOR_FX_GRAPH_CACHE=1 \
+    PYTHONMALLOC=malloc \
+    MALLOC_TRIM_THRESHOLD_=100000 \
+    LD_LIBRARY_PATH=/opt/rocm/lib \
+    PATH="/opt/rocm/bin:/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 RUN groupadd --gid 10001 guideants \
     && useradd --uid 10001 --gid guideants --create-home --shell /bin/bash guideants \
     && rm -f /etc/nginx/sites-enabled/default
@@ -121,7 +158,7 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY catalog/ /opt/guideants/comfyui-video/catalog/
 COPY workflows/ /opt/guideants/comfyui-video/workflows/
 COPY scripts/ /opt/guideants/comfyui-video/scripts/
-COPY source-lock.json /opt/guideants/comfyui-video/source-lock.json
+COPY source-lock-rocm.json /opt/guideants/comfyui-video/source-lock.json
 RUN chmod 0755 /usr/local/bin/ga-script-exec /opt/guideants/comfyui-video/scripts/*.py \
       /opt/guideants/comfyui-video/scripts/entrypoint.sh \
     && chown -R guideants:guideants /app /opt/ComfyUI /opt/guideants/comfyui-video \

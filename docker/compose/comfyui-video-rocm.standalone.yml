@@ -1,0 +1,98 @@
+services:
+  comfyui-video:
+    image: ${GA_COMFYUI_VIDEO_ROCM_IMAGE:-guideants-comfyui:rocm-latest}
+    restart: unless-stopped
+    init: true
+    devices:
+      - /dev/dxg
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    ports:
+      - "127.0.0.1:${GA_COMFYUI_VIDEO_PORT:-8189}:80"
+    environment:
+      VIDEO_GPU_BACKEND: rocm
+      VIDEO_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1-rocm.json
+      IMAGE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-v1.json
+      IMAGE_GENERATE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-v1.json
+      HIP_VISIBLE_DEVICES: ${GA_COMFYUI_VIDEO_HIP_VISIBLE_DEVICES:-0}
+      HSA_ENABLE_DXG_DETECTION: "1"
+      HSA_ENABLE_SDMA: "0"
+      HSA_USE_SVM: "0"
+      PYTORCH_HIP_ALLOC_CONF: "backend:native,expandable_segments:True,garbage_collection_threshold:0.7,max_split_size_mb:256"
+      TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: "1"
+      TORCHINDUCTOR_CACHE_DIR: /cache/torch_inductor_comfy
+      TORCHINDUCTOR_FX_GRAPH_CACHE: "1"
+      LD_LIBRARY_PATH: /opt/rocm/lib
+      FILE_STORAGE_ROOT: /app/ContentFiles
+      HF_HOME: /cache/huggingface
+      TORCH_HOME: /cache/torch
+      XDG_CACHE_HOME: /cache/xdg
+      SCRIPT_EXECUTION_AGENT_TOKEN: ${GA_SCRIPT_AGENT_TOKEN:?Set GA_SCRIPT_AGENT_TOKEN}
+      SCRIPT_EXECUTION_ADMIN_TOKEN: ${GA_SCRIPT_AGENT_ADMIN_TOKEN:?Set GA_SCRIPT_AGENT_ADMIN_TOKEN}
+      SCRIPT_EXECUTION_ADMIN_STATE_DIR: /var/lib/guideants/script-agent-admin
+      SCRIPT_EXECUTION_SCOPE_STATE_ROOT: /var/lib/guideants/script-agent-admin/scopes
+      SCRIPT_EXECUTION_BASE_PYTHON_VENV: /opt/venv
+      SCRIPT_EXECUTION_TIMEOUT_SECONDS: ${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-3600}
+      VIDEO_ADMIN_TOKEN: ${GA_COMFYUI_VIDEO_ADMIN_TOKEN:?Set GA_COMFYUI_VIDEO_ADMIN_TOKEN}
+      VIDEO_MAX_CONCURRENT_JOBS: ${GA_COMFYUI_VIDEO_MAX_CONCURRENT_JOBS:-1}
+      VIDEO_JOB_TIMEOUT_SECONDS: ${GA_COMFYUI_VIDEO_JOB_TIMEOUT_SECONDS:-3600}
+    volumes:
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:?Set GA_CONTENT_FILES_HOST_PATH}
+        target: /app/ContentFiles
+      - type: bind
+        source: /usr/lib/wsl/lib/libdxcore.so
+        target: /usr/lib/libdxcore.so
+        read_only: true
+      - type: bind
+        source: ${GA_ROCM_WSL_LIBROCDXG_HOST_PATH:-../volumes/rocm-wsl/lib/librocdxg.so}
+        target: /lib/librocdxg.so
+        read_only: true
+      - type: bind
+        source: ${GA_ROCM_WSL_LIBROCDXG_HOST_PATH:-../volumes/rocm-wsl/lib/librocdxg.so}
+        target: /usr/lib/librocdxg.so
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/workflows/infinitetalk-i2v-v1-rocm.json
+        target: /opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1-rocm.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/workflows/qwen-image-edit-v1.json
+        target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-v1.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/workflows/qwen-image-v1.json
+        target: /opt/guideants/comfyui-video/workflows/qwen-image-v1.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/catalog/manifest.json
+        target: /opt/guideants/comfyui-video/catalog/manifest.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/adapter
+        target: /app/adapter
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/client/guideants_video_client
+        target: /opt/venv/lib/python3.12/site-packages/guideants_video_client
+        read_only: true
+      - type: volume
+        source: comfyui_video_models
+        target: /models
+      - type: volume
+        source: comfyui_video_cache
+        target: /cache
+      - type: volume
+        source: comfyui_script_state
+        target: /var/lib/guideants/script-agent-admin
+      - type: volume
+        source: comfyui_video_state
+        target: /var/lib/guideants/comfyui-video
+    shm_size: 8gb
+volumes:
+  comfyui_video_models:
+  comfyui_video_cache:
+  comfyui_script_state:
+  comfyui_video_state:

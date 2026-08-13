@@ -81,12 +81,12 @@
   "10": {
     "class_type": "WanVideoBlockSwap",
     "inputs": {
-      "blocks_to_swap": 7,
+      "blocks_to_swap": 0,
       "offload_img_emb": false,
       "offload_txt_emb": false,
       "use_non_blocking": true,
       "vace_blocks_to_swap": 0,
-      "prefetch_blocks": 3,
+      "prefetch_blocks": 0,
       "block_swap_debug": false
     }
   },

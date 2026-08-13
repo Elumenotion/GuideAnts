@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-$RepoRoot = "D:/repos/GuideAnts-infinitetalk-comfyui"
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $VideoHost = "http://127.0.0.1:8189"
 $ScriptAgentToken = "local-script-agent-test-token"
 $OutputName = "doug-office-hq-v2-416x240-30s.mp4"
