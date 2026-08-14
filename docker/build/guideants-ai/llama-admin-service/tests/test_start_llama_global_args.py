@@ -23,13 +23,7 @@ class StartLlamaGlobalArgsTests(unittest.TestCase):
             fake_server.chmod(fake_server.stat().st_mode | stat.S_IEXEC)
 
             script_copy = tmp_path / "start-llama.sh"
-            script_copy.write_text(
-                START_LLAMA.read_text(encoding="utf-8").replace(
-                    "exec /app/llama-server",
-                    f"exec {fake_server}",
-                ),
-                encoding="utf-8",
-            )
+            script_copy.write_text(START_LLAMA.read_text(encoding="utf-8"), encoding="utf-8")
             script_copy.chmod(script_copy.stat().st_mode | stat.S_IEXEC)
 
             router_canonical = tmp_path / "router-models.ini"
@@ -44,6 +38,7 @@ class StartLlamaGlobalArgsTests(unittest.TestCase):
             lib_root = REPO_ROOT / "docker/build/guideants-ai/lib"
             admin_root = REPO_ROOT / "docker/build/guideants-ai/llama-admin-service"
             run_env["PYTHONPATH"] = f"{lib_root}:{admin_root}"
+            run_env["GA_LLAMA_SERVER_BIN"] = str(fake_server)
             run_env.setdefault("GA_LLAMA_MODELS_PRESET", str(router_canonical))
             run_env.setdefault("GA_LLAMA_MODELS_RUNTIME_PRESET", str(router_runtime))
 
@@ -95,13 +90,7 @@ class StartLlamaGlobalArgsTests(unittest.TestCase):
             fake_server.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
             fake_server.chmod(fake_server.stat().st_mode | stat.S_IEXEC)
             script_copy = tmp_path / "start-llama.sh"
-            script_copy.write_text(
-                START_LLAMA.read_text(encoding="utf-8").replace(
-                    "exec /app/llama-server",
-                    f"exec {fake_server}",
-                ),
-                encoding="utf-8",
-            )
+            script_copy.write_text(START_LLAMA.read_text(encoding="utf-8"), encoding="utf-8")
             script_copy.chmod(script_copy.stat().st_mode | stat.S_IEXEC)
 
             run_env = os.environ.copy()
@@ -111,6 +100,7 @@ class StartLlamaGlobalArgsTests(unittest.TestCase):
                     "GA_LLAMA_NO_MMAP": "1",
                     "GA_LLAMA_MODELS_PRESET": str(router_canonical),
                     "GA_LLAMA_MODELS_RUNTIME_PRESET": str(router_runtime),
+                    "GA_LLAMA_SERVER_BIN": str(fake_server),
                 },
             )
             lib_root = REPO_ROOT / "docker/build/guideants-ai/lib"
@@ -156,17 +146,12 @@ class StartLlamaGlobalArgsTests(unittest.TestCase):
             fake_server.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
             fake_server.chmod(fake_server.stat().st_mode | stat.S_IEXEC)
             script_copy = tmp_path / "start-llama.sh"
-            script_copy.write_text(
-                START_LLAMA.read_text(encoding="utf-8").replace(
-                    "exec /app/llama-server",
-                    f"exec {fake_server}",
-                ),
-                encoding="utf-8",
-            )
+            script_copy.write_text(START_LLAMA.read_text(encoding="utf-8"), encoding="utf-8")
             script_copy.chmod(script_copy.stat().st_mode | stat.S_IEXEC)
 
             run_env = os.environ.copy()
             run_env["GA_LLAMA_MODELS_PRESET"] = str(missing)
+            run_env["GA_LLAMA_SERVER_BIN"] = str(fake_server)
             lib_root = REPO_ROOT / "docker/build/guideants-ai/lib"
             admin_root = REPO_ROOT / "docker/build/guideants-ai/llama-admin-service"
             run_env["PYTHONPATH"] = f"{lib_root}:{admin_root}"

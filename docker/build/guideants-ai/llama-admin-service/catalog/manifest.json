@@ -773,6 +773,214 @@
       }
     },
     {
+      "id": "qwen3.8-27b",
+      "display": {
+        "name": "Qwen 3.8 27B",
+        "description": "Dense Qwen 3.8 vision model. Hybrid thinking with reasoning_effort (xhigh default). In-GGUF draft-mtp and preserve reasoning.",
+        "labels": [
+          "Text",
+          "Vision",
+          "Reasoning",
+          "Tool use",
+          "MTP"
+        ],
+        "license": "Apache-2.0",
+        "documentationUrl": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
+        "recommendedQuantLabels": [
+          "UD-Q4_K_XL"
+        ]
+      },
+      "source": {
+        "repository": "unsloth/Qwen3.8-27B-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "qwen3.8-27b-local",
+        "routerModelId": "Qwen3.8-27B-GGUF",
+        "targetDirectory": "Qwen3.8-27B-GGUF",
+        "mmproj": {
+          "path": "mmproj-F16.gguf"
+        },
+        "routerPreset": {
+          "ctx-size": "262144",
+          "image-min-tokens": "1024",
+          "reasoning-preserve": "true",
+          "spec-type": "draft-mtp",
+          "spec-draft-n-max": "2"
+        },
+        "chatBehavior": {
+          "combineSystemAndDeveloperMessages": true,
+          "samplingParametersJson": {
+            "temperature": {
+              "key": "temperature",
+              "label": "Temperature",
+              "description": "Controls randomness: lower is focused, higher is creative",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 0,
+              "exposedInGuideBuilder": true
+            },
+            "top_p": {
+              "key": "top_p",
+              "label": "Top P",
+              "description": "Nucleus sampling: controls diversity of token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05,
+              "default": 0.95,
+              "displayOrder": 1,
+              "exposedInGuideBuilder": true
+            },
+            "top_k": {
+              "key": "top_k",
+              "label": "Top K",
+              "description": "Limits number of token candidates considered",
+              "min": 1,
+              "max": 100,
+              "step": 1,
+              "default": 20,
+              "displayOrder": 2,
+              "exposedInGuideBuilder": true
+            },
+            "min_p": {
+              "key": "min_p",
+              "label": "Min P",
+              "description": "Minimum probability threshold for token selection",
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.01,
+              "default": 0.0,
+              "displayOrder": 3,
+              "exposedInGuideBuilder": false
+            },
+            "presence_penalty": {
+              "key": "presence_penalty",
+              "label": "Presence Penalty",
+              "description": "Reduces repetition (0=off; Unsloth thinking default is 0, instruct/none uses 1.5)",
+              "min": 0.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 0.0,
+              "displayOrder": 4,
+              "exposedInGuideBuilder": true
+            },
+            "repetition_penalty": {
+              "key": "repetition_penalty",
+              "label": "Repetition Penalty",
+              "description": "Penalizes repeated tokens (1.0=disabled)",
+              "min": 1.0,
+              "max": 2.0,
+              "step": 0.1,
+              "default": 1.0,
+              "displayOrder": 5,
+              "exposedInGuideBuilder": false
+            }
+          },
+          "thinkingControlJson": {
+            "defaultChoice": "xhigh",
+            "choiceActions": {
+              "none": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": false
+                },
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.preserve_thinking",
+                  "value": false
+                },
+                {
+                  "target": "RequestField",
+                  "key": "reasoning_format",
+                  "value": "none"
+                }
+              ],
+              "low": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.reasoning_effort",
+                  "value": "low"
+                },
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.preserve_thinking",
+                  "value": true
+                }
+              ],
+              "medium": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.reasoning_effort",
+                  "value": "medium"
+                },
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.preserve_thinking",
+                  "value": true
+                }
+              ],
+              "xhigh": [
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.enable_thinking",
+                  "value": true
+                },
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.reasoning_effort",
+                  "value": "xhigh"
+                },
+                {
+                  "target": "NestedRequestField",
+                  "key": "chat_template_kwargs.preserve_thinking",
+                  "value": true
+                }
+              ]
+            }
+          },
+          "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+          "requestFieldsWhenToolsPresent": {
+            "parallel_tool_calls": false
+          }
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": [
+          "UD-Q4_K_XL",
+          "UD-Q3_K_XL",
+          "UD-Q5_K_XL"
+        ],
+        "guidance": {
+          "UD-Q4_K_XL": {
+            "summary": "Unsloth default 4-bit. Typical 17–19GB RAM+VRAM."
+          },
+          "UD-Q3_K_XL": {
+            "summary": "Unsloth 3-bit option. Typical 13–16GB."
+          },
+          "UD-Q5_K_XL": {
+            "summary": "Higher quality toward Unsloth 6-bit ~24GB class."
+          }
+        }
+      },
+      "hardwareNotes": {
+        "summary": "Dense 27B vision with in-GGUF draft-mtp. Unsloth: 4-bit 17–19GB, 6-bit 24GB, 8-bit 31GB (RAM+VRAM). Native context 262144. MTP needs extra VRAM headroom.",
+        "contextClass": "large"
+      }
+    },
+    {
       "id": "muse-glimmer-30b",
       "display": {
         "name": "Muse Glimmer 30B",

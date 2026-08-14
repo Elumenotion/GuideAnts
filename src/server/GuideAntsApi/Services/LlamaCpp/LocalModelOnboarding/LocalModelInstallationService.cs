@@ -1,4 +1,3 @@
-using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
@@ -14,14 +13,14 @@ public interface ILocalModelInstallationService
 public sealed class LocalModelInstallationService : ILocalModelInstallationService
 {
     private readonly ApplicationDbContext _db;
-    private readonly ILlamaRuntimeInventoryService _inventoryService;
 
     public LocalModelInstallationService(
         ApplicationDbContext db,
         ILlamaRuntimeInventoryService inventoryService)
     {
         _db = db;
-        _inventoryService = inventoryService;
+        // Inventory is live llama state; catalog edit must not wait on it.
+        _ = inventoryService;
     }
 
     public async Task<LlamaInstallationDetailDto> GetDetailAsync(
@@ -57,7 +56,7 @@ public sealed class LocalModelInstallationService : ILocalModelInstallationServi
                 statusCode: 404);
         }
 
-        return await MapDetailAsync(model, installation, cancellationToken).ConfigureAwait(false);
+        return MapDetailWithoutLiveRuntime(model, installation);
     }
 
     internal static SettingsModelDto MapModel(Model model) =>
@@ -78,15 +77,12 @@ public sealed class LocalModelInstallationService : ILocalModelInstallationServi
             ThinkingControlJson: model.ThinkingControlJson,
             RequestFieldsWhenToolsPresentJson: model.RequestFieldsWhenToolsPresentJson);
 
-    private async Task<LlamaInstallationDetailDto> MapDetailAsync(
+    private static LlamaInstallationDetailDto MapDetailWithoutLiveRuntime(
         Model model,
-        LocalModelInstallation installation,
-        CancellationToken cancellationToken)
+        LocalModelInstallation installation)
     {
-        var inventory = await _inventoryService.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
-        var row = inventory.FirstOrDefault(i =>
-            string.Equals(i.RouterModelId, installation.RouterModelId, StringComparison.Ordinal));
-
+        // Catalog preset editing must not wait on llama-server /models. Live runtime
+        // state belongs on the Loaded models tab; this DTO is SQL provenance + snapshot.
         return new LlamaInstallationDetailDto(
             ModelId: model.ModelId,
             CatalogModel: MapModel(model),
@@ -103,8 +99,8 @@ public sealed class LocalModelInstallationService : ILocalModelInstallationServi
             ProjectorArtifacts: InstallationArtifactRecords.Parse(installation.ProjectorArtifactsJson),
             CompanionArtifacts: InstallationArtifactRecords.Parse(installation.CompanionArtifactsJson),
             RouterPresetSnapshot: InstallationArtifactRecords.ParsePresetSnapshot(installation.RouterPresetSnapshotJson),
-            RuntimeState: row?.RuntimeState ?? "unknown",
-            Loaded: string.Equals(row?.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase),
+            RuntimeState: "unknown",
+            Loaded: false,
             CreatedUtc: installation.CreatedUtc,
             UpdatedUtc: installation.UpdatedUtc);
     }

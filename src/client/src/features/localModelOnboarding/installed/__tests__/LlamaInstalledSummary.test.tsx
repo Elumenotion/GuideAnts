@@ -45,4 +45,13 @@ describe('LlamaInstalledSummary', () => {
     expect(screen.getByTestId('model-chat-behavior-panel')).toBeInTheDocument();
     expect(screen.queryByText(/Management mode/i)).not.toBeInTheDocument();
   });
+
+  it('still renders the preset editor when live router entries fail', async () => {
+    vi.mocked(api.settings.getLlamaRouterEntries).mockRejectedValue(new Error('Llama router entries unavailable'));
+
+    render(<LlamaInstalledSummary modelId="llama/qwen" onOperationStarted={vi.fn()} />);
+
+    expect(await screen.findByTestId('alias-preset-save-panel')).toBeInTheDocument();
+    expect(screen.getByText(/router entries unavailable/i)).toBeInTheDocument();
+  });
 });

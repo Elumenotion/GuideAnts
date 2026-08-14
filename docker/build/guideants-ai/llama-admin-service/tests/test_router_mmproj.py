@@ -29,7 +29,27 @@ class RouterMmprojTests(unittest.TestCase):
 
     def test_preset_disables_mmproj_accepts_boolean_flag(self) -> None:
         self.assertTrue(preset_disables_mmproj({"no-mmproj": ""}))
+        self.assertTrue(preset_disables_mmproj({"nommproj": ""}))
+        self.assertTrue(preset_disables_mmproj({"mmproj-auto": "false"}))
         self.assertFalse(preset_disables_mmproj({"spec-type": "draft-mtp"}))
+        self.assertFalse(preset_disables_mmproj({"mmproj-auto": "true"}))
+
+    def test_materialize_translates_hyphenless_nommproj(self) -> None:
+        canonical = (
+            "version = 1\n\n"
+            "[alias]\n"
+            "model = /models-local/llama/a/model.gguf\n"
+            "mmproj = /models-local/llama/a/mmproj-F16.gguf\n"
+            "nommproj = \n"
+        )
+        runtime = materialize_router_ini_text(
+            canonical,
+            parse_router_ini=router.parse_router_ini,
+            serialize_router_ini_for_runtime=router.serialize_router_ini_for_runtime,
+        )
+        self.assertIn("mmproj-auto = false", runtime)
+        self.assertNotIn("nommproj", runtime)
+        self.assertNotIn("mmproj =", runtime)
 
     def test_materialize_translates_no_mmproj_to_mmproj_auto_false(self) -> None:
         canonical = (
@@ -168,10 +188,86 @@ class RouterMmprojTests(unittest.TestCase):
             runtime = handle.read()
 
         self.assertIn("mmproj = /models-local/llama/a/mmproj-F16.gguf", canonical)
-        self.assertIn("no-mmproj =", canonical)
+        self.assertIn("mmproj-auto = false", canonical)
+        self.assertNotIn("no-mmproj", canonical)
         self.assertIn("mmproj-auto = false", runtime)
         self.assertNotIn("no-mmproj", runtime)
         self.assertNotIn("mmproj =", runtime)
+
+
+class UnrecognizedPresetTests(unittest.TestCase):
+    def test_parse_nommproj_error(self) -> None:
+        from guideants_hf.unrecognized_preset import parse_unrecognized_option_error
+
+        parsed = parse_unrecognized_option_error(
+            "failed to initialize router models: option 'nommproj' not recognized in preset 'Qwen3.8-27B-GGUF'"
+        )
+        self.assertEqual(parsed, ("nommproj", "Qwen3.8-27B-GGUF"))
+
+    def test_parse_uses_latest_unrecognized_option(self) -> None:
+        from guideants_hf.unrecognized_preset import parse_unrecognized_option_error
+
+        parsed = parse_unrecognized_option_error(
+            "option 'nommproj' not recognized in preset 'Qwen3.8-27B-GGUF'\n"
+            "option 'foobar' not recognized in preset 'alias'\n"
+        )
+        self.assertEqual(parsed, ("foobar", "alias"))
+
+    def test_drop_nommproj_rewrites_to_mmproj_auto(self) -> None:
+        from guideants_hf.unrecognized_preset import drop_unrecognized_option_from_entries
+
+        entries = router.parse_router_ini(
+            "version = 1\n\n[Qwen3.8-27B-GGUF]\nmodel = /m/a.gguf\nmmproj = /m/p.gguf\nnommproj = \nctx-size = 8\n"
+        )
+        changed = drop_unrecognized_option_from_entries(
+            entries, option_token="nommproj", alias="Qwen3.8-27B-GGUF"
+        )
+        self.assertTrue(changed)
+        extras = entries["Qwen3.8-27B-GGUF"].extras
+        self.assertEqual(extras["mmproj-auto"], "false")
+        self.assertNotIn("nommproj", extras)
+        self.assertEqual(extras["ctx-size"], "8")
+
+    def test_drop_unknown_key_by_hyphenless_token(self) -> None:
+        from guideants_hf.unrecognized_preset import drop_unrecognized_option_from_entries
+
+        entries = router.parse_router_ini(
+            "version = 1\n\n[alias]\nmodel = /m/a.gguf\nmmproj = \nfoo-bar = 1\nctx-size = 8\n"
+        )
+        changed = drop_unrecognized_option_from_entries(
+            entries, option_token="foobar", alias="alias"
+        )
+        self.assertTrue(changed)
+        self.assertNotIn("foo-bar", entries["alias"].extras)
+        self.assertEqual(entries["alias"].extras["ctx-size"], "8")
+
+    def test_sanitize_canonical_from_log_rewrites_file(self) -> None:
+        from guideants_hf.unrecognized_preset import sanitize_canonical_from_log
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        canonical_path = os.path.join(tmp.name, "router-models.ini")
+        log_path = os.path.join(tmp.name, "llama-server.log")
+        with open(canonical_path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "version = 1\n\n[Qwen3.8-27B-GGUF]\nmodel = /m/a.gguf\nmmproj = /m/p.gguf\nno-mmproj = \n"
+            )
+        with open(log_path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "E srv  llama_server: failed to initialize router models: option 'nommproj' not recognized in preset 'Qwen3.8-27B-GGUF'\n"
+            )
+        self.assertTrue(
+            sanitize_canonical_from_log(
+                canonical_path,
+                log_path,
+                parse_router_ini=router.parse_router_ini,
+                serialize_router_ini=router.serialize_router_ini,
+            )
+        )
+        with open(canonical_path, encoding="utf-8") as handle:
+            rewritten = handle.read()
+        self.assertIn("mmproj-auto = false", rewritten)
+        self.assertNotIn("no-mmproj", rewritten)
 
 
 if __name__ == "__main__":

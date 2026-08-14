@@ -103,7 +103,11 @@ if [ ! -f "$ROUTER_CANONICAL" ]; then
     exit 1
 fi
 
-PYTHONPATH="/app/lib:/app/llama-admin-service${PYTHONPATH:+:$PYTHONPATH}" python3 - "$ROUTER_CANONICAL" "$ROUTER_RUNTIME" <<'PY'
+PYTHONPATH="/app/lib:/app/llama-admin-service${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+
+materialize_runtime_ini() {
+    python3 - "$ROUTER_CANONICAL" "$ROUTER_RUNTIME" <<'PY'
 import sys
 
 from guideants_hf.router_mmproj import materialize_router_ini_text
@@ -120,15 +124,47 @@ runtime = materialize_router_ini_text(
 with open(runtime_path, "w", encoding="utf-8", newline="\n") as handle:
     handle.write(runtime)
 PY
-
-if [ ! -f "$ROUTER_RUNTIME" ]; then
-    echo "ERROR: router runtime preset not written at '$ROUTER_RUNTIME'." >&2
-    exit 1
-fi
+}
 
 ARGS+=(--models-preset "$ROUTER_RUNTIME")
 [ -n "$GA_LLAMA_MODELS_MAX" ] && ARGS+=(--models-max "$GA_LLAMA_MODELS_MAX")
 [ "$GA_LLAMA_NO_AUTOLOAD" = "1" ] && ARGS+=(--no-models-autoload)
 ARGS+=(--host "${GA_LLAMA_HOST:-127.0.0.1}")
 ARGS+=(--port "${GA_LLAMA_PORT:-8080}")
-exec /app/llama-server "${ARGS[@]}"
+
+LLAMA_SERVER="${GA_LLAMA_SERVER_BIN:-/app/llama-server}"
+LLAMA_SERVER_LOG="${GA_LLAMA_SERVER_LOG:-/run/llama-server.log}"
+
+# Entrypoint respawns this script when llama-server exits. If the previous
+# process died on an unrecognized preset key, strip it from canonical INI
+# before rematerializing so we do not restore the poison key and crash-loop.
+if [ -f "$LLAMA_SERVER_LOG" ]; then
+    python3 - "$ROUTER_CANONICAL" "$LLAMA_SERVER_LOG" <<'PY' || true
+import sys
+
+from guideants_hf.unrecognized_preset import sanitize_canonical_from_log
+import llama_router_ini as router_ini
+
+ok = sanitize_canonical_from_log(
+    sys.argv[1],
+    sys.argv[2],
+    parse_router_ini=router_ini.parse_router_ini,
+    serialize_router_ini=router_ini.serialize_router_ini,
+)
+if ok:
+    print(
+        f"stripped unrecognized llama.cpp preset option from {sys.argv[1]}",
+        file=sys.stderr,
+    )
+sys.exit(0)
+PY
+fi
+
+materialize_runtime_ini
+
+if [ ! -f "$ROUTER_RUNTIME" ]; then
+    echo "ERROR: router runtime preset not written at '$ROUTER_RUNTIME'." >&2
+    exit 1
+fi
+
+exec "$LLAMA_SERVER" "${ARGS[@]}"
