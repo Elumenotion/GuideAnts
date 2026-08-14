@@ -40,6 +40,16 @@ describe('routerPreset', () => {
     );
     expect(preset).toEqual({ 'ctx-size': '131072', 'spec-type': 'draft-mtp' });
   });
+
+  it('canonicalizes no-mmproj CLI spellings to mmproj-auto=false', () => {
+    const preset = buildEffectivePresetRecord(
+      [{ key: 'no-mmproj', value: '' }, { key: 'spec-type', value: 'draft-mtp' }],
+      '131072',
+      '',
+    );
+    expect(preset).toEqual({ 'ctx-size': '131072', 'spec-type': 'draft-mtp', 'mmproj-auto': 'false' });
+    expect(preset).not.toHaveProperty('no-mmproj');
+  });
 });
 
 describe('artifactGroups', () => {

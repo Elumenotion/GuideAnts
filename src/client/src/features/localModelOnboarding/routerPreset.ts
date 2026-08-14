@@ -87,7 +87,41 @@ export function buildEffectivePresetRecord(
   if (trimmedCacheRam) {
     preset['cache-ram'] = trimmedCacheRam;
   }
-  return preset;
+  return canonicalizeMmprojDisableKeys(preset);
+}
+
+function llamaOptionToken(key: string): string {
+  return key.trim().toLowerCase().replace(/[-_]/g, '');
+}
+
+function isFalseyPresetValue(value: string): boolean {
+  return ['', '0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
+}
+
+/** Rewrite CLI-shaped mmproj disable flags to mmproj-auto=false before INI save. */
+export function canonicalizeMmprojDisableKeys(preset: Record<string, string>): Record<string, string> {
+  const rewritten: Record<string, string> = {};
+  let disableMmproj = false;
+  for (const [key, value] of Object.entries(preset)) {
+    const token = llamaOptionToken(key);
+    if (token === 'nommproj' || token === 'nommprojauto') {
+      disableMmproj = true;
+      continue;
+    }
+    if (token === 'mmprojauto') {
+      if (isFalseyPresetValue(value)) {
+        disableMmproj = true;
+      } else {
+        rewritten['mmproj-auto'] = value;
+      }
+      continue;
+    }
+    rewritten[key] = value;
+  }
+  if (disableMmproj) {
+    rewritten['mmproj-auto'] = 'false';
+  }
+  return rewritten;
 }
 
 /** Router shell keys belong on the process CLI, not in per-alias presets. */

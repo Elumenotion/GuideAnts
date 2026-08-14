@@ -222,6 +222,16 @@ class RouterPresetTests(unittest.TestCase):
         self.assertEqual(preset["n-gpu-layers"], "999")
         self.assertEqual(preset["jinja"], "true")
 
+    def test_canonicalizes_no_mmproj_cli_spellings(self) -> None:
+        from guideants_hf.preset_validation import normalize_preset_map
+
+        preset = normalize_preset_map({"no-mmproj": "", "ctx-size": "131072"})
+        self.assertEqual(preset["mmproj-auto"], "false")
+        self.assertNotIn("no-mmproj", preset)
+        hyphenless = normalize_preset_map({"nommproj": "", "spec-type": "draft-mtp"})
+        self.assertEqual(hyphenless["mmproj-auto"], "false")
+        self.assertNotIn("nommproj", hyphenless)
+
     def test_fixture_preset_shape(self) -> None:
         fixture = json.loads((CONTRACTS_ROOT / "admin-router-entries-post-request.fixture.json").read_text(encoding="utf-8"))
         preset = router.normalize_preset_map(fixture["preset"])

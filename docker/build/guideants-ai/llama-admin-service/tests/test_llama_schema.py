@@ -33,7 +33,7 @@ class LlamaSchemaTests(unittest.TestCase):
 
     def test_shipped_manifest_validates(self) -> None:
         validate_manifest_instance(self.manifest)
-        self.assertEqual(15, len(self.manifest["models"]))
+        self.assertEqual(16, len(self.manifest["models"]))
 
     def test_rejects_file_arrays_on_definition(self) -> None:
         bad = copy.deepcopy(self.manifest["models"][0])

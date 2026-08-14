@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from guideants_hf.router_mmproj import canonicalize_mmproj_disable_keys
+
 INFRASTRUCTURE_KEYS = frozenset({"model", "mmproj", "version"})
 
 # Router shell bootstrap keys belong on the llama-server parent process CLI (start-llama.sh),
@@ -91,7 +93,7 @@ def normalize_preset_map(preset: dict[str, Any] | None) -> dict[str, str]:
             )
         seen_lower[lower] = key
         normalized[key] = value
-    return normalized
+    return canonicalize_mmproj_disable_keys(normalized)
 
 
 def apply_preset_mode(

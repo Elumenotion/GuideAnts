@@ -70,6 +70,8 @@ export interface AliasPresetSavePanelProps {
   routerEntry: LlamaRouterEntryDto | null;
   /** Fallback when router entry is unavailable (e.g. provenance snapshot). */
   fallbackPreset?: Record<string, string>;
+  fallbackModelPath?: string;
+  fallbackMmprojPath?: string;
 }
 
 /**
@@ -80,7 +82,13 @@ export interface AliasPresetSavePanelProps {
  * removed keys and makes Delete appear to fail after reload.
  */
 export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, AliasPresetSavePanelProps>(
-  function AliasPresetSavePanel({ alias, routerEntry, fallbackPreset = {} }, ref) {
+  function AliasPresetSavePanel({
+    alias,
+    routerEntry,
+    fallbackPreset = {},
+    fallbackModelPath = '',
+    fallbackMmprojPath = '',
+  }, ref) {
     const authoritativePreset = useMemo(() => {
       return routerEntry?.preset && Object.keys(routerEntry.preset).length > 0
         ? routerEntry.preset
@@ -127,7 +135,8 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
       ref,
       () => ({
         async saveRouterPreset() {
-          if (!routerEntry) {
+          const modelPath = routerEntry?.modelPath?.trim() || fallbackModelPath.trim();
+          if (!modelPath) {
             throw new Error('Router entry is unavailable. Refresh and try again.');
           }
           if (validationErrors.length > 0) {
@@ -136,8 +145,8 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
 
           await api.settings.putLlamaRouterEntry(alias, {
             alias,
-            modelPath: routerEntry.modelPath,
-            mmprojPath: routerEntry.mmprojPath ?? '',
+            modelPath,
+            mmprojPath: routerEntry?.mmprojPath ?? fallbackMmprojPath,
             preset: effectivePreset,
             // WYSIWYG: removed rows must leave the INI, not survive via merge.
             presetMode: 'replace',
@@ -146,7 +155,7 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
           });
         },
       }),
-      [alias, cacheRamDraft, ctxSizeDraft, effectivePreset, routerEntry, validationErrors],
+      [alias, cacheRamDraft, ctxSizeDraft, effectivePreset, fallbackMmprojPath, fallbackModelPath, routerEntry, validationErrors],
     );
 
     return (
@@ -194,7 +203,9 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
         />
 
         {!routerEntry ? (
-          <p className="text-xs text-amber-800">Live router entry not loaded — refresh catalog edit.</p>
+          <p className="text-xs text-amber-800">
+            Live router entry not loaded — editing the last saved snapshot. Save still writes the INI.
+          </p>
         ) : null}
       </div>
     );

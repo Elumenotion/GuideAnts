@@ -1484,8 +1484,9 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
             "iniSha256": runtime_apply.ini_sha256,
             "remediation": runtime_apply.remediation,
         }
-        if not runtime_apply.applied:
-            raise HTTPException(status_code=502, detail=response)
+        # INI commit is the operator recovery path. llama-server may be crash-looping
+        # on a bad preset; returning 502 here hid the editor that can fix it.
+        response["applyStatus"] = "applied" if runtime_apply.applied else "ini_committed_reload_pending"
     return response
 
 
