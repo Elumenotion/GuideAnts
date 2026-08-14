@@ -99,26 +99,8 @@ if buildx_supports_cache_export; then
   BUILDX_CACHE_EXPORT_SUPPORTED=true
 fi
 
-get_combined_hash() {
-  local -a paths=("$@")
-  local line
-  local joined=""
-
-  for path in "${paths[@]}"; do
-    if [[ ! -f "$path" ]]; then
-      echo "Hash input file not found: $path" >&2
-      return 1
-    fi
-    line="$path|$(sha256sum "$path" | awk '{print tolower($1)}')"
-    if [[ -z "$joined" ]]; then
-      joined="$line"
-    else
-      joined+=$'\n'"$line"
-    fi
-  done
-
-  printf "%s" "$joined" | sha256sum | awk '{print $1}'
-}
+# shellcheck source=lib/combined-hash.sh
+source "$SCRIPT_DIR/lib/combined-hash.sh"
 
 write_deps_dockerfile_slice() {
   local dockerfile_path="$1"
@@ -267,7 +249,7 @@ DEPS_HASH_INPUTS=(
   "$BUILD_CONTEXT/emb-requirements.txt"
   "$REQ_DEST"
 )
-DEPS_HASH="$(get_combined_hash "${DEPS_HASH_INPUTS[@]}")"
+DEPS_HASH="$(get_combined_hash "$REPO_ROOT" "${DEPS_HASH_INPUTS[@]}")"
 DEPS_HASH="${DEPS_HASH:0:12}"
 DEPS_TAG="guideants-ai-deps:${BACKEND}-${DEPS_HASH}"
 DEPS_CACHE_TAG="guideants-ai-deps:${BACKEND}-cache"
