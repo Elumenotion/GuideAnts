@@ -379,22 +379,8 @@ public class ConversationService : IConversationService
         }
     }
 
-    private static string BuildAttachmentPathForChat(string relativePath)
-    {
-        if (relativePath.StartsWith("Output/", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.StartsWith("Output\\", StringComparison.OrdinalIgnoreCase))
-        {
-            return Path.GetFileName(relativePath);
-        }
-
-        if (relativePath.StartsWith("Runs/", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.StartsWith("Runs\\", StringComparison.OrdinalIgnoreCase))
-        {
-            return Path.GetFileName(relativePath);
-        }
-
-        return $"../{relativePath.Replace("\\", "/").TrimStart('/')}";
-    }
+    private static string BuildAttachmentPathForChat(string relativePath) =>
+        ContextOptionFilesResolver.ToCwdRelativePath(relativePath, isPublished: false);
 
     private static ConversationStreamRunContext BuildRunContext(
         IConversationStreamPolicy policy,

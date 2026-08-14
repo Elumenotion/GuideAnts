@@ -692,12 +692,9 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   const handleCopyPaths = useCallback((paths: string[]) => {
     setShowContextMenu(false);
     setShowFileContextMenu(false);
-    // Scope paths under the notebook name so identically-named folders in
-    // different notebooks don't produce indistinguishable copied paths.
-    const namespace = notebookName?.trim().replace(/^\/+|\/+$/g, '');
-    const scopedPaths = namespace ? paths.map(p => `${namespace}/${p}`) : paths;
-    void copyPaths(scopedPaths);
-  }, [copyPaths, notebookName]);
+    // CWD-relative paths (from Output/) so pasted/copied paths work in chat tools.
+    void copyPaths(paths);
+  }, [copyPaths]);
 
   const handleDownloadFile = useCallback(async () => {
     if (!selectedContextFile || !projectId || !notebookId) {
