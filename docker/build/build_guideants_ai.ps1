@@ -8,37 +8,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $env:DOCKER_BUILDKIT = '1'
 
+. (Join-Path $PSScriptRoot 'lib\combined-hash.ps1')
+
 if ($All) {
     Write-Error "The -All support-image build was split out. Run build_support_images.ps1 separately after backend builds."
     exit 1
-}
-
-function Get-CombinedHash {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Paths
-    )
-
-    $lines = foreach ($path in $Paths) {
-        if (-not (Test-Path $path)) {
-            throw "Hash input file not found: $path"
-        }
-
-        $hash = (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLowerInvariant()
-        "$path|$hash"
-    }
-
-    $joined = [string]::Join("`n", $lines)
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($joined)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $digest = $sha.ComputeHash($bytes)
-    }
-    finally {
-        $sha.Dispose()
-    }
-
-    -join ($digest | ForEach-Object { $_.ToString('x2') })
 }
 
 function Write-DepsDockerfileSlice {
@@ -341,7 +315,7 @@ $scriptAgentSourceFiles = Get-ChildItem -Path $scriptAgentProject -Recurse -File
     Sort-Object FullName |
     Select-Object -ExpandProperty FullName
 
-$scriptAgentSourceHash = Get-CombinedHash -Paths $scriptAgentSourceFiles
+$scriptAgentSourceHash = Get-CombinedHash -Paths $scriptAgentSourceFiles -RelativeTo $repoRoot
 $canReusePublish = $false
 if ((Test-Path $publishOutput) -and (Test-Path $scriptAgentHashFile)) {
     $previousHash = (Get-Content -Path $scriptAgentHashFile -Raw).Trim()
@@ -400,7 +374,7 @@ $depsHashInputs = @(
     (Join-Path $buildContext 'emb-requirements.txt'),
     $reqDest
 )
-$depsHash = (Get-CombinedHash -Paths $depsHashInputs).Substring(0, 12)
+$depsHash = (Get-CombinedHash -Paths $depsHashInputs -RelativeTo $repoRoot).Substring(0, 12)
 $depsTag = "guideants-ai-deps:${Backend}-${depsHash}"
 $depsCacheTag = "guideants-ai-deps:${Backend}-cache"
 Write-Host "Dependency image tag: $depsTag"

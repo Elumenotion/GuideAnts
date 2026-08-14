@@ -36,6 +36,7 @@ These requirements are intentional and must be preserved when changing the AI Do
 
 - Heavy dependency work belongs in `deps-*`; application code, service scripts, gateway config, and startup wiring belong in `final-*`.
 - `sd-cli` and `sd-server` are runtime dependencies and must be produced before, and copied into, `deps-*`.
+- The deps hash must be content-addressed from repo-relative paths so git worktrees and relocated checkouts share `guideants-ai-deps:<backend>-<hash12>` tags for the same inputs.
 - A dependency input change may require a new hash-tagged deps image, but it must not make Docker rebuild every deps layer from scratch solely because the hash tag changed.
 - When one deps instruction changes, Docker must still be able to reuse unchanged earlier layers from the previous deps image.
 - The changing hash tag must identify the deps contents used by the final image; it must not be the only cache identity available to future deps builds.
