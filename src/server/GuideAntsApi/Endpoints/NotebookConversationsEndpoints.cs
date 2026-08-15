@@ -173,14 +173,11 @@ public static class NotebookConversationsEndpoints
                 }
             }
 
-            ctx.Response.Headers["Content-Type"] = "text/event-stream";
-
             try
             {
-                await foreach (var ev in service.SendMessageStreamToConversationAsync(convoId, request, ctx.RequestAborted))
-                {
-                    await ctx.Response.WriteSseEventAsync(ev.EventType, ev.Payload, ctx.RequestAborted);
-                }
+                await ctx.Response.WriteSseStreamWithKeepAliveAsync(
+                    service.SendMessageStreamToConversationAsync(convoId, request, ctx.RequestAborted),
+                    ctx.RequestAborted);
             }
             catch (UnauthorizedAccessException)
             {

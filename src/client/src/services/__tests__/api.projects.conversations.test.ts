@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { api } from '../api';
+import { api, CONVERSATION_STREAM_IDLE_TIMEOUT_MS } from '../api';
 
 const mockFetch = vi.fn();
 
@@ -263,22 +263,53 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
 
     it('calls onComplete when stream ends without [DONE]', async () => {
       const onComplete = vi.fn();
-      mockFetch.mockResolvedValue(sseResponse(['data: {"done":true}\n', '\n']));
+      const onError = vi.fn();
+      mockFetch.mockResolvedValue(sseResponse([
+        'event: complete\n',
+        'data: {}\n',
+        '\n',
+      ]));
       await api.projects.notebooks.conversations.sendMessageStream(
         projectId,
         notebookId,
         convoId,
         { instructions: 'x' },
         vi.fn(),
-        vi.fn(),
+        onError,
         onComplete,
       );
       expect(onComplete).toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('calls onError when the stream ends without a terminal event', async () => {
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      mockFetch.mockResolvedValue(sseResponse(['data: {"delta":"hi"}\n', '\n']));
+      await api.projects.notebooks.conversations.sendMessageStream(
+        projectId,
+        notebookId,
+        convoId,
+        { instructions: 'x' },
+        vi.fn(),
+        onError,
+        onComplete,
+      );
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringMatching(/ended without a reply/i),
+      }));
+      expect(onComplete).not.toHaveBeenCalled();
     });
 
     it('ignores invalid SSE JSON without failing the stream', async () => {
       const onComplete = vi.fn();
-      mockFetch.mockResolvedValue(sseResponse(['data: not-json\n', '\n']));
+      mockFetch.mockResolvedValue(sseResponse([
+        'data: not-json\n',
+        '\n',
+        'event: complete\n',
+        'data: {}\n',
+        '\n',
+      ]));
       await api.projects.notebooks.conversations.sendMessageStream(
         projectId,
         notebookId,
@@ -302,6 +333,7 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
         body: {
           getReader: () => ({
             read: vi.fn().mockRejectedValue(new DOMException('aborted', 'AbortError')),
+            cancel: vi.fn(),
             releaseLock: vi.fn(),
           }),
         },
@@ -319,6 +351,48 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
       );
 
       expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('calls onError when the stream goes silent', async () => {
+      vi.useFakeTimers();
+      const onError = vi.fn();
+      const onComplete = vi.fn();
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: () => new Promise(() => undefined),
+            cancel,
+            releaseLock: vi.fn(),
+          }),
+        },
+      });
+
+      try {
+        const pending = api.projects.notebooks.conversations.sendMessageStream(
+          projectId,
+          notebookId,
+          convoId,
+          { instructions: 'x' },
+          vi.fn(),
+          onError,
+          onComplete,
+        );
+
+        await vi.advanceTimersByTimeAsync(CONVERSATION_STREAM_IDLE_TIMEOUT_MS);
+        await pending;
+
+        expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+          name: 'StreamIdleTimeoutError',
+          message: expect.stringMatching(/stopped sending data/i),
+        }));
+        expect(onComplete).not.toHaveBeenCalled();
+        expect(cancel).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

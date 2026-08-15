@@ -175,6 +175,12 @@ public sealed class ConversationPersistence : IConversationPersistence
             }
         }
 
+        if (request.ThinkingBlocksJson != null)
+        {
+            stub.ThinkingBlocksJson = request.ThinkingBlocksJson;
+            db.Entry(stub).Property(x => x.ThinkingBlocksJson).IsModified = true;
+        }
+
         TouchTurn(db, request.TurnId);
         await db.SaveChangesAsync(ct);
     }

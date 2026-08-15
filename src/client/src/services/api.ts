@@ -403,6 +403,16 @@ function parseHuggingFaceRepository(input: string): [string, string] | null {
     return [owner, repo];
 }
 
+/** Max silence on a conversation SSE body before the client treats the server as gone. */
+export const CONVERSATION_STREAM_IDLE_TIMEOUT_MS = 45_000;
+
+const CONVERSATION_STREAM_TERMINAL_EVENT_TYPES = new Set([
+    'error',
+    'complete',
+    'cancelled',
+    'pending_client_tool',
+]);
+
 export const api = {
     public: {
         getPublishedGuideByFriendlyName: async (friendlyName: string) => {
@@ -1235,6 +1245,30 @@ export const api = {
                     const decoder = new TextDecoder();
                     let buffer = '';
                     let currentEventType = '';
+                    let sawTerminalEvent = false;
+                    let idleTimedOut = false;
+
+                    const readChunkWithIdleTimeout = (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+                        let idleTimer: ReturnType<typeof setTimeout> | undefined;
+                        const readPromise = reader.read();
+                        const idlePromise = new Promise<never>((_, reject) => {
+                            idleTimer = setTimeout(() => {
+                                idleTimedOut = true;
+                                reject(Object.assign(
+                                    new Error(
+                                        'The conversation stream stopped sending data. The server is no longer answering this request.',
+                                    ),
+                                    { name: 'StreamIdleTimeoutError' },
+                                ));
+                                void reader.cancel().catch(() => undefined);
+                            }, CONVERSATION_STREAM_IDLE_TIMEOUT_MS);
+                        });
+                        return Promise.race([readPromise, idlePromise]).finally(() => {
+                            if (idleTimer !== undefined) {
+                                clearTimeout(idleTimer);
+                            }
+                        });
+                    };
 
                     try {
                         while (true) {
@@ -1242,7 +1276,7 @@ export const api = {
                                 throw new DOMException('Operation was aborted', 'AbortError');
                             }
 
-                            const { done, value } = await reader.read();
+                            const { done, value } = await readChunkWithIdleTimeout();
                             if (done) break;
 
                             buffer += decoder.decode(value, { stream: true });
@@ -1259,13 +1293,18 @@ export const api = {
                                 } else if (line.startsWith('data: ')) {
                                     const eventData = line.slice(6);
                                     if (eventData === '[DONE]') {
+                                        sawTerminalEvent = true;
                                         onComplete();
                                         return;
                                     }
                                     
                                     try {
                                         const parsed = JSON.parse(eventData);
-                                        onEvent({ type: currentEventType || 'data', data: parsed });
+                                        const eventType = currentEventType || 'data';
+                                        if (CONVERSATION_STREAM_TERMINAL_EVENT_TYPES.has(eventType)) {
+                                            sawTerminalEvent = true;
+                                        }
+                                        onEvent({ type: eventType, data: parsed });
                                     } catch (err) {
                                         console.error('Failed to parse SSE data:', err);
                                     }
@@ -1274,15 +1313,25 @@ export const api = {
                                 }
                             }
                         }
+                        if (!sawTerminalEvent) {
+                            onError(new Error(
+                                'The conversation stream ended without a reply. The server is no longer answering this request.',
+                            ));
+                            return;
+                        }
                         onComplete();
                     } catch (err) {
-                        if (err instanceof DOMException && err.name === 'AbortError') {
+                        if (!idleTimedOut && err instanceof DOMException && err.name === 'AbortError') {
                             console.log('Stream was cancelled by user');
                             return;
                         }
                         onError(err as Error);
                     } finally {
-                        reader.releaseLock();
+                        try {
+                            reader.releaseLock();
+                        } catch {
+                            // cancel() may already have released the lock
+                        }
                     }
                 },
 

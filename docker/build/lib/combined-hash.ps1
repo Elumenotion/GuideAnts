@@ -65,3 +65,108 @@ function Get-CombinedHash {
 
     -join ($digest | ForEach-Object { $_.ToString('x2') })
 }
+
+function Get-LegacyAbsoluteCombinedHash {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Paths
+    )
+
+    if ($Paths.Count -eq 0) {
+        throw "Hash input file list is empty"
+    }
+
+    $lines = foreach ($path in $Paths) {
+        if (-not (Test-Path -Path $path)) {
+            throw "Hash input file not found: $path"
+        }
+
+        $hash = (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$path|$hash"
+    }
+
+    $joined = [string]::Join("`n", $lines)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($joined)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha.ComputeHash($bytes)
+    }
+    finally {
+        $sha.Dispose()
+    }
+
+    -join ($digest | ForEach-Object { $_.ToString('x2') })
+}
+
+function Find-ReusableDepsImage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CanonicalTag,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LegacyTag,
+
+        [Parameter(Mandatory = $true)]
+        [string]$CanonicalFullHash,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Backend,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$ImageExists,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$GetLabel,
+
+        [string[]]$CandidateTags = @()
+    )
+
+    if (& $ImageExists $CanonicalTag) {
+        return $CanonicalTag
+    }
+
+    if (& $ImageExists $LegacyTag) {
+        return $LegacyTag
+    }
+
+    foreach ($tag in $CandidateTags) {
+        if ([string]::IsNullOrWhiteSpace($tag)) {
+            continue
+        }
+        if ($tag -notlike "guideants-ai-deps:${Backend}-*") {
+            continue
+        }
+        $label = & $GetLabel $tag
+        if ($label -eq $CanonicalFullHash) {
+            return $tag
+        }
+    }
+
+    $cacheTag = "guideants-ai-deps:${Backend}-cache"
+    if (& $ImageExists $cacheTag) {
+        return $cacheTag
+    }
+
+    return $null
+}
+
+function Get-LocalBuildxCacheFromArgs {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$CachePaths
+    )
+
+    $args = [System.Collections.Generic.List[string]]::new()
+    foreach ($cachePath in $CachePaths) {
+        $index = Join-Path $cachePath 'index.json'
+        if (Test-Path -LiteralPath $index) {
+            $args.Add('--cache-from')
+            $args.Add("type=local,src=$cachePath")
+        }
+    }
+    if ($args.Count -eq 0) {
+        return @()
+    }
+
+    return @($args.ToArray())
+}

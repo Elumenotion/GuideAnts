@@ -794,6 +794,15 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             assistant.Content.Should().NotBeNullOrWhiteSpace();
             assistant.Content.Should().Contain("Partial");
 
+            turn.ChatRunOutputJson.Should().NotBeNullOrWhiteSpace();
+
+            (await db2.UsageEvents.AnyAsync(u =>
+                    u.ConversationId == conversationId
+                    && u.Category == UsageCategory.ChatCompletion
+                    && u.ValueInput == 0
+                    && u.ValueOutput == 0))
+                .Should().BeFalse();
+
             (await db2.ConversationLocks.AnyAsync(l => l.ConversationId == conversationId)).Should().BeFalse();
         }
 
@@ -841,6 +850,70 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
                 .AnyAsync(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Tool))
                 .Should().BeFalse();
         }
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_Cancel_during_thinking_persists_thinking_without_zero_token_usage()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Cancel during thinking");
+        }
+
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.ThinkingStream;
+        FakeChatCompletionBehavior.Instance.ThinkingText = "searching for the hosted file name in the tool result";
+        FakeChatCompletionBehavior.Instance.FinalAssistantText = "should not be persisted";
+
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(80));
+        try
+        {
+            await SendConversationStreamUntilCancelledAsync(
+                projectId,
+                notebookId,
+                conversationId,
+                new { instructions = "Think then answer", assistantName = "assistant" },
+                cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // expected when the HTTP stream is aborted
+        }
+
+        await Task.Delay(500);
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var turn = await db2.ConversationTurns.SingleAsync(t => t.NotebookConversationId == conversationId);
+        turn.Status.Should().Be("cancelled");
+        turn.ChatRunOutputJson.Should().NotBeNullOrWhiteSpace();
+
+        var assistant = await db2.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.Assistant)
+            .SingleAsync();
+        assistant.IsStreaming.Should().BeFalse();
+        assistant.ThinkingBlocksJson.Should().NotBeNullOrWhiteSpace();
+        assistant.Content.Should().NotBe("should not be persisted");
+
+        (await db2.UsageEvents.AnyAsync(u =>
+                u.ConversationId == conversationId
+                && u.Category == UsageCategory.ChatCompletion
+                && u.ValueInput == 0
+                && u.ValueOutput == 0))
+            .Should().BeFalse();
+
+        var service = ResolveService(verifyScope);
+        var dto = await service.GetConversationWithMessagesAsync(conversationId);
+        dto!.Messages.Should().NotContain(m =>
+            m.Role == DataModelChatRole.Assistant && string.IsNullOrWhiteSpace(m.Content));
+        dto.Messages.Should().Contain(m =>
+            m.Role == DataModelChatRole.Assistant && m.Content.Contains("searching", StringComparison.Ordinal));
     }
 
     [TestMethod]

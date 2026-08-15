@@ -23,8 +23,8 @@ namespace AntRunner.Chat
     }
 
     /// <summary>
-    /// Thrown when a chat run is cancelled after one or more completed LLM rounds.
-    /// Carries partial output including accumulated token usage for billing.
+    /// Thrown when a chat run is cancelled. Always carries the work that already took place
+    /// (messages, files, and any accumulated token usage) so the host can complete the turn.
     /// </summary>
     public sealed class ChatRunCancelledException : OperationCanceledException
     {

@@ -29,23 +29,9 @@ public sealed record ToolTurnUsageRequest(
     Guid? AssistantId,
     string? ContextLabel = null);
 
-public sealed record CancelledTurnUsageRequest(
-    ConversationUsageMode Mode,
-    Guid ProjectId,
-    Guid NotebookId,
-    Guid ConversationId,
-    int TurnIndex,
-    string? ModelDeploymentId,
-    Guid? AssistantId,
-    Guid? PreferredAssistantMessageId = null,
-    IReadOnlyList<Guid>? AssistantMessageIds = null,
-    string? ContextLabel = null);
-
 public interface IConversationUsageReporter
 {
     Task RecordChatCompletionUsageAsync(ChatCompletionUsageRequest request, CancellationToken ct = default);
 
     Task RecordToolCallUsageForTurnAsync(ToolTurnUsageRequest request, CancellationToken ct = default);
-
-    Task RecordCancelledTurnMarkerUsageAsync(CancelledTurnUsageRequest request, CancellationToken ct = default);
 }

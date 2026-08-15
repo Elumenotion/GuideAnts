@@ -165,6 +165,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
             Guid? currentAssistantMessageId = null;
             var currentAssistantContent = new StringBuilder();
+            var currentThinkingContent = new StringBuilder();
             var currentMessageSequence = context.InitialMessageSequence;
             var filenameUrlMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var assistantMessageIds = new List<Guid>();
@@ -192,6 +193,12 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
             void TryWrite(StreamingEvent ev)
             {
+                if (ConversationStreamEventWriter.IsTerminal(ev.EventType))
+                {
+                    ConversationStreamEventWriter.WriteTerminal(writer, ev, TimeSpan.FromSeconds(2));
+                    return;
+                }
+
                 if (externalCt.IsCancellationRequested)
                 {
                     return;
@@ -235,6 +242,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 if (isThinking)
                 {
                     thinkingEmittedInStream = true;
+                    currentThinkingContent.Append(e.ContentDelta);
                 }
 
                 if (currentAssistantMessageId == null)
@@ -332,6 +340,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         currentAssistantContent,
                         assistantMessageIds,
                         TryWrite);
+                    currentThinkingContent.Clear();
                     return;
                 }
 
@@ -491,6 +500,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         context,
                         currentAssistantMessageId,
                         currentAssistantContent,
+                        currentThinkingContent,
                         assistantMessageIds,
                         TryWrite,
                         partialOutput,
@@ -891,6 +901,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
         ConversationStreamRunContext context,
         Guid? currentAssistantMessageId,
         StringBuilder currentAssistantContent,
+        StringBuilder currentThinkingContent,
         IReadOnlyList<Guid> assistantMessageIds,
         Action<StreamingEvent> tryWrite,
         ChatRunOutput? partialOutput,
@@ -898,12 +909,21 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
     {
         if (currentAssistantMessageId != null)
         {
+            string? thinkingJson = null;
+            if (currentThinkingContent.Length > 0)
+            {
+                thinkingJson = JsonSerializer.Serialize(
+                    new[] { ChatThinkingBlock.ForThinking(currentThinkingContent.ToString(), string.Empty) },
+                    JsonOptions);
+            }
+
             await _persistence.AppendOrFinalizeAssistantMessageAsync(
                 new AssistantMessageUpdateRequest(
                     currentAssistantMessageId.Value,
                     context.DbTurn.Id,
                     currentAssistantContent.ToString(),
-                    Finalize: true),
+                    Finalize: true,
+                    ThinkingBlocksJson: thinkingJson),
                 ct);
         }
 
@@ -934,6 +954,9 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             }
         }
 
+        await _persistence.PersistThinkingBlocksAsync(partialOutput, assistantMessageIds, ct);
+        await _persistence.PersistRunOutputAsync(context.DbTurn.Id, partialOutput, ct);
+
         await RecordToolUsageAsync(context, ct);
 
         if (partialOutput?.Usage != null)
@@ -944,23 +967,6 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 currentAssistantMessageId,
                 assistantMessageIds,
                 tryWrite,
-                ct);
-        }
-        else
-        {
-            await _usageReporter.RecordCancelledTurnMarkerUsageAsync(
-                new CancelledTurnUsageRequest(
-                    context.Policy.UsageMode,
-                    context.Conversation.Notebook.ProjectId,
-                    context.Conversation.NotebookId,
-                    context.Conversation.Id,
-                    context.TurnIndex,
-                    context.ModelDeploymentId,
-                    context.AssistantId,
-                    PreferredAssistantMessageId: currentAssistantMessageId
-                        ?? (assistantMessageIds.Count > 0 ? assistantMessageIds[^1] : null),
-                    AssistantMessageIds: assistantMessageIds,
-                    ContextLabel: context.UsageContextLabel != null ? $"{context.UsageContextLabel}(cancelled)" : null),
                 ct);
         }
 

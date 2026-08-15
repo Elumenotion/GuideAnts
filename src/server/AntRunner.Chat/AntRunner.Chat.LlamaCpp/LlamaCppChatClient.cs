@@ -144,7 +144,8 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         }
         catch (OperationCanceledException)
         {
-            throw;
+            accumulator.FlushPendingAssistantText(onChunk);
+            throw new ChatStreamCancelledException(accumulator.ToResponse(), cancellationToken);
         }
         catch (Exception ex) when (IsMidStreamTransportFailure(ex))
         {

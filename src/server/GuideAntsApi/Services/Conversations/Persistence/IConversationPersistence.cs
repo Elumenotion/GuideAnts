@@ -42,7 +42,8 @@ public sealed record AssistantMessageUpdateRequest(
     Guid TurnId,
     string Content,
     bool Finalize,
-    string? ToolCallsJson = null);
+    string? ToolCallsJson = null,
+    string? ThinkingBlocksJson = null);
 
 public sealed record CreateToolMessageRequest(
     Guid ConversationId,

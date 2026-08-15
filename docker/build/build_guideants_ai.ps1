@@ -374,14 +374,37 @@ $depsHashInputs = @(
     (Join-Path $buildContext 'emb-requirements.txt'),
     $reqDest
 )
-$depsHash = (Get-CombinedHash -Paths $depsHashInputs -RelativeTo $repoRoot).Substring(0, 12)
+$depsInputHashLabel = 'org.guideants.deps-input-hash'
+$depsCanonicalFullHash = Get-CombinedHash -Paths $depsHashInputs -RelativeTo $repoRoot
+$depsLegacyFullHash = Get-LegacyAbsoluteCombinedHash -Paths $depsHashInputs
+$depsHash = $depsCanonicalFullHash.Substring(0, 12)
 $depsTag = "guideants-ai-deps:${Backend}-${depsHash}"
+$depsLegacyTag = "guideants-ai-deps:${Backend}-$($depsLegacyFullHash.Substring(0, 12))"
 $depsCacheTag = "guideants-ai-deps:${Backend}-cache"
 Write-Host "Dependency image tag: $depsTag"
 Write-Host "Dependency cache tag: $depsCacheTag"
 
 try {
-    $depsExists = Test-DockerImageExists -ImageTag $depsTag
+    $depsCandidateTags = @(docker images --format '{{.Repository}}:{{.Tag}}' 'guideants-ai-deps' 2>$null)
+    $reusableDepsImage = Find-ReusableDepsImage `
+        -CanonicalTag $depsTag `
+        -LegacyTag $depsLegacyTag `
+        -CanonicalFullHash $depsCanonicalFullHash `
+        -Backend $Backend `
+        -ImageExists { param($tag) Test-DockerImageExists -ImageTag $tag } `
+        -GetLabel {
+            param($tag)
+            $value = docker inspect --format "{{index .Config.Labels `"$depsInputHashLabel`"}}" $tag 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                return $null
+            }
+            if ([string]::IsNullOrWhiteSpace($value) -or $value -eq '<no value>') {
+                return $null
+            }
+            return $value.Trim()
+        } `
+        -CandidateTags $depsCandidateTags
+    $depsExists = -not [string]::IsNullOrWhiteSpace($reusableDepsImage)
     $depsCacheExists = Test-DockerImageExists -ImageTag $depsCacheTag
     if ($RebuildBase -or -not $depsExists) {
         if ($RebuildBase) {
@@ -404,15 +427,13 @@ try {
             $depsBuildArgs += '--pull'
         }
         else {
-            $depsBuildArgs += @(
-                '--cache-from', "type=local,src=$depsCachePath",
-                '--cache-from', "type=local,src=$finalCachePath"
-            )
+            $depsBuildArgs += @(Get-LocalBuildxCacheFromArgs -CachePaths @($depsCachePath, $finalCachePath))
             if ($depsCacheExists) {
                 $depsBuildArgs += @('--cache-from', $depsCacheTag)
             }
         }
         $depsBuildArgs += @(
+            '--label', "${depsInputHashLabel}=$depsCanonicalFullHash",
             '--target', $depsTarget,
             '-t', $depsTag,
             '-t', $depsCacheTag,
@@ -431,10 +452,18 @@ try {
         Promote-LocalBuildxCache -CurrentPath $depsCachePath -NewPath $depsCachePathNew
     }
     else {
-        Write-Host "Reusing cached dependency image: $depsTag" -ForegroundColor Green
-        docker tag $depsTag $depsCacheTag
+        Write-Host "Reusing dependency image $($reusableDepsImage) as $depsTag" -ForegroundColor Green
+        if ($reusableDepsImage -eq $depsCacheTag) {
+            Write-Warning "Reused unlabeled $depsCacheTag. If Dockerfile or requirements changed, rerun with -RebuildBase."
+        }
+        docker tag $reusableDepsImage $depsTag
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to tag dependency cache image $depsCacheTag from $depsTag"
+            Write-Error "Failed to tag $depsTag from $reusableDepsImage"
+            exit 1
+        }
+        docker tag $reusableDepsImage $depsCacheTag
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to tag dependency cache image $depsCacheTag from $reusableDepsImage"
             exit 1
         }
     }
@@ -444,9 +473,8 @@ try {
     if ($RebuildBase) {
         $dockerArgs += '--no-cache'
     }
+    $dockerArgs += @(Get-LocalBuildxCacheFromArgs -CachePaths @($depsCachePath, $finalCachePath))
     $dockerArgs += @(
-        '--cache-from', "type=local,src=$depsCachePath",
-        '--cache-from', "type=local,src=$finalCachePath",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,

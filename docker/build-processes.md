@@ -26,6 +26,7 @@ The AI image is deliberately split into `deps-*` and `final-*` stages. These req
 - Heavy runtime dependencies belong in `deps-*`; app/service code and runtime wiring belong in `final-*`.
 - `sd-cli` and `sd-server` are runtime dependencies, so they belong in `deps-*`, not `final-*`.
 - The deps hash is content-addressed from repo-relative paths so the same inputs produce the same `guideants-ai-deps:<backend>-<hash12>` tag across git worktrees and checkout locations.
+- A new hash formula must still reuse an already-built image for those same inputs (previous path-based tag or `org.guideants.deps-input-hash` label). Missing `index.json` under `.buildx-cache-*` must not be passed as `--cache-from`.
 - A deps change may create a new `guideants-ai-deps:<backend>-<hash12>` image, but the hash change itself must not force Docker to rebuild every deps layer from scratch.
 - When one deps instruction changes, Docker must still have a stable cache source for unchanged earlier deps layers and intermediate builder stages.
 - The hash tag is for exact image selection. The stable `guideants-ai-deps:<backend>-cache` tag is for layer reuse across deps hash changes.

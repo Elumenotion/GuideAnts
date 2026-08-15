@@ -102,6 +102,48 @@ public sealed class ConversationPersistenceToolMessageTests
         rows[0].MessageSequence.Should().Be(5);
     }
 
+    [TestMethod]
+    public async Task AppendOrFinalizeAssistantMessageAsync_PersistsThinkingBlocksWhenProvided()
+    {
+        var (_, conversationId, turnId) = await SeedAsync();
+
+        Guid messageId;
+        await using (var startDb = new ApplicationDbContext(_options))
+        {
+            var startPersistence = new ConversationPersistence(
+                new TestServiceScopeFactory(startDb),
+                Mock.Of<ILogger<ConversationPersistence>>());
+            messageId = await startPersistence.StartAssistantMessageAsync(new StartAssistantMessageRequest(
+                conversationId,
+                turnId,
+                TurnIndex: 1,
+                MessageSequence: 2,
+                AssistantName: "Guide",
+                ModelDeploymentId: "test",
+                AssistantId: null));
+        }
+
+        var thinkingJson = """[{"type":"thinking","thinking":"looking for the file name","signature":""}]""";
+        await using (var updateDb = new ApplicationDbContext(_options))
+        {
+            var updatePersistence = new ConversationPersistence(
+                new TestServiceScopeFactory(updateDb),
+                Mock.Of<ILogger<ConversationPersistence>>());
+            await updatePersistence.AppendOrFinalizeAssistantMessageAsync(
+                new AssistantMessageUpdateRequest(
+                    messageId,
+                    turnId,
+                    Content: "",
+                    Finalize: true,
+                    ThinkingBlocksJson: thinkingJson));
+        }
+
+        await using var db = new ApplicationDbContext(_options);
+        var row = await db.NotebookConversationMessages.SingleAsync(m => m.Id == messageId);
+        row.IsStreaming.Should().BeFalse();
+        row.ThinkingBlocksJson.Should().Contain("looking for the file name");
+    }
+
     private DbContextOptions<ApplicationDbContext> _options = null!;
 
     private async Task<(ConversationPersistence Persistence, Guid ConversationId, Guid TurnId)> SeedAsync()

@@ -249,17 +249,28 @@ DEPS_HASH_INPUTS=(
   "$BUILD_CONTEXT/emb-requirements.txt"
   "$REQ_DEST"
 )
-DEPS_HASH="$(get_combined_hash "$REPO_ROOT" "${DEPS_HASH_INPUTS[@]}")"
-DEPS_HASH="${DEPS_HASH:0:12}"
+DEPS_INPUT_HASH_LABEL="org.guideants.deps-input-hash"
+DEPS_CANONICAL_FULL_HASH="$(get_combined_hash "$REPO_ROOT" "${DEPS_HASH_INPUTS[@]}")"
+DEPS_LEGACY_FULL_HASH="$(get_legacy_absolute_combined_hash "${DEPS_HASH_INPUTS[@]}")"
+DEPS_HASH="${DEPS_CANONICAL_FULL_HASH:0:12}"
 DEPS_TAG="guideants-ai-deps:${BACKEND}-${DEPS_HASH}"
+DEPS_LEGACY_TAG="guideants-ai-deps:${BACKEND}-${DEPS_LEGACY_FULL_HASH:0:12}"
 DEPS_CACHE_TAG="guideants-ai-deps:${BACKEND}-cache"
 
 echo "Dependency image tag: $DEPS_TAG"
 echo "Dependency cache tag: $DEPS_CACHE_TAG"
 
+mapfile -t DEPS_CANDIDATE_TAGS < <(docker images --format '{{.Repository}}:{{.Tag}}' 'guideants-ai-deps' 2>/dev/null || true)
+REUSABLE_DEPS_IMAGE=""
+if REUSABLE_DEPS_IMAGE="$(find_reusable_deps_image "$DEPS_TAG" "$DEPS_LEGACY_TAG" "$DEPS_CANONICAL_FULL_HASH" "$BACKEND" "${DEPS_CANDIDATE_TAGS[@]}")"; then
+  :
+else
+  REUSABLE_DEPS_IMAGE=""
+fi
+
 DEPS_EXISTS=false
 DEPS_CACHE_EXISTS=false
-if docker_image_exists "$DEPS_TAG"; then DEPS_EXISTS=true; fi
+if [[ -n "$REUSABLE_DEPS_IMAGE" ]]; then DEPS_EXISTS=true; fi
 if docker_image_exists "$DEPS_CACHE_TAG"; then DEPS_CACHE_EXISTS=true; fi
 
 if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
@@ -273,15 +284,18 @@ if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
   if [[ "$REBUILD_BASE" == "true" ]]; then
     DEPS_BUILD_ARGS+=(--no-cache)
   else
-    DEPS_BUILD_ARGS+=(
-      --cache-from "type=local,src=$DEPS_CACHE_PATH"
-      --cache-from "type=local,src=$FINAL_CACHE_PATH"
-    )
+    if [[ -f "$DEPS_CACHE_PATH/index.json" ]]; then
+      DEPS_BUILD_ARGS+=(--cache-from "type=local,src=$DEPS_CACHE_PATH")
+    fi
+    if [[ -f "$FINAL_CACHE_PATH/index.json" ]]; then
+      DEPS_BUILD_ARGS+=(--cache-from "type=local,src=$FINAL_CACHE_PATH")
+    fi
     if [[ "$DEPS_CACHE_EXISTS" == "true" ]]; then
       DEPS_BUILD_ARGS+=(--cache-from "$DEPS_CACHE_TAG")
     fi
   fi
   DEPS_BUILD_ARGS+=(
+    --label "${DEPS_INPUT_HASH_LABEL}=${DEPS_CANONICAL_FULL_HASH}"
     --target "$DEPS_TARGET"
     -t "$DEPS_TAG"
     -t "$DEPS_CACHE_TAG"
@@ -296,18 +310,25 @@ if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
   docker "${DEPS_BUILD_ARGS[@]}"
   promote_local_cache "$DEPS_CACHE_PATH" "$DEPS_CACHE_PATH_NEW"
 else
-  echo "Reusing cached dependency image: $DEPS_TAG"
-  docker tag "$DEPS_TAG" "$DEPS_CACHE_TAG"
+  echo "Reusing dependency image ${REUSABLE_DEPS_IMAGE} as $DEPS_TAG"
+  if [[ "$REUSABLE_DEPS_IMAGE" == "$DEPS_CACHE_TAG" ]]; then
+    echo "WARNING: Reused unlabeled $DEPS_CACHE_TAG. If Dockerfile or requirements changed, rerun with --rebuild-base." >&2
+  fi
+  docker tag "$REUSABLE_DEPS_IMAGE" "$DEPS_TAG"
+  docker tag "$REUSABLE_DEPS_IMAGE" "$DEPS_CACHE_TAG"
 fi
 
 DOCKER_ARGS=(buildx build --load)
 if [[ "$REBUILD_BASE" == "true" ]]; then
   DOCKER_ARGS+=(--no-cache)
 fi
+if [[ -f "$DEPS_CACHE_PATH/index.json" ]]; then
+  DOCKER_ARGS+=(--cache-from "type=local,src=$DEPS_CACHE_PATH")
+fi
+if [[ -f "$FINAL_CACHE_PATH/index.json" ]]; then
+  DOCKER_ARGS+=(--cache-from "type=local,src=$FINAL_CACHE_PATH")
+fi
 DOCKER_ARGS+=(
-  --cache-from "type=local,src=$DEPS_CACHE_PATH"
-  --cache-from "type=local,src=$FINAL_CACHE_PATH"
-  --cache-from "$DEPS_CACHE_TAG"
   --build-arg "${DEPS_IMAGE_ARG}=$DEPS_TAG"
   --target "$FULL_TARGET"
   -t "$IMAGE_TAG"

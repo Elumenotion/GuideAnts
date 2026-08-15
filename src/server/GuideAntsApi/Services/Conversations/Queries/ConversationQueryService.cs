@@ -205,6 +205,14 @@ public class ConversationQueryService : IConversationQueryService
                 turnFilesModified.TryGetValue(msg.TurnIndex, out filesModified);
             }
 
+            var hasToolCalls = toolCalls != null && toolCalls.Count > 0;
+            var hasTurnFiles = (filesCreated?.Count > 0) || (filesModified?.Count > 0);
+            if (!ConversationMessageMapper.HasVisibleAssistantBody(msg.Role, msg.Content, hasToolCalls, attachments.Count)
+                && !hasTurnFiles)
+            {
+                continue;
+            }
+
             messageDtos.Add(new MessageDto(
                 msg.Id,
                 msg.Role,
