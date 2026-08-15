@@ -28,6 +28,37 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
 {
     private static readonly JsonSerializerOptions CamelCase = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
+    private static async Task WaitForTurnStatusAsync(
+        ApplicationDbContext db,
+        Guid conversationId,
+        string expectedStatus,
+        TimeSpan? timeout = null)
+    {
+        var waitTimeout = timeout ?? TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + waitTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var status = await db.ConversationTurns
+                .AsNoTracking()
+                .Where(t => t.NotebookConversationId == conversationId)
+                .Select(t => t.Status)
+                .SingleAsync();
+            if (string.Equals(status, expectedStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            await Task.Delay(100);
+        }
+
+        var finalStatus = await db.ConversationTurns
+            .AsNoTracking()
+            .Where(t => t.NotebookConversationId == conversationId)
+            .Select(t => t.Status)
+            .SingleAsync();
+        finalStatus.Should().Be(expectedStatus);
+    }
+
     [ClassInitialize]
     public static Task ClassInitialize(TestContext context) => InitializeSharedFactoryAsync(context);
 
@@ -805,6 +836,7 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             conversationId = await SeedConversationAsync(db, notebookId, "Cancel partial stream");
         }
 
+        FakeChatCompletionBehavior.Instance.Reset();
         FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.SlowCancellableStream;
         FakeChatCompletionBehavior.Instance.ChunkDelayMs = 120;
 
@@ -824,14 +856,13 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             // expected when the HTTP stream is aborted
         }
 
-        await Task.Delay(500);
-
         using (var verifyScope = SharedFactory!.Services.CreateScope())
         {
             var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+            await WaitForTurnStatusAsync(db2, conversationId, "cancelled");
+
             var turn = await db2.ConversationTurns.SingleAsync(t => t.NotebookConversationId == conversationId);
-            turn.Status.Should().Be("cancelled");
 
             var assistant = await db2.NotebookConversationMessages
                 .Where(m => m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.Assistant)
@@ -878,14 +909,13 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             // expected when tool execution is cancelled before results are persisted
         }
 
-        await Task.Delay(500);
-
         using (var pruneVerifyScope = SharedFactory!.Services.CreateScope())
         {
             var pruneVerifyDb = pruneVerifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+            await WaitForTurnStatusAsync(pruneVerifyDb, pruneConversationId, "cancelled");
+
             var pruneTurn = await pruneVerifyDb.ConversationTurns.SingleAsync(t => t.NotebookConversationId == pruneConversationId);
-            pruneTurn.Status.Should().Be("cancelled");
 
             var pruneAssistant = await pruneVerifyDb.NotebookConversationMessages
                 .Where(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Assistant)
@@ -923,13 +953,12 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
 
         events.Should().Contain(e => e.EventType == StreamingEventTypes.Error);
 
-        await Task.Delay(500);
-
         using var verifyScope = SharedFactory!.Services.CreateScope();
         var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+        await WaitForTurnStatusAsync(db2, conversationId, "timed_out");
+
         var turn = await db2.ConversationTurns.SingleAsync(t => t.NotebookConversationId == conversationId);
-        turn.Status.Should().Be("timed_out");
         turn.TerminationCode.Should().Be("local_llm_timeout");
         turn.ChatRunOutputJson.Should().NotBeNullOrWhiteSpace();
 
@@ -964,6 +993,7 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             conversationId = await SeedConversationAsync(db, notebookId, "Cancel during thinking");
         }
 
+        FakeChatCompletionBehavior.Instance.Reset();
         FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.ThinkingStream;
         FakeChatCompletionBehavior.Instance.ThinkingText = "searching for the hosted file name in the tool result";
         FakeChatCompletionBehavior.Instance.FinalAssistantText = "should not be persisted";
@@ -984,13 +1014,12 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             // expected when the HTTP stream is aborted
         }
 
-        await Task.Delay(500);
-
         using var verifyScope = SharedFactory!.Services.CreateScope();
         var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+        await WaitForTurnStatusAsync(db2, conversationId, "cancelled");
+
         var turn = await db2.ConversationTurns.SingleAsync(t => t.NotebookConversationId == conversationId);
-        turn.Status.Should().Be("cancelled");
         turn.ChatRunOutputJson.Should().NotBeNullOrWhiteSpace();
 
         var assistant = await db2.NotebookConversationMessages

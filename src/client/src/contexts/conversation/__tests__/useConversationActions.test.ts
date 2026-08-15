@@ -77,6 +77,10 @@ function createDeps(overrides: Partial<Parameters<typeof useConversationActions>
     setCurrentStreamController,
     inflightRuntimeChecksRef,
     runtimeReadyCacheRef,
+    activeStreamTurnId: null as string | null,
+    setActiveStreamTurnId: vi.fn(),
+    getActiveStreamTurnId: vi.fn(() => null),
+    refreshConversation: vi.fn().mockResolvedValue(undefined),
     assistantByName: {
       Claude: { name: 'Claude', avatarUrl: '', id: 'asst-1' },
     },
@@ -167,6 +171,7 @@ describe('useConversationActions', () => {
         expect.any(Function),
         expect.any(Function),
         expect.any(AbortSignal),
+        expect.objectContaining({ requestServerCancel: expect.any(Function) }),
       );
       expect(deps.setCurrentStreamController).toHaveBeenCalled();
     });
