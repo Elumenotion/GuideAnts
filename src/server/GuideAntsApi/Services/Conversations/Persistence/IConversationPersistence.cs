@@ -42,7 +42,8 @@ public sealed record AssistantMessageUpdateRequest(
     Guid TurnId,
     string Content,
     bool Finalize,
-    string? ToolCallsJson = null);
+    string? ToolCallsJson = null,
+    string? ThinkingBlocksJson = null);
 
 public sealed record CreateToolMessageRequest(
     Guid ConversationId,
@@ -72,6 +73,25 @@ public sealed record AppendTurnTraceSegmentRequest(
     int SchemaVersion,
     string CaptureState,
     string SegmentJson);
+
+public sealed record TerminalizeAssistantSnapshot(
+    Guid MessageId,
+    string Content,
+    string? ToolCallsJson = null,
+    string? ThinkingBlocksJson = null);
+
+public sealed record TerminalizeTurnRequest(
+    Guid TurnId,
+    Guid ConversationId,
+    int TurnIndex,
+    string TerminalStatus,
+    string? TerminationCode = null,
+    string? TerminationDetail = null,
+    Guid? ExecutionId = null,
+    ChatRunOutput? Output = null,
+    IReadOnlyList<TerminalizeAssistantSnapshot>? AssistantSnapshots = null,
+    bool PruneIncompleteToolCalls = false,
+    IReadOnlyList<Guid>? AssistantMessageIdsForThinking = null);
 
 public interface IConversationPersistence
 {
@@ -105,4 +125,21 @@ public interface IConversationPersistence
         CancellationToken ct = default);
 
     Task AppendTurnTraceSegmentAsync(AppendTurnTraceSegmentRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically finalizes a turn: streaming assistant rows, run output, usage/files, and terminal status.
+    /// Idempotent when the turn is already in a terminal status.
+    /// </summary>
+    Task<bool> TerminalizeTurnAsync(TerminalizeTurnRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Persists bounded assistant text/thinking for an in-flight turn when checkpoint version advances.
+    /// </summary>
+    Task<bool> CheckpointTurnAsync(
+        Guid turnId,
+        Guid messageId,
+        string content,
+        string? thinkingBlocksJson,
+        int checkpointVersion,
+        CancellationToken ct = default);
 }

@@ -78,6 +78,7 @@ public sealed class PrivateConversationStreamPolicy : ConversationStreamPolicyBa
         _broadcastHub.BroadcastToConversationAsync(conversationId,
             new StreamingEvent(StreamingEventTypes.TurnCreated, JsonSerializer.Serialize(new
             {
+                turnId = info.TurnId,
                 turnIndex = info.TurnIndex,
                 userId = info.User.UserId ?? Guid.Empty,
                 userName = info.User.UserName,

@@ -891,24 +891,45 @@ namespace AntRunner.Chat
                 traceCollector?.CaptureTerminalStatus(runResults?.Status ?? (choice?.FinishReason ?? "unknown"));
                 return runResults;
             }
+            catch (Exception ex) when (ex is IChatPartialCompletionException)
+            {
+                var partialEx = (IChatPartialCompletionException)ex;
+                traceCollector?.CaptureTerminalStatus(partialEx.TerminationStatus, ex.Message);
+                if (partialEx.PartialResponse != null)
+                {
+                    IncorporateCancelledStreamResponse(messages, ref accumulatedUsage, partialEx.PartialResponse);
+                }
+
+                throw new ChatConversationException(
+                    ex,
+                    CreateTerminatedException(
+                        messages,
+                        runResults,
+                        accumulatedUsage,
+                        accumulatedNewFiles,
+                        accumulatedModifiedFiles,
+                        partialEx.TerminationStatus));
+            }
+            catch (ChatStreamCancelledException streamEx)
+            {
+                traceCollector?.CaptureTerminalStatus("cancelled");
+                IncorporateCancelledStreamResponse(messages, ref accumulatedUsage, streamEx.PartialResponse);
+                throw CreateCancelledException(
+                    messages,
+                    runResults,
+                    accumulatedUsage,
+                    accumulatedNewFiles,
+                    accumulatedModifiedFiles);
+            }
             catch (OperationCanceledException)
             {
                 traceCollector?.CaptureTerminalStatus("cancelled");
-
-                if (accumulatedUsage != null)
-                {
-                    var partial = runResults ?? new ChatRunOutput
-                    {
-                        Messages = messages,
-                        Status = "cancelled",
-                        LastMessage = messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.GetText() ?? string.Empty
-                    };
-                    partial.Status = "cancelled";
-                    partial.Usage = accumulatedUsage;
-                    throw new ChatRunCancelledException(partial);
-                }
-
-                throw;
+                throw CreateCancelledException(
+                    messages,
+                    runResults,
+                    accumulatedUsage,
+                    accumulatedNewFiles,
+                    accumulatedModifiedFiles);
             }
             catch (Exception ex)
             {
@@ -1024,6 +1045,7 @@ namespace AntRunner.Chat
             }
 
             var streamedContent = new StringBuilder();
+            var streamedThinking = new StringBuilder();
             var hasStreamed = false;
             Exception? lastException = null;
             var attempt = 0;
@@ -1039,13 +1061,21 @@ namespace AntRunner.Chat
                         if (!string.IsNullOrEmpty(delta?.Content))
                         {
                             var finishReason = partialResponse.FirstChoice?.FinishReason;
-                            var roleName = string.Equals(finishReason, "thinking", StringComparison.OrdinalIgnoreCase)
+                            var isThinking = string.Equals(finishReason, "thinking", StringComparison.OrdinalIgnoreCase);
+                            var roleName = isThinking
                                 ? "assistant_thinking"
                                 : delta?.Role?.ToString() ?? ChatRole.Assistant.ToString();
                             var normalized = NormalizeAssistantText(delta!.Content);
                             if (!string.IsNullOrEmpty(normalized))
                             {
-                                streamedContent.Append(normalized);
+                                if (isThinking)
+                                {
+                                    streamedThinking.Append(normalized);
+                                }
+                                else
+                                {
+                                    streamedContent.Append(normalized);
+                                }
                                 hasStreamed = true;
                             }
                             streamingMessageProgress.Invoke(null, new StreamingMessageProgressEventArgs(roleName, normalized));
@@ -1053,6 +1083,28 @@ namespace AntRunner.Chat
                     }, cancellationToken);
 
                     return finalResponse;
+                }
+                catch (ChatStreamCancelledException)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (ex is IChatPartialCompletionException partialEx)
+                {
+                    if (partialEx.PartialResponse == null && hasStreamed)
+                    {
+                        throw new ChatPartialCompletionException(
+                            partialEx.TerminationStatus,
+                            BuildPartialStreamResponse(streamedContent.ToString(), streamedThinking.ToString()),
+                            ex);
+                    }
+
+                    throw;
+                }
+                catch (OperationCanceledException) when (hasStreamed)
+                {
+                    throw new ChatStreamCancelledException(
+                        BuildPartialStreamResponse(streamedContent.ToString(), streamedThinking.ToString()),
+                        cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1091,6 +1143,24 @@ namespace AntRunner.Chat
                         ex.GetType().Name,
                         delay.TotalMilliseconds);
                     await Task.Delay(delay, cancellationToken);
+                }
+            }
+
+            if (lastException != null && hasStreamed)
+            {
+                if (lastException is IChatPartialCompletionException partialEx && partialEx.PartialResponse == null)
+                {
+                    throw new ChatPartialCompletionException(
+                        partialEx.TerminationStatus,
+                        BuildPartialStreamResponse(streamedContent.ToString(), streamedThinking.ToString()),
+                        lastException);
+                }
+
+                if (lastException is ChatStreamCancelledException)
+                {
+                    throw new ChatStreamCancelledException(
+                        BuildPartialStreamResponse(streamedContent.ToString(), streamedThinking.ToString()),
+                        cancellationToken);
                 }
             }
 
@@ -1202,6 +1272,10 @@ namespace AntRunner.Chat
                     ? await GetCompletionAndStreamAsync(api, chatRequest, onStream, token)
                     : await api.GetCompletionAsync(chatRequest, token);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (ChatContextOverflowException)
             {
                 // Already classified at the source (e.g. llama client) — let it flow to the unwinder.
@@ -1305,6 +1379,86 @@ namespace AntRunner.Chat
                 $"[Message aborted due to size restrictions{detail}. The original content was too large for the model " +
                 "context window and has been removed. Retry with a different approach that limits the message size — " +
                 "for example, write large output to a file and return only a short summary instead of the full content.]";
+        }
+
+        private static void IncorporateCancelledStreamResponse(
+            List<ChatMessage> messages,
+            ref UsageResponse? accumulatedUsage,
+            ChatCompletionResponse partialResponse)
+        {
+            var partialMessage = partialResponse.FirstChoice?.Message;
+            if (partialMessage != null && !ReferenceEquals(messages.LastOrDefault(), partialMessage))
+            {
+                messages.Add(partialMessage);
+            }
+
+            if (partialResponse.Usage != null)
+            {
+                accumulatedUsage = MergeRoundUsage(accumulatedUsage, partialResponse.Usage);
+            }
+        }
+
+        private static ChatRunCancelledException CreateCancelledException(
+            List<ChatMessage> messages,
+            ChatRunOutput? runResults,
+            UsageResponse? accumulatedUsage,
+            HashSet<string> accumulatedNewFiles,
+            HashSet<string> accumulatedModifiedFiles)
+        {
+            return new ChatRunCancelledException(
+                CreateTerminatedException(
+                    messages,
+                    runResults,
+                    accumulatedUsage,
+                    accumulatedNewFiles,
+                    accumulatedModifiedFiles,
+                    "cancelled"));
+        }
+
+        private static ChatRunOutput CreateTerminatedException(
+            List<ChatMessage> messages,
+            ChatRunOutput? runResults,
+            UsageResponse? accumulatedUsage,
+            HashSet<string> accumulatedNewFiles,
+            HashSet<string> accumulatedModifiedFiles,
+            string status)
+        {
+            var lastAssistantText = messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.GetText() ?? string.Empty;
+            var partial = runResults ?? new ChatRunOutput
+            {
+                Messages = messages,
+                LastMessage = lastAssistantText
+            };
+            partial.Messages = messages;
+            partial.Status = status;
+            if (!string.IsNullOrEmpty(lastAssistantText))
+            {
+                partial.LastMessage = lastAssistantText;
+            }
+
+            if (accumulatedUsage != null)
+            {
+                partial.Usage = accumulatedUsage;
+            }
+
+            ApplyAccumulatedFileChanges(partial, accumulatedNewFiles, accumulatedModifiedFiles);
+            return partial;
+        }
+
+        private static ChatCompletionResponse BuildPartialStreamResponse(string assistantText, string thinkingText)
+        {
+            IReadOnlyList<ChatThinkingBlock>? thinkingBlocks = string.IsNullOrWhiteSpace(thinkingText)
+                ? null
+                : [ChatThinkingBlock.ForThinking(thinkingText, string.Empty)];
+
+            IReadOnlyList<ChatContent> content = string.IsNullOrWhiteSpace(assistantText)
+                ? []
+                : [new ChatContent(assistantText)];
+
+            var message = new ChatMessage(ChatRole.Assistant, content, toolCalls: null, thinkingBlocks);
+            return new ChatCompletionResponse(
+                [new ChatChoice(message, "cancelled")],
+                usage: null);
         }
 
         private static UsageResponse MergeRoundUsage(UsageResponse? accumulated, ChatCompletionUsage roundUsage)

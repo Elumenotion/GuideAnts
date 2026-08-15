@@ -7,7 +7,7 @@ namespace AntRunner.Chat.LlamaCpp;
 /// caller cancellation: the runtime may still be generating and must be recovered before new
 /// work is admitted.
 /// </summary>
-public sealed class LlamaInferenceTimeoutException : TimeoutException, IChatRunFatalException
+public sealed class LlamaInferenceTimeoutException : TimeoutException, IChatPartialCompletionException
 {
     public LlamaInferenceTimeoutException(
         string routerModelId,
@@ -22,9 +22,26 @@ public sealed class LlamaInferenceTimeoutException : TimeoutException, IChatRunF
         TimeoutSeconds = timeoutSeconds;
     }
 
+    public LlamaInferenceTimeoutException(
+        string routerModelId,
+        int timeoutSeconds,
+        ChatCompletionResponse? partialResponse,
+        Exception? innerException = null)
+        : this(routerModelId, timeoutSeconds, innerException)
+    {
+        PartialResponse = partialResponse;
+    }
+
     public string RouterModelId { get; }
 
     public int TimeoutSeconds { get; }
+
+    /// <summary>
+    /// Tokens already produced before the inference deadline expired.
+    /// </summary>
+    public ChatCompletionResponse? PartialResponse { get; }
+
+    public string TerminationStatus => "timed_out";
 }
 
 /// <summary>

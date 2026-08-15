@@ -62,6 +62,61 @@ try {
     }
     Assert-True $threw 'Files outside the repo root must not be hashed'
 
+    $legacyA = Get-LegacyAbsoluteCombinedHash -Paths @(
+        (Join-Path $worktreeA 'docker\build\guideants-ai\asr-requirements.txt'),
+        (Join-Path $worktreeA 'docker\build\guideants-ai\emb-requirements.txt')
+    )
+    $legacyB = Get-LegacyAbsoluteCombinedHash -Paths @(
+        (Join-Path $worktreeB 'docker\build\guideants-ai\asr-requirements.txt'),
+        (Join-Path $worktreeB 'docker\build\guideants-ai\emb-requirements.txt')
+    )
+    Assert-True ($legacyA -ne $legacyB) 'Legacy absolute-path hashes must differ across worktrees'
+    Assert-True ($legacyA -ne $hashA) 'Canonical content hash must not equal the legacy path hash'
+
+    $present = @{
+        'guideants-ai-deps:rocm-oldpath12' = $true
+        'guideants-ai-deps:rocm-cache' = $true
+    }
+    $labels = @{
+        'guideants-ai-deps:rocm-cache' = $null
+    }
+    $reused = Find-ReusableDepsImage `
+        -CanonicalTag 'guideants-ai-deps:rocm-newhash12' `
+        -LegacyTag 'guideants-ai-deps:rocm-oldpath12' `
+        -CanonicalFullHash $hashA `
+        -Backend 'rocm' `
+        -ImageExists { param($tag) [bool]$present[$tag] } `
+        -GetLabel { param($tag) $labels[$tag] } `
+        -CandidateTags @('guideants-ai-deps:rocm-cache')
+    Assert-Equal $reused 'guideants-ai-deps:rocm-oldpath12' 'Same-checkout legacy tag must be reused when the content tag is absent'
+
+    $present.Remove('guideants-ai-deps:rocm-oldpath12')
+    $unlabeledCache = Find-ReusableDepsImage `
+        -CanonicalTag 'guideants-ai-deps:rocm-newhash12' `
+        -LegacyTag 'guideants-ai-deps:rocm-oldpath12' `
+        -CanonicalFullHash $hashA `
+        -Backend 'rocm' `
+        -ImageExists { param($tag) [bool]$present[$tag] } `
+        -GetLabel { param($tag) $labels[$tag] } `
+        -CandidateTags @('guideants-ai-deps:rocm-cache')
+    Assert-Equal $unlabeledCache 'guideants-ai-deps:rocm-cache' 'Unlabeled backend cache image is the last-resort reuse when hashed tags are absent'
+
+    $labels['guideants-ai-deps:rocm-cache'] = $hashA
+    $labeledCache = Find-ReusableDepsImage `
+        -CanonicalTag 'guideants-ai-deps:rocm-newhash12' `
+        -LegacyTag 'guideants-ai-deps:rocm-oldpath12' `
+        -CanonicalFullHash $hashA `
+        -Backend 'rocm' `
+        -ImageExists { param($tag) [bool]$present[$tag] } `
+        -GetLabel { param($tag) $labels[$tag] } `
+        -CandidateTags @('guideants-ai-deps:rocm-cache')
+    Assert-Equal $labeledCache 'guideants-ai-deps:rocm-cache' 'Cache image with matching input-hash label must be reused'
+
+    $emptyCache = Join-Path $scratch 'empty-buildx-cache'
+    New-Item -ItemType Directory -Path $emptyCache -Force | Out-Null
+    $cacheFrom = @(Get-LocalBuildxCacheFromArgs -CachePaths @($emptyCache))
+    Assert-True ($cacheFrom.Count -eq 0) 'Missing buildx index.json must not be passed as --cache-from'
+
     Write-Host 'test_combined_hash.ps1: passed'
 }
 finally {

@@ -37,6 +37,21 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                 return;
             }
 
+            var turnUsageRequestId = BuildTurnChatUsageRequestId(request.ConversationId, request.TurnIndex);
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var alreadyRecorded = await db.UsageEvents
+                    .AnyAsync(
+                        u => u.ExternalRequestId == turnUsageRequestId
+                             && u.Category == GuideAntsApi.DataModel.Models.UsageCategory.ChatCompletion,
+                        ct);
+                if (alreadyRecorded)
+                {
+                    return;
+                }
+            }
+
             var attribution = UsageAttributionHttpContext.TryGet(_httpContextAccessor);
 
             await _usageRecorder.RecordChatAsync(
@@ -52,7 +67,7 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                 ct: ct,
                 publishedGuideId: attribution?.PublishedGuideId,
                 sourceChannel: attribution?.SourceChannel,
-                externalRequestId: attribution?.ExternalRequestId,
+                externalRequestId: turnUsageRequestId,
                 externalUserIdentity: attribution?.ExternalUserIdentity);
         }
         catch (Exception ex)
@@ -139,88 +154,8 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
         }
     }
 
-    public async Task RecordCancelledTurnMarkerUsageAsync(CancelledTurnUsageRequest request, CancellationToken ct = default)
-    {
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var attribution = UsageAttributionHttpContext.TryGet(_httpContextAccessor);
-
-            var turnMessageIds = await db.NotebookConversationMessages
-                .Where(m => m.NotebookConversationId == request.ConversationId
-                         && m.TurnIndex == request.TurnIndex)
-                .Select(m => m.Id)
-                .ToListAsync(ct);
-
-            if (turnMessageIds.Count == 0)
-            {
-                return;
-            }
-
-            var hasUsageForTurn = await db.UsageEvents
-                .Where(u => u.NotebookConversationMessageId != null
-                         && turnMessageIds.Contains(u.NotebookConversationMessageId.Value))
-                .AnyAsync(ct);
-
-            if (hasUsageForTurn)
-            {
-                return;
-            }
-
-            var messageIdForUsage = request.PreferredAssistantMessageId
-                ?? (request.AssistantMessageIds is { Count: > 0 } ids ? ids[^1] : null);
-
-            if (messageIdForUsage == null)
-            {
-                messageIdForUsage = await db.NotebookConversationMessages
-                    .Where(m => m.NotebookConversationId == request.ConversationId
-                             && m.TurnIndex == request.TurnIndex
-                             && m.Role == DataModelChatRole.Assistant)
-                    .OrderByDescending(m => m.Created)
-                    .Select(m => (Guid?)m.Id)
-                    .FirstOrDefaultAsync(ct);
-            }
-
-            if (messageIdForUsage == null)
-            {
-                return;
-            }
-
-            var usageService = LlmProviderResolver.ResolveUsageServiceName(request.ModelDeploymentId, _scopeFactory);
-            var markerMetadata = JsonSerializer.Serialize(new
-            {
-                cancellationType = "user_cancelled",
-                turnIndex = request.TurnIndex
-            });
-
-            await _usageRecorder.RecordChatAsync(
-                projectId: request.ProjectId,
-                notebookId: request.NotebookId,
-                service: usageService,
-                modelDeploymentId: request.ModelDeploymentId ?? string.Empty,
-                metrics: new UsageMetrics(ValueInput: 0, ValueCachedInput: 0, ValueReasoning: 0, ValueOutput: 0),
-                conversationId: request.ConversationId,
-                metadataJson: markerMetadata,
-                assistantId: request.AssistantId,
-                notebookConversationMessageId: messageIdForUsage,
-                ct: ct,
-                publishedGuideId: attribution?.PublishedGuideId,
-                sourceChannel: attribution?.SourceChannel,
-                externalRequestId: attribution?.ExternalRequestId,
-                externalUserIdentity: attribution?.ExternalUserIdentity);
-        }
-        catch (Exception ex)
-        {
-            var contextLabel = string.IsNullOrWhiteSpace(request.ContextLabel) ? "turn" : request.ContextLabel;
-            _logger.LogWarning(
-                ex,
-                "Failed to record cancelled turn marker in {ContextLabel} for conversation {ConversationId} turn {TurnIndex}",
-                contextLabel,
-                request.ConversationId,
-                request.TurnIndex);
-        }
-    }
+    private static string BuildTurnChatUsageRequestId(Guid conversationId, int turnIndex) =>
+        $"turn-chat:{conversationId:N}:{turnIndex}";
 
     private async Task<Guid?> ResolveAssistantMessageIdForChatUsageAsync(
         ChatCompletionUsageRequest request,

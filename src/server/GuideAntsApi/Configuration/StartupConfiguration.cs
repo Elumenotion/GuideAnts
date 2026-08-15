@@ -151,6 +151,7 @@ public static class StartupConfiguration
         services.AddScoped<IConversationHistoryBuilder, ConversationHistoryBuilder>();
         services.AddScoped<IConversationPersistence, ConversationPersistence>();
         services.AddScoped<IConversationUsageReporter, ConversationUsageReporter>();
+        services.AddSingleton<ConversationStreamRunRegistry>();
         services.AddScoped<ConversationStreamLockCoordinator>();
         services.AddScoped<PrivateConversationStreamPolicy>();
         services.AddScoped<PublishedConversationStreamPolicy>();
@@ -279,6 +280,7 @@ public static class StartupConfiguration
         // Conversation Management Services
         services.AddSingleton<IConversationBroadcastHub, ConversationBroadcastHub>();
         services.AddScoped<IDistributedConversationLock, DistributedConversationLockService>();
+        services.AddHostedService<GuideAntsApi.Services.Conversations.Recovery.ConversationTurnRecoveryService>();
         services.AddHostedService<LockCleanupBackgroundService>();
         services.AddHostedService<HostFolderMountStartupReconciliationService>();
         phaseLogger?.Invoke("ConfigureServices.RegisterServices.ConversationAndHosted");

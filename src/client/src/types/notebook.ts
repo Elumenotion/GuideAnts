@@ -289,6 +289,15 @@ export interface NotebookConversationDto {
     lastActivity?: string;
 }
 
+export interface ConversationTurnStatusDto {
+    turnId: string;
+    turnIndex: number;
+    status: string;
+    terminationCode?: string | null;
+    terminalizedAt?: string | null;
+}
+
 export interface NotebookConversationWithMessagesDto extends NotebookConversationDto {
   messages: MessageDto[];
+  activeTurn?: ConversationTurnStatusDto | null;
 }

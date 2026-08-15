@@ -314,7 +314,9 @@ namespace GuideAntsApi.DataModel
 
             // Check constraint for valid status values
             modelBuilder.Entity<ConversationTurn>()
-                .ToTable(t => t.HasCheckConstraint("CK_Turn_Status", "[Status] IN ('streaming', 'completed', 'cancelled')"));
+                .ToTable(t => t.HasCheckConstraint(
+                    "CK_Turn_Status",
+                    "[Status] IN ('streaming', 'completed', 'cancelled', 'timed_out', 'failed', 'interrupted', 'pending_client_tool')"));
 
             modelBuilder.Entity<ConversationTurnTrace>()
                 .Property(t => t.Updated)

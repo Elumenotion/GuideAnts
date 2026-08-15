@@ -144,10 +144,12 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         }
         catch (OperationCanceledException)
         {
-            throw;
+            accumulator.FlushPendingAssistantText(onChunk);
+            throw new ChatStreamCancelledException(accumulator.ToResponse(), cancellationToken);
         }
         catch (Exception ex) when (IsMidStreamTransportFailure(ex))
         {
+            accumulator.FlushPendingAssistantText(onChunk);
             _logger.LogError(
                 ex,
                 "llama.cpp stream ended unexpectedly mid-response. {DiagnosticInfo}",
@@ -157,6 +159,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
                 "The local model stopped responding mid-stream. The runtime likely crashed and must be restarted.",
                 response.StatusCode,
                 upstreamDetail: ex.Message,
+                partialResponse: accumulator.ToResponse(),
                 innerException: ex);
         }
 
@@ -198,7 +201,16 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
                 _config.TimeoutSeconds);
 
             _ = _timeoutObserver.RequestRecoveryAsync(routerModelId, _config.TimeoutSeconds);
-            throw new LlamaInferenceTimeoutException(routerModelId, _config.TimeoutSeconds, ex);
+
+            ChatCompletionResponse? partialResponse = null;
+            if (ex is ChatStreamCancelledException streamCancelled)
+            {
+                partialResponse = streamCancelled.PartialResponse;
+            }
+
+            throw partialResponse != null
+                ? new LlamaInferenceTimeoutException(routerModelId, _config.TimeoutSeconds, partialResponse, ex)
+                : new LlamaInferenceTimeoutException(routerModelId, _config.TimeoutSeconds, ex);
         }
     }
 

@@ -51,3 +51,65 @@ get_combined_hash() {
   sorted="${sorted%$'\n'}"
   printf "%s" "$sorted" | sha256sum | awk '{print $1}'
 }
+
+get_legacy_absolute_combined_hash() {
+  local -a paths=("$@")
+  local path line joined=""
+
+  if [[ ${#paths[@]} -eq 0 ]]; then
+    echo "Hash input file list is empty" >&2
+    return 1
+  fi
+
+  for path in "${paths[@]}"; do
+    if [[ ! -f "$path" ]]; then
+      echo "Hash input file not found: $path" >&2
+      return 1
+    fi
+    line="$path|$(sha256sum "$path" | awk '{print tolower($1)}')"
+    if [[ -z "$joined" ]]; then
+      joined="$line"
+    else
+      joined+=$'\n'"$line"
+    fi
+  done
+
+  printf "%s" "$joined" | sha256sum | awk '{print $1}'
+}
+
+find_reusable_deps_image() {
+  local canonical_tag="$1"
+  local legacy_tag="$2"
+  local canonical_full_hash="$3"
+  local backend="$4"
+  shift 4
+  local -a candidates=("$@")
+  local tag label
+
+  if docker_image_exists "$canonical_tag"; then
+    printf '%s' "$canonical_tag"
+    return 0
+  fi
+  if docker_image_exists "$legacy_tag"; then
+    printf '%s' "$legacy_tag"
+    return 0
+  fi
+
+  for tag in "${candidates[@]}"; do
+    [[ -n "$tag" ]] || continue
+    [[ "$tag" == "guideants-ai-deps:${backend}-"* ]] || continue
+    label="$(docker inspect --format "{{index .Config.Labels \"org.guideants.deps-input-hash\"}}" "$tag" 2>/dev/null || true)"
+    if [[ "$label" == "$canonical_full_hash" ]]; then
+      printf '%s' "$tag"
+      return 0
+    fi
+  done
+
+  local cache_tag="guideants-ai-deps:${backend}-cache"
+  if docker_image_exists "$cache_tag"; then
+    printf '%s' "$cache_tag"
+    return 0
+  fi
+
+  return 1
+}

@@ -42,6 +42,7 @@ public class NotebookConversationStreamingToolCallsTests
         public Task RenameConversationAsync(Guid conversationId, string newTitle) => throw new NotImplementedException();
         public Task DeleteConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task EditMessageAsync(Guid messageId, string newContent) => throw new NotImplementedException();
+        public Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId) => Task.FromResult(false);
 
 
         
@@ -325,6 +326,7 @@ public class NotebookConversationStreamingToolCallsTests
         public Task RenameConversationAsync(Guid conversationId, string newTitle) => throw new NotImplementedException();
         public Task DeleteConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task EditMessageAsync(Guid messageId, string newContent) => throw new NotImplementedException();
+        public Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId) => Task.FromResult(false);
         public Task UndoLastForConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task UndoForConversationAsync(Guid conversationId, Guid messageId) => throw new NotImplementedException();
         public Task<PagedUserConversationsDto> GetUserConversationsAsync(UserConversationsQuery query)
