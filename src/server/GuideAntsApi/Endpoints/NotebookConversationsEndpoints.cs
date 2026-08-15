@@ -87,6 +87,19 @@ public static class NotebookConversationsEndpoints
         .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent);
 
+        // POST cancel an in-flight stream turn (idempotent Stop control)
+        group.MapPost("/{convoId:guid}/turns/{turnId:guid}/cancel", async (
+            [FromServices] IConversationService svc,
+            Guid convoId,
+            Guid turnId) =>
+        {
+            var cancelled = await svc.CancelTurnStreamAsync(convoId, turnId);
+            return cancelled ? Results.NoContent() : Results.NotFound();
+        })
+        .RequireAuthorization("RequireContributor")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status404NotFound);
+
         // POST send message (requires SSE via Accept: text/event-stream)
         group.MapPost("/{convoId:guid}/messages", async (
             HttpContext ctx, 

@@ -923,6 +923,35 @@ public sealed class LlamaCppChatClientTests
     }
 
     [TestMethod]
+    public async Task StreamCompletionAsync_InternalDeadline_PreservesPartialResponseAfterStreamedChunks()
+    {
+        const string ssePayload =
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Partial \"}}]}\n\n";
+
+        var handler = new StaticResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new PartialThenBlockingReadStream(ssePayload))
+            {
+                Headers = { ContentType = new MediaTypeHeaderValue("text/event-stream") }
+            }
+        });
+
+        var client = CreateClient(
+            handler,
+            config: new LlamaCppConfig
+            {
+                BaseUrl = "http://localhost:8000",
+                TimeoutSeconds = 1
+            });
+
+        var act = async () => await client.StreamCompletionAsync(BuildRequest(), _ => { });
+
+        var ex = await act.Should().ThrowAsync<LlamaInferenceTimeoutException>();
+        ex.Which.PartialResponse.Should().NotBeNull();
+        ex.Which.PartialResponse!.FirstChoice!.Message.GetText().Should().Contain("Partial");
+    }
+
+    [TestMethod]
     public async Task StreamCompletionAsync_InternalDeadline_CancelsBodyReadAndQueuesRecovery()
     {
         var observer = new RecordingTimeoutObserver();
@@ -1136,6 +1165,57 @@ public sealed class LlamaCppChatClientTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("Unreachable.");
         }
+    }
+
+    private sealed class PartialThenBlockingReadStream : Stream
+    {
+        private readonly byte[] _prefix;
+        private int _position;
+
+        public PartialThenBlockingReadStream(string prefix)
+        {
+            _prefix = Encoding.UTF8.GetBytes(prefix);
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_position < _prefix.Length)
+            {
+                var toCopy = Math.Min(count, _prefix.Length - _position);
+                Array.Copy(_prefix, _position, buffer, offset, toCopy);
+                _position += toCopy;
+                return toCopy;
+            }
+
+            throw new NotSupportedException("Use async read.");
+        }
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            if (_position < _prefix.Length)
+            {
+                var toCopy = Math.Min(buffer.Length, _prefix.Length - _position);
+                _prefix.AsSpan(_position, toCopy).CopyTo(buffer.Span);
+                _position += toCopy;
+                return toCopy;
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class BlockingReadStream : Stream

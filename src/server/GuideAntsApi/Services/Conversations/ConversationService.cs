@@ -30,6 +30,7 @@ public class ConversationService : IConversationService
     private readonly IConversationUndoService _undoService;
     private readonly PrivateConversationStreamPolicy _streamPolicy;
     private readonly IConversationStreamEngine _streamEngine;
+    private readonly ConversationStreamRunRegistry _streamRunRegistry;
     private readonly IToolOAuthService? _toolOAuthService;
     private readonly ILogger<ConversationService> _logger;
 
@@ -45,6 +46,7 @@ public class ConversationService : IConversationService
         IConversationUndoService undoService,
         PrivateConversationStreamPolicy streamPolicy,
         IConversationStreamEngine streamEngine,
+        ConversationStreamRunRegistry streamRunRegistry,
         ILogger<ConversationService> logger,
         IToolOAuthService? toolOAuthService = null)
     {
@@ -59,6 +61,7 @@ public class ConversationService : IConversationService
         _undoService = undoService;
         _streamPolicy = streamPolicy;
         _streamEngine = streamEngine;
+        _streamRunRegistry = streamRunRegistry;
         _logger = logger;
         _toolOAuthService = toolOAuthService;
     }
@@ -134,6 +137,11 @@ public class ConversationService : IConversationService
         return new StreamUserIdentity(user.Id, userName, null);
     }
 
+    public Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId) =>
+        _streamRunRegistry.RequestCancel(turnId)
+            ? Task.FromResult(true)
+            : Task.FromResult(false);
+
     private async IAsyncEnumerable<StreamingEvent> SendMessageStreamCoreAsync(
         Guid conversationId,
         SendMessageRequest request,
@@ -160,6 +168,7 @@ public class ConversationService : IConversationService
             await _streamPolicy.OnTurnCreatedAsync(
                 conversationId,
                 new StreamTurnCreatedInfo(
+                    loaded.DbTurn!.Id,
                     loaded.TurnIndex,
                     request.Instructions,
                     loaded.AssistantName,
@@ -177,9 +186,17 @@ public class ConversationService : IConversationService
             throw;
         }
 
-        await foreach (var ev in _streamEngine.RunStreamAsync(runContext, lockHandle, cancellationToken))
+        var streamToken = _streamRunRegistry.Register(runContext.DbTurn.Id, cancellationToken);
+        try
         {
-            yield return ev;
+            await foreach (var ev in _streamEngine.RunStreamAsync(runContext, lockHandle, streamToken))
+            {
+                yield return ev;
+            }
+        }
+        finally
+        {
+            _streamRunRegistry.Unregister(runContext.DbTurn.Id);
         }
     }
 

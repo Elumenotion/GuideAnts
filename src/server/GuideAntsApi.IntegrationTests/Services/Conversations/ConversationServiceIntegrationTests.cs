@@ -193,6 +193,52 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         return events;
     }
 
+    private async Task<List<(string EventType, string Payload)>> SendConversationStreamCollectAllAsync(
+        Guid projectId,
+        Guid notebookId,
+        Guid conversationId,
+        object requestBody)
+    {
+        using var req = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/messages")
+        {
+            Content = JsonContent.Create(requestBody)
+        };
+        req.Headers.Accept.Clear();
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        using var resp = await Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        resp.EnsureSuccessStatusCode();
+
+        var events = new List<(string EventType, string Payload)>();
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+
+        string? currentEvent = null;
+        while (!reader.EndOfStream)
+        {
+            var line = await reader.ReadLineAsync();
+            if (line == null)
+            {
+                break;
+            }
+
+            if (line.StartsWith("event:", StringComparison.Ordinal))
+            {
+                currentEvent = line["event:".Length..].Trim();
+                continue;
+            }
+
+            if (line.StartsWith("data:", StringComparison.Ordinal) && currentEvent != null)
+            {
+                events.Add((currentEvent, line["data:".Length..].Trim()));
+            }
+        }
+
+        return events;
+    }
+
     private async Task<List<(string EventType, string Payload)>> SendConversationStreamUntilCancelledAsync(
         Guid projectId,
         Guid notebookId,
@@ -850,6 +896,59 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
                 .AnyAsync(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Tool))
                 .Should().BeFalse();
         }
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_TimeoutDuringStream_preserves_partial_text_and_marks_turn_timed_out()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Timeout partial stream");
+        }
+
+        FakeChatCompletionBehavior.Instance.Reset();
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.PartialTimeoutStream;
+        FakeChatCompletionBehavior.Instance.SlowStreamText = "Partial timeout assistant text.";
+
+        var events = await SendConversationStreamCollectAllAsync(
+            projectId,
+            notebookId,
+            conversationId,
+            new { instructions = "Timeout during stream", assistantName = "assistant" });
+
+        events.Should().Contain(e => e.EventType == StreamingEventTypes.Error);
+
+        await Task.Delay(500);
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var turn = await db2.ConversationTurns.SingleAsync(t => t.NotebookConversationId == conversationId);
+        turn.Status.Should().Be("timed_out");
+        turn.TerminationCode.Should().Be("local_llm_timeout");
+        turn.ChatRunOutputJson.Should().NotBeNullOrWhiteSpace();
+
+        var assistant = await db2.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.Assistant)
+            .SingleAsync();
+        assistant.IsStreaming.Should().BeFalse();
+        assistant.Content.Should().Contain("Partial timeout");
+
+        (await db2.UsageEvents.AnyAsync(u =>
+                u.ConversationId == conversationId
+                && u.Category == UsageCategory.ChatCompletion
+                && u.ValueInput == 0
+                && u.ValueOutput == 0))
+            .Should().BeFalse();
+
+        (await db2.ConversationLocks.AnyAsync(l => l.ConversationId == conversationId)).Should().BeFalse();
+
+        FakeChatCompletionBehavior.Instance.Reset();
     }
 
     [TestMethod]

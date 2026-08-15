@@ -1209,6 +1209,11 @@ export const api = {
                         `/notebooks/${notebookId}/llama-runtime/restart`,
                         { method: 'POST' }
                     ),
+                cancelTurn: (projectId: string, notebookId: string, convoId: string, turnId: string) =>
+                    callApi<void>(
+                        `/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/turns/${turnId}/cancel`,
+                        { method: 'POST' }
+                    ),
                 sendMessageStream: async (
                     projectId: string,
                     notebookId: string,
@@ -1217,7 +1222,10 @@ export const api = {
                     onEvent: (event: { type: string; data: any }) => void,
                     onError: (error: Error) => void,
                     onComplete: () => void,
-                    abortSignal?: AbortSignal
+                    abortSignal?: AbortSignal,
+                    streamControl?: {
+                        requestServerCancel?: () => Promise<void>;
+                    },
                 ) => {
                     const response = await fetchWithAuth(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/messages`, {
                         method: 'POST',
@@ -1254,13 +1262,23 @@ export const api = {
                         const idlePromise = new Promise<never>((_, reject) => {
                             idleTimer = setTimeout(() => {
                                 idleTimedOut = true;
-                                reject(Object.assign(
+                                const idleError = Object.assign(
                                     new Error(
                                         'The conversation stream stopped sending data. The server is no longer answering this request.',
                                     ),
                                     { name: 'StreamIdleTimeoutError' },
-                                ));
-                                void reader.cancel().catch(() => undefined);
+                                );
+                                void (async () => {
+                                    try {
+                                        if (streamControl?.requestServerCancel) {
+                                            await streamControl.requestServerCancel();
+                                        }
+                                    } catch {
+                                        // Best-effort server cancel before surfacing idle timeout.
+                                    }
+                                    reject(idleError);
+                                    void reader.cancel().catch(() => undefined);
+                                })();
                             }, CONVERSATION_STREAM_IDLE_TIMEOUT_MS);
                         });
                         return Promise.race([readPromise, idlePromise]).finally(() => {

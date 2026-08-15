@@ -19,6 +19,10 @@ interface ActionDeps {
   inflightRuntimeChecksRef: React.MutableRefObject<Set<string>>;
   runtimeReadyCacheRef: React.MutableRefObject<Set<string>>;
   assistantByName: Record<string, { name: string; model?: string; avatarUrl: string; id?: string }>;
+  activeStreamTurnId: string | null;
+  setActiveStreamTurnId: (turnId: string | null) => void;
+  getActiveStreamTurnId: () => string | null;
+  refreshConversation: (options?: { force?: boolean }) => Promise<void>;
 }
 
 export function useConversationActions(
@@ -31,6 +35,7 @@ export function useConversationActions(
     handleStreamingEvent, showToast, loadNotebookFiles,
     currentStreamController, setCurrentStreamController,
     inflightRuntimeChecksRef, runtimeReadyCacheRef, assistantByName,
+    activeStreamTurnId, setActiveStreamTurnId, getActiveStreamTurnId, refreshConversation,
   } = deps;
 
   const sendMessage = useCallback(
@@ -111,6 +116,15 @@ export function useConversationActions(
 
       dispatch({ type: 'START_STREAMING_TURN' });
 
+      try {
+        const convoSnapshot = await api.projects.notebooks.conversations.get(projectId, notebookId, conversationId);
+        if (convoSnapshot.activeTurn?.turnId) {
+          setActiveStreamTurnId(convoSnapshot.activeTurn.turnId);
+        }
+      } catch (snapshotError) {
+        console.warn('Failed to load active turn id before streaming:', snapshotError);
+      }
+
       const userMessage: MessageDto = {
         id: `tmp-${Date.now()}`,
         role: 'user',
@@ -154,16 +168,29 @@ export function useConversationActions(
           } as any,
           handleStreamingEvent,
           (error) => {
+            const reconcile = async () => {
+              if (refreshConversation) {
+                try {
+                  await refreshConversation({ force: true });
+                } catch (reconcileError) {
+                  console.warn('Failed to reconcile conversation after stream error:', reconcileError);
+                }
+              }
+            };
+
             if (error.name === 'AbortError' || error.message.includes('aborted')) {
               console.log('Stream was cancelled by user - finalizing partial content');
+              void reconcile();
               dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
               dispatch({ type: 'COMPLETE_STREAMING_TURN' });
               dispatch({ type: 'SET_CANCELLING', payload: false });
               setCurrentStreamController(null);
+              setActiveStreamTurnId?.(null);
               return;
             }
 
             console.error('Streaming error:', error);
+            void reconcile();
             runtimeReadyCacheRef.current.clear();
             dispatch({ type: 'SET_STREAMING', payload: false });
             dispatch({ type: 'SET_CANCELLING', payload: false });
@@ -171,6 +198,7 @@ export function useConversationActions(
             dispatch({ type: 'CONVERT_STREAMING_IDS' });
             dispatch({ type: 'COMPLETE_STREAMING_TURN' });
             setCurrentStreamController(null);
+            setActiveStreamTurnId?.(null);
             const streamErrorMessage = error.message || 'Chat request failed';
             dispatch({ type: 'SET_STREAMING_ERROR', payload: streamErrorMessage });
             showToast({
@@ -191,7 +219,17 @@ export function useConversationActions(
             });
             try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
           },
-          controller.signal
+          controller.signal,
+          {
+            requestServerCancel: async () => {
+              const turnId = getActiveStreamTurnId();
+              if (turnId) {
+                await api.projects.notebooks.conversations
+                  .cancelTurn(projectId, notebookId, conversationId, turnId);
+              }
+              controller.abort();
+            },
+          },
         );
       } catch (error: any) {
         if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('aborted'))) {
@@ -379,6 +417,11 @@ export function useConversationActions(
   }, [projectId, notebookId, conversationId, dispatch]);
 
   const cancelStream = useCallback(() => {
+    if (activeStreamTurnId) {
+      void api.projects.notebooks.conversations
+        .cancelTurn(projectId, notebookId, conversationId, activeStreamTurnId)
+        .catch(err => console.warn('Failed to request server stream cancellation:', err));
+    }
     if (currentStreamController) {
       dispatch({ type: 'SET_CANCELLING', payload: true });
       currentStreamController.abort();
@@ -393,7 +436,7 @@ export function useConversationActions(
         }
       }, 500);
     }
-  }, [currentStreamController, projectId, notebookId, conversationId, state.isStreaming]);
+  }, [activeStreamTurnId, currentStreamController, projectId, notebookId, conversationId, state.isStreaming, dispatch, setCurrentStreamController, setActiveStreamTurnId]);
 
   const undoLastTurn = useCallback(async () => {
     if (state._isUndoing) {

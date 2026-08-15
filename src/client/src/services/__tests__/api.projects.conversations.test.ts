@@ -358,6 +358,7 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
       const onError = vi.fn();
       const onComplete = vi.fn();
       const cancel = vi.fn().mockResolvedValue(undefined);
+      const requestServerCancel = vi.fn().mockResolvedValue(undefined);
       mockFetch.mockResolvedValue({
         ok: true,
         status: 200,
@@ -379,6 +380,8 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
           vi.fn(),
           onError,
           onComplete,
+          undefined,
+          { requestServerCancel },
         );
 
         await vi.advanceTimersByTimeAsync(CONVERSATION_STREAM_IDLE_TIMEOUT_MS);
@@ -389,6 +392,7 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
           message: expect.stringMatching(/stopped sending data/i),
         }));
         expect(onComplete).not.toHaveBeenCalled();
+        expect(requestServerCancel).toHaveBeenCalled();
         expect(cancel).toHaveBeenCalled();
       } finally {
         vi.useRealTimers();

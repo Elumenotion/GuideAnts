@@ -37,6 +37,21 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                 return;
             }
 
+            var turnUsageRequestId = BuildTurnChatUsageRequestId(request.ConversationId, request.TurnIndex);
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var alreadyRecorded = await db.UsageEvents
+                    .AnyAsync(
+                        u => u.ExternalRequestId == turnUsageRequestId
+                             && u.Category == GuideAntsApi.DataModel.Models.UsageCategory.ChatCompletion,
+                        ct);
+                if (alreadyRecorded)
+                {
+                    return;
+                }
+            }
+
             var attribution = UsageAttributionHttpContext.TryGet(_httpContextAccessor);
 
             await _usageRecorder.RecordChatAsync(
@@ -52,7 +67,7 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                 ct: ct,
                 publishedGuideId: attribution?.PublishedGuideId,
                 sourceChannel: attribution?.SourceChannel,
-                externalRequestId: attribution?.ExternalRequestId,
+                externalRequestId: turnUsageRequestId,
                 externalUserIdentity: attribution?.ExternalUserIdentity);
         }
         catch (Exception ex)
@@ -138,6 +153,9 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                 request.TurnIndex);
         }
     }
+
+    private static string BuildTurnChatUsageRequestId(Guid conversationId, int turnIndex) =>
+        $"turn-chat:{conversationId:N}:{turnIndex}";
 
     private async Task<Guid?> ResolveAssistantMessageIdForChatUsageAsync(
         ChatCompletionUsageRequest request,

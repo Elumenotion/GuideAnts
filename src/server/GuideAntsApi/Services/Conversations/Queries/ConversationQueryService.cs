@@ -112,7 +112,11 @@ public class ConversationQueryService : IConversationQueryService
                     }).ToList(),
                 Turns = c.Turns.Select(t => new
                 {
+                    t.Id,
                     t.TurnIndex,
+                    t.Status,
+                    t.TerminationCode,
+                    t.TerminalizedAt,
                     t.FilesCreated,
                     t.FilesModified
                 }).ToList()
@@ -245,13 +249,26 @@ public class ConversationQueryService : IConversationQueryService
             m => m.ToolCalls != null && m.ToolCalls.Count > 0
         );
 
+        var latestTurn = conversationData.Turns
+            .OrderByDescending(t => t.TurnIndex)
+            .FirstOrDefault();
+        ConversationTurnStatusDto? activeTurn = latestTurn == null
+            ? null
+            : new ConversationTurnStatusDto(
+                latestTurn.Id,
+                latestTurn.TurnIndex,
+                latestTurn.Status,
+                latestTurn.TerminationCode,
+                latestTurn.TerminalizedAt);
+
         return new NotebookConversationWithMessagesDto(
             conversationData.Id,
             conversationData.Title ?? "Untitled",
             conversationData.AssistantName,
             conversationData.Created,
             conversationData.LastActivity,
-            filteredMessageDtos
+            filteredMessageDtos,
+            activeTurn
         );
     }
 

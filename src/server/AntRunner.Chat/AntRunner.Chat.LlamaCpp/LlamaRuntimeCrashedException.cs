@@ -1,4 +1,5 @@
 using System.Net;
+using AntRunner.Chat.Abstractions;
 
 namespace AntRunner.Chat.LlamaCpp;
 
@@ -37,7 +38,7 @@ public enum LlamaRuntimeCrashReason
     Recovering
 }
 
-public sealed class LlamaRuntimeCrashedException : Exception
+public sealed class LlamaRuntimeCrashedException : Exception, IChatPartialCompletionException
 {
     public LlamaRuntimeCrashReason Reason { get; }
     public HttpStatusCode? StatusCode { get; }
@@ -60,4 +61,23 @@ public sealed class LlamaRuntimeCrashedException : Exception
         StatusCode = statusCode;
         UpstreamDetail = upstreamDetail;
     }
+
+    public LlamaRuntimeCrashedException(
+        LlamaRuntimeCrashReason reason,
+        string message,
+        HttpStatusCode? statusCode,
+        string? upstreamDetail,
+        ChatCompletionResponse? partialResponse,
+        Exception? innerException = null)
+        : this(reason, message, statusCode, upstreamDetail, innerException)
+    {
+        PartialResponse = partialResponse;
+    }
+
+    /// <summary>
+    /// Tokens already produced before the runtime failed mid-stream.
+    /// </summary>
+    public ChatCompletionResponse? PartialResponse { get; }
+
+    public string TerminationStatus => "failed";
 }

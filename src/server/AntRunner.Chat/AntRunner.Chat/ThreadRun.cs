@@ -891,6 +891,25 @@ namespace AntRunner.Chat
                 traceCollector?.CaptureTerminalStatus(runResults?.Status ?? (choice?.FinishReason ?? "unknown"));
                 return runResults;
             }
+            catch (Exception ex) when (ex is IChatPartialCompletionException)
+            {
+                var partialEx = (IChatPartialCompletionException)ex;
+                traceCollector?.CaptureTerminalStatus(partialEx.TerminationStatus, ex.Message);
+                if (partialEx.PartialResponse != null)
+                {
+                    IncorporateCancelledStreamResponse(messages, ref accumulatedUsage, partialEx.PartialResponse);
+                }
+
+                throw new ChatConversationException(
+                    ex,
+                    CreateTerminatedException(
+                        messages,
+                        runResults,
+                        accumulatedUsage,
+                        accumulatedNewFiles,
+                        accumulatedModifiedFiles,
+                        partialEx.TerminationStatus));
+            }
             catch (ChatStreamCancelledException streamEx)
             {
                 traceCollector?.CaptureTerminalStatus("cancelled");
@@ -1069,6 +1088,18 @@ namespace AntRunner.Chat
                 {
                     throw;
                 }
+                catch (Exception ex) when (ex is IChatPartialCompletionException partialEx)
+                {
+                    if (partialEx.PartialResponse == null && hasStreamed)
+                    {
+                        throw new ChatPartialCompletionException(
+                            partialEx.TerminationStatus,
+                            BuildPartialStreamResponse(streamedContent.ToString(), streamedThinking.ToString()),
+                            ex);
+                    }
+
+                    throw;
+                }
                 catch (OperationCanceledException) when (hasStreamed)
                 {
                     throw new ChatStreamCancelledException(
@@ -1112,6 +1143,24 @@ namespace AntRunner.Chat
                         ex.GetType().Name,
                         delay.TotalMilliseconds);
                     await Task.Delay(delay, cancellationToken);
+                }
+            }
+
+            if (lastException != null && hasStreamed)
+            {
+                if (lastException is IChatPartialCompletionException partialEx && partialEx.PartialResponse == null)
+                {
+                    throw new ChatPartialCompletionException(
+                        partialEx.TerminationStatus,
+                        BuildPartialStreamResponse(streamedContent.ToString(), streamedThinking.ToString()),
+                        lastException);
+                }
+
+                if (lastException is ChatStreamCancelledException)
+                {
+                    throw new ChatStreamCancelledException(
+                        BuildPartialStreamResponse(streamedContent.ToString(), streamedThinking.ToString()),
+                        cancellationToken);
                 }
             }
 
@@ -1356,6 +1405,24 @@ namespace AntRunner.Chat
             HashSet<string> accumulatedNewFiles,
             HashSet<string> accumulatedModifiedFiles)
         {
+            return new ChatRunCancelledException(
+                CreateTerminatedException(
+                    messages,
+                    runResults,
+                    accumulatedUsage,
+                    accumulatedNewFiles,
+                    accumulatedModifiedFiles,
+                    "cancelled"));
+        }
+
+        private static ChatRunOutput CreateTerminatedException(
+            List<ChatMessage> messages,
+            ChatRunOutput? runResults,
+            UsageResponse? accumulatedUsage,
+            HashSet<string> accumulatedNewFiles,
+            HashSet<string> accumulatedModifiedFiles,
+            string status)
+        {
             var lastAssistantText = messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.GetText() ?? string.Empty;
             var partial = runResults ?? new ChatRunOutput
             {
@@ -1363,7 +1430,7 @@ namespace AntRunner.Chat
                 LastMessage = lastAssistantText
             };
             partial.Messages = messages;
-            partial.Status = "cancelled";
+            partial.Status = status;
             if (!string.IsNullOrEmpty(lastAssistantText))
             {
                 partial.LastMessage = lastAssistantText;
@@ -1375,7 +1442,7 @@ namespace AntRunner.Chat
             }
 
             ApplyAccumulatedFileChanges(partial, accumulatedNewFiles, accumulatedModifiedFiles);
-            return new ChatRunCancelledException(partial);
+            return partial;
         }
 
         private static ChatCompletionResponse BuildPartialStreamResponse(string assistantText, string thinkingText)

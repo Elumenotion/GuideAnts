@@ -41,7 +41,10 @@ public sealed class ConversationPersistence : IConversationPersistence
             ModelDeploymentId = request.ModelDeploymentId,
             Instructions = request.Instructions,
             Created = DateTime.UtcNow,
-            Status = request.InitialStatus ?? "completed"
+            Status = request.InitialStatus ?? "completed",
+            ExecutionId = string.Equals(request.InitialStatus, "streaming", StringComparison.OrdinalIgnoreCase)
+                ? Guid.NewGuid()
+                : null
         };
 
         db.ConversationTurns.Add(dbTurn);
@@ -69,7 +72,10 @@ public sealed class ConversationPersistence : IConversationPersistence
             Instructions = request.Instructions,
             Created = DateTime.UtcNow,
             Status = request.InitialStatus ?? "completed",
-            LastUpdated = DateTime.UtcNow
+            LastUpdated = DateTime.UtcNow,
+            ExecutionId = string.Equals(request.InitialStatus, "streaming", StringComparison.OrdinalIgnoreCase)
+                ? Guid.NewGuid()
+                : null
         };
 
         db.ConversationTurns.Add(dbTurn);
@@ -122,6 +128,10 @@ public sealed class ConversationPersistence : IConversationPersistence
         }
 
         turn.Status = status;
+        if (string.Equals(status, "streaming", StringComparison.OrdinalIgnoreCase) && turn.ExecutionId == null)
+        {
+            turn.ExecutionId = Guid.NewGuid();
+        }
         turn.LastUpdated = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return true;
@@ -501,5 +511,250 @@ public sealed class ConversationPersistence : IConversationPersistence
     {
         var turn = db.ConversationTurns.First(t => t.Id == turnId);
         turn.LastUpdated = DateTime.UtcNow;
+    }
+
+    private static bool IsTerminalTurnStatus(string status) =>
+        !string.Equals(status, "streaming", StringComparison.OrdinalIgnoreCase);
+
+    private static string? BoundTerminationDetail(string? detail) =>
+        detail == null ? null : detail.Length <= 500 ? detail : detail[..500];
+
+    public async Task<bool> TerminalizeTurnAsync(TerminalizeTurnRequest request, CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var strategy = db.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            try
+            {
+                var turn = await db.ConversationTurns.FirstOrDefaultAsync(t => t.Id == request.TurnId, ct);
+                if (turn == null)
+                {
+                    return false;
+                }
+
+                var alreadyTerminal = IsTerminalTurnStatus(turn.Status);
+
+                if (request.AssistantSnapshots is { Count: > 0 })
+                {
+                    foreach (var snapshot in request.AssistantSnapshots)
+                    {
+                        var msg = await db.NotebookConversationMessages
+                            .FirstOrDefaultAsync(m => m.Id == snapshot.MessageId, ct);
+                        if (msg == null)
+                        {
+                            continue;
+                        }
+
+                        msg.Content = snapshot.Content;
+                        if (snapshot.ToolCallsJson != null)
+                        {
+                            msg.ToolCalls = snapshot.ToolCallsJson;
+                        }
+
+                        if (snapshot.ThinkingBlocksJson != null)
+                        {
+                            msg.ThinkingBlocksJson = snapshot.ThinkingBlocksJson;
+                        }
+
+                        msg.IsStreaming = false;
+                    }
+                }
+
+                var streamingAssistantMessages = await db.NotebookConversationMessages
+                    .Where(m =>
+                        m.NotebookConversationId == request.ConversationId
+                        && m.TurnIndex == request.TurnIndex
+                        && m.Role == DataModelChatRole.Assistant
+                        && m.IsStreaming == true)
+                    .ToListAsync(ct);
+
+                foreach (var msg in streamingAssistantMessages)
+                {
+                    msg.IsStreaming = false;
+                }
+
+                if (request.Output?.Messages != null && request.AssistantMessageIdsForThinking is { Count: > 0 })
+                {
+                    var assistantMessages = request.Output.Messages
+                        .Where(m => m.Role == ChatMessageRole.Assistant)
+                        .ToList();
+
+                    if (assistantMessages.Count >= request.AssistantMessageIdsForThinking.Count)
+                    {
+                        var recentAssistantMessages = assistantMessages
+                            .Skip(assistantMessages.Count - request.AssistantMessageIdsForThinking.Count)
+                            .ToList();
+
+                        for (var i = 0; i < request.AssistantMessageIdsForThinking.Count; i++)
+                        {
+                            var thinkingBlocks = recentAssistantMessages[i].ThinkingBlocks;
+                            if (thinkingBlocks is not { Count: > 0 })
+                            {
+                                continue;
+                            }
+
+                            var messageId = request.AssistantMessageIdsForThinking[i];
+                            var msg = await db.NotebookConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct);
+                            if (msg == null)
+                            {
+                                continue;
+                            }
+
+                            msg.ThinkingBlocksJson = JsonSerializer.Serialize(thinkingBlocks, JsonOptions);
+                        }
+                    }
+                }
+
+                if (request.PruneIncompleteToolCalls)
+                {
+                    await PruneIncompleteToolCallsInContextAsync(db, request.ConversationId, request.TurnIndex);
+                }
+
+                if (!alreadyTerminal)
+                {
+                    turn.Status = request.TerminalStatus;
+                    turn.TerminalizedAt = DateTime.UtcNow;
+                    turn.TerminationCode = request.TerminationCode;
+                    turn.TerminationDetail = BoundTerminationDetail(request.TerminationDetail);
+                    if (request.ExecutionId.HasValue)
+                    {
+                        turn.ExecutionId = request.ExecutionId;
+                    }
+                }
+
+                if (request.Output != null)
+                {
+                    turn.ChatRunOutputJson = JsonSerializer.Serialize(request.Output, JsonOptions);
+                    turn.UsageJson = request.Output.Usage != null
+                        ? JsonSerializer.Serialize(request.Output.Usage, JsonOptions)
+                        : turn.UsageJson;
+
+                    if (request.Output.NewFiles is { Count: > 0 })
+                    {
+                        turn.FilesCreated = JsonSerializer.Serialize(request.Output.NewFiles, JsonOptions);
+                    }
+
+                    if (request.Output.ModifiedFiles is { Count: > 0 })
+                    {
+                        turn.FilesModified = JsonSerializer.Serialize(request.Output.ModifiedFiles, JsonOptions);
+                    }
+                }
+
+                turn.LastUpdated = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync(ct);
+                _logger.LogError(
+                    ex,
+                    "Failed to terminalize turn {TurnId} for conversation {ConversationId}",
+                    request.TurnId,
+                    request.ConversationId);
+                throw;
+            }
+        });
+    }
+
+    public async Task<bool> CheckpointTurnAsync(
+        Guid turnId,
+        Guid messageId,
+        string content,
+        string? thinkingBlocksJson,
+        int checkpointVersion,
+        CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var turn = await db.ConversationTurns.FirstOrDefaultAsync(t => t.Id == turnId, ct);
+        if (turn == null || IsTerminalTurnStatus(turn.Status))
+        {
+            return false;
+        }
+
+        if (checkpointVersion <= turn.CheckpointVersion)
+        {
+            return false;
+        }
+
+        var stub = new NotebookConversationMessage { Id = messageId };
+        db.Attach(stub);
+        stub.Content = content;
+        db.Entry(stub).Property(x => x.Content).IsModified = true;
+
+        if (thinkingBlocksJson != null)
+        {
+            stub.ThinkingBlocksJson = thinkingBlocksJson;
+            db.Entry(stub).Property(x => x.ThinkingBlocksJson).IsModified = true;
+        }
+
+        turn.CheckpointVersion = checkpointVersion;
+        turn.LastUpdated = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    private async Task PruneIncompleteToolCallsInContextAsync(
+        ApplicationDbContext db,
+        Guid conversationId,
+        int turnIndex)
+    {
+        var turnMessages = await db.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId && m.TurnIndex == turnIndex)
+            .ToListAsync();
+
+        var toolResultIds = new HashSet<string>(turnMessages
+            .Where(m => m.Role == DataModelChatRole.Tool && !string.IsNullOrWhiteSpace(m.ToolCallId))
+            .Select(m => m.ToolCallId!)
+            .Where(id => !string.IsNullOrWhiteSpace(id)));
+
+        var anyChanges = false;
+
+        foreach (var msg in turnMessages)
+        {
+            if (msg.Role != DataModelChatRole.Assistant || string.IsNullOrWhiteSpace(msg.ToolCalls))
+            {
+                continue;
+            }
+
+            try
+            {
+                var calls = JsonSerializer.Deserialize<List<ChatToolCall>>(msg.ToolCalls!, JsonOptions)
+                    ?? new List<ChatToolCall>();
+                var pruned = calls.Where(tc => !string.IsNullOrWhiteSpace(tc.Id) && toolResultIds.Contains(tc.Id!)).ToList();
+
+                if (pruned.Count == calls.Count)
+                {
+                    continue;
+                }
+
+                msg.ToolCalls = pruned.Count > 0
+                    ? JsonSerializer.Serialize(pruned, JsonOptions)
+                    : null;
+                db.Entry(msg).Property(x => x.ToolCalls).IsModified = true;
+                anyChanges = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to prune tool calls for message {MessageId} in conversation {ConversationId} turn {TurnIndex}",
+                    msg.Id,
+                    conversationId,
+                    turnIndex);
+            }
+        }
+
+        if (anyChanges)
+        {
+            await db.SaveChangesAsync();
+        }
     }
 }

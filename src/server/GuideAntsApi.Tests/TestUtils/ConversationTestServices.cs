@@ -120,6 +120,7 @@ internal static class ConversationTestServices
             undoService,
             streamPolicy,
             streamEngine,
+            new ConversationStreamRunRegistry(),
             logger ?? Mock.Of<ILogger<ConversationService>>(),
             toolOAuthService);
     }

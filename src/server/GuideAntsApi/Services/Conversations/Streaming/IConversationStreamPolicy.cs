@@ -10,6 +10,7 @@ public sealed record StreamUserIdentity(
     string? ExternalUserIdentity);
 
 public sealed record StreamTurnCreatedInfo(
+    Guid TurnId,
     int TurnIndex,
     string UserMessage,
     string AssistantName,
