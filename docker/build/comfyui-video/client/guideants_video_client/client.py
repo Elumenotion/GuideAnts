@@ -155,6 +155,8 @@ def submit_talking_head(
     workflow: str = WORKFLOW_VERSION,
     working_directory: str | os.PathLike[str] | None = None,
     parameters: dict[str, int | float] | None = None,
+    positive_prompt: str | None = None,
+    negative_prompt: str | None = None,
     base_url: str | None = None,
 ) -> dict[str, Any]:
     """Upload notebook-scoped inputs and submit the fixed I2V workflow."""
@@ -168,12 +170,21 @@ def submit_talking_head(
     audio_type = mimetypes.guess_type(audio.name)[0] or "application/octet-stream"
     if audio_type == "audio/x-wav":
         audio_type = "audio/wav"
+    if positive_prompt is not None and not positive_prompt.strip():
+        raise VideoClientError("positive_prompt must be non-empty")
+    if negative_prompt is not None and not negative_prompt.strip():
+        raise VideoClientError("negative_prompt must be non-empty")
+    fields = {
+        "output_filename": output_filename,
+        "workflow_version": WORKFLOW_VERSION,
+        "parameters": json.dumps(parameters or {}, separators=(",", ":")),
+    }
+    if positive_prompt is not None:
+        fields["positive_prompt"] = positive_prompt
+    if negative_prompt is not None:
+        fields["negative_prompt"] = negative_prompt
     body, content_type = _multipart(
-        {
-            "output_filename": output_filename,
-            "workflow_version": WORKFLOW_VERSION,
-            "parameters": json.dumps(parameters or {}, separators=(",", ":")),
-        },
+        fields,
         {
             "source": (source.name, source.read_bytes(), source_type),
             "audio": (audio.name, audio.read_bytes(), audio_type),
@@ -217,8 +228,8 @@ def materialize_talking_head_result(
     """Atomically write a completed result inside the notebook scope."""
     job_id = _job_id(job_id)
     destination = resolve_notebook_path(output_path, working_directory, must_exist=False)
-    if destination.suffix.lower() != ".mp4":
-        raise VideoClientError("output_path must end in .mp4")
+    if destination.suffix.lower() != ".mkv":
+        raise VideoClientError("output_path must end in .mkv")
     if not destination.parent.is_dir():
         raise VideoClientError("output directory does not exist")
     handle, temporary_name = tempfile.mkstemp(

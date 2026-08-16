@@ -37,7 +37,7 @@ ALLOWED_PARAMETERS: dict[str, tuple[type, float | int, float | int]] = {
     "width": (int, 256, 1920),
     "height": (int, 256, 1920),
     "fps": (int, 1, 60),
-    "frames": (int, 1, 1800),
+    "frames": (int, 1, 7200),
     "steps": (int, 1, 100),
     "seed": (int, 0, 2**63 - 1),
     "cfg": ((int, float), 0.0, 30.0),  # type: ignore[dict-item]
@@ -51,6 +51,15 @@ DEFAULT_PARAMETERS: dict[str, int | float] = {
     "seed": 0,
     "cfg": 5.0,
 }
+DEFAULT_POSITIVE_PROMPT = (
+    "A professional presenter speaks naturally to camera, relaxed head movement, "
+    "subtle head turns, expressive eyes, small posture shifts, warm restrained smile"
+)
+DEFAULT_NEGATIVE_PROMPT = (
+    "blur, distortion, extra limbs, deformed face, subtitles, low quality, "
+    "dramatic gestures, overacting, wild motion"
+)
+MAX_PROMPT_CHARS = 4000
 IMAGE_ALLOWED_PARAMETERS: dict[str, tuple[type, float | int, float | int]] = {
     "steps": (int, 1, 50),
     "seed": (int, 0, 2**63 - 1),
@@ -91,11 +100,11 @@ def validate_identifier(value: str, kind: str) -> str:
 
 
 def safe_output_filename(value: str) -> str:
-    """Accept a basename MP4 only, never a path."""
+    """Accept a basename lossless MKV only, never a path."""
     if not value or Path(value).name != value or value in {".", ".."}:
         raise AdapterError("output_filename must be a filename, not a path", 422)
-    if Path(value).suffix.lower() != ".mp4":
-        raise AdapterError("output_filename must end in .mp4", 422)
+    if Path(value).suffix.lower() != ".mkv":
+        raise AdapterError("output_filename must end in .mkv", 422)
     if any(char in value for char in ("/", "\\", "\0")):
         raise AdapterError("output_filename contains an invalid character", 422)
     return value
@@ -110,6 +119,28 @@ def safe_image_output_filename(value: str) -> str:
     if any(char in value for char in ("/", "\\", "\0")):
         raise AdapterError("output_filename contains an invalid character", 422)
     return value
+
+
+def validate_talking_head_prompts(
+    positive_prompt: str | None,
+    negative_prompt: str | None,
+) -> tuple[str, str]:
+    """Return job prompts, applying defaults when a field is omitted."""
+    positive = DEFAULT_POSITIVE_PROMPT if positive_prompt is None else positive_prompt
+    negative = DEFAULT_NEGATIVE_PROMPT if negative_prompt is None else negative_prompt
+    if not isinstance(positive, str) or not isinstance(negative, str):
+        raise AdapterError("positive_prompt and negative_prompt must be strings", 422)
+    positive = positive.strip()
+    negative = negative.strip()
+    if not positive:
+        raise AdapterError("positive_prompt must be non-empty", 422)
+    if not negative:
+        raise AdapterError("negative_prompt must be non-empty", 422)
+    if len(positive) > MAX_PROMPT_CHARS or len(negative) > MAX_PROMPT_CHARS:
+        raise AdapterError(f"prompt exceeds the {MAX_PROMPT_CHARS}-character limit", 422)
+    if "\0" in positive or "\0" in negative:
+        raise AdapterError("prompt contains an invalid character", 422)
+    return positive, negative
 
 
 def validate_parameters(raw: dict[str, Any]) -> dict[str, int | float]:
@@ -175,8 +206,15 @@ def resolve_workflow_parameters(
         return parameters
     duration = probe_audio_duration_seconds(audio, audio_type)
     fps = int(parameters["fps"])
+    derived = round(duration * fps)
     _, minimum, maximum = ALLOWED_PARAMETERS["frames"]
-    parameters["frames"] = max(int(minimum), min(int(maximum), round(duration * fps)))
+    if derived < int(minimum) or derived > int(maximum):
+        raise AdapterError(
+            f"audio duration {duration:.3f}s at {fps} fps requires {derived} frames; "
+            f"frames must be between {minimum} and {maximum}",
+            422,
+        )
+    parameters["frames"] = derived
     return parameters
 
 
@@ -203,7 +241,7 @@ class Job:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     prompt_id: str | None = None
-    output_filename: str = "output.mp4"
+    output_filename: str = "output.mkv"
     output_path: str | None = None
     error: str | None = None
     cancel_requested: bool = False
@@ -359,10 +397,10 @@ def find_video_output(history: dict[str, Any], prompt_id: str) -> dict[str, Any]
                 for descriptor in values:
                     if isinstance(descriptor, dict):
                         filename = descriptor.get("filename", "")
-                        if isinstance(filename, str) and filename.lower().endswith(".mp4"):
+                        if isinstance(filename, str) and filename.lower().endswith(".mkv"):
                             return descriptor
     if isinstance(status, dict) and status.get("status_str") == "success":
-        raise AdapterError("ComfyUI completed without producing an MP4 output")
+        raise AdapterError("ComfyUI completed without producing an MKV output")
     return None
 
 
@@ -629,6 +667,8 @@ class AdapterService:
         output_filename: str,
         workflow_version: str,
         parameters: dict[str, Any],
+        positive_prompt: str | None = None,
+        negative_prompt: str | None = None,
     ) -> Job:
         if workflow_version != WORKFLOW_VERSION:
             raise AdapterError(f"unsupported workflow_version: {workflow_version}", 422)
@@ -644,6 +684,9 @@ class AdapterService:
             raise AdapterError(f"audio exceeds the {MAX_AUDIO_BYTES}-byte limit", 413)
         output_filename = safe_output_filename(output_filename)
         parameters = resolve_workflow_parameters(parameters, audio, audio_type)
+        positive_prompt, negative_prompt = validate_talking_head_prompts(
+            positive_prompt, negative_prompt
+        )
         ready, details = self.readiness()
         if not ready:
             raise AdapterError(f"video backend is not ready: {details['missing']}", 503)
@@ -656,7 +699,16 @@ class AdapterService:
             self.jobs[job.id] = job
         threading.Thread(
             target=self._job_worker,
-            args=(job, source, source_type, audio, audio_type, parameters),
+            args=(
+                job,
+                source,
+                source_type,
+                audio,
+                audio_type,
+                parameters,
+                positive_prompt,
+                negative_prompt,
+            ),
             daemon=True,
         ).start()
         return job
@@ -669,6 +721,8 @@ class AdapterService:
         audio: bytes,
         audio_type: str,
         parameters: dict[str, int | float],
+        positive_prompt: str,
+        negative_prompt: str,
     ) -> None:
         job.state = "running"
         self._update_job_progress(job, phase="running", message="starting job")
@@ -683,7 +737,16 @@ class AdapterService:
                 f"{job.id}-audio{ALLOWED_INPUT_TYPES[audio_type]}", audio, audio_type
             )
             template = json.loads(self.workflow_path.read_text(encoding="utf-8"))
-            workflow = render_workflow(template, source_name, audio_name, parameters)
+            workflow = render_workflow(
+                template,
+                source_name,
+                audio_name,
+                parameters,
+                extra_replacements={
+                    "{{POSITIVE_PROMPT}}": positive_prompt,
+                    "{{NEGATIVE_PROMPT}}": negative_prompt,
+                },
+            )
             self._update_job_progress(job, phase="submitting", message="submitting ComfyUI prompt")
             job.prompt_id = self.comfy.submit(workflow, job.id)
             listener = ComfyProgressListener(

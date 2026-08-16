@@ -13,7 +13,10 @@ import guideants_video_adapter.core as core
 from guideants_video_adapter.core import (
     AdapterError,
     AdapterService,
+    DEFAULT_NEGATIVE_PROMPT,
+    DEFAULT_POSITIVE_PROMPT,
     MAX_AUDIO_BYTES,
+    MAX_PROMPT_CHARS,
     WORKFLOW_VERSION,
     find_video_output,
     probe_audio_duration_seconds,
@@ -21,6 +24,7 @@ from guideants_video_adapter.core import (
     resolve_workflow_parameters,
     safe_output_filename,
     validate_parameters,
+    validate_talking_head_prompts,
 )
 
 
@@ -63,7 +67,7 @@ class FakeComfy:
         return {
             prompt_id: {
                 "status": {"status_str": "success"},
-                "outputs": {"9": {"videos": [{"filename": "generated.mp4", "type": "output"}]}},
+                "outputs": {"9": {"videos": [{"filename": "generated.mkv", "type": "output"}]}},
             }
         }
 
@@ -71,7 +75,7 @@ class FakeComfy:
         return {"queue_running": [], "queue_pending": []}
 
     def download_output(self, descriptor: dict) -> bytes:
-        return b"fake-mp4"
+        return b"fake-mkv"
 
     def interrupt(self) -> None:
         self.interrupted = True
@@ -110,6 +114,12 @@ def service(tmp_path: Path) -> tuple[AdapterService, FakeComfy]:
             {
                 "1": {"inputs": {"image": "{{INPUT_IMAGE}}", "audio": "{{INPUT_AUDIO}}"}},
                 "2": {"inputs": {"width": "{{WIDTH}}", "frames": "{{FRAMES}}"}},
+                "3": {
+                    "inputs": {
+                        "positive_prompt": "{{POSITIVE_PROMPT}}",
+                        "negative_prompt": "{{NEGATIVE_PROMPT}}",
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -130,7 +140,9 @@ def service(tmp_path: Path) -> tuple[AdapterService, FakeComfy]:
 
 def test_rejects_paths_and_unknown_parameters() -> None:
     with pytest.raises(AdapterError, match="filename, not a path"):
-        safe_output_filename("../outside.mp4")
+        safe_output_filename("../outside.mkv")
+    with pytest.raises(AdapterError, match=r"end in \.mkv"):
+        safe_output_filename("lossy.mp4")
     with pytest.raises(AdapterError, match="unsupported workflow parameters"):
         validate_parameters({"custom_node": "anything"})
 
@@ -161,7 +173,7 @@ def test_rejects_oversized_payload(
             "image/png",
             b"x" * (MAX_AUDIO_BYTES + 1),
             "audio/wav",
-            "answer.mp4",
+            "answer.mkv",
             WORKFLOW_VERSION,
             {},
         )
@@ -186,6 +198,26 @@ def test_resolve_workflow_parameters_keeps_explicit_frames() -> None:
     assert parameters["frames"] == 100
 
 
+def test_resolve_workflow_parameters_derives_frames_for_multi_minute_audio() -> None:
+    audio = make_wav(80.0)
+    parameters = resolve_workflow_parameters({"fps": 25}, audio, "audio/wav")
+    assert parameters["frames"] == 2000
+
+
+def test_resolve_workflow_parameters_rejects_audio_longer_than_frame_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(core.ALLOWED_PARAMETERS, "frames", (int, 1, 100))
+    audio = make_wav(10.0)
+    with pytest.raises(AdapterError, match="requires 250 frames"):
+        resolve_workflow_parameters({"fps": 25}, audio, "audio/wav")
+
+
+def test_validate_parameters_rejects_frames_above_max() -> None:
+    with pytest.raises(AdapterError, match="frames must be between"):
+        validate_parameters({"frames": 7201})
+
+
 def test_v1_rejects_video_and_reports_image_only(
     service: tuple[AdapterService, FakeComfy],
 ) -> None:
@@ -197,7 +229,7 @@ def test_v1_rejects_video_and_reports_image_only(
             "video/mp4",
             make_wav(1.0),
             "audio/wav",
-            "answer.mp4",
+            "answer.mkv",
             WORKFLOW_VERSION,
             {},
         )
@@ -209,8 +241,77 @@ def test_renders_only_declared_placeholders() -> None:
         "uploaded.png",
         "uploaded.wav",
         validate_parameters({"fps": 30}),
+        extra_replacements={
+            "{{POSITIVE_PROMPT}}": "custom window | another window",
+            "{{NEGATIVE_PROMPT}}": "static frame",
+        },
     )
     assert rendered["node"]["inputs"] == {"image": "uploaded.png", "fps": 30}
+
+
+def test_talking_head_workflows_preserve_full_chroma_for_keying() -> None:
+    workflows_root = Path(__file__).parents[3] / "workflows"
+    for workflow_name in (
+        "infinitetalk-i2v-v1.json",
+        "infinitetalk-i2v-v1-rocm.json",
+    ):
+        workflow = json.loads(
+            (workflows_root / workflow_name).read_text(encoding="utf-8")
+        )
+        video_output = workflow["16"]["inputs"]
+        assert video_output["format"] == "video/ffv1-mkv"
+        assert video_output["pix_fmt"] in {
+            "bgra",
+            "rgba64le",
+            "yuv444p",
+            "yuv444p10le",
+            "yuv444p16le",
+        }
+        assert video_output["gop_size"] == 1
+
+
+def test_validate_talking_head_prompts_defaults_and_rejects() -> None:
+    assert validate_talking_head_prompts(None, None) == (
+        DEFAULT_POSITIVE_PROMPT,
+        DEFAULT_NEGATIVE_PROMPT,
+    )
+    assert validate_talking_head_prompts("  spoken story | spoken story  ", " blur ") == (
+        "spoken story | spoken story",
+        "blur",
+    )
+    with pytest.raises(AdapterError, match="non-empty"):
+        validate_talking_head_prompts("   ", None)
+    with pytest.raises(AdapterError, match="character limit"):
+        validate_talking_head_prompts("x" * (MAX_PROMPT_CHARS + 1), None)
+
+
+def test_job_substitutes_caller_prompts(
+    service: tuple[AdapterService, FakeComfy],
+) -> None:
+    adapter, comfy = service
+    audio = make_wav(1.0)
+    job = adapter.submit_job(
+        b"image",
+        "image/png",
+        audio,
+        "audio/wav",
+        "answer.mkv",
+        WORKFLOW_VERSION,
+        {"fps": 25, "frames": 25},
+        positive_prompt="A man teaching | A man answering a question",
+        negative_prompt="head bobbing, overacting",
+    )
+    comfy.history_ready.set()
+    for _ in range(1000):
+        if adapter.get_job(job.id).state == "completed":
+            break
+        threading.Event().wait(0.001)
+    assert adapter.get_job(job.id).state == "completed"
+    assert comfy.submitted is not None
+    assert comfy.submitted["3"]["inputs"]["positive_prompt"] == (
+        "A man teaching | A man answering a question"
+    )
+    assert comfy.submitted["3"]["inputs"]["negative_prompt"] == "head bobbing, overacting"
 
 
 def test_find_video_output_rejects_comfy_error() -> None:
@@ -229,7 +330,7 @@ def test_job_uses_private_directory_and_materializes_result(
         "image/png",
         audio,
         "audio/wav",
-        "answer.mp4",
+        "answer.mkv",
         WORKFLOW_VERSION,
         {"fps": 30},
     )
@@ -242,12 +343,14 @@ def test_job_uses_private_directory_and_materializes_result(
     assert completed.state == "completed"
     assert completed.progress["phase"] == "completed"
     result, filename = adapter.open_result(job.id)
-    assert filename == "answer.mp4"
+    assert filename == "answer.mkv"
     assert result.parent == adapter.jobs_root / job.id
-    assert result.read_bytes() == b"fake-mp4"
+    assert result.read_bytes() == b"fake-mkv"
     assert comfy.submitted is not None
     assert comfy.submitted["2"]["inputs"]["width"] == 832
     assert comfy.submitted["2"]["inputs"]["frames"] == 150
+    assert comfy.submitted["3"]["inputs"]["positive_prompt"] == DEFAULT_POSITIVE_PROMPT
+    assert comfy.submitted["3"]["inputs"]["negative_prompt"] == DEFAULT_NEGATIVE_PROMPT
 
 
 def test_image_edit_job_materializes_png(

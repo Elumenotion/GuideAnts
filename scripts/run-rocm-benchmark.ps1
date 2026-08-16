@@ -29,10 +29,10 @@ if (-not (Test-Path -LiteralPath $AudioPath)) {
 }
 if ([string]::IsNullOrWhiteSpace($OutputName)) {
     $audioStem = [IO.Path]::GetFileNameWithoutExtension($AudioFile)
-    $OutputName = "rocm-benchmark-${Width}x${Height}-${audioStem}.mp4"
+    $OutputName = "rocm-benchmark-${Width}x${Height}-${audioStem}.mkv"
 }
-if ($OutputName -notmatch '^[A-Za-z0-9._-]+\.mp4$') {
-    throw "OutputName must be a filename ending in .mp4"
+if ($OutputName -notmatch '^[A-Za-z0-9._-]+\.mkv$') {
+    throw "OutputName must be a filename ending in .mkv"
 }
 
 $duration = [double](& ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 $AudioPath)

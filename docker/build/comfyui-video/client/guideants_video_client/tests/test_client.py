@@ -51,7 +51,7 @@ def test_requires_notebook_marker(tmp_path: Path) -> None:
     output_dir = tmp_path / "Output"
     output_dir.mkdir()
     with pytest.raises(VideoClientError, match=r"\.guideants/notebook\.json"):
-        client_module.resolve_notebook_path("result.mp4", output_dir, must_exist=False)
+        client_module.resolve_notebook_path("result.mkv", output_dir, must_exist=False)
 
 
 def test_submit_streams_scoped_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -68,10 +68,12 @@ def test_submit_streams_scoped_files(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     result = submit_talking_head(
         image_path="../Input/avatar.png",
         audio_path="../Input/voice.wav",
-        output_filename="output.mp4",
+        output_filename="output.mkv",
         workflow="infinitetalk-i2v-v1",
         working_directory=output_dir,
         parameters={"fps": 25},
+        positive_prompt="A man teaching | A man talking",
+        negative_prompt="head bobbing",
     )
     assert result["jobId"] == JOB_ID
     assert captured["path"] == "/v1/talking-head/jobs"
@@ -79,6 +81,8 @@ def test_submit_streams_scoped_files(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert isinstance(body, bytes)
     assert b'infinitetalk-i2v-v1' in body
     assert b'"fps":25' in body
+    assert b"A man teaching | A man talking" in body
+    assert b"head bobbing" in body
     assert b"png" in body and b"wav" in body
 
 
@@ -109,24 +113,28 @@ def test_materialize_is_atomic_and_scoped(
     def fake_request(method: str, path: str, **kwargs: object) -> None:
         output = kwargs["output"]
         assert isinstance(output, io.BufferedWriter)
-        output.write(b"mp4-data")
+        output.write(b"mkv-data")
 
     monkeypatch.setattr(client_module, "_request", fake_request)
     result = materialize_talking_head_result(
-        JOB_ID, "result.mp4", working_directory=output_dir
+        JOB_ID, "result.mkv", working_directory=output_dir
     )
-    result_path = output_dir / "result.mp4"
+    result_path = output_dir / "result.mkv"
     assert result == {
         "jobId": JOB_ID,
         "outputPath": str(result_path),
         "bytes": 8,
     }
-    assert result_path.read_bytes() == b"mp4-data"
+    assert result_path.read_bytes() == b"mkv-data"
     assert list(output_dir.glob("*.part")) == []
 
+    with pytest.raises(VideoClientError, match=r"end in \.mkv"):
+        materialize_talking_head_result(
+            JOB_ID, "lossy.mp4", working_directory=output_dir
+        )
     with pytest.raises(VideoClientError, match="escapes"):
         materialize_talking_head_result(
-            JOB_ID, "../../outside.mp4", working_directory=output_dir
+            JOB_ID, "../../outside.mkv", working_directory=output_dir
         )
 
 

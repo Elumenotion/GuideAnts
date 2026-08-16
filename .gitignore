@@ -447,3 +447,4 @@ docker-compose.voice-pack.local.yml
 *.cli-auth-token
 /src/client/GuideAnts.code-workspace
 /recordings
+/.github/copilot-instructions.md

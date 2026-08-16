@@ -23,7 +23,7 @@
   ],
   "workflow": {
     "id": "infinitetalk-i2v-v1",
-    "revision": 3,
+    "revision": 5,
     "path": "workflows/infinitetalk-i2v-v1.json"
   },
   "modelCatalog": "catalog/manifest.json"

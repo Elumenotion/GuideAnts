@@ -13,11 +13,11 @@ INSTALL_ID = "fedcba9876543210fedcba9876543210"
 
 class StubService:
     def __init__(self, tmp_path: Path) -> None:
-        result = tmp_path / "result.mp4"
-        result.write_bytes(b"mp4")
+        result = tmp_path / "result.mkv"
+        result.write_bytes(b"mkv")
         self.result = result
         self.installations: dict[str, Installation] = {}
-        self.job = Job(id=JOB_ID, state="completed", output_filename="result.mp4")
+        self.job = Job(id=JOB_ID, state="completed", output_filename="result.mkv")
 
     def health(self) -> dict:
         return {"status": "ok"}
@@ -46,7 +46,7 @@ class StubService:
 
     def open_result(self, job_id: str) -> tuple[Path, str]:
         assert job_id == JOB_ID
-        return self.result, "result.mp4"
+        return self.result, "result.mkv"
 
     def submit_image_job(self, *args: object, **kwargs: object) -> Job:
         return self.job
@@ -59,7 +59,7 @@ def test_read_only_endpoints_and_result(tmp_path: Path) -> None:
     assert client.get("/v1/capabilities").json()["backend"] == "comfyui"
     result = client.get(f"/v1/talking-head/jobs/{JOB_ID}/result")
     assert result.status_code == 200
-    assert result.content == b"mp4"
+    assert result.content == b"mkv"
 
 
 def test_admin_endpoints_require_token(tmp_path: Path) -> None:

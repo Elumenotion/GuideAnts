@@ -1,11 +1,11 @@
 $ErrorActionPreference = "Stop"
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$RepoRoot = "D:/repos/GuideAnts-infinitetalk-comfyui"
 $VideoHost = "http://127.0.0.1:8189"
 $ScriptAgentToken = "local-script-agent-test-token"
-$OutputName = "doug-office-hq-v2-416x240-30s.mkv"
+$OutputName = "kite-poster-10s-416x256.mkv"
 $JobTimeoutSeconds = 7200
 $ArtifactDir = Join-Path $RepoRoot "artifacts/infinitetalk"
-$LogPath = Join-Path $ArtifactDir "doug-office-hq-run.log"
+$LogPath = Join-Path $ArtifactDir "kite-poster-hq-run.log"
 New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
 
 function Invoke-CurlJson($Label, $Arguments) {
@@ -35,9 +35,9 @@ $common = @{
     timeoutSeconds = 600
 }
 
-"Starting doug-office HQ job at $(Get-Date -Format o)" | Tee-Object -FilePath $LogPath
-$submitPayload = Get-Content (Join-Path $RepoRoot "tests/requests/infinitetalk/execute-doug-office-hq.json") -Raw | ConvertFrom-Json -AsHashtable
-$submit = Invoke-SandboxExecute "submit" $submitPayload (Join-Path $ArtifactDir "doug-office-submit.json")
+"Starting kite-poster HQ job at $(Get-Date -Format o)" | Tee-Object -FilePath $LogPath
+$submitPayload = Get-Content (Join-Path $RepoRoot "tests/requests/infinitetalk/execute-kite-poster-hq.json") -Raw | ConvertFrom-Json -AsHashtable
+$submit = Invoke-SandboxExecute "submit" $submitPayload (Join-Path $ArtifactDir "kite-poster-submit.json")
 $jobId = [string]$submit.jobId
 "jobId=$jobId" | Tee-Object -FilePath $LogPath -Append
 
@@ -45,7 +45,7 @@ $deadline = (Get-Date).AddSeconds($JobTimeoutSeconds)
 do {
     $statusPayload = $common.Clone()
     $statusPayload.script = "from guideants_video_client import get_talking_head_job`nimport json`nprint(json.dumps(get_talking_head_job('$jobId'), separators=(',', ':')))"
-    $status = Invoke-SandboxExecute "status" $statusPayload (Join-Path $ArtifactDir "doug-office-status.json")
+    $status = Invoke-SandboxExecute "status" $statusPayload (Join-Path $ArtifactDir "kite-poster-status.json")
     $state = [string]$status.state
     if ($status.progress) {
         $p = $status.progress
@@ -61,7 +61,7 @@ do {
 
 $matPayload = $common.Clone()
 $matPayload.script = "from guideants_video_client import materialize_talking_head_result`nimport json`nprint(json.dumps(materialize_talking_head_result('$jobId', '$OutputName'), separators=(',', ':')))"
-Invoke-SandboxExecute "materialize" $matPayload (Join-Path $ArtifactDir "doug-office-materialize.json") | Out-Null
+Invoke-SandboxExecute "materialize" $matPayload (Join-Path $ArtifactDir "kite-poster-materialize.json") | Out-Null
 
 $hostOut = Join-Path $RepoRoot "tests/runtime/content-files/acceptance-project/authorized-notebook/Output/$OutputName"
 $preserved = Join-Path $ArtifactDir $OutputName

@@ -17,6 +17,8 @@ from .core import (
     AdapterError,
     AdapterService,
     ComfyTransport,
+    DEFAULT_NEGATIVE_PROMPT,
+    DEFAULT_POSITIVE_PROMPT,
     IMAGE_GENERATE_WORKFLOW_VERSION,
     IMAGE_WORKFLOW_VERSION,
     WORKFLOW_VERSION,
@@ -129,6 +131,8 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
         output_filename: Annotated[str, Form()],
         workflow_version: Annotated[str, Form()] = WORKFLOW_VERSION,
         parameters: Annotated[str, Form()] = "{}",
+        positive_prompt: Annotated[str, Form()] = DEFAULT_POSITIVE_PROMPT,
+        negative_prompt: Annotated[str, Form()] = DEFAULT_NEGATIVE_PROMPT,
     ) -> dict[str, Any]:
         try:
             parsed_parameters = json.loads(parameters)
@@ -149,6 +153,8 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
             output_filename,
             workflow_version,
             parsed_parameters,
+            positive_prompt,
+            negative_prompt,
         )
         return job.public()
 

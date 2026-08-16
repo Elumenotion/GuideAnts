@@ -35,7 +35,7 @@ if ([string]::IsNullOrWhiteSpace($SubmitFixture)) {
     $SubmitFixture = Join-Path $ArtifactsRoot 'submit-request.json'
 }
 if ([string]::IsNullOrWhiteSpace($OutputName)) {
-    $OutputName = if ($Backend -eq 'rocm') { 'sample-rocm-gfx1151.mp4' } else { 'sample-cuda13-rtx5090.mp4' }
+    $OutputName = if ($Backend -eq 'rocm') { 'sample-rocm-gfx1151.mkv' } else { 'sample-cuda13-rtx5090.mkv' }
 }
 
 function Resolve-RepoPath([string]$Path) {
@@ -185,7 +185,7 @@ if ($avatarBytes.Length -lt 8 -or -not ($avatarBytes[0] -eq 0x89 -and $avatarByt
 if ($voiceBytes.Length -lt 12 -or [Text.Encoding]::ASCII.GetString($voiceBytes, 0, 4) -ne "RIFF" -or [Text.Encoding]::ASCII.GetString($voiceBytes, 8, 4) -ne "WAVE") {
     throw "voice.wav does not have a RIFF/WAVE signature."
 }
-if (-not (Get-Command ffprobe -ErrorAction SilentlyContinue)) { throw "ffprobe is required to verify the generated MP4." }
+if (-not (Get-Command ffprobe -ErrorAction SilentlyContinue)) { throw "ffprobe is required to verify the generated MKV." }
 
 $ContentRoot = Resolve-RepoPath $ContentFilesRoot
 $InputDir = Join-Path $NotebookRoot "Input"
@@ -346,10 +346,10 @@ if (($files | ConvertTo-Json -Depth 10) -notmatch [regex]::Escape($OutputName)) 
 }
 
 $HostOutput = Join-Path $OutputDir $OutputName
-Test-RequiredFile $HostOutput "Materialized MP4 is missing from the host ContentFiles share."
+Test-RequiredFile $HostOutput "Materialized MKV is missing from the host ContentFiles share."
 $header = [IO.File]::ReadAllBytes($HostOutput)
-if ($header.Length -lt 12 -or [Text.Encoding]::ASCII.GetString($header, 4, 4) -ne "ftyp") {
-    throw "Host output is not an ISO Base Media/MP4 file."
+if ($header.Length -lt 4 -or -not ($header[0] -eq 0x1a -and $header[1] -eq 0x45 -and $header[2] -eq 0xdf -and $header[3] -eq 0xa3)) {
+    throw "Host output is not a Matroska file."
 }
 & ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 $HostOutput |
     Add-Content -LiteralPath $script:TranscriptPath
@@ -367,4 +367,4 @@ Add-Content -LiteralPath $script:TranscriptPath -Value ("video_duration_seconds=
 $PreservedOutput = Join-Path $ArtifactDir $OutputName
 Copy-Item -LiteralPath $HostOutput -Destination $PreservedOutput -Force
 Write-Host "Acceptance passed. Transcript: $script:TranscriptPath"
-Write-Host "Preserved MP4: $PreservedOutput"
+Write-Host "Preserved MKV: $PreservedOutput"
