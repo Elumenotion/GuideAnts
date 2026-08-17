@@ -12,6 +12,7 @@ services:
     environment:
       CUDA_VISIBLE_DEVICES: ${GA_COMFYUI_VIDEO_CUDA_VISIBLE_DEVICES:?Select exactly one GPU UUID or index}
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      IMAGE_EDIT_BF16_INPAINT_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
       FILE_STORAGE_ROOT: /app/ContentFiles
       HF_HOME: /cache/huggingface
       TORCH_HOME: /cache/torch
@@ -46,8 +47,20 @@ services:
         target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-v1.json
         read_only: true
       - type: bind
+        source: ../build/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
+        target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
+        read_only: true
+      - type: bind
         source: ../build/comfyui-video/workflows/qwen-image-v1.json
         target: /opt/guideants/comfyui-video/workflows/qwen-image-v1.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/scripts
+        target: /opt/guideants/comfyui-video/scripts
         read_only: true
       - type: bind
         source: ../build/comfyui-video/catalog/manifest.json

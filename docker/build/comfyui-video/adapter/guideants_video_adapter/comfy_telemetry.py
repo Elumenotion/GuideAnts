@@ -71,7 +71,8 @@ def format_progress(progress: dict[str, Any]) -> str:
 
 def log_job_progress(job_id: str, progress: dict[str, Any]) -> None:
     line = f"[video-job {job_id}] {format_progress(progress)}"
-    print(line, file=sys.stderr, flush=True)
+    # stdout so Docker Desktop and compose logs surface job telemetry.
+    print(line, file=sys.stdout, flush=True)
     LOGGER.info(line)
 
 

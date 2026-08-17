@@ -197,6 +197,92 @@ def test_submit_image_edit_streams_scoped_file(
     assert b"png" in body
 
 
+def test_submit_image_edit_accepts_20_step_workflow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _notebook, input_dir, output_dir = make_notebook(tmp_path)
+    (input_dir / "office.png").write_bytes(b"png")
+    captured: dict = {}
+
+    def fake_request(method: str, path: str, **kwargs: object) -> dict:
+        captured.update({"method": method, "path": path, **kwargs})
+        return {"jobId": JOB_ID, "state": "queued"}
+
+    monkeypatch.setattr(client_module, "_request", fake_request)
+    result = submit_image_edit(
+        image_path="../Input/office.png",
+        prompt="restyle carefully",
+        output_filename="edited20.png",
+        workflow="qwen-image-edit-20-v1",
+        working_directory=output_dir,
+        parameters={"denoise": 0.8, "megapixels": 2.0},
+    )
+    assert result["jobId"] == JOB_ID
+    body = captured["body"]
+    assert isinstance(body, bytes)
+    assert b"qwen-image-edit-20-v1" in body
+    assert b'"denoise":0.8' in body
+    assert b'"megapixels":2.0' in body
+
+
+def test_submit_image_edit_accepts_bf16_workflow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _notebook, input_dir, output_dir = make_notebook(tmp_path)
+    (input_dir / "office.png").write_bytes(b"png")
+    captured: dict = {}
+
+    def fake_request(method: str, path: str, **kwargs: object) -> dict:
+        captured.update({"method": method, "path": path, **kwargs})
+        return {"jobId": JOB_ID, "state": "queued"}
+
+    monkeypatch.setattr(client_module, "_request", fake_request)
+    result = submit_image_edit(
+        image_path="../Input/office.png",
+        prompt="restyle bf16",
+        output_filename="edited-bf16.png",
+        workflow="qwen-image-edit-bf16-v1",
+        working_directory=output_dir,
+        parameters={"cfg": 4.0, "denoise": 0.8},
+    )
+    assert result["jobId"] == JOB_ID
+    body = captured["body"]
+    assert isinstance(body, bytes)
+    assert b"qwen-image-edit-bf16-v1" in body
+    assert b'"cfg":4.0' in body
+    assert b'"denoise":0.8' in body
+
+
+def test_submit_image_edit_accepts_bf16_inpaint_workflow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _notebook, input_dir, output_dir = make_notebook(tmp_path)
+    (input_dir / "masked.png").write_bytes(b"png")
+    (input_dir / "mask.png").write_bytes(b"mask")
+    captured: dict = {}
+
+    def fake_request(method: str, path: str, **kwargs: object) -> dict:
+        captured.update({"method": method, "path": path, **kwargs})
+        return {"jobId": JOB_ID, "state": "queued"}
+
+    monkeypatch.setattr(client_module, "_request", fake_request)
+    result = submit_image_edit(
+        image_path="../Input/masked.png",
+        prompt="complete the alpha mask",
+        output_filename="completed.png",
+        workflow="qwen-image-edit-bf16-inpaint-v1",
+        mask_path="../Input/mask.png",
+        working_directory=output_dir,
+        parameters={"steps": 4, "cfg": 1.0, "denoise": 1.0, "lora_strength": 1.0},
+    )
+    assert result["jobId"] == JOB_ID
+    body = captured["body"]
+    assert isinstance(body, bytes)
+    assert b"qwen-image-edit-bf16-inpaint-v1" in body
+    assert b'"denoise":1.0' in body
+    assert b'name="mask"' in body
+
+
 def test_submit_image_generate_posts_form_without_source(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

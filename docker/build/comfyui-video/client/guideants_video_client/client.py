@@ -312,7 +312,18 @@ def materialize_talking_head_result(
 
 
 IMAGE_WORKFLOW_VERSION = "qwen-image-edit-v1"
+IMAGE_EDIT_20_WORKFLOW_VERSION = "qwen-image-edit-20-v1"
+IMAGE_EDIT_BF16_WORKFLOW_VERSION = "qwen-image-edit-bf16-v1"
+IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION = "qwen-image-edit-bf16-inpaint-v1"
 IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-v1"
+IMAGE_EDIT_WORKFLOW_VERSIONS = frozenset(
+    {
+        IMAGE_WORKFLOW_VERSION,
+        IMAGE_EDIT_20_WORKFLOW_VERSION,
+        IMAGE_EDIT_BF16_WORKFLOW_VERSION,
+        IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION,
+    }
+)
 
 
 def submit_image_edit(
@@ -321,31 +332,45 @@ def submit_image_edit(
     output_filename: str,
     *,
     workflow: str = IMAGE_WORKFLOW_VERSION,
+    mask_path: str | os.PathLike[str] | None = None,
     working_directory: str | os.PathLike[str] | None = None,
     parameters: dict[str, int | float] | None = None,
     negative_prompt: str = " ",
     base_url: str | None = None,
 ) -> dict[str, Any]:
-    """Upload a notebook-scoped image and submit the Qwen Image Edit workflow."""
-    if workflow != IMAGE_WORKFLOW_VERSION:
+    """Upload a notebook-scoped image and submit a Qwen Image Edit workflow."""
+    if workflow not in IMAGE_EDIT_WORKFLOW_VERSIONS:
         raise VideoClientError(f"unsupported workflow: {workflow}")
     if not prompt.strip():
         raise VideoClientError("prompt must be non-empty")
     source = resolve_notebook_path(image_path, working_directory, must_exist=True)
     if not source.is_file():
         raise VideoClientError("image_path must identify a file")
+    if workflow == IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION and mask_path is None:
+        raise VideoClientError("mask_path is required for the BF16 inpaint workflow")
+    if workflow != IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION and mask_path is not None:
+        raise VideoClientError("mask_path is only valid for the BF16 inpaint workflow")
+    mask = (
+        resolve_notebook_path(mask_path, working_directory, must_exist=True)
+        if mask_path is not None
+        else None
+    )
+    if mask is not None and not mask.is_file():
+        raise VideoClientError("mask_path must identify a file")
     source_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+    files = {"source": (source.name, source.read_bytes(), source_type)}
+    if mask is not None:
+        mask_type = mimetypes.guess_type(mask.name)[0] or "application/octet-stream"
+        files["mask"] = (mask.name, mask.read_bytes(), mask_type)
     body, content_type = _multipart(
         {
             "prompt": prompt,
             "output_filename": output_filename,
-            "workflow_version": IMAGE_WORKFLOW_VERSION,
+            "workflow_version": workflow,
             "negative_prompt": negative_prompt,
             "parameters": json.dumps(parameters or {}, separators=(",", ":")),
         },
-        {
-            "source": (source.name, source.read_bytes(), source_type),
-        },
+        files,
     )
     return _request(
         "POST",

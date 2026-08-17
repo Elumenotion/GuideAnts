@@ -30,8 +30,21 @@ API_VERSION = "v1"
 WORKFLOW_VERSION = "infinitetalk-i2v-v1"
 V2V_WORKFLOW_VERSION = "infinitetalk-v2v-v1"
 IMAGE_WORKFLOW_VERSION = "qwen-image-edit-v1"
-IMAGE_BUNDLE = "qwen-image-edit-v1"
+IMAGE_EDIT_20_WORKFLOW_VERSION = "qwen-image-edit-20-v1"
+IMAGE_EDIT_BF16_WORKFLOW_VERSION = "qwen-image-edit-bf16-v1"
+IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION = "qwen-image-edit-bf16-inpaint-v1"
 IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-v1"
+IMAGE_EDIT_WORKFLOW_VERSIONS = frozenset(
+    {
+        IMAGE_WORKFLOW_VERSION,
+        IMAGE_EDIT_20_WORKFLOW_VERSION,
+        IMAGE_EDIT_BF16_WORKFLOW_VERSION,
+        IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION,
+    }
+)
+IMAGE_BUNDLE = "qwen-image-edit-v1"
+IMAGE_EDIT_20_BUNDLE = "qwen-image-edit-20-v1"
+IMAGE_EDIT_BF16_BUNDLE = "qwen-image-edit-bf16-v1"
 IMAGE_GENERATE_BUNDLE = "qwen-image-v1"
 TERMINAL_STATES = frozenset({"completed", "failed", "cancelled"})
 ALLOWED_PARAMETERS: dict[str, tuple[type, float | int, float | int]] = {
@@ -65,11 +78,41 @@ IMAGE_ALLOWED_PARAMETERS: dict[str, tuple[type, float | int, float | int]] = {
     "steps": (int, 1, 50),
     "seed": (int, 0, 2**63 - 1),
     "cfg": ((int, float), 0.0, 30.0),  # type: ignore[dict-item]
+    "denoise": ((int, float), 0.0, 1.0),  # type: ignore[dict-item]
+    "shift": ((int, float), 0.0, 10.0),  # type: ignore[dict-item]
+    "megapixels": ((int, float), 0.1, 4.0),  # type: ignore[dict-item]
+    "lora_strength": ((int, float), 0.0, 2.0),  # type: ignore[dict-item]
+    "width": (int, 256, 1920),
+    "height": (int, 256, 1920),
 }
+IMAGE_GENERATE_SIZE_PARAMETERS = frozenset({"width", "height"})
 IMAGE_DEFAULT_PARAMETERS: dict[str, int | float] = {
     "steps": 4,
     "seed": 0,
     "cfg": 1.0,
+    "denoise": 1.0,
+    "shift": 3.1,
+    "megapixels": 1.6,
+    "lora_strength": 1.0,
+}
+IMAGE_WORKFLOW_DEFAULTS: dict[str, dict[str, int | float]] = {
+    IMAGE_WORKFLOW_VERSION: dict(IMAGE_DEFAULT_PARAMETERS),
+    IMAGE_EDIT_20_WORKFLOW_VERSION: {
+        "steps": 20,
+        "seed": 0,
+        "cfg": 4.0,
+        "denoise": 1.0,
+        "shift": 3.1,
+        "megapixels": 1.6,
+        "lora_strength": 1.0,
+    },
+    IMAGE_EDIT_BF16_WORKFLOW_VERSION: dict(IMAGE_DEFAULT_PARAMETERS),
+    IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION: dict(IMAGE_DEFAULT_PARAMETERS),
+    IMAGE_GENERATE_WORKFLOW_VERSION: {
+        **IMAGE_DEFAULT_PARAMETERS,
+        "width": 1328,
+        "height": 1328,
+    },
 }
 MAX_SOURCE_BYTES = 100 * 1024 * 1024
 MAX_AUDIO_BYTES = 50 * 1024 * 1024
@@ -148,6 +191,46 @@ def validate_talking_head_prompts(
     return positive, negative
 
 
+def _png_dimensions(value: bytes, label: str) -> tuple[int, int]:
+    if len(value) < 26 or value[:8] != b"\x89PNG\r\n\x1a\n" or value[12:16] != b"IHDR":
+        raise AdapterError(f"inpaint {label} is not a valid PNG", 422)
+    width = int.from_bytes(value[16:20], "big")
+    height = int.from_bytes(value[20:24], "big")
+    if width <= 0 or height <= 0:
+        raise AdapterError(f"inpaint {label} has invalid dimensions", 422)
+    return width, height
+
+
+def validate_inpaint_inputs(
+    source: bytes,
+    source_type: str,
+    mask: bytes | None,
+    mask_type: str | None,
+) -> tuple[int, int]:
+    """Require separate, equally sized source and mask PNGs."""
+    if source_type != "image/png":
+        raise AdapterError("inpaint source must be a PNG", 415)
+    if mask is None:
+        raise AdapterError("inpaint mask is required", 422)
+    if mask_type != "image/png":
+        raise AdapterError("inpaint mask must be a PNG", 415)
+    source_size = _png_dimensions(source, "source")
+    mask_size = _png_dimensions(mask, "mask")
+    if mask_size != source_size:
+        raise AdapterError(
+            f"inpaint mask dimensions {mask_size[0]}x{mask_size[1]} do not match "
+            f"source dimensions {source_size[0]}x{source_size[1]}",
+            422,
+        )
+    width, height = source_size
+    if width % 8 != 0 or height % 8 != 0:
+        raise AdapterError(
+            "inpaint source width and height must be multiples of 8", 422
+        )
+    return width, height
+
+
+
 def validate_parameters(raw: dict[str, Any]) -> dict[str, int | float]:
     unknown = sorted(set(raw) - set(ALLOWED_PARAMETERS))
     if unknown:
@@ -163,17 +246,33 @@ def validate_parameters(raw: dict[str, Any]) -> dict[str, int | float]:
     return result
 
 
-def validate_image_parameters(raw: dict[str, Any]) -> dict[str, int | float]:
+def validate_image_parameters(
+    raw: dict[str, Any],
+    *,
+    workflow_version: str = IMAGE_WORKFLOW_VERSION,
+) -> dict[str, int | float]:
     unknown = sorted(set(raw) - set(IMAGE_ALLOWED_PARAMETERS))
     if unknown:
         raise AdapterError(f"unsupported workflow parameters: {', '.join(unknown)}", 422)
-    result = dict(IMAGE_DEFAULT_PARAMETERS)
+    if workflow_version != IMAGE_GENERATE_WORKFLOW_VERSION:
+        size_params = sorted(set(raw) & IMAGE_GENERATE_SIZE_PARAMETERS)
+        if size_params:
+            raise AdapterError(
+                f"{', '.join(size_params)} only valid for {IMAGE_GENERATE_WORKFLOW_VERSION}",
+                422,
+            )
+    defaults = IMAGE_WORKFLOW_DEFAULTS.get(workflow_version)
+    if defaults is None:
+        raise AdapterError(f"unsupported workflow_version: {workflow_version}", 422)
+    result = dict(defaults)
     for name, value in raw.items():
         expected, minimum, maximum = IMAGE_ALLOWED_PARAMETERS[name]
         if isinstance(value, bool) or not isinstance(value, expected):
             raise AdapterError(f"{name} has an invalid type", 422)
         if value < minimum or value > maximum:
             raise AdapterError(f"{name} must be between {minimum} and {maximum}", 422)
+        if name in IMAGE_GENERATE_SIZE_PARAMETERS and value % 8 != 0:
+            raise AdapterError(f"{name} must be a multiple of 8", 422)
         result[name] = value
     return result
 
@@ -452,6 +551,9 @@ class AdapterService:
         comfy: ComfyTransport,
         poll_interval: float = 1.0,
         image_workflow_path: Path | None = None,
+        image_edit_20_workflow_path: Path | None = None,
+        image_edit_bf16_workflow_path: Path | None = None,
+        image_edit_bf16_inpaint_workflow_path: Path | None = None,
         image_generate_workflow_path: Path | None = None,
         v2v_workflow_path: Path | None = None,
     ) -> None:
@@ -464,9 +566,24 @@ class AdapterService:
         self.image_workflow_path = image_workflow_path or (
             workflow_path.parent / f"{IMAGE_WORKFLOW_VERSION}.json"
         )
+        self.image_edit_20_workflow_path = image_edit_20_workflow_path or (
+            workflow_path.parent / f"{IMAGE_EDIT_20_WORKFLOW_VERSION}.json"
+        )
+        self.image_edit_bf16_workflow_path = image_edit_bf16_workflow_path or (
+            workflow_path.parent / f"{IMAGE_EDIT_BF16_WORKFLOW_VERSION}.json"
+        )
+        self.image_edit_bf16_inpaint_workflow_path = image_edit_bf16_inpaint_workflow_path or (
+            workflow_path.parent / f"{IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION}.json"
+        )
         self.image_generate_workflow_path = image_generate_workflow_path or (
             workflow_path.parent / f"{IMAGE_GENERATE_WORKFLOW_VERSION}.json"
         )
+        self.image_edit_workflow_paths = {
+            IMAGE_WORKFLOW_VERSION: self.image_workflow_path,
+            IMAGE_EDIT_20_WORKFLOW_VERSION: self.image_edit_20_workflow_path,
+            IMAGE_EDIT_BF16_WORKFLOW_VERSION: self.image_edit_bf16_workflow_path,
+            IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION: self.image_edit_bf16_inpaint_workflow_path,
+        }
         self.manifest_path = manifest_path
         self.comfy = comfy
         self.poll_interval = poll_interval
@@ -502,12 +619,55 @@ class AdapterService:
         return self._comfy_readiness(missing, self.v2v_workflow_path)
 
     def image_readiness(self) -> tuple[bool, dict[str, Any]]:
+        return self._image_edit_readiness(
+            IMAGE_WORKFLOW_VERSION,
+            self.image_workflow_path,
+            IMAGE_BUNDLE,
+            "image_workflow",
+            "image_models",
+        )
+
+    def image_edit_20_readiness(self) -> tuple[bool, dict[str, Any]]:
+        return self._image_edit_readiness(
+            IMAGE_EDIT_20_WORKFLOW_VERSION,
+            self.image_edit_20_workflow_path,
+            IMAGE_EDIT_20_BUNDLE,
+            "image_edit_20_workflow",
+            "image_edit_20_models",
+        )
+
+    def image_edit_bf16_readiness(self) -> tuple[bool, dict[str, Any]]:
+        return self._image_edit_readiness(
+            IMAGE_EDIT_BF16_WORKFLOW_VERSION,
+            self.image_edit_bf16_workflow_path,
+            IMAGE_EDIT_BF16_BUNDLE,
+            "image_edit_bf16_workflow",
+            "image_edit_bf16_models",
+        )
+
+    def image_edit_bf16_inpaint_readiness(self) -> tuple[bool, dict[str, Any]]:
+        return self._image_edit_readiness(
+            IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION,
+            self.image_edit_bf16_inpaint_workflow_path,
+            IMAGE_EDIT_BF16_BUNDLE,
+            "image_edit_bf16_inpaint_workflow",
+            "image_edit_bf16_models",
+        )
+
+    def _image_edit_readiness(
+        self,
+        _workflow_version: str,
+        workflow_path: Path,
+        bundle_name: str,
+        workflow_missing: str,
+        models_missing: str,
+    ) -> tuple[bool, dict[str, Any]]:
         missing: list[str] = []
-        if not self.image_workflow_path.is_file():
-            missing.append("image_workflow")
-        if not self._bundle_ready(IMAGE_BUNDLE):
-            missing.append("image_models")
-        return self._comfy_readiness(missing, self.image_workflow_path)
+        if not workflow_path.is_file():
+            missing.append(workflow_missing)
+        if not self._bundle_ready(bundle_name):
+            missing.append(models_missing)
+        return self._comfy_readiness(missing, workflow_path)
 
     def image_generate_readiness(self) -> tuple[bool, dict[str, Any]]:
         missing: list[str] = []
@@ -554,11 +714,19 @@ class AdapterService:
     def capabilities(self) -> dict[str, Any]:
         ready, details = self.readiness()
         image_ready, image_details = self.image_readiness()
+        image_edit_20_ready, image_edit_20_details = self.image_edit_20_readiness()
+        image_edit_bf16_ready, image_edit_bf16_details = self.image_edit_bf16_readiness()
+        image_edit_bf16_inpaint_ready, image_edit_bf16_inpaint_details = (
+            self.image_edit_bf16_inpaint_readiness()
+        )
         image_generate_ready, image_generate_details = self.image_generate_readiness()
         v2v_ready, v2v_details = self.v2v_readiness()
         device = (
             details.get("device")
             or image_details.get("device")
+            or image_edit_20_details.get("device")
+            or image_edit_bf16_details.get("device")
+            or image_edit_bf16_inpaint_details.get("device")
             or image_generate_details.get("device")
             or v2v_details.get("device")
             or {}
@@ -570,9 +738,14 @@ class AdapterService:
                 WORKFLOW_VERSION,
                 V2V_WORKFLOW_VERSION,
                 IMAGE_WORKFLOW_VERSION,
+                IMAGE_EDIT_20_WORKFLOW_VERSION,
+                IMAGE_EDIT_BF16_WORKFLOW_VERSION,
+                IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION,
                 IMAGE_GENERATE_WORKFLOW_VERSION,
             ],
+            "image_parameters": sorted(IMAGE_ALLOWED_PARAMETERS),
             "input_kinds": ["image", "video"],
+
             "audio_types": ["audio/wav", "audio/x-wav", "audio/mpeg", "audio/flac", "audio/ogg"],
             "output_type": "video/mp4",
             "device": device.get("name"),
@@ -580,6 +753,9 @@ class AdapterService:
             "ready": ready,
             "v2v_ready": v2v_ready,
             "image_ready": image_ready,
+            "image_edit_20_ready": image_edit_20_ready,
+            "image_edit_bf16_ready": image_edit_bf16_ready,
+            "image_edit_bf16_inpaint_ready": image_edit_bf16_inpaint_ready,
             "image_generate_ready": image_generate_ready,
         }
 
@@ -843,8 +1019,10 @@ class AdapterService:
         workflow_version: str,
         parameters: dict[str, Any],
         negative_prompt: str = " ",
+        mask: bytes | None = None,
+        mask_type: str | None = None,
     ) -> Job:
-        if workflow_version != IMAGE_WORKFLOW_VERSION:
+        if workflow_version not in IMAGE_EDIT_WORKFLOW_VERSIONS:
             raise AdapterError(f"unsupported workflow_version: {workflow_version}", 422)
         if source_type not in ALLOWED_INPUT_TYPES or not source_type.startswith("image/"):
             raise AdapterError("unsupported source media type", 415)
@@ -855,19 +1033,43 @@ class AdapterService:
         if not prompt.strip():
             raise AdapterError("prompt must be non-empty", 422)
         output_filename = safe_image_output_filename(output_filename)
-        parameters = validate_image_parameters(parameters)
-        ready, details = self.image_readiness()
+        if workflow_version == IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION:
+            validate_inpaint_inputs(source, source_type, mask, mask_type)
+        elif mask is not None:
+            raise AdapterError("mask is only valid for the BF16 inpaint workflow", 422)
+        parameters = validate_image_parameters(parameters, workflow_version=workflow_version)
+        if workflow_version == IMAGE_EDIT_20_WORKFLOW_VERSION:
+            ready, details = self.image_edit_20_readiness()
+        elif workflow_version == IMAGE_EDIT_BF16_WORKFLOW_VERSION:
+            ready, details = self.image_edit_bf16_readiness()
+        elif workflow_version == IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION:
+            ready, details = self.image_edit_bf16_inpaint_readiness()
+        else:
+            ready, details = self.image_readiness()
         if not ready:
             raise AdapterError(f"image backend is not ready: {details['missing']}", 503)
+        workflow_path = self.image_edit_workflow_paths[workflow_version]
         job = Job(id=uuid.uuid4().hex, output_filename=output_filename)
         job_dir = self.jobs_root / job.id
         job_dir.mkdir(mode=0o700)
         (job_dir / f"source{ALLOWED_INPUT_TYPES[source_type]}").write_bytes(source)
+        if mask is not None and mask_type is not None:
+            (job_dir / f"mask{ALLOWED_INPUT_TYPES[mask_type]}").write_bytes(mask)
         with self._lock:
             self.jobs[job.id] = job
         threading.Thread(
             target=self._image_job_worker,
-            args=(job, source, source_type, prompt, negative_prompt, parameters),
+            args=(
+                job,
+                source,
+                source_type,
+                prompt,
+                negative_prompt,
+                parameters,
+                workflow_path,
+                mask,
+                mask_type,
+            ),
             daemon=True,
         ).start()
         return job
@@ -880,6 +1082,9 @@ class AdapterService:
         prompt: str,
         negative_prompt: str,
         parameters: dict[str, int | float],
+        workflow_path: Path,
+        mask: bytes | None,
+        mask_type: str | None,
     ) -> None:
         job.state = "running"
         self._update_job_progress(job, phase="running", message="starting image job")
@@ -889,7 +1094,13 @@ class AdapterService:
             source_name = self.comfy.upload(
                 f"{job.id}-source{ALLOWED_INPUT_TYPES[source_type]}", source, source_type
             )
-            template = json.loads(self.image_workflow_path.read_text(encoding="utf-8"))
+            mask_name = ""
+            if mask is not None and mask_type is not None:
+                self._update_job_progress(job, phase="uploading", message="uploading mask image")
+                mask_name = self.comfy.upload(
+                    f"{job.id}-mask{ALLOWED_INPUT_TYPES[mask_type]}", mask, mask_type
+                )
+            template = json.loads(workflow_path.read_text(encoding="utf-8"))
             workflow = render_workflow(
                 template,
                 source_name,
@@ -898,6 +1109,7 @@ class AdapterService:
                 extra_replacements={
                     "{{PROMPT}}": prompt,
                     "{{NEGATIVE_PROMPT}}": negative_prompt,
+                    "{{INPUT_MASK}}": mask_name,
                 },
             )
             self._update_job_progress(job, phase="submitting", message="submitting ComfyUI prompt")
@@ -963,7 +1175,9 @@ class AdapterService:
         if not prompt.strip():
             raise AdapterError("prompt must be non-empty", 422)
         output_filename = safe_image_output_filename(output_filename)
-        parameters = validate_image_parameters(parameters)
+        parameters = validate_image_parameters(
+            parameters, workflow_version=workflow_version
+        )
         ready, details = self.image_generate_readiness()
         if not ready:
             raise AdapterError(f"image generate backend is not ready: {details['missing']}", 503)

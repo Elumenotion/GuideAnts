@@ -6,7 +6,7 @@
       "cfg": "{{CFG}}",
       "sampler_name": "euler",
       "scheduler": "simple",
-      "denoise": 1,
+      "denoise": "{{DENOISE}}",
       "model": ["66", 0],
       "positive": ["6", 0],
       "negative": ["7", 0],
@@ -79,8 +79,8 @@
   },
   "58": {
     "inputs": {
-      "width": 1328,
-      "height": 1328,
+      "width": "{{WIDTH}}",
+      "height": "{{HEIGHT}}",
       "batch_size": 1
     },
     "class_type": "EmptySD3LatentImage",
@@ -100,7 +100,7 @@
   },
   "66": {
     "inputs": {
-      "shift": 3.1,
+      "shift": "{{SHIFT}}",
       "model": ["73", 0]
     },
     "class_type": "ModelSamplingAuraFlow",
@@ -111,7 +111,7 @@
   "73": {
     "inputs": {
       "lora_name": "Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors",
-      "strength_model": 1,
+      "strength_model": "{{LORA_STRENGTH}}",
       "model": ["37", 0]
     },
     "class_type": "LoraLoaderModelOnly",

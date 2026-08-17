@@ -44,6 +44,18 @@ def build_service() -> AdapterService:
             "IMAGE_WORKFLOW_PATH",
             "/opt/guideants/comfyui-video/workflows/qwen-image-edit-v1.json",
         ),
+        image_edit_20_workflow_path=_path_env(
+            "IMAGE_EDIT_20_WORKFLOW_PATH",
+            "/opt/guideants/comfyui-video/workflows/qwen-image-edit-20-v1.json",
+        ),
+        image_edit_bf16_workflow_path=_path_env(
+            "IMAGE_EDIT_BF16_WORKFLOW_PATH",
+            "/opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-v1.json",
+        ),
+        image_edit_bf16_inpaint_workflow_path=_path_env(
+            "IMAGE_EDIT_BF16_INPAINT_WORKFLOW_PATH",
+            "/opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json",
+        ),
         image_generate_workflow_path=_path_env(
             "IMAGE_GENERATE_WORKFLOW_PATH",
             "/opt/guideants/comfyui-video/workflows/qwen-image-v1.json",
@@ -186,6 +198,7 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
         workflow_version: Annotated[str, Form()] = IMAGE_WORKFLOW_VERSION,
         negative_prompt: Annotated[str, Form()] = " ",
         parameters: Annotated[str, Form()] = "{}",
+        mask: Annotated[UploadFile | None, File()] = None,
     ) -> dict[str, Any]:
         try:
             parsed_parameters = json.loads(parameters)
@@ -195,6 +208,8 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
             raise HTTPException(422, "parameters must be a JSON object")
         source_type = (source.content_type or "").split(";", 1)[0].lower()
         source_bytes = await source.read()
+        mask_type = (mask.content_type or "").split(";", 1)[0].lower() if mask else None
+        mask_bytes = await mask.read() if mask else None
         job = await run_in_threadpool(
             get_service().submit_image_job,
             source_bytes,
@@ -204,6 +219,8 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
             workflow_version,
             parsed_parameters,
             negative_prompt,
+            mask_bytes,
+            mask_type,
         )
         return job.public()
 

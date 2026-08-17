@@ -15,6 +15,8 @@ from guideants_video_adapter.core import (
     AdapterService,
     DEFAULT_NEGATIVE_PROMPT,
     DEFAULT_POSITIVE_PROMPT,
+    IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION,
+
     MAX_AUDIO_BYTES,
     MAX_PROMPT_CHARS,
     WORKFLOW_VERSION,
@@ -23,6 +25,8 @@ from guideants_video_adapter.core import (
     render_workflow,
     resolve_workflow_parameters,
     safe_output_filename,
+    validate_inpaint_inputs,
+    validate_image_parameters,
     validate_parameters,
     validate_talking_head_prompts,
 )
@@ -37,6 +41,18 @@ def make_wav(seconds: float, *, sample_rate: int = 24_000) -> bytes:
         wav_file.setframerate(sample_rate)
         wav_file.writeframes(b"\x00\x00" * frame_count)
     return buffer.getvalue()
+
+
+def make_png_header(width: int = 1920, height: int = 1080, color_type: int = 6) -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + (13).to_bytes(4, "big")
+        + b"IHDR"
+        + width.to_bytes(4, "big")
+        + height.to_bytes(4, "big")
+        + bytes([8, color_type, 0, 0, 0])
+    )
+
 
 class FakeComfy:
     def __init__(self) -> None:
@@ -412,7 +428,7 @@ def test_image_edit_job_materializes_png(
         "complete the scene",
         "edited.png",
         "qwen-image-edit-v1",
-        {"steps": 4, "cfg": 1.0},
+        {"steps": 4, "cfg": 1.0, "denoise": 0.85, "shift": 3.1, "megapixels": 1.6, "lora_strength": 1.0},
     )
     comfy.history_ready.set()
     for _ in range(1000):
@@ -430,6 +446,130 @@ def test_image_edit_job_materializes_png(
     comfy.history = original_history
 
 
+def test_validate_image_parameters_accepts_quality_controls() -> None:
+    params = validate_image_parameters(
+        {
+            "steps": 20,
+            "cfg": 4.0,
+            "denoise": 0.7,
+            "shift": 2.8,
+            "megapixels": 2.0,
+            "lora_strength": 0.5,
+        },
+        workflow_version="qwen-image-edit-20-v1",
+    )
+    assert params["steps"] == 20
+    assert params["cfg"] == 4.0
+    assert params["denoise"] == 0.7
+    assert params["shift"] == 2.8
+    assert params["megapixels"] == 2.0
+    assert params["lora_strength"] == 0.5
+
+
+def test_image_edit_20_defaults_when_parameters_omitted() -> None:
+    params = validate_image_parameters({}, workflow_version="qwen-image-edit-20-v1")
+    assert params["steps"] == 20
+    assert params["cfg"] == 4.0
+    assert params["denoise"] == 1.0
+    assert params["megapixels"] == 1.6
+
+
+def test_image_edit_bf16_uses_lightning_defaults() -> None:
+    params = validate_image_parameters({}, workflow_version="qwen-image-edit-bf16-v1")
+    assert params["steps"] == 4
+    assert params["cfg"] == 1.0
+    assert params["denoise"] == 1.0
+    assert params["lora_strength"] == 1.0
+
+
+def test_image_edit_bf16_inpaint_uses_lightning_defaults() -> None:
+    params = validate_image_parameters(
+        {}, workflow_version=IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION
+    )
+    assert params["steps"] == 4
+    assert params["cfg"] == 1.0
+    assert params["denoise"] == 1.0
+    assert params["lora_strength"] == 1.0
+
+
+def test_inpaint_inputs_require_separate_same_size_pngs() -> None:
+    source = make_png_header(color_type=2)
+    mask = make_png_header(color_type=0)
+    assert validate_inpaint_inputs(source, "image/png", mask, "image/png") == (1920, 1080)
+    with pytest.raises(AdapterError, match="mask is required"):
+        validate_inpaint_inputs(source, "image/png", None, None)
+    with pytest.raises(AdapterError, match="do not match"):
+        validate_inpaint_inputs(
+            source, "image/png", make_png_header(width=1912, color_type=0), "image/png"
+        )
+    with pytest.raises(AdapterError, match="multiples of 8"):
+        validate_inpaint_inputs(
+            make_png_header(width=1919, color_type=2),
+            "image/png",
+            make_png_header(width=1919, color_type=0),
+            "image/png",
+        )
+    with pytest.raises(AdapterError, match="source must be a PNG"):
+        validate_inpaint_inputs(source, "image/jpeg", mask, "image/png")
+
+
+def test_bf16_inpaint_workflow_uses_separate_mask_and_preserves_source_size() -> None:
+    workflow_path = (
+        Path(__file__).parents[3]
+        / "workflows"
+        / f"{IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION}.json"
+    )
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert workflow["80"]["class_type"] == "SetLatentNoiseMask"
+    assert workflow["42"]["inputs"]["image"] == "{{INPUT_MASK}}"
+    assert workflow["82"]["class_type"] == "ImageToMask"
+    assert workflow["82"]["inputs"] == {"image": ["42", 0], "channel": "red"}
+    assert workflow["80"]["inputs"] == {"samples": ["75", 0], "mask": ["82", 0]}
+    assert workflow["65"]["inputs"]["latent_image"] == ["80", 0]
+    assert workflow["81"]["class_type"] == "ImageCompositeMasked"
+    assert workflow["81"]["inputs"]["destination"] == ["41", 0]
+    assert workflow["81"]["inputs"]["mask"] == ["82", 0]
+    assert workflow["9"]["inputs"]["images"] == ["81", 0]
+    assert all(
+        node["class_type"] != "ImageScaleToTotalPixels" for node in workflow.values()
+    )
+
+
+def test_image_edit_bf16_rejects_unknown_workflow() -> None:
+    with pytest.raises(AdapterError, match="unsupported workflow_version"):
+        validate_image_parameters({}, workflow_version="qwen-image-edit-fp32-v1")
+
+
+def test_image_generate_defaults_include_square_canvas() -> None:
+    params = validate_image_parameters({}, workflow_version="qwen-image-v1")
+    assert params["width"] == 1328
+    assert params["height"] == 1328
+    assert params["steps"] == 4
+
+
+def test_image_generate_accepts_width_and_height() -> None:
+    params = validate_image_parameters(
+        {"width": 1664, "height": 928},
+        workflow_version="qwen-image-v1",
+    )
+    assert params["width"] == 1664
+    assert params["height"] == 928
+
+
+def test_image_generate_rejects_non_multiple_of_eight_canvas() -> None:
+    with pytest.raises(AdapterError, match="width must be a multiple of 8"):
+        validate_image_parameters({"width": 1329}, workflow_version="qwen-image-v1")
+    with pytest.raises(AdapterError, match="height must be a multiple of 8"):
+        validate_image_parameters({"height": 930}, workflow_version="qwen-image-v1")
+
+
+def test_image_edit_rejects_width_and_height() -> None:
+    with pytest.raises(AdapterError, match="width only valid for qwen-image-v1"):
+        validate_image_parameters({"width": 1664}, workflow_version="qwen-image-edit-v1")
+    with pytest.raises(AdapterError, match="height only valid for qwen-image-v1"):
+        validate_image_parameters({"height": 928}, workflow_version="qwen-image-edit-20-v1")
+
+
 def test_image_generate_job_materializes_png(
     service: tuple[AdapterService, FakeComfy],
 ) -> None:
@@ -442,7 +582,14 @@ def test_image_generate_job_materializes_png(
                     "class_type": "CLIPTextEncode",
                     "inputs": {"text": "{{PROMPT}}"},
                 },
-                "2": {"class_type": "SaveImage", "inputs": {"steps": "{{STEPS}}"}},
+                "2": {
+                    "class_type": "SaveImage",
+                    "inputs": {
+                        "steps": "{{STEPS}}",
+                        "width": "{{WIDTH}}",
+                        "height": "{{HEIGHT}}",
+                    },
+                },
             }
         ),
         encoding="utf-8",
@@ -495,6 +642,8 @@ def test_image_generate_job_materializes_png(
     assert comfy.submitted is not None
     assert comfy.submitted["1"]["inputs"]["text"] == "a futuristic CPU on a motherboard"
     assert comfy.submitted["2"]["inputs"]["steps"] == 4
+    assert comfy.submitted["2"]["inputs"]["width"] == 1328
+    assert comfy.submitted["2"]["inputs"]["height"] == 1328
 
 
 def test_readiness_fails_clearly_when_comfy_is_unavailable(

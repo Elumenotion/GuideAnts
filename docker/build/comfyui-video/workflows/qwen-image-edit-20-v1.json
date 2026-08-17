@@ -89,7 +89,7 @@
   "67": {
     "inputs": {
       "shift": "{{SHIFT}}",
-      "model": ["74", 0]
+      "model": ["12", 0]
     },
     "class_type": "ModelSamplingAuraFlow",
     "_meta": {
@@ -138,17 +138,6 @@
     "class_type": "FluxKontextMultiReferenceLatentMethod",
     "_meta": {
       "title": "Edit Model Reference Method"
-    }
-  },
-  "74": {
-    "inputs": {
-      "lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
-      "strength_model": "{{LORA_STRENGTH}}",
-      "model": ["12", 0]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "LoraLoaderModelOnly"
     }
   },
   "75": {

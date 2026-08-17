@@ -16,6 +16,9 @@ services:
       VIDEO_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1-rocm.json
       VIDEO_V2V_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/infinitetalk-v2v-v1-rocm.json
       IMAGE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-v1.json
+      IMAGE_EDIT_20_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-20-v1.json
+      IMAGE_EDIT_BF16_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
+      IMAGE_EDIT_BF16_INPAINT_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
       IMAGE_GENERATE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-v1.json
       HIP_VISIBLE_DEVICES: ${GA_COMFYUI_VIDEO_HIP_VISIBLE_DEVICES:-0}
       HSA_ENABLE_DXG_DETECTION: "1"
@@ -66,6 +69,26 @@ services:
       - type: bind
         source: ../build/comfyui-video/workflows/qwen-image-edit-v1.json
         target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-v1.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/scripts
+        target: /opt/guideants/comfyui-video/scripts
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/workflows/qwen-image-edit-20-v1.json
+        target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-20-v1.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
+        target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
+        target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
         read_only: true
       - type: bind
         source: ../build/comfyui-video/workflows/qwen-image-v1.json

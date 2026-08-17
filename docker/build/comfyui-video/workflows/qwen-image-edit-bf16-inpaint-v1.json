@@ -12,7 +12,7 @@
   "9": {
     "inputs": {
       "filename_prefix": "ComfyUI",
-      "images": ["8", 0]
+      "images": ["81", 0]
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -30,7 +30,7 @@
   },
   "12": {
     "inputs": {
-      "unet_name": "qwen_image_edit_2511_fp8mixed.safetensors",
+      "unet_name": "qwen_image_edit_2511_bf16.safetensors",
       "weight_dtype": "default"
     },
     "class_type": "UNETLoader",
@@ -44,7 +44,16 @@
     },
     "class_type": "LoadImage",
     "_meta": {
-      "title": "Load Image"
+      "title": "Load Unaltered Source Image"
+    }
+  },
+  "42": {
+    "inputs": {
+      "image": "{{INPUT_MASK}}"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Separate Grayscale Mask"
     }
   },
   "61": {
@@ -79,11 +88,11 @@
       "model": ["64", 0],
       "positive": ["70", 0],
       "negative": ["71", 0],
-      "latent_image": ["75", 0]
+      "latent_image": ["80", 0]
     },
     "class_type": "KSampler",
     "_meta": {
-      "title": "KSampler"
+      "title": "KSampler (Alpha Mask Only)"
     }
   },
   "67": {
@@ -101,7 +110,7 @@
       "prompt": "{{PROMPT}}",
       "clip": ["61", 0],
       "vae": ["10", 0],
-      "image1": ["79", 0]
+      "image1": ["41", 0]
     },
     "class_type": "TextEncodeQwenImageEditPlus",
     "_meta": {
@@ -113,11 +122,11 @@
       "prompt": "{{NEGATIVE_PROMPT}}",
       "clip": ["61", 0],
       "vae": ["10", 0],
-      "image1": ["79", 0]
+      "image1": ["41", 0]
     },
     "class_type": "TextEncodeQwenImageEditPlus",
     "_meta": {
-      "title": "TextEncodeQwenImageEditPlus"
+      "title": "TextEncodeQwenImageEditPlus (Negative)"
     }
   },
   "70": {
@@ -153,24 +162,46 @@
   },
   "75": {
     "inputs": {
-      "pixels": ["79", 0],
+      "pixels": ["41", 0],
       "vae": ["10", 0]
     },
     "class_type": "VAEEncode",
     "_meta": {
-      "title": "VAE Encode"
+      "title": "VAE Encode at Source Dimensions"
     }
   },
-  "79": {
+  "80": {
     "inputs": {
-      "upscale_method": "lanczos",
-      "megapixels": "{{MEGAPIXELS}}",
-      "resolution_steps": 1,
-      "image": ["41", 0]
+      "samples": ["75", 0],
+      "mask": ["82", 0]
     },
-    "class_type": "ImageScaleToTotalPixels",
+    "class_type": "SetLatentNoiseMask",
     "_meta": {
-      "title": "ImageScaleToTotalPixels"
+      "title": "Restrict Sampling to Alpha Mask"
+    }
+  },
+  "81": {
+    "inputs": {
+      "destination": ["41", 0],
+      "source": ["8", 0],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": ["82", 0]
+    },
+    "class_type": "ImageCompositeMasked",
+    "_meta": {
+      "title": "Preserve Original Opaque Pixels"
+    }
+  },
+  "82": {
+    "inputs": {
+      "image": ["42", 0],
+      "channel": "red"
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "White Pixels Are Editable"
     }
   }
 }

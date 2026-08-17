@@ -69,8 +69,10 @@ declare -a comfy_args=(
 if [[ "$video_gpu_backend" == "rocm" ]]; then
   comfy_args+=(--gpu-only --disable-smart-memory)
 fi
+filter_py=/opt/guideants/comfyui-video/scripts/filter-comfyui-logs.py
+export TQDM_DISABLE=1
 gosu "$RUN_USER:$RUN_GROUP" \
-  python /opt/ComfyUI/main.py "${comfy_args[@]}" &
+  bash -c "python /opt/ComfyUI/main.py $(printf '%q ' "${comfy_args[@]}") 2>&1 | python $filter_py" &
 children+=("$!")
 
 for _ in $(seq 1 60); do
@@ -88,10 +90,17 @@ gosu "$RUN_USER:$RUN_GROUP" \
 [[ -f /app/adapter/guideants_video_adapter/app.py ]] || die "video adapter payload is missing"
 gosu "$RUN_USER:$RUN_GROUP" \
   uvicorn guideants_video_adapter.app:APP \
-    --app-dir /app/adapter --host 127.0.0.1 --port 8190 &
+    --app-dir /app/adapter --host 127.0.0.1 --port 8190 \
+    --log-level warning --no-access-log &
 children+=("$!")
 
-dotnet /app/script-agent/ScriptExecutionAgent.dll \
+# Health checks hit /sandbox/health every 30s; default ASP.NET request logging
+# floods Docker logs with four lines per probe. env(1) is required because the
+# category names contain dots and are not valid bash identifiers.
+env \
+  'Logging__LogLevel__Microsoft.AspNetCore.Hosting.Diagnostics=Error' \
+  'Logging__LogLevel__Microsoft.AspNetCore.Routing.EndpointMiddleware=Error' \
+  dotnet /app/script-agent/ScriptExecutionAgent.dll \
     --urls http://127.0.0.1:8081 &
 children+=("$!")
 
