@@ -28,6 +28,7 @@ from .comfy_telemetry import (
 
 API_VERSION = "v1"
 WORKFLOW_VERSION = "infinitetalk-i2v-v1"
+V2V_WORKFLOW_VERSION = "infinitetalk-v2v-v1"
 IMAGE_WORKFLOW_VERSION = "qwen-image-edit-v1"
 IMAGE_BUNDLE = "qwen-image-edit-v1"
 IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-v1"
@@ -76,6 +77,10 @@ ALLOWED_INPUT_TYPES = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
     "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/x-matroska": ".mkv",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
     "audio/wav": ".wav",
     "audio/x-wav": ".wav",
     "audio/mpeg": ".mp3",
@@ -348,16 +353,21 @@ class ComfyTransport:
 
 def render_workflow(
     template: dict[str, Any],
-    image_name: str,
+    image_name: str | None,
     audio_name: str,
     parameters: dict[str, int | float],
     extra_replacements: dict[str, Any] | None = None,
+    *,
+    video_name: str | None = None,
 ) -> dict[str, Any]:
     replacements: dict[str, Any] = {
-        "{{INPUT_IMAGE}}": image_name,
         "{{INPUT_AUDIO}}": audio_name,
         **{f"{{{{{name.upper()}}}}}": value for name, value in parameters.items()},
     }
+    if image_name is not None:
+        replacements["{{INPUT_IMAGE}}"] = image_name
+    if video_name is not None:
+        replacements["{{INPUT_VIDEO}}"] = video_name
     if extra_replacements:
         replacements.update(extra_replacements)
 
@@ -443,10 +453,14 @@ class AdapterService:
         poll_interval: float = 1.0,
         image_workflow_path: Path | None = None,
         image_generate_workflow_path: Path | None = None,
+        v2v_workflow_path: Path | None = None,
     ) -> None:
         self.jobs_root = jobs_root
         self.models_root = models_root
         self.workflow_path = workflow_path
+        self.v2v_workflow_path = v2v_workflow_path or (
+            workflow_path.parent / f"{V2V_WORKFLOW_VERSION}.json"
+        )
         self.image_workflow_path = image_workflow_path or (
             workflow_path.parent / f"{IMAGE_WORKFLOW_VERSION}.json"
         )
@@ -478,6 +492,14 @@ class AdapterService:
         if not self._bundle_ready(WORKFLOW_VERSION):
             missing.append("models")
         return self._comfy_readiness(missing, self.workflow_path)
+
+    def v2v_readiness(self) -> tuple[bool, dict[str, Any]]:
+        missing: list[str] = []
+        if not self.v2v_workflow_path.is_file():
+            missing.append("v2v_workflow")
+        if not self._bundle_ready(WORKFLOW_VERSION):
+            missing.append("models")
+        return self._comfy_readiness(missing, self.v2v_workflow_path)
 
     def image_readiness(self) -> tuple[bool, dict[str, Any]]:
         missing: list[str] = []
@@ -533,10 +555,12 @@ class AdapterService:
         ready, details = self.readiness()
         image_ready, image_details = self.image_readiness()
         image_generate_ready, image_generate_details = self.image_generate_readiness()
+        v2v_ready, v2v_details = self.v2v_readiness()
         device = (
             details.get("device")
             or image_details.get("device")
             or image_generate_details.get("device")
+            or v2v_details.get("device")
             or {}
         )
         return {
@@ -544,15 +568,17 @@ class AdapterService:
             "backend": "comfyui",
             "workflow_versions": [
                 WORKFLOW_VERSION,
+                V2V_WORKFLOW_VERSION,
                 IMAGE_WORKFLOW_VERSION,
                 IMAGE_GENERATE_WORKFLOW_VERSION,
             ],
-            "input_kinds": ["image"],
+            "input_kinds": ["image", "video"],
             "audio_types": ["audio/wav", "audio/x-wav", "audio/mpeg", "audio/flac", "audio/ogg"],
             "output_type": "video/mp4",
             "device": device.get("name"),
             "precision": os.getenv("VIDEO_PRECISION", "bfloat16"),
             "ready": ready,
+            "v2v_ready": v2v_ready,
             "image_ready": image_ready,
             "image_generate_ready": image_generate_ready,
         }
@@ -670,10 +696,16 @@ class AdapterService:
         positive_prompt: str | None = None,
         negative_prompt: str | None = None,
     ) -> Job:
-        if workflow_version != WORKFLOW_VERSION:
+        if workflow_version == WORKFLOW_VERSION:
+            if source_type not in ALLOWED_INPUT_TYPES or not source_type.startswith("image/"):
+                raise AdapterError("unsupported source media type", 415)
+            ready, details = self.readiness()
+        elif workflow_version == V2V_WORKFLOW_VERSION:
+            if source_type not in ALLOWED_INPUT_TYPES or not source_type.startswith("video/"):
+                raise AdapterError("unsupported source media type", 415)
+            ready, details = self.v2v_readiness()
+        else:
             raise AdapterError(f"unsupported workflow_version: {workflow_version}", 422)
-        if source_type not in ALLOWED_INPUT_TYPES or not source_type.startswith("image/"):
-            raise AdapterError("unsupported source media type", 415)
         if audio_type not in ALLOWED_INPUT_TYPES or not audio_type.startswith("audio/"):
             raise AdapterError("unsupported audio media type", 415)
         if not source or not audio:
@@ -687,7 +719,6 @@ class AdapterService:
         positive_prompt, negative_prompt = validate_talking_head_prompts(
             positive_prompt, negative_prompt
         )
-        ready, details = self.readiness()
         if not ready:
             raise AdapterError(f"video backend is not ready: {details['missing']}", 503)
         job = Job(id=uuid.uuid4().hex, output_filename=output_filename)
@@ -708,6 +739,7 @@ class AdapterService:
                 parameters,
                 positive_prompt,
                 negative_prompt,
+                workflow_version,
             ),
             daemon=True,
         ).start()
@@ -723,12 +755,16 @@ class AdapterService:
         parameters: dict[str, int | float],
         positive_prompt: str,
         negative_prompt: str,
+        workflow_version: str,
     ) -> None:
+        is_v2v = workflow_version == V2V_WORKFLOW_VERSION
+        workflow_path = self.v2v_workflow_path if is_v2v else self.workflow_path
         job.state = "running"
         self._update_job_progress(job, phase="running", message="starting job")
         listener: ComfyProgressListener | None = None
         try:
-            self._update_job_progress(job, phase="uploading", message="uploading source image")
+            source_label = "source video" if is_v2v else "source image"
+            self._update_job_progress(job, phase="uploading", message=f"uploading {source_label}")
             source_name = self.comfy.upload(
                 f"{job.id}-source{ALLOWED_INPUT_TYPES[source_type]}", source, source_type
             )
@@ -736,16 +772,17 @@ class AdapterService:
             audio_name = self.comfy.upload(
                 f"{job.id}-audio{ALLOWED_INPUT_TYPES[audio_type]}", audio, audio_type
             )
-            template = json.loads(self.workflow_path.read_text(encoding="utf-8"))
+            template = json.loads(workflow_path.read_text(encoding="utf-8"))
             workflow = render_workflow(
                 template,
-                source_name,
+                None if is_v2v else source_name,
                 audio_name,
                 parameters,
                 extra_replacements={
                     "{{POSITIVE_PROMPT}}": positive_prompt,
                     "{{NEGATIVE_PROMPT}}": negative_prompt,
                 },
+                video_name=source_name if is_v2v else None,
             )
             self._update_job_progress(job, phase="submitting", message="submitting ComfyUI prompt")
             job.prompt_id = self.comfy.submit(workflow, job.id)

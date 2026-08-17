@@ -11,6 +11,7 @@ from .client import (
     submit_image_edit,
     submit_image_generate,
     submit_talking_head,
+    submit_talking_head_v2v,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "submit_image_edit",
     "submit_image_generate",
     "submit_talking_head",
+    "submit_talking_head_v2v",
 ]

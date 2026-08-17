@@ -17,6 +17,7 @@ from typing import Any, BinaryIO
 DEFAULT_BASE_URL = "http://127.0.0.1:8190"
 REQUEST_TIMEOUT_SECONDS = 180
 WORKFLOW_VERSION = "infinitetalk-i2v-v1"
+V2V_WORKFLOW_VERSION = "infinitetalk-v2v-v1"
 HEX_UUID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -177,6 +178,60 @@ def submit_talking_head(
     fields = {
         "output_filename": output_filename,
         "workflow_version": WORKFLOW_VERSION,
+        "parameters": json.dumps(parameters or {}, separators=(",", ":")),
+    }
+    if positive_prompt is not None:
+        fields["positive_prompt"] = positive_prompt
+    if negative_prompt is not None:
+        fields["negative_prompt"] = negative_prompt
+    body, content_type = _multipart(
+        fields,
+        {
+            "source": (source.name, source.read_bytes(), source_type),
+            "audio": (audio.name, audio.read_bytes(), audio_type),
+        },
+    )
+    return _request(
+        "POST",
+        "/v1/talking-head/jobs",
+        base_url=base_url,
+        body=body,
+        content_type=content_type,
+    )
+
+
+def submit_talking_head_v2v(
+    video_path: str | os.PathLike[str],
+    audio_path: str | os.PathLike[str],
+    output_filename: str,
+    *,
+    workflow: str = V2V_WORKFLOW_VERSION,
+    working_directory: str | os.PathLike[str] | None = None,
+    parameters: dict[str, int | float] | None = None,
+    positive_prompt: str | None = None,
+    negative_prompt: str | None = None,
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    """Upload notebook-scoped video/audio and submit the fixed V2V workflow."""
+    if workflow != V2V_WORKFLOW_VERSION:
+        raise VideoClientError(f"unsupported workflow: {workflow}")
+    source = resolve_notebook_path(video_path, working_directory, must_exist=True)
+    audio = resolve_notebook_path(audio_path, working_directory, must_exist=True)
+    if not source.is_file() or not audio.is_file():
+        raise VideoClientError("video_path and audio_path must identify files")
+    source_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+    audio_type = mimetypes.guess_type(audio.name)[0] or "application/octet-stream"
+    if source_type == "application/octet-stream" and source.suffix.lower() == ".mkv":
+        source_type = "video/x-matroska"
+    if audio_type == "audio/x-wav":
+        audio_type = "audio/wav"
+    if positive_prompt is not None and not positive_prompt.strip():
+        raise VideoClientError("positive_prompt must be non-empty")
+    if negative_prompt is not None and not negative_prompt.strip():
+        raise VideoClientError("negative_prompt must be non-empty")
+    fields = {
+        "output_filename": output_filename,
+        "workflow_version": V2V_WORKFLOW_VERSION,
         "parameters": json.dumps(parameters or {}, separators=(",", ":")),
     }
     if positive_prompt is not None:

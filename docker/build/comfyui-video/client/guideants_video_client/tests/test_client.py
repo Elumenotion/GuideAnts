@@ -14,6 +14,7 @@ from guideants_video_client import (
     submit_image_edit,
     submit_image_generate,
     submit_talking_head,
+    submit_talking_head_v2v,
 )
 
 JOB_ID = "0123456789abcdef0123456789abcdef"
@@ -84,6 +85,35 @@ def test_submit_streams_scoped_files(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert b"A man teaching | A man talking" in body
     assert b"head bobbing" in body
     assert b"png" in body and b"wav" in body
+
+
+def test_submit_v2v_streams_scoped_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _notebook, input_dir, output_dir = make_notebook(tmp_path)
+    (input_dir / "driver.mkv").write_bytes(b"mkv")
+    (input_dir / "voice.wav").write_bytes(b"wav")
+    captured: dict = {}
+
+    def fake_request(method: str, path: str, **kwargs: object) -> dict:
+        captured.update({"method": method, "path": path, **kwargs})
+        return {"jobId": JOB_ID, "state": "queued"}
+
+    monkeypatch.setattr(client_module, "_request", fake_request)
+    result = submit_talking_head_v2v(
+        video_path="../Input/driver.mkv",
+        audio_path="../Input/voice.wav",
+        output_filename="output.mkv",
+        working_directory=output_dir,
+        parameters={"fps": 25},
+        positive_prompt="A man teaching | A man talking",
+        negative_prompt="head bobbing",
+    )
+    assert result["jobId"] == JOB_ID
+    assert captured["path"] == "/v1/talking-head/jobs"
+    body = captured["body"]
+    assert isinstance(body, bytes)
+    assert b"infinitetalk-v2v-v1" in body
+    assert b'"fps":25' in body
+    assert b"mkv" in body and b"wav" in body
 
 
 def test_status_and_cancel_require_hex_uuid(monkeypatch: pytest.MonkeyPatch) -> None:

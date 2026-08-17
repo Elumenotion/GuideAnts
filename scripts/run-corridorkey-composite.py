@@ -131,11 +131,33 @@ def coarse_alpha_hint(frame_bgr: "np.ndarray") -> "np.ndarray":
     return np.clip(alpha * 255.0, 0, 255).astype("uint8")
 
 
+def crop_to_aspect(
+    image: "np.ndarray",
+    target_width: int,
+    target_height: int,
+) -> "np.ndarray":
+    """Center-crop an image so its pixel aspect matches the target canvas."""
+    source_height, source_width = image.shape[:2]
+    source_ratio = source_width / source_height
+    target_ratio = target_width / target_height
+    if source_ratio > target_ratio:
+        cropped_width = round(source_height * target_ratio)
+        left = max((source_width - cropped_width) // 2, 0)
+        return image[:, left : left + cropped_width]
+    if source_ratio < target_ratio:
+        cropped_height = round(source_width / target_ratio)
+        top = max((source_height - cropped_height) // 2, 0)
+        return image[top : top + cropped_height, :]
+    return image
+
+
 def prepare_corridor_clip(
     source: Path,
     clip_root: Path,
     started_at: float,
     max_frames: int | None,
+    target_width: int,
+    target_height: int,
 ) -> tuple[int, float]:
     input_dir = clip_root / "Input"
     alpha_dir = clip_root / "AlphaHint"
@@ -156,6 +178,15 @@ def prepare_corridor_clip(
         ok, frame = capture.read()
         if not ok:
             break
+        original_height, original_width = frame.shape[:2]
+        frame = crop_to_aspect(frame, target_width, target_height)
+        if frame_count == 0:
+            telemetry(
+                started_at,
+                f"prepare aspect crop {original_width}x{original_height} "
+                f"to {frame.shape[1]}x{frame.shape[0]} "
+                f"for target={target_width}x{target_height}",
+            )
         frame_path = input_dir / f"{frame_count:05d}.png"
         if not cv2.imwrite(str(frame_path), frame):
             capture.release()
@@ -422,6 +453,7 @@ def composite_outputs(
                     f"invalid CorridorKey foreground frame: {fg_path}"
                 )
             fg_rgb = cv2.cvtColor(fg_bgr[:, :, :3], cv2.COLOR_BGR2RGB)
+            fg_rgb = crop_to_aspect(fg_rgb, width, height)
             fg_srgb = cv2.resize(
                 np.clip(fg_rgb, 0.0, 1.0),
                 (width, height),
@@ -447,6 +479,7 @@ def composite_outputs(
                 matte = matte.astype("float32") / 255.0
             else:
                 matte = matte.astype("float32")
+            matte = crop_to_aspect(matte, width, height)
             alpha = cv2.resize(
                 np.clip(matte, 0.0, 1.0),
                 (width, height),
@@ -525,7 +558,12 @@ def main() -> int:
         clip_root = Path(temporary) / "talking-head"
         clip_root.mkdir()
         frame_count, fps = prepare_corridor_clip(
-            source, clip_root, started_at, args.max_frames
+            source,
+            clip_root,
+            started_at,
+            args.max_frames,
+            args.width,
+            args.height,
         )
         run_corridorkey(
             corridor_root, clip_root, args.device, args.max_frames, started_at

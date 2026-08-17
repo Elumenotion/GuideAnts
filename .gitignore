@@ -444,6 +444,7 @@ docker-compose.voice-pack.local.yml
 /installer/docker/images.env
 /installer/.installer_state.env
 /docker/volumes/rocm-wsl/
+docker/compose/comfyui-video-local.runtime.env
 *.cli-auth-token
 /src/client/GuideAnts.code-workspace
 /recordings

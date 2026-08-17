@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$AvatarPath = "tests/runtime/content-files/acceptance-project/authorized-notebook/Input/doug-on-green-2.png",
-    [string]$AudioPath = "tests/runtime/content-files/acceptance-project/authorized-notebook/Input/may_5_cover_10s.wav",
-    [string]$BackgroundPath = "tests/runtime/content-files/acceptance-project/authorized-notebook/Input/office-plate.png",
-    [string]$OutputStem = "doug-office-10s",
+    [string]$DriverVideoPath = "artifacts/infinitetalk-v2v/inputs/august16-office-full-11-green-416x256.mkv",
+    [string]$AudioPath = "artifacts/infinitetalk-v2v/inputs/august_16_cover.wav",
+    [string]$BackgroundPath = "tests/runtime/content-files/acceptance-project/authorized-notebook/Input/office-whiteboard-bf16-inpaint-28.png",
+    [string]$OutputStem = "v2v-august16-office-full-11",
     [int]$Width = 416,
     [int]$Height = 256,
     [int]$Steps = 14,
@@ -18,12 +18,12 @@ param(
     [int]$OutputWidth = 1280,
     [int]$OutputHeight = 720,
     [string]$CorridorKeyRoot = "artifacts/tools/CorridorKey",
-    [string]$CorridorKeyDevice = "cuda",
-    [string]$SourceVideoPath = "",
+    [string]$CorridorKeyDevice = "cuda:0",
     [double]$BackgroundBlurSigma = 1.5,
     [double]$ForegroundSharpenAmount = 0.15,
     [double]$ForegroundSharpenSigma = 0.8,
     [double]$AudioLeadInSeconds = 0.5,
+    [string]$SourceGreenPath = "",
     [switch]$SkipGenerate
 )
 
@@ -51,9 +51,18 @@ function Get-VideoSize([string]$Path) {
 }
 
 function Invoke-CurlJson($Label, $Arguments) {
-    $output = & curl.exe --fail --silent --show-error @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "curl failed during '$Label': $output" }
-    return ($output | Out-String).Trim() | ConvertFrom-Json
+    $attempts = 0
+    while ($true) {
+        $attempts++
+        try {
+            $output = & curl.exe --fail --silent --show-error @Arguments 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "curl failed during '$Label': $output" }
+            return ($output | Out-String).Trim() | ConvertFrom-Json
+        } catch {
+            if ($attempts -ge 12) { throw }
+            Start-Sleep -Seconds 5
+        }
+    }
 }
 
 function Write-Utf8NoBomFile([string]$Path, [string]$Content) {
@@ -109,11 +118,11 @@ function Invoke-SandboxExecute($Label, $Payload, $PayloadPath) {
     return $stdout | ConvertFrom-Json
 }
 
-$Avatar = Resolve-RepoPath $AvatarPath
+$DriverVideo = Resolve-RepoPath $DriverVideoPath
 $Audio = Resolve-RepoPath $AudioPath
 $Background = Resolve-RepoPath $BackgroundPath
 $CorridorKey = Resolve-RepoPath $CorridorKeyRoot
-foreach ($required in @($Avatar, $Audio, $Background)) {
+foreach ($required in @($DriverVideo, $Audio, $Background)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing: $required" }
 }
 if (-not (Test-Path -LiteralPath $CorridorKey -PathType Container)) {
@@ -123,76 +132,79 @@ if (-not (Test-Path -LiteralPath $CorridorKey -PathType Container)) {
 $NotebookRoot = Join-Path $RepoRoot "tests/runtime/content-files/acceptance-project/authorized-notebook"
 $InputDir = Join-Path $NotebookRoot "Input"
 $OutputDir = Join-Path $NotebookRoot "Output"
-$ArtifactDir = Join-Path $RepoRoot "artifacts/infinitetalk"
+$ArtifactDir = Join-Path $RepoRoot "artifacts/infinitetalk-v2v/runs"
 New-Item -ItemType Directory -Force -Path $ArtifactDir, $InputDir, $OutputDir | Out-Null
 
 $RequestedOutputStem = $OutputStem
 $OutputStem = Get-AvailableOutputStem -BaseStem $OutputStem -ArtifactDir $ArtifactDir
 
-$PreparedName = "$OutputStem-start-${Width}x${Height}.png"
+$DriverName = "$OutputStem-driver-${Width}x${Height}.mkv"
 $GenName = "$OutputStem-green-${Width}x${Height}.mkv"
 $FinalName = "$OutputStem-overlay-720p.mp4"
 $MasterName = "$OutputStem-master-720p.mkv"
-$PreparedHost = Join-Path $InputDir $PreparedName
+$DriverHost = Join-Path $InputDir $DriverName
 $GenHost = Join-Path $OutputDir $GenName
 $FinalHost = Join-Path $ArtifactDir $FinalName
 $MasterHost = Join-Path $ArtifactDir $MasterName
 $LogPath = Join-Path $ArtifactDir "$OutputStem-pipeline.log"
-if ($SkipGenerate -and -not [string]::IsNullOrWhiteSpace($SourceVideoPath)) {
-    $GenHost = Resolve-RepoPath $SourceVideoPath
+if ($SkipGenerate -and -not [string]::IsNullOrWhiteSpace($SourceGreenPath)) {
+    $GenHost = Resolve-RepoPath $SourceGreenPath
 }
 
-"Starting talking-head pipeline at $(Get-Date -Format o)" | Tee-Object -FilePath $LogPath
+"Starting V2V talking-head pipeline at $(Get-Date -Format o)" | Tee-Object -FilePath $LogPath
+"workflow=infinitetalk-v2v-v1" | Tee-Object -FilePath $LogPath -Append
 if ($OutputStem -ne $RequestedOutputStem) {
     "requested_output_stem=$RequestedOutputStem" | Tee-Object -FilePath $LogPath -Append
 }
 "output_stem=$OutputStem" | Tee-Object -FilePath $LogPath -Append
+"driver_video=$DriverVideo" | Tee-Object -FilePath $LogPath -Append
 "audio_lead_in_seconds=$AudioLeadInSeconds" | Tee-Object -FilePath $LogPath -Append
 
-$size = Get-VideoSize $Avatar
-"1. prep avatar $($size.Width)x$($size.Height) -> ${Width}x${Height}" | Tee-Object -FilePath $LogPath -Append
-if ($size.Width -eq $Width -and $size.Height -eq $Height) {
-    Copy-Item -LiteralPath $Avatar -Destination $PreparedHost -Force
+$driverSize = Get-VideoSize $DriverVideo
+"1. stage driver $($driverSize.Width)x$($driverSize.Height) -> ${Width}x${Height}" | Tee-Object -FilePath $LogPath -Append
+if ($driverSize.Width -eq $Width -and $driverSize.Height -eq $Height) {
+    Copy-Item -LiteralPath $DriverVideo -Destination $DriverHost -Force
 } else {
-    Invoke-Ffmpeg -Label "prep avatar" -Arguments @(
+    Invoke-Ffmpeg -Label "prep driver video" -Arguments @(
         "-y", "-hide_banner", "-loglevel", "error",
-        "-i", $Avatar,
+        "-i", $DriverVideo,
         "-vf", "scale=${Width}:${Height}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${Width}:${Height}:(ow-iw)/2:(oh-ih)/2:color=0x00ff00,setsar=1",
-        "-update", "1",
-        $PreparedHost
+        "-c:v", "ffv1",
+        "-pix_fmt", "rgba64le",
+        $DriverHost
     )
 }
-Copy-Item -LiteralPath $PreparedHost -Destination (Join-Path $ArtifactDir $PreparedName) -Force
+Copy-Item -LiteralPath $DriverHost -Destination (Join-Path $ArtifactDir $DriverName) -Force
 $AudioName = "$OutputStem-input-padded.wav"
 $AudioInNotebook = Join-Path $InputDir $AudioName
 $AudioArtifact = Join-Path $ArtifactDir $AudioName
 New-PaddedAudio -SourcePath $Audio -DestinationPath $AudioInNotebook -LeadInSeconds $AudioLeadInSeconds
 Copy-Item -LiteralPath $AudioInNotebook -Destination $AudioArtifact -Force
-$GenerationAudio = $AudioInNotebook
-$preparedSize = Get-VideoSize $PreparedHost
+$preparedSize = Get-VideoSize $DriverHost
 if ($preparedSize.Width -ne $Width -or $preparedSize.Height -ne $Height) {
-    throw "Prepared avatar is $($preparedSize.Width)x$($preparedSize.Height), expected ${Width}x${Height}"
+    throw "Prepared driver is $($preparedSize.Width)x$($preparedSize.Height), expected ${Width}x${Height}"
 }
 
+$common = @{
+    scriptType = "Python"
+    workingDirectory = "/app/ContentFiles/acceptance-project/authorized-notebook/Output"
+    projectId = "11111111-1111-1111-1111-111111111111"
+    notebookId = "22222222-2222-2222-2222-222222222222"
+    guideId = "33333333-3333-3333-3333-333333333333"
+    timeoutSeconds = 600
+}
+$jobId = ""
 if (-not $SkipGenerate) {
-    $common = @{
-        scriptType = "Python"
-        workingDirectory = "/app/ContentFiles/acceptance-project/authorized-notebook/Output"
-        projectId = "11111111-1111-1111-1111-111111111111"
-        notebookId = "22222222-2222-2222-2222-222222222222"
-        guideId = "33333333-3333-3333-3333-333333333333"
-        timeoutSeconds = 600
-    }
-    $promptLiteral = $PositivePrompt | ConvertTo-Json -Compress
-    $negativeLiteral = $NegativePrompt | ConvertTo-Json -Compress
-    $submitPayload = $common.Clone()
-    $submitPayload.script = @"
-from guideants_video_client import submit_talking_head
+$promptLiteral = $PositivePrompt | ConvertTo-Json -Compress
+$negativeLiteral = $NegativePrompt | ConvertTo-Json -Compress
+$submitPayload = $common.Clone()
+$submitPayload.script = @"
+from guideants_video_client import submit_talking_head_v2v
 import json
-result = submit_talking_head(
-    image_path='../Input/$PreparedName',
+result = submit_talking_head_v2v(
+    video_path='../Input/$DriverName',
     audio_path='../Input/$AudioName',
-    workflow='infinitetalk-i2v-v1',
+    workflow='infinitetalk-v2v-v1',
     output_filename='$GenName',
     parameters={'width': $Width, 'height': $Height, 'steps': $Steps, 'cfg': $Cfg, 'fps': $Fps},
     positive_prompt=$promptLiteral,
@@ -200,35 +212,35 @@ result = submit_talking_head(
 )
 print(json.dumps(result, separators=(',', ':')))
 "@
-    "2. generate ${Width}x${Height} from $(Split-Path -Leaf $GenerationAudio)" | Tee-Object -FilePath $LogPath -Append
-    $submit = Invoke-SandboxExecute "submit" $submitPayload (Join-Path $ArtifactDir "$OutputStem-submit.json")
-    $jobId = [string]$submit.jobId
-    "jobId=$jobId" | Tee-Object -FilePath $LogPath -Append
-    $deadline = (Get-Date).AddSeconds($JobTimeoutSeconds)
-    do {
-        $statusPayload = $common.Clone()
-        $statusPayload.script = "from guideants_video_client import get_talking_head_job`nimport json`nprint(json.dumps(get_talking_head_job('$jobId'), separators=(',', ':')))"
-        $status = Invoke-SandboxExecute "status" $statusPayload (Join-Path $ArtifactDir "$OutputStem-status.json")
-        $state = [string]$status.state
-        if ($status.progress) {
-            $p = $status.progress
-            $line = "[job $jobId] $($p.message) | node=$($p.node_class) | step=$($p.step)/$($p.max_steps)"
-            Write-Host $line
-            $line | Add-Content -Path $LogPath
-        }
-        if ($state -eq "completed") { break }
-        if ($state -in @("failed", "cancelled")) {
-            throw "Job ended in state $state : $($status.error)"
-        }
-        if ((Get-Date) -ge $deadline) { throw "Timed out waiting for job $jobId" }
-        Start-Sleep -Seconds $PollSeconds
-    } while ($true)
+"2. generate V2V ${Width}x${Height} from $(Split-Path -Leaf $AudioInNotebook)" | Tee-Object -FilePath $LogPath -Append
+$submit = Invoke-SandboxExecute "submit" $submitPayload (Join-Path $ArtifactDir "$OutputStem-submit.json")
+$jobId = [string]$submit.jobId
+"jobId=$jobId" | Tee-Object -FilePath $LogPath -Append
+$deadline = (Get-Date).AddSeconds($JobTimeoutSeconds)
+do {
+    $statusPayload = $common.Clone()
+    $statusPayload.script = "from guideants_video_client import get_talking_head_job`nimport json`nprint(json.dumps(get_talking_head_job('$jobId'), separators=(',', ':')))"
+    $status = Invoke-SandboxExecute "status" $statusPayload (Join-Path $ArtifactDir "$OutputStem-status.json")
+    $state = [string]$status.state
+    if ($status.progress) {
+        $p = $status.progress
+        $line = "[job $jobId] $($p.message) | node=$($p.node_class) | step=$($p.step)/$($p.max_steps)"
+        Write-Host $line
+        $line | Add-Content -Path $LogPath
+    }
+    if ($state -eq "completed") { break }
+    if ($state -in @("failed", "cancelled")) {
+        throw "Job ended in state $state : $($status.error)"
+    }
+    if ((Get-Date) -ge $deadline) { throw "Timed out waiting for job $jobId" }
+    Start-Sleep -Seconds $PollSeconds
+} while ($true)
 
-    $matPayload = $common.Clone()
-    $matPayload.script = "from guideants_video_client import materialize_talking_head_result`nimport json`nprint(json.dumps(materialize_talking_head_result('$jobId', '$GenName'), separators=(',', ':')))"
-    Invoke-SandboxExecute "materialize" $matPayload (Join-Path $ArtifactDir "$OutputStem-materialize.json") | Out-Null
-    if (-not (Test-Path -LiteralPath $GenHost -PathType Leaf)) { throw "Missing generated file $GenHost" }
-    Copy-Item -LiteralPath $GenHost -Destination (Join-Path $ArtifactDir $GenName) -Force
+$matPayload = $common.Clone()
+$matPayload.script = "from guideants_video_client import materialize_talking_head_result`nimport json`nprint(json.dumps(materialize_talking_head_result('$jobId', '$GenName'), separators=(',', ':')))"
+Invoke-SandboxExecute "materialize" $matPayload (Join-Path $ArtifactDir "$OutputStem-materialize.json") | Out-Null
+if (-not (Test-Path -LiteralPath $GenHost -PathType Leaf)) { throw "Missing generated file $GenHost" }
+Copy-Item -LiteralPath $GenHost -Destination (Join-Path $ArtifactDir $GenName) -Force
 } else {
     if (-not (Test-Path -LiteralPath $GenHost -PathType Leaf)) {
         $cachedGenerate = Join-Path $ArtifactDir $GenName
@@ -237,6 +249,8 @@ print(json.dumps(result, separators=(',', ':')))
         }
         Copy-Item -LiteralPath $cachedGenerate -Destination $GenHost -Force
     }
+    Copy-Item -LiteralPath $GenHost -Destination (Join-Path $ArtifactDir $GenName) -Force
+    "2. skipped V2V generation (SkipGenerate)" | Tee-Object -FilePath $LogPath -Append
 }
 
 "3+4. CorridorKey foreground unmixing and composite to ${OutputWidth}x${OutputHeight}" | Tee-Object -FilePath $LogPath -Append
@@ -254,19 +268,14 @@ $corridorScript = Join-Path $PSScriptRoot "run-corridorkey-composite.py"
     --foreground-sharpen-amount $ForegroundSharpenAmount `
     --foreground-sharpen-sigma $ForegroundSharpenSigma 2>&1 |
     Tee-Object -FilePath $LogPath -Append
-$corridorExitCode = $LASTEXITCODE
-if ($corridorExitCode -ne 0) {
-    throw "run-corridorkey-composite.py failed (exit $corridorExitCode)"
+if ($LASTEXITCODE -ne 0) {
+    throw "run-corridorkey-composite.py failed (exit $LASTEXITCODE)"
 }
 if (-not (Test-Path -LiteralPath $MasterHost -PathType Leaf)) {
     throw "Missing lossless master $MasterHost"
 }
 
-$verificationAudio = $GenerationAudio
-if ($SkipGenerate -and -not [string]::IsNullOrWhiteSpace($SourceVideoPath)) {
-    $verificationAudio = $GenHost
-}
-$audioDur = [double](& ffprobe.exe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 $verificationAudio)
+$audioDur = [double](& ffprobe.exe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 $AudioInNotebook)
 $finalDur = [double](& ffprobe.exe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 $FinalHost)
 $masterDur = [double](& ffprobe.exe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 $MasterHost)
 $finalSize = Get-VideoSize $FinalHost

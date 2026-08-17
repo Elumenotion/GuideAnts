@@ -105,33 +105,10 @@ def main() -> int:
             if not re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"]):
                 fail(f"model artifact checksum is invalid: {artifact['path']}")
 
-    workflow = json.loads((ROOT / lock["workflow"]["path"]).read_text(encoding="utf-8"))
-    if not workflow or any(
-        not isinstance(node, dict)
-        or not isinstance(node.get("class_type"), str)
-        or not isinstance(node.get("inputs"), dict)
-        for node in workflow.values()
-    ):
-        fail("workflow is not a ComfyUI API prompt graph")
-    for node_id, node in workflow.items():
-        for value in node["inputs"].values():
-            if (
-                isinstance(value, list)
-                and len(value) == 2
-                and isinstance(value[0], str)
-                and value[0] not in workflow
-            ):
-                fail(f"workflow node {node_id} links missing node {value[0]}")
-    if backend == "rocm":
-        for node in workflow.values():
-            if node.get("class_type") != "WanVideoBlockSwap":
-                continue
-            blocks = node.get("inputs", {}).get("blocks_to_swap")
-            if blocks != 0:
-                fail(
-                    "ROCm workflow must keep all transformer blocks on GPU "
-                    f"(blocks_to_swap=0, found {blocks!r})"
-                )
+    validate_workflow_graph(ROOT / lock["workflow"]["path"], backend, lock["workflow"]["id"])
+    v2v_workflow = lock.get("v2vWorkflow")
+    if v2v_workflow:
+        validate_workflow_graph(ROOT / v2v_workflow["path"], backend, v2v_workflow["id"])
 
     for source in lock["sources"]:
         if source.get("embedded", True) is False:
@@ -153,6 +130,36 @@ def main() -> int:
         return 0
 
     return validate_runtime(backend, lock)
+
+
+def validate_workflow_graph(workflow_path: Path, backend: str, label: str) -> None:
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    if not workflow or any(
+        not isinstance(node, dict)
+        or not isinstance(node.get("class_type"), str)
+        or not isinstance(node.get("inputs"), dict)
+        for node in workflow.values()
+    ):
+        fail(f"{label} workflow is not a ComfyUI API prompt graph")
+    for node_id, node in workflow.items():
+        for value in node["inputs"].values():
+            if (
+                isinstance(value, list)
+                and len(value) == 2
+                and isinstance(value[0], str)
+                and value[0] not in workflow
+            ):
+                fail(f"{label} workflow node {node_id} links missing node {value[0]}")
+    if backend == "rocm":
+        for node in workflow.values():
+            if node.get("class_type") != "WanVideoBlockSwap":
+                continue
+            blocks = node.get("inputs", {}).get("blocks_to_swap")
+            if blocks != 0:
+                fail(
+                    f"{label} ROCm workflow must keep all transformer blocks on GPU "
+                    f"(blocks_to_swap=0, found {blocks!r})"
+                )
 
 
 if __name__ == "__main__":

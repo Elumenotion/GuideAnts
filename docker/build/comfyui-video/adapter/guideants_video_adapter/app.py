@@ -48,6 +48,10 @@ def build_service() -> AdapterService:
             "IMAGE_GENERATE_WORKFLOW_PATH",
             "/opt/guideants/comfyui-video/workflows/qwen-image-v1.json",
         ),
+        v2v_workflow_path=_path_env(
+            "VIDEO_V2V_WORKFLOW_PATH",
+            "/opt/guideants/comfyui-video/workflows/infinitetalk-v2v-v1.json",
+        ),
         manifest_path=_path_env(
             "VIDEO_MODEL_MANIFEST", "/opt/guideants-video/catalog/manifest.json"
         ),

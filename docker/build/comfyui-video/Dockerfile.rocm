@@ -134,6 +134,7 @@ ENV FILE_STORAGE_ROOT=/app/ContentFiles \
     VIDEO_ADAPTER_PORT=8190 \
     VIDEO_JOBS_ROOT=/var/lib/guideants/comfyui-video/jobs \
     VIDEO_WORKFLOW_PATH=/opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1-rocm.json \
+    VIDEO_V2V_WORKFLOW_PATH=/opt/guideants/comfyui-video/workflows/infinitetalk-v2v-v1-rocm.json \
     VIDEO_MODEL_MANIFEST=/opt/guideants/comfyui-video/catalog/manifest.json \
     VIDEO_MAX_CONCURRENT_JOBS=1 \
     VIDEO_JOB_TIMEOUT_SECONDS=3600 \

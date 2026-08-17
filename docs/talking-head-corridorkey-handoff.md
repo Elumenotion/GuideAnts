@@ -30,7 +30,8 @@ The intended product is a talking-head video:
 
 1. Start with `doug-on-green.png`.
 2. Generate lip-synced motion from a WAV clip.
-3. Generate at the source size needed by InfiniteTalk, currently 416x256.
+3. Generate at the proven InfiniteTalk canvas, currently 416x256, while
+   preserving the 16:9 avatar content with green chroma padding.
 4. Replace the green screen with `office-plate.png`.
 5. Deliver a 1280x720 MP4 with the original audio duration.
 
@@ -80,6 +81,7 @@ InfiniteTalk / ComfyUI
         |
         v
 CorridorKey
+  center-crop input frames to delivery aspect
   deterministic coarse HSV alpha hint
   foreground + matte inference
         |
@@ -206,6 +208,14 @@ The script creates a temporary CorridorKey clip with:
 Input/       decoded 8-bit PNG frames
 AlphaHint/   deterministic coarse HSV/chroma subject hints
 ```
+
+The avatar preparation step preserves the source aspect while fitting it into
+the 416x256 generation canvas, filling the top and bottom padding with the
+green screen key color. Before temporary CorridorKey frames are written, those
+padding rows are center-cropped to the final delivery aspect ratio. This
+prevents the generated content from being non-uniformly stretched into the
+1280x720 composite. The foreground and matte are defensively cropped again
+before their final upscale.
 
 CorridorKey produces `FG/*.exr` and `Matte/*.exr`. The compositor then:
 
@@ -435,7 +445,7 @@ The latest hybrid scripts also passed:
    The hybrid pass improves the sharpness relationship, but it cannot recover
    detail that InfiniteTalk never generated. The next quality experiment should
    generate at 832x480 or another larger supported source size, then compare
-   cost and quality against the current hybrid pass.
+   cost and quality against the 416x256 baseline.
 
 2. **The adapter result MIME metadata still says `video/mp4` in
    `adapter/guideants_video_adapter/app.py`, and capabilities still report
