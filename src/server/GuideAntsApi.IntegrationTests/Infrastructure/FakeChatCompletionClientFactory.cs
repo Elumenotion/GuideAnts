@@ -15,6 +15,7 @@ internal enum FakeChatScenario
     ToolCallsCancelBeforeExecution,
     ToolCallThenReply,
     ThinkingStream,
+    LongThinkingStream,
     RepeatedToolCalls,
     PartialTimeoutStream,
 }
@@ -106,6 +107,7 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
             FakeChatScenario.ToolCallsCancelBeforeExecution => ToolCallsCancelBeforeExecutionAsync(onChunk),
             FakeChatScenario.ToolCallThenReply => ToolCallThenReplyAsync(onChunk, cancellationToken),
             FakeChatScenario.ThinkingStream => ThinkingStreamAsync(onChunk, cancellationToken),
+            FakeChatScenario.LongThinkingStream => LongThinkingStreamAsync(onChunk, cancellationToken),
             FakeChatScenario.RepeatedToolCalls => RepeatedToolCallsAsync(request, onChunk),
             FakeChatScenario.PartialTimeoutStream => PartialTimeoutStreamAsync(onChunk, cancellationToken),
             _ => DefaultStreamAsync(onChunk)
@@ -232,6 +234,28 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
         return new ChatCompletionResponse(
             [new ChatChoice(message, "stop")],
             CreateUsage());
+    }
+
+    private async Task<ChatCompletionResponse> LongThinkingStreamAsync(
+        Action<ChatCompletionChunk> onChunk,
+        CancellationToken cancellationToken)
+    {
+        foreach (var word in _behavior.ThinkingText.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            onChunk(new ChatCompletionChunk(
+            [
+                new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, word + " "), "thinking")
+            ]));
+            await Task.Delay(_behavior.ChunkDelayMs, cancellationToken);
+        }
+
+        onChunk(new ChatCompletionChunk(
+        [
+            new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, _behavior.FinalAssistantText), null)
+        ]));
+
+        return CreateResponse(_behavior.FinalAssistantText, finishReason: "stop");
     }
 
     private async Task<ChatCompletionResponse> PartialTimeoutStreamAsync(

@@ -168,6 +168,38 @@ export function useConversationActions(
           } as any,
           handleStreamingEvent,
           (error) => {
+            const isUserCancel = error.name === 'AbortError';
+            const isIdleTimeout = error.name === 'StreamIdleTimeoutError';
+
+            if (isUserCancel) {
+              console.log('Stream cancelled by user - finalizing partial content without force refresh');
+              dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
+              dispatch({ type: 'COMPLETE_STREAMING_TURN' });
+              dispatch({ type: 'SET_CANCELLING', payload: false });
+              setCurrentStreamController(null);
+              setActiveStreamTurnId?.(null);
+              return;
+            }
+
+            if (isIdleTimeout) {
+              console.log('Stream idle timeout - finalizing partial content without force refresh');
+              dispatch({ type: 'SET_STREAMING', payload: false });
+              dispatch({ type: 'SET_CANCELLING', payload: false });
+              dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
+              dispatch({ type: 'CONVERT_STREAMING_IDS' });
+              dispatch({ type: 'COMPLETE_STREAMING_TURN' });
+              setCurrentStreamController(null);
+              setActiveStreamTurnId?.(null);
+              const streamErrorMessage = error.message || 'The conversation stream stopped sending data.';
+              dispatch({ type: 'SET_STREAMING_ERROR', payload: streamErrorMessage });
+              showToast({
+                type: 'error',
+                title: 'Chat Request Failed',
+                message: streamErrorMessage,
+              });
+              return;
+            }
+
             const reconcile = async () => {
               if (refreshConversation) {
                 try {
@@ -177,17 +209,6 @@ export function useConversationActions(
                 }
               }
             };
-
-            if (error.name === 'AbortError' || error.message.includes('aborted')) {
-              console.log('Stream was cancelled by user - finalizing partial content');
-              void reconcile();
-              dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
-              dispatch({ type: 'COMPLETE_STREAMING_TURN' });
-              dispatch({ type: 'SET_CANCELLING', payload: false });
-              setCurrentStreamController(null);
-              setActiveStreamTurnId?.(null);
-              return;
-            }
 
             console.error('Streaming error:', error);
             void reconcile();
