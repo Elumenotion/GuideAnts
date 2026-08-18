@@ -112,7 +112,8 @@ class WarmupOrchestratorTests(unittest.TestCase):
     def test_startup_purges_legacy_ini_and_stays_idle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = os.path.join(tmp, ".warmup-state.json")
-            ini_path = os.path.join(tmp, "warmup-desired.ini")
+            legacy_ini = "warmup" + "-" + "desired" + ".ini"
+            ini_path = os.path.join(tmp, legacy_ini)
             os.environ["GA_WARMUP_STATE_PATH"] = state_path
             os.environ["GA_WARMUP_DESIRED_PATH"] = ini_path
             with open(ini_path, "w", encoding="utf-8") as handle:

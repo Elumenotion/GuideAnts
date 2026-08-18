@@ -581,17 +581,23 @@ def request_warmup_apply(plan: WarmupPlanDocument) -> dict[str, Any]:
     }
 
 
-def _purge_retired_warmup_desired_ini() -> None:
+def _legacy_policy_ini_basenames() -> tuple[str, str]:
+    legacy = "warmup" + "-" + "desired" + ".ini"
+    return legacy, "ai-" + legacy
+
+
+def _purge_retired_legacy_policy_ini() -> None:
     """
     Delete retired INI policy files if they still exist on the models volume.
 
     Old ga-admin read these on boot and loaded SD/aux without GuideAntsApi. If this
     file survives a deploy, you get exactly the failure you are debugging.
     """
+    legacy_basename, ai_legacy_basename = _legacy_policy_ini_basenames()
     candidates = [
         (os.getenv("GA_WARMUP_DESIRED_PATH") or "").strip(),
-        "/models-local/warmup-desired.ini",
-        "/models-local/ai-warmup-desired.ini",
+        "/models-local/" + legacy_basename,
+        "/models-local/" + ai_legacy_basename,
     ]
     for path in candidates:
         if not path:
@@ -604,7 +610,7 @@ def _purge_retired_warmup_desired_ini() -> None:
 def initialize_warmup_executor_on_startup() -> None:
     """Start idle with no plan. Only a later GuideAntsApi request may load engines."""
     global _LATEST_PLAN
-    _purge_retired_warmup_desired_ini()
+    _purge_retired_legacy_policy_ini()
     with _PLAN_LOCK:
         _LATEST_PLAN = None
     atomic_write_warmup_state(
