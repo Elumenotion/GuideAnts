@@ -13,8 +13,8 @@
 | Installation provenance | SQL `LocalModelInstallations` | Repository, revision, quant, artifacts, preset snapshot |
 | Durable operations | SQL `LocalModelOperations` | Survives API and llama-admin restart |
 | Per-alias llama-server argv | `router-models.ini` via llama-admin | All model switches including `parallel`; curated defaults in manifest `routerPreset` |
-| Runtime profile tool policy | SQL `RuntimeProfiles.requestFieldsWhenToolsPresent` | Chat API request fields when tools present — not llama-server spawn args |
-| Model identity | SQL `Models.runtimeConfigJson` | Minimal JSON: `routerModelId` + `runtimeProfileId` only |
+| Tool policy + thinking control at chat | SQL `Models` chat-behavior columns | `RequestFieldsWhenToolsPresentJson`, `ThinkingControlJson`, etc. — see [model-chat-behavior-contract.md](../model-chat-behavior-contract.md) |
+| Model identity | SQL `Models.runtimeConfigJson` | Llama-cpp: `{"routerModelId":"<alias>"}` only |
 
 ## Curated install lifecycle
 

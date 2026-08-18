@@ -49,13 +49,13 @@ public sealed class ThreadRunTests
     }
 
     [TestMethod]
-    public void IsFatalChatRunException_RecognizesWrappedLlamaInferenceTimeout()
+    public void IsFatalChatRunException_DoesNotTerminateConversationForLlamaInferenceTimeout()
     {
         var timeout = new LlamaInferenceTimeoutException("qwen3.5-27b", 600);
         var nestedFailure = new ChatConversationException(timeout, chatRunOutput: null);
         var toolInvocationFailure = new TargetInvocationException(nestedFailure);
 
-        Invoke<bool>("IsFatalChatRunException", toolInvocationFailure).Should().BeTrue();
+        Invoke<bool>("IsFatalChatRunException", toolInvocationFailure).Should().BeFalse();
     }
 
     [TestMethod]

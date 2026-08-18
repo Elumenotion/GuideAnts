@@ -724,24 +724,24 @@ describe('FolderTree extended coverage', () => {
   });
 
   describe('copy path', () => {
-    it('copies a file path to the clipboard as root-relative', async () => {
+    it('copies a file path to the clipboard as cwd-relative', async () => {
       const { user, writeText } = setupClipboard();
       renderTree();
 
       fireEvent.contextMenu(screen.getByText('notes.txt'));
       await user.click(await findPortalButton('Copy path'));
 
-      expect(writeText).toHaveBeenCalledWith('/notes.txt');
+      expect(writeText).toHaveBeenCalledWith('../notes.txt');
     });
 
-    it('copies a folder path to the clipboard as root-relative', async () => {
+    it('copies a folder path to the clipboard as cwd-relative', async () => {
       const { user, writeText } = setupClipboard();
       renderTree();
 
       fireEvent.contextMenu(screen.getByText('Archive'));
       await user.click(await findPortalButton('Copy path'));
 
-      expect(writeText).toHaveBeenCalledWith('/Archive');
+      expect(writeText).toHaveBeenCalledWith('../Archive');
     });
 
     it('does not show Copy path for the root folder', () => {
@@ -758,7 +758,7 @@ describe('FolderTree extended coverage', () => {
       fireEvent.contextMenu(screen.getByText('notes.txt'));
       await user.click(await findPortalButton(/Copy \d+ Paths/));
 
-      expect(writeText).toHaveBeenCalledWith('/Archive\n/guide.md\n/notes.txt');
+      expect(writeText).toHaveBeenCalledWith('../Archive\n../guide.md\n../notes.txt');
     });
   });
 
@@ -786,7 +786,7 @@ describe('FolderTree extended coverage', () => {
       fireEvent.contextMenu(screen.getByText('Archive'));
       await user.click(await findPortalButton(/Copy \d+ Paths/));
 
-      expect(writeText).toHaveBeenCalledWith('/Archive\n/guide.md');
+      expect(writeText).toHaveBeenCalledWith('../Archive\n../guide.md');
     });
 
     it('right-clicking a folder outside the current selection collapses to just that folder', () => {

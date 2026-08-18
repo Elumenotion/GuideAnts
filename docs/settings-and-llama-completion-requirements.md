@@ -1,6 +1,6 @@
 # Settings + Llama Completion - Requirements
 
-Last updated: 2026-05-18
+Last updated: 2026-08-10
 
 This document is the normative requirements baseline for Settings, chat/non-chat routing,
 local llama runtime integration, and fail-fast behavior.
@@ -8,6 +8,7 @@ local llama runtime integration, and fail-fast behavior.
 Source-of-truth set:
 - [setup-guide.md](setup-guide.md)
 - [settings-architecture.md](settings-architecture.md)
+- [model-chat-behavior-contract.md](model-chat-behavior-contract.md)
 
 ## Glossary
 
@@ -73,13 +74,13 @@ Source-of-truth set:
 
 | ID | Requirement |
 |----|-------------|
-| R-6.1 | `Models & Runtime` MUST include `Catalog`, `Runtime Profiles`, and `Local Llama Runtime` workflows. |
+| R-6.1 | `Models & Runtime` MUST include `Catalog` and `Local Llama Runtime` workflows. Chat behavior is edited on catalog model rows (see [model-chat-behavior-contract.md](model-chat-behavior-contract.md)). |
 | R-6.2 | Catalog create flow MUST remain provider-driven wizard UX. |
 | R-6.3 | Catalog edit MUST remain provider-scoped and safe for existing rows. |
 | R-6.4 | Catalog rows MUST surface readiness/routability signals. |
 | R-6.5 | Provider coverage MUST be status-qualified: Stable (operator-supported) includes `openai-chat`, `openai-responses`, `azure-openai-chat`, `azure-openai-responses`, `anthropic`, `llama-cpp`, `google-gemini-chat`, `openrouter-chat`; Experimental/Hidden includes `hf-inference-chat`; roadmap providers are documented separately and are not shipped. |
-| R-6.6 | Runtime profiles MUST expose usage-aware lifecycle (including delete guard when referenced). |
-| R-6.7 | Runtime profile templates (`qwen3_5`, `qwen3_6`, `gemma4`) MUST remain available. |
+| R-6.6 | Runtime profile CRUD API MAY remain for legacy/install paths; profiles are not operator Settings UX and are not chat runtime authority. |
+| R-6.7 | Bootstrap install templates in `Resources/bootstrap/runtime-profiles/` MUST remain idempotently seedable for curated llama install copy. |
 | R-6.8 | Local Llama Runtime surface MUST remain runtime-operations focused. |
 | R-6.9 | Unified add endpoint behavior for model creation MUST remain consistent with Settings wizard flows. |
 | R-6.10 | Runtime inventory MUST expose alias state, artifacts, linkage, and load/unload actions. |
@@ -102,7 +103,7 @@ Source-of-truth set:
 
 | ID | Requirement |
 |----|-------------|
-| R-8.1 | Runtime profile onboarding templates must remain operator-accessible and idempotent. |
+| R-8.1 | Bootstrap runtime-profile JSON files MUST seed install templates idempotently (`RuntimeProfileSeeder`); inference reads model-row chat behavior, not profiles. |
 | R-8.2 | Catalog onboarding helpers for local llama models must remain idempotent. |
 | R-8.3 | HF-driven onboarding must produce registered inventory-ready aliases on success. |
 | R-8.4 | Alias load transitions must remain observable in UI and API status. |

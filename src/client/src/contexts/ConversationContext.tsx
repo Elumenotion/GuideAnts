@@ -54,6 +54,12 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
   });
 
   const [currentStreamController, setCurrentStreamController] = React.useState<AbortController | null>(null);
+  const [activeStreamTurnId, setActiveStreamTurnId] = React.useState<string | null>(null);
+  const activeStreamTurnIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    activeStreamTurnIdRef.current = activeStreamTurnId;
+  }, [activeStreamTurnId]);
+  const getActiveStreamTurnId = React.useCallback(() => activeStreamTurnIdRef.current, []);
   const templateStartersRef = React.useRef<string[]>([]);
   const inflightRuntimeChecksRef = React.useRef<Set<string>>(new Set());
   const runtimeReadyCacheRef = React.useRef<Set<string>>(getNotebookRuntimeReadyCache(notebookId));
@@ -84,8 +90,8 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
   }, [notebookAssistants, state.assistants]);
 
   // --- Refresh ---
-  const refresh = useCallback(async () => {
-    if (isStreamingRef.current) {
+  const refresh = useCallback(async (options?: { force?: boolean }) => {
+    if (!options?.force && isStreamingRef.current) {
       return;
     }
 
@@ -136,6 +142,11 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
         }
 
         dispatch({ type: 'SET_MESSAGES', payload: convo.messages ?? [] });
+        if (convo.activeTurn?.turnId) {
+          setActiveStreamTurnId(convo.activeTurn.turnId);
+        } else if (convo.activeTurn?.status && convo.activeTurn.status !== 'streaming') {
+          setActiveStreamTurnId(null);
+        }
 
         if (convo.assistantName) {
           dispatch({ type: 'SET_ASSISTANT', payload: convo.assistantName });
@@ -336,11 +347,6 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
   }, []);
 
   // --- Custom hooks for streaming events and actions ---
-  const handleStreamingEvent = useStreamingEventHandler(dispatch, state, {
-    loadNotebookFiles, showToast,
-    projectId, notebookId, conversationId, setCurrentStreamController,
-  });
-
   const assistants = useMemo(() => state.assistants ?? [], [state.assistants]);
   const conversationStarters = useMemo(() => state.conversationStarters ?? [], [state.conversationStarters]);
   const pendingAttachments = useMemo(() => state.pendingAttachments ?? [], [state.pendingAttachments]);
@@ -355,11 +361,19 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     return map;
   }, [assistants]);
 
+  const handleStreamingEvent = useStreamingEventHandler(dispatch, state, {
+    loadNotebookFiles, showToast,
+    projectId, notebookId, conversationId, setCurrentStreamController,
+    setActiveStreamTurnId,
+    refreshConversation: refresh,
+  });
+
   const actions = useConversationActions(dispatch, state, {
     projectId, notebookId, conversationId,
     handleStreamingEvent, showToast, loadNotebookFiles,
     currentStreamController, setCurrentStreamController,
     inflightRuntimeChecksRef, runtimeReadyCacheRef, assistantByName,
+    activeStreamTurnId, setActiveStreamTurnId, getActiveStreamTurnId, refreshConversation: refresh,
   });
 
   const currentAssistant = useMemo(() => {

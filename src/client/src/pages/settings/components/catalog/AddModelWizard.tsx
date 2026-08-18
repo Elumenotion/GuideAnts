@@ -36,6 +36,7 @@ const ADD_MODEL_STEPS = [
   { id: 'resolvingFiles', label: 'Resolving files', help: 'Looking up repository artifacts.' },
   { id: 'downloading', label: 'Downloading', help: 'Downloading GGUF and mmproj bytes.' },
   { id: 'registeringAlias', label: 'Registering alias', help: 'Writing router alias mapping.' },
+  { id: 'catalogFinalization', label: 'Finalizing catalog', help: 'Creating the Settings catalog row.' },
   { id: 'completed', label: 'Completed', help: 'Model is ready for runtime operations.' },
 ] as const;
 
@@ -177,7 +178,9 @@ function AddOperationProgress({
         return (
           <div key={item.id} className="space-y-1 text-sm">
             <div className="flex items-center gap-2">
-            {active && currentStatus !== 'completed' ? <FaSpinner className="animate-spin text-blue-600" /> : null}
+            {active && currentStatus !== 'completed' && currentStatus !== 'failed' && currentStatus !== 'error' ? (
+              <FaSpinner className="animate-spin text-blue-600" />
+            ) : null}
             <span
               className={
                 reached
@@ -295,9 +298,9 @@ export function AddModelWizard({
 
   const handleOperationPollFailureThreshold = useCallback(() => {
     setOperationError({
-      code: 'INSTALL_STEP_FAILED',
+      code: 'STATUS_POLL_FAILED',
       step: 'downloading',
-      message: 'Failed to poll operation status.',
+      message: 'Lost contact with the server while checking progress. The download may still be running — wait or refresh Settings.',
     });
   }, []);
 
@@ -602,7 +605,7 @@ export function AddModelWizard({
                   routerModelId: meta.routerModelId,
                   catalogModelId: meta.catalogModelId,
                   kind: 'add',
-                  pollRoute: 'downloads',
+                  pollRoute: 'operations',
                 });
               }}
               onCuratedCompleted={(result) => {

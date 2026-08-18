@@ -10,6 +10,8 @@ interface StreamingEventDeps {
   notebookId: string;
   conversationId: string;
   setCurrentStreamController: (c: AbortController | null) => void;
+  setActiveStreamTurnId?: (turnId: string | null) => void;
+  refreshConversation?: (options?: { force?: boolean }) => Promise<void>;
 }
 
 export function useStreamingEventHandler(
@@ -118,6 +120,19 @@ export function useStreamingEventHandler(
           } catch (e) {
             // Best-effort
           }
+        }
+        break;
+
+      case 'pending_client_tool':
+        dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
+        dispatch({ type: 'COMPLETE_STREAMING_TURN' });
+        dispatch({ type: 'SET_STREAMING', payload: false });
+        dispatch({ type: 'SET_CANCELLING', payload: false });
+        break;
+
+      case 'turn_created':
+        if (event.data?.turnId) {
+          deps.setActiveStreamTurnId?.(event.data.turnId);
         }
         break;
 

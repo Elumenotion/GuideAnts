@@ -86,7 +86,8 @@ class ExactDownloadTests(unittest.TestCase):
                 digest=None,
             )
         )
-        self.assertFalse(
+        # operationId is audit-only; identity match ignores it across retries.
+        self.assertTrue(
             resume_metadata_matches(
                 meta_path,
                 operation_id="op-2",
@@ -97,9 +98,20 @@ class ExactDownloadTests(unittest.TestCase):
                 digest=None,
             )
         )
+        self.assertFalse(
+            resume_metadata_matches(
+                meta_path,
+                operation_id="op-1",
+                repository="org/repo",
+                resolved_revision="def",
+                repository_path="a.gguf",
+                expected_size=10,
+                digest=None,
+            )
+        )
 
     def test_staging_activation_is_atomic(self) -> None:
-        _, model_specs, _ = build_artifact_specs(
+        _, model_specs, _, _ = build_artifact_specs(
             model_files=["a.gguf"],
             mmproj_files=[],
             store_root=self._root,
@@ -124,7 +136,7 @@ class ExactDownloadTests(unittest.TestCase):
         self.assertEqual(os.path.getsize(final_path), 4)
 
     def test_activate_skips_already_installed_artifacts(self) -> None:
-        _, model_specs, mmproj_specs = build_artifact_specs(
+        _, model_specs, mmproj_specs, _ = build_artifact_specs(
             model_files=["model.gguf"],
             mmproj_files=["mmproj-F16.gguf"],
             store_root=self._root,
@@ -156,6 +168,34 @@ class ExactDownloadTests(unittest.TestCase):
         self.assertTrue(artifact_is_installed(model_specs[0]))
         self.assertTrue(artifact_is_installed(mmproj_specs[0]))
 
+    def test_companion_artifacts_download_with_model(self) -> None:
+        _, model_specs, _, companion_specs = build_artifact_specs(
+            model_files=["model.gguf"],
+            mmproj_files=[],
+            companion_files=["dflash-kquant.gguf"],
+            store_root=self._root,
+            target_subdir="muse-glimmer",
+            artifact_metadata=[
+                {"path": "model.gguf", "size": 6},
+                {"path": "dflash-kquant.gguf", "size": 4},
+            ],
+        )
+        target_dir = os.path.join(self._root, "muse-glimmer")
+        os.makedirs(target_dir, exist_ok=True)
+        staging_dir = os.path.join(self._root, ".staging", "op-companion")
+        os.makedirs(staging_dir, exist_ok=True)
+        staged = os.path.join(staging_dir, "dflash-kquant.gguf")
+        with open(staged, "wb") as handle:
+            handle.write(b"dfsh")
+
+        activated = activate_staged_files(
+            staging_dir=staging_dir,
+            target_dir=target_dir,
+            store_root=self._root,
+            specs=companion_specs,
+        )
+        self.assertIn(os.path.join(target_dir, "dflash-kquant.gguf"), activated)
+
     def test_journal_survives_restart(self) -> None:
         journal_root = os.path.join(self._root, ".llama-operations")
         store = OperationJournalStore(journal_root)
@@ -186,6 +226,7 @@ class ExactDownloadTests(unittest.TestCase):
             resolved_revision=fixture["resolvedRevision"],
             model_files=fixture["modelFiles"],
             mmproj_files=fixture["mmprojFiles"],
+            companion_files=fixture.get("companionFiles", []),
             alias=fixture["routerModelId"],
             target_directory=fixture.get("targetDirectory", fixture["routerModelId"]),
             preset=fixture["routerPreset"],
@@ -203,7 +244,7 @@ class ExactDownloadTests(unittest.TestCase):
                 handle.write(b"1234")
 
         download_mock.side_effect = write_file
-        _, model_specs, _ = build_artifact_specs(
+        _, model_specs, _, _ = build_artifact_specs(
             model_files=["a.gguf"],
             mmproj_files=[],
             store_root=self._root,
@@ -223,7 +264,7 @@ class ExactDownloadTests(unittest.TestCase):
 
     @mock.patch("guideants_hf.exact_download.download_hf_file")
     def test_stage_download_skips_when_already_installed(self, download_mock: mock.Mock) -> None:
-        _, model_specs, _ = build_artifact_specs(
+        _, model_specs, _, _ = build_artifact_specs(
             model_files=["a.gguf"],
             mmproj_files=[],
             store_root=self._root,
@@ -246,6 +287,40 @@ class ExactDownloadTests(unittest.TestCase):
         )
         self.assertEqual(result, model_specs[0].destination_abs)
         download_mock.assert_not_called()
+
+    def test_truncated_download_preserves_tmp_and_raises(self) -> None:
+        from guideants_hf.transport import IncompleteDownloadError
+
+        _, model_specs, _, _ = build_artifact_specs(
+            model_files=["a.gguf"],
+            mmproj_files=[],
+            store_root=self._root,
+            target_subdir="alias",
+            artifact_metadata=[{"path": "a.gguf", "size": 10}],
+        )
+        staging_dir = os.path.join(self._root, ".staging", "alias")
+        temp_path = os.path.join(staging_dir, "a.gguf.tmp")
+
+        def fail_after_partial(*_args, **kwargs) -> None:
+            destination = kwargs.get("destination_path") if "destination_path" in kwargs else _args[2]
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            with open(destination + ".tmp", "wb") as handle:
+                handle.write(b"short")
+            raise IncompleteDownloadError("truncated", received=5, expected=10)
+
+        with mock.patch("guideants_hf.exact_download.download_hf_file", side_effect=fail_after_partial):
+            with self.assertRaises(ExactDownloadError) as ctx:
+                stage_download_file(
+                    repository="org/repo",
+                    resolved_revision="rev",
+                    spec=model_specs[0],
+                    staging_dir=staging_dir,
+                    token=None,
+                    operation_id="op-trunc",
+                )
+
+        self.assertEqual("DOWNLOAD_TRUNCATED", ctx.exception.code)
+        self.assertTrue(os.path.isfile(temp_path))
 
 
 if __name__ == "__main__":

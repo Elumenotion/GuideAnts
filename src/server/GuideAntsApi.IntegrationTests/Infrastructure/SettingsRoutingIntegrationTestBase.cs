@@ -148,7 +148,6 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
         await db.Database.ExecuteSqlRawAsync("DELETE FROM AgentInvocations;");
         await db.Database.ExecuteSqlRawAsync("DELETE FROM Assistants;");
         await db.Database.ExecuteSqlRawAsync("DELETE FROM Models;");
-        await db.Database.ExecuteSqlRawAsync("DELETE FROM RuntimeProfiles;");
     }
 
     /// <summary>

@@ -21,10 +21,16 @@ public sealed record CuratedImmutableOperationInput(
     string QuantLabel,
     IReadOnlyList<string> ModelFiles,
     IReadOnlyList<string> MmprojFiles,
+    IReadOnlyList<string> CompanionFiles,
     string RouterModelId,
-    string RuntimeProfileId,
     string TargetDirectory,
     IReadOnlyDictionary<string, string> RouterPreset,
+    string SamplingParametersJson,
+    string? ReasoningChoicesJson,
+    string ThinkingControlJson,
+    string RequestFieldsWhenToolsPresentJson,
+    bool CombineSystemAndDeveloperMessages,
+    string? ThoughtBlockPattern,
     IReadOnlyList<CuratedArtifactMetadataInput>? ArtifactMetadata = null)
 {
     private static readonly JsonSerializerOptions CanonicalJsonOptions = new()
@@ -57,6 +63,7 @@ public sealed record CuratedImmutableOperationInput(
             ResolvedRevision: ResolvedRevision,
             ModelFiles: ModelFiles,
             MmprojFiles: MmprojFiles,
+            CompanionFiles: CompanionFiles,
             Alias: RouterModelId,
             TargetDirectory: TargetDirectory,
             Preset: RouterPreset,

@@ -387,15 +387,11 @@ public sealed class ApplicationSettingsServiceDeepTests
                 ["tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
             }
         });
-
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-
         return new ApplicationSettingsService(
             db,
             new SettingsSectionRegistry(),
             environment.Object,
             configuration,
-            settingsSecrets.Object,
-            runtimeProfileResolver.Object);
+            settingsSecrets.Object);
     }
 }

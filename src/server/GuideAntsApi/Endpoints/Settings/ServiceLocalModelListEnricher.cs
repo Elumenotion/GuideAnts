@@ -56,7 +56,7 @@ internal static class ServiceLocalModelListEnricher
                     statusCode: StatusCodes.Status502BadGateway);
             }
 
-            var selectedBundleId = await ConfiguredLocalServiceSelectionSync.TryReadPersistedLocalModelRefAsync(
+            var selectedBundleId = await LocalServiceModeSelectionReader.TryReadLocalModelRefAsync(
                     settings,
                     RoutedServiceNames.ImageGeneration,
                     cancellationToken)

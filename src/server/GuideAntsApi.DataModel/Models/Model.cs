@@ -43,9 +43,10 @@ namespace GuideAntsApi.DataModel.Models
         public string? ReasoningChoicesJson { get; set; }
 
         /// <summary>
-        /// Optional JSON string containing runtime configuration for this model.
-        /// For llama-cpp: { routerModelId }.
-        /// Non-local providers do not persist runtime config; parameter surfaces live on the model row.
+        /// Optional JSON string containing provider runtime configuration.
+        /// Llama-cpp: { routerModelId } only. Other providers: null or provider-specific JSON
+        /// without runtimeProfileId. Chat behavior (sampling, reasoning, thinking) lives on
+        /// this row's JSON columns — see docs/model-chat-behavior-contract.md.
         /// </summary>
         public string? RuntimeConfigJson { get; set; }
 
@@ -64,12 +65,14 @@ namespace GuideAntsApi.DataModel.Models
 
         /// <summary>
         /// JSON dictionary of sampling parameter definitions keyed by parameter name.
+        /// Authority for guide/assistant parameter surfaces and request defaults (all providers).
         /// </summary>
         [Required]
         public string SamplingParametersJson { get; set; } = "{}";
 
         /// <summary>
         /// JSON object mapping reasoning choices to request actions.
+        /// Used at inference for llama-cpp, hf-inference-chat, and openrouter-chat when configured.
         /// </summary>
         [Required]
         public string ThinkingControlJson { get; set; } = "{}";

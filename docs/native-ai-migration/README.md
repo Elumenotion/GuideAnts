@@ -32,7 +32,9 @@ Three connected layers that must stay in sync:
 
 2. **Settings UI** — Model pickers and configuration controls are **built from manifest metadata**, not hardcoded lists. When the user selects Chatterbox they get voice-pack presets; when they select Qwen3 CustomVoice they get built-in speaker ids; when they select VoiceDesign they get an instruct field.
 
-3. **Runtime** — Each service loads and infers using the **active catalog entry** the user selected (`asr_service.py`, `tts_service.py`, `emb_service.py`, …). .NET forwards inference with minimal payloads; it does not embed parallel product knowledge.
+3. **Runtime** — Each service loads and infers using the catalog entry stored on
+   **ServiceModes** (the operator/API selection), not engine disk markers.
+   .NET forwards inference with minimal payloads; it does not embed parallel product knowledge.
 
 **Program is done** when every row in [INVENTORY.md](./INVENTORY.md) passes the matrix in [STATE.md](./STATE.md): manifest → download → UI controls → load → inference.
 

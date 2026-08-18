@@ -49,14 +49,14 @@ public class LocalModelOnboardingValidatorDeep2Tests
     }
 
     [TestMethod]
-    public async Task ValidateAsync_MissingRuntimeProfile_ThrowsRuntimeProfileNotFound()
+    public async Task ValidateAsync_MissingChatBehavior_ThrowsInstallStepFailed()
     {
         var validator = CreateValidator();
-        var request = CreateLocalRequest(LocalModelInstallSources.HuggingFace);
-        var command = LocalModelOnboardingCommand.FromAddModelRequest(request) with { RuntimeProfileId = "" };
+        var request = CreateLocalRequest(LocalModelInstallSources.HuggingFace) with { ProviderConfig = null };
 
-        var ex = await Invoking(validator, request, command).Should().ThrowAsync<AddModelException>();
-        ex.Which.Code.Should().Be("RUNTIME_PROFILE_NOT_FOUND");
+        var ex = await Invoking(validator, request, LocalModelOnboardingCommand.FromAddModelRequest(request))
+            .Should().ThrowAsync<AddModelException>();
+        ex.Which.Message.Should().Contain("chat behavior");
     }
 
     [TestMethod]
@@ -298,7 +298,6 @@ public class LocalModelOnboardingValidatorDeep2Tests
             configuration,
             settingsService.Object,
             chatTargetValidator.Object,
-            new Mock<IRuntimeProfileResolver>(MockBehavior.Loose).Object,
             inventoryService.Object,
             tokenResolver.Object,
             curatedResolver.Object,
@@ -324,7 +323,6 @@ public class LocalModelOnboardingValidatorDeep2Tests
             Install: new AddModelInstallDto(
                 Source: source,
                 RouterModelId: alias,
-                RuntimeProfileId: "qwen3_6",
                 HuggingFace: string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
                     ? new AddModelInstallHuggingFaceDto(
                         Repository: "unsloth/Qwen3.6-9B-GGUF",

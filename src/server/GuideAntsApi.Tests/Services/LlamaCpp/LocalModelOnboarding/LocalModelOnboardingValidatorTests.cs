@@ -136,7 +136,6 @@ public class LocalModelOnboardingValidatorTests
             configuration,
             settingsService.Object,
             chatTargetValidator.Object,
-            new Mock<IRuntimeProfileResolver>(MockBehavior.Loose).Object,
             inventoryService.Object,
             tokenResolver.Object,
             curatedResolver.Object,
@@ -162,9 +161,6 @@ public class LocalModelOnboardingValidatorTests
             Install: new AddModelInstallDto(
                 Source: source,
                 RouterModelId: alias,
-                RuntimeProfileId: string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
-                    ? "qwen3_6"
-                    : null,
                 HuggingFace: string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
                     ? new AddModelInstallHuggingFaceDto(
                         Repository: "unsloth/Qwen3.6-9B-GGUF",

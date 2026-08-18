@@ -114,7 +114,6 @@ export interface ActiveModelOperationState {
 
 export interface CanonicalLocalRuntimeConfig {
   routerModelId: string;
-  runtimeProfileId?: string;
   loadParams?: Record<string, unknown>;
   parallelToolCalls?: boolean;
   routerContextSize?: number;

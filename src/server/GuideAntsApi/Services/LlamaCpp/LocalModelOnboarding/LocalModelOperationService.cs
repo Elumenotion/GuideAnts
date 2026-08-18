@@ -34,20 +34,17 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
     private readonly ApplicationDbContext _db;
     private readonly ILlamaRuntimeAdminClient _adminClient;
     private readonly IHuggingFaceTokenResolver _tokenResolver;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly ILogger<LocalModelOperationService> _logger;
 
     public LocalModelOperationService(
         ApplicationDbContext db,
         ILlamaRuntimeAdminClient adminClient,
         IHuggingFaceTokenResolver tokenResolver,
-        IRuntimeProfileResolver runtimeProfileResolver,
         ILogger<LocalModelOperationService> logger)
     {
         _db = db;
         _adminClient = adminClient;
         _tokenResolver = tokenResolver;
-        _runtimeProfileResolver = runtimeProfileResolver;
         _logger = logger;
     }
 
@@ -380,6 +377,7 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
             installation.TargetDirectory = immutableInput.TargetDirectory;
             installation.ModelArtifactsJson = BuildModelArtifactsJson(immutableInput);
             installation.ProjectorArtifactsJson = BuildProjectorArtifactsJson(immutableInput);
+            installation.CompanionArtifactsJson = BuildCompanionArtifactsJson(immutableInput);
             installation.RouterPresetSnapshotJson = JsonSerializer.Serialize(immutableInput.RouterPreset);
             installation.UpdatedUtc = now;
         }
@@ -405,12 +403,6 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
             var runtimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
                 new LocalRuntimeConfiguration(immutableInput.RouterModelId));
 
-            var profile = await _runtimeProfileResolver
-                .ResolveAsync(immutableInput.RuntimeProfileId, cancellationToken)
-                .ConfigureAwait(false);
-            var reasoningChoicesJson = ModelChatBehavior.DeriveReasoningChoicesJson(
-                JsonSerializer.Serialize(profile.ThinkingControl));
-
             var now = DateTime.UtcNow;
             var model = new Model
             {
@@ -418,13 +410,13 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
                 DisplayName = immutableInput.CatalogDisplayName,
                 Provider = "llama-cpp",
                 Description = immutableInput.CatalogDescription,
-                ReasoningChoicesJson = reasoningChoicesJson,
+                ReasoningChoicesJson = immutableInput.ReasoningChoicesJson,
                 RuntimeConfigJson = runtimeConfigJson,
-                CombineSystemAndDeveloperMessages = profile.CombineSystemAndDeveloperMessages,
-                ThoughtBlockPattern = profile.ThoughtBlockPattern,
-                SamplingParametersJson = JsonSerializer.Serialize(profile.SamplingParameters),
-                ThinkingControlJson = JsonSerializer.Serialize(profile.ThinkingControl),
-                RequestFieldsWhenToolsPresentJson = JsonSerializer.Serialize(profile.RequestFieldsWhenToolsPresent),
+                CombineSystemAndDeveloperMessages = immutableInput.CombineSystemAndDeveloperMessages,
+                ThoughtBlockPattern = immutableInput.ThoughtBlockPattern,
+                SamplingParametersJson = immutableInput.SamplingParametersJson,
+                ThinkingControlJson = immutableInput.ThinkingControlJson,
+                RequestFieldsWhenToolsPresentJson = immutableInput.RequestFieldsWhenToolsPresentJson,
                 IsActive = immutableInput.CatalogIsActive,
                 DisplayOrder = immutableInput.CatalogDisplayOrder,
                 Created = now,
@@ -447,6 +439,7 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
                 TargetDirectory = immutableInput.TargetDirectory,
                 ModelArtifactsJson = BuildModelArtifactsJson(immutableInput),
                 ProjectorArtifactsJson = BuildProjectorArtifactsJson(immutableInput),
+                CompanionArtifactsJson = BuildCompanionArtifactsJson(immutableInput),
                 RouterPresetSnapshotJson = JsonSerializer.Serialize(immutableInput.RouterPreset),
                 CreatedUtc = now,
                 UpdatedUtc = now,
@@ -537,6 +530,24 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
         }
 
         var artifacts = input.MmprojFiles.Select(path => new JsonObject
+        {
+            ["repositoryPath"] = path,
+            ["installedRelativePath"] = $"{input.TargetDirectory}/{Path.GetFileName(path)}",
+            ["byteSize"] = input.ArtifactMetadata?
+                .FirstOrDefault(a => string.Equals(a.Path, path, StringComparison.Ordinal))?.Size,
+        }).ToList<JsonNode?>();
+
+        return new JsonArray(artifacts.ToArray()).ToJsonString();
+    }
+
+    private static string BuildCompanionArtifactsJson(CuratedImmutableOperationInput input)
+    {
+        if (input.CompanionFiles.Count == 0)
+        {
+            return "[]";
+        }
+
+        var artifacts = input.CompanionFiles.Select(path => new JsonObject
         {
             ["repositoryPath"] = path,
             ["installedRelativePath"] = $"{input.TargetDirectory}/{Path.GetFileName(path)}",

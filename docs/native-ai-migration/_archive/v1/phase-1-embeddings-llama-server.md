@@ -79,9 +79,9 @@ covers embeddings**, see [`model-catalog-and-downloads.md`](./model-catalog-and-
   .NET), `POST /emb/admin/unload`, `GET /emb/admin/models`,
   `POST /emb/admin/models/download`, `GET /emb/admin/models/{operation_id}`,
   `POST /emb/admin/models/{operation_id}/cancel`, `DELETE /emb/admin/models/{model_ref}`.
-- Entrypoint readiness monitor (`entrypoint.sh:439-446`) polls `/ready` on
-  `GA_EMB_PORT` when `GA_EMB_AUTO_LOAD_ON_STARTUP=1` and
-  `GA_EMB_WAIT_FOR_READY_ON_STARTUP=1`.
+- Historical note: this phase used an entrypoint readiness/autoload mechanism.
+  It has been removed; current engines start unloaded and accept only an
+  explicit GuideAntsApi lifecycle plan.
 - Container `HEALTHCHECK` includes `curl http://localhost/emb/health`.
 
 **Purpose semantics (prefix CHANGES with the new default):** today `emb_service.py:388-399`
@@ -110,7 +110,7 @@ silently degrades retrieval.
 
 | Var | Disposition |
 |-----|-------------|
-| `GA_EMB_HOST/PORT/MODEL_DIR/DEFAULT_MODEL_PATH/AUTO_LOAD_ON_STARTUP/WAIT_FOR_READY_ON_STARTUP/READY_TIMEOUT_SECONDS/WARMUP_ON_LOAD` | Kept, same meaning. |
+| Embeddings runtime environment | Historical values only. Startup lifecycle flags were removed; see `docs/local-ai-lifecycle/ARCHITECTURE.md`. |
 | `GA_EMB_DEVICE` (`cpu`/`cuda`/`cuda-multi`/`rocm`/`mps`) | Repurposed: maps to child launch config (`--n-gpu-layers`, device selection). `cuda-multi` handling per §7. |
 | `GA_EMB_FIX_MISTRAL_REGEX` | Retired (sentence-transformers tokenizer workaround; meaningless under llama.cpp). Fail loudly if set, or log-and-ignore with a deprecation warning — pick one, do not silently honor. |
 
@@ -282,9 +282,8 @@ The 0.6B model is small; CPU serving may be acceptable on weak-GPU hosts — the
    names, incl. `dimensions` (= the active model's dim, **1024** for the default
    Qwen3-Embedding-0.6B) and `modelRef`; and that .NET consumers still receive **1536**-wide
    vectors after normalization (`ProviderRoutedEmbeddingService.cs:69`).
-3. `LocalAiStartupWarmupService` end-to-end: container boot with
-   `GA_EMB_AUTO_LOAD_ON_STARTUP=1`, `GA_EMB_WAIT_FOR_READY_ON_STARTUP=1` reaches ready
-   within timeout on all four flavors.
+3. Superseded acceptance step: current readiness requires an explicit API-owned
+   lifecycle plan selecting the embeddings model.
 4. Settings UI: model list/download/load/unload round-trip via
    `/{serviceId}/local-models*` endpoints (serviceId=`Embeddings`).
 5. **Curated catalog + constrained download (D9):** the embeddings picker offers **only**

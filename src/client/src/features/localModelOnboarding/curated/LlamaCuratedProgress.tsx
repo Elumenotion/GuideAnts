@@ -7,6 +7,7 @@ const PROGRESS_STEPS = [
   { id: 'resolvingFiles', label: 'Resolving files' },
   { id: 'downloading', label: 'Downloading' },
   { id: 'registeringAlias', label: 'Registering alias' },
+  { id: 'catalogFinalization', label: 'Finalizing catalog' },
   { id: 'completed', label: 'Completed' },
 ] as const;
 

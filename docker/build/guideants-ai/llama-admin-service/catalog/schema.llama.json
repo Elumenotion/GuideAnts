@@ -57,7 +57,7 @@
         "revision": { "type": "string" }
       }
     },
-    "mmprojRef": {
+    "repositoryArtifactRef": {
       "type": "object",
       "required": ["path"],
       "additionalProperties": false,
@@ -67,25 +67,43 @@
         "revision": { "type": "string" }
       }
     },
+    "mmprojRef": {
+      "$ref": "#/$defs/repositoryArtifactRef"
+    },
     "routerPreset": {
       "type": "object",
       "minProperties": 1,
       "additionalProperties": { "type": "string" }
+    },
+    "chatBehavior": {
+      "type": "object",
+      "required": [
+        "combineSystemAndDeveloperMessages",
+        "samplingParametersJson",
+        "thinkingControlJson"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "combineSystemAndDeveloperMessages": { "type": "boolean" },
+        "thoughtBlockPattern": { "type": "string", "minLength": 1 },
+        "samplingParametersJson": { "type": "object" },
+        "thinkingControlJson": { "type": "object" },
+        "requestFieldsWhenToolsPresent": { "type": "object" }
+      }
     },
     "defaults": {
       "type": "object",
       "required": [
         "catalogModelId",
         "routerModelId",
-        "runtimeProfileId",
         "targetDirectory",
-        "routerPreset"
+        "routerPreset",
+        "chatBehavior"
       ],
       "additionalProperties": false,
       "properties": {
         "catalogModelId": { "type": "string", "minLength": 1 },
         "routerModelId": { "type": "string", "minLength": 1 },
-        "runtimeProfileId": { "type": "string", "minLength": 1 },
         "targetDirectory": { "type": "string", "minLength": 1 },
         "mmproj": {
           "oneOf": [
@@ -93,7 +111,12 @@
             { "type": "null" }
           ]
         },
-        "routerPreset": { "$ref": "#/$defs/routerPreset" }
+        "companionArtifacts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/repositoryArtifactRef" }
+        },
+        "routerPreset": { "$ref": "#/$defs/routerPreset" },
+        "chatBehavior": { "$ref": "#/$defs/chatBehavior" }
       }
     },
     "quantMetadata": {

@@ -86,16 +86,12 @@ public sealed class ApplicationSettingsServiceRuntimeDependencyOverrideTests
 
         var settingsSecrets = new Mock<IOptionsMonitor<SettingsSecretsOptions>>();
         settingsSecrets.SetupGet(value => value.CurrentValue).Returns(CreateValidSecretsOptions());
-
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-
         return new ApplicationSettingsService(
             db,
             new SettingsSectionRegistry(),
             environment.Object,
             configuration,
-            settingsSecrets.Object,
-            runtimeProfileResolver.Object);
+            settingsSecrets.Object);
     }
 
     private static SettingsSecretsOptions CreateValidSecretsOptions() => new()

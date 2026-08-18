@@ -114,6 +114,35 @@ describe('AliasPresetSavePanel', () => {
     });
   });
 
+  it('saves from fallback paths when the live router entry is missing', async () => {
+    vi.mocked(api.settings.putLlamaRouterEntry).mockResolvedValue(undefined as never);
+    const panelRef = createRef<AliasPresetSavePanelHandle>();
+
+    render(
+      <AliasPresetSavePanel
+        ref={panelRef}
+        alias="Qwen3.8-27B-GGUF"
+        routerEntry={null}
+        fallbackPreset={{ 'ctx-size': '131272' }}
+        fallbackModelPath="/models-local/llama/Qwen3.8-27B-GGUF/model.gguf"
+        fallbackMmprojPath="/models-local/llama/Qwen3.8-27B-GGUF/mmproj-F16.gguf"
+      />,
+    );
+
+    await panelRef.current?.saveRouterPreset();
+
+    await waitFor(() => {
+      expect(api.settings.putLlamaRouterEntry).toHaveBeenCalledWith(
+        'Qwen3.8-27B-GGUF',
+        expect.objectContaining({
+          modelPath: '/models-local/llama/Qwen3.8-27B-GGUF/model.gguf',
+          mmprojPath: '/models-local/llama/Qwen3.8-27B-GGUF/mmproj-F16.gguf',
+          preset: expect.objectContaining({ 'ctx-size': '131272' }),
+        }),
+      );
+    });
+  });
+
   it('does not render a separate save button', () => {
     render(
       <AliasPresetSavePanel

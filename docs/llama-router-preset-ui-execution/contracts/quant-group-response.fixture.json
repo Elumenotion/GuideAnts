@@ -38,5 +38,6 @@
   "projector": {
     "path": "mmproj-F16.gguf",
     "size": 1234567890
-  }
+  },
+  "companions": []
 }

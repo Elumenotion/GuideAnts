@@ -1,9 +1,11 @@
 # Llama Model Download + Runtime Management
 
-Last updated: 2026-05-20
+Last updated: 2026-08-10
 
 This document describes the shipped local llama lifecycle in GuideAnts:
 model onboarding, alias inventory, load/unload orchestration, and fail-fast behavior.
+
+**Chat behavior authority:** [model-chat-behavior-contract.md](model-chat-behavior-contract.md) — sampling, reasoning, and thinking control live on the catalog `Models` row after install, not on runtime profiles at inference time.
 
 ## 1. Ownership model
 
@@ -42,8 +44,7 @@ model onboarding, alias inventory, load/unload orchestration, and fail-fast beha
 
 `Settings -> Models & Runtime` provides:
 
-- Catalog model onboarding/editing
-- Runtime profiles
+- Catalog model onboarding/editing (chat behavior JSON on each row)
 - Local llama runtime inventory/actions
 
 `Settings -> Infrastructure` provides runtime dependency visibility/probes,
@@ -52,7 +53,7 @@ including `LlamaCpp:BaseUrl` and local service host keys.
 **Add AI Services Wizard** (`Local AI` provider path) provides a guided first-launch onboarding path for llama-cpp models:
 
 - Prerequisites step: captures `HuggingFace:Token` and shows live readiness for `LlamaCpp:BaseUrl` and `LocalServiceHosts:*` keys.
-- Models step: reuses `RepositoryFilePicker` + `llamaCppClassifier` for HF repo browsing, GGUF selection, runtime profile assignment, and alias registration. Downloads are initiated via `POST /api/settings/models:add` and polled via `GET /api/settings/llama/downloads/{operationId}`.
+- Models step: reuses `RepositoryFilePicker` + `llamaCppClassifier` for HF repo browsing, GGUF selection, and alias registration. Custom HF install may pick a runtime profile **at install only** (fields copied to the model row). Downloads are initiated via `POST /api/settings/models:add` and polled via `GET /api/settings/llama/downloads/{operationId}`.
 - Optional services step: toggle-based configuration for all five local non-chat services.
 
 The wizard path is complementary to full Settings ownership; operators can use either surface.
@@ -74,6 +75,7 @@ The wizard path is complementary to full Settings ownership; operators can use e
 ## 8. Related docs
 
 - Default chat model resolution: [settings-architecture.md#default-chat-model-behavior](settings-architecture.md#default-chat-model-behavior)
+- Model chat behavior contract: [model-chat-behavior-contract.md](model-chat-behavior-contract.md)
 - Settings architecture: [settings-architecture.md](settings-architecture.md)
 - Requirements baseline: [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)
 - Operator setup: [setup-guide.md](setup-guide.md)

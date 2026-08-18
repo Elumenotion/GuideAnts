@@ -154,13 +154,16 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
         var routerPreset = RouterPresetValidator.ValidateAndNormalize(definition.Defaults.RouterPreset);
         var modelFiles = quant.Files.Select(f => f.Path).ToList();
         var mmprojFiles = quants.Projector is null ? Array.Empty<string>() : new[] { quants.Projector.Path };
+        var companions = quants.Companions ?? Array.Empty<LlamaProjectorArtifactDto>();
+        var companionFiles = companions.Select(c => c.Path).ToList();
 
         var oldPaths = InstallationArtifactRecords.Parse(installation.ModelArtifactsJson)
             .Concat(InstallationArtifactRecords.Parse(installation.ProjectorArtifactsJson))
+            .Concat(InstallationArtifactRecords.Parse(installation.CompanionArtifactsJson))
             .Select(a => a.RepositoryPath)
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .ToList();
-        var newPaths = modelFiles.Concat(mmprojFiles).ToHashSet(StringComparer.Ordinal);
+        var newPaths = modelFiles.Concat(mmprojFiles).Concat(companionFiles).ToHashSet(StringComparer.Ordinal);
         var obsoletePaths = oldPaths.Where(p => !newPaths.Contains(p)).ToList();
 
         var immutableInput = new ChangeQuantImmutableInput(
@@ -174,12 +177,12 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             ResolvedRevision: resolvedRevision,
             ModelFiles: modelFiles,
             MmprojFiles: mmprojFiles,
+            CompanionFiles: companionFiles,
             RouterModelId: installation.RouterModelId!,
-            RuntimeProfileId: definition.Defaults.RuntimeProfileId,
             TargetDirectory: installation.TargetDirectory!,
             RouterPreset: routerPreset,
             ObsoleteRepositoryPaths: obsoletePaths,
-            ArtifactMetadata: BuildArtifactMetadata(quant, quants.Projector));
+            ArtifactMetadata: BuildArtifactMetadata(quant, quants.Projector, companions));
 
         var wasLoaded = await CaptureLoadedStateAsync(installation.RouterModelId!, cancellationToken).ConfigureAwait(false);
         var operation = await _operationService
@@ -229,6 +232,10 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             .Select(a => a.RepositoryPath)
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .ToList();
+        var companionFiles = InstallationArtifactRecords.Parse(installation.CompanionArtifactsJson)
+            .Select(a => a.RepositoryPath)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToList();
 
         if (modelFiles.Count == 0)
         {
@@ -251,8 +258,8 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             ResolvedRevision: installation.ResolvedRevision,
             ModelFiles: modelFiles,
             MmprojFiles: mmprojFiles,
+            CompanionFiles: companionFiles,
             RouterModelId: installation.RouterModelId,
-            RuntimeProfileId: definition?.Defaults.RuntimeProfileId ?? string.Empty,
             TargetDirectory: installation.TargetDirectory,
             RouterPreset: preset);
 
@@ -458,7 +465,8 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
 
     private static IReadOnlyList<CuratedArtifactMetadataInput>? BuildArtifactMetadata(
         LlamaQuantGroupDto quant,
-        LlamaProjectorArtifactDto? projector)
+        LlamaProjectorArtifactDto? projector,
+        IReadOnlyList<LlamaProjectorArtifactDto> companions)
     {
         var metadata = quant.Files
             .Select(f => new CuratedArtifactMetadataInput(f.Path, f.Size))
@@ -466,6 +474,11 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
         if (projector is not null)
         {
             metadata.Add(new CuratedArtifactMetadataInput(projector.Path, projector.Size));
+        }
+
+        foreach (var companion in companions)
+        {
+            metadata.Add(new CuratedArtifactMetadataInput(companion.Path, companion.Size));
         }
 
         return metadata.Count == 0 ? null : metadata;

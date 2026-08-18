@@ -1,0 +1,28 @@
+---
+description: Preserve GuideAntsApi as the sole local AI lifecycle policy owner
+alwaysApply: true
+---
+
+# Local AI lifecycle authority
+
+- `GuideAntsApi` alone decides enabled/disabled state and model/bundle selection.
+- `ServiceModes` is authoritative for auxiliary service routing and selections.
+- `ga-admin` only validates and executes a complete plan explicitly submitted by
+  the API. It must start empty/idle and must not load engines on boot.
+- Engine folders, inventory endpoints, status, and marker files are diagnostic
+  outputs. Never use them to populate ServiceModes or choose what loads.
+- Do not add a persisted desired-state plan or startup replay.
+- Do not add auxiliary engine autoload environment flags or startup load calls.
+- Do not add revision noop, runtime drift checks, or transition diffing in
+  `warmup_orchestrator.py` — that file is a dumb executor only; verification
+  lives in `LocalAiRuntimeAlignmentVerifier` (GuideAntsApi).
+- Cloud-active routing must produce `enabled: false` for the corresponding local
+  engine and must skip load-specific setup such as SD bundle projection.
+- Missing API-owned local selections are errors. Do not guess from disk or
+  engine state.
+- Each local stack uses one holistic host URL: `LlamaCpp:BaseUrl` for chat,
+  `LocalServiceHosts:*BaseUrl` for aux. Lifecycle apply must target that same
+  host (via per-stack plan split), not always the llama host.
+
+Read `docs/local-ai-lifecycle/ARCHITECTURE.md` before changing local AI startup,
+routing, warmup, model selection, engine admin, or compose behavior.

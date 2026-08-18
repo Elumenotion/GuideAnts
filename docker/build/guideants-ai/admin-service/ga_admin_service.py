@@ -1,7 +1,7 @@
 """
 GuideAnts consolidated control-plane service (Phase 4).
 
-Hosts llama-admin routes and warmup orchestration only. Every inference engine
+Hosts llama-admin routes and warmup execution only. Every inference engine
 (ASR, SD, TTS, embeddings, llama-cpp) runs in its own process; nginx routes
 traffic directly to each engine port so no inference workload can block this
 control plane or any other engine.
@@ -26,8 +26,11 @@ if _llama_admin_dir not in sys.path:
 
 import llama_admin_service  # noqa: E402
 
-from warmup_orchestrator import apply_warmup_on_startup, configure_warmup_orchestrator  # noqa: E402
+from warmup_orchestrator import configure_warmup_orchestrator, initialize_warmup_executor_on_startup  # noqa: E402
 from warmup_routes import ROUTER as WARMUP_ROUTER  # noqa: E402
+
+# ga-admin warmup module is named warmup_orchestrator for import stability only.
+# It is a DUMB EXECUTOR — see the module docstring before editing.
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -77,7 +80,7 @@ _include_flat_routes(APP, WARMUP_ROUTER)
 @APP.on_event("startup")
 async def on_startup() -> None:
     configure_warmup_orchestrator(log_event=lambda event, **fields: print({"event": event, **fields}, flush=True))
-    apply_warmup_on_startup()
+    initialize_warmup_executor_on_startup()
 
 
 if __name__ == "__main__":

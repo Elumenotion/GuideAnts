@@ -39,13 +39,13 @@ public static class ReadWebTools
         var errorResult = new MarkdownConversionResult();
         if (_serviceProvider == null)
         {
-            errorResult.Content = "Error: ReadWeb tool services are not initialized.";
+            errorResult.Content = "ReadWeb is unavailable. Report to the user.";
             return errorResult;
         }
 
         if (!TryCreateHttpUri(url, out var uri))
         {
-            errorResult.Content = "Error: Invalid URL format. Only HTTP and HTTPS URLs are supported.";
+            errorResult.Content = "Invalid URL. Provide a complete https:// URL.";
             return errorResult;
         }
 
@@ -58,6 +58,15 @@ public static class ReadWebTools
         var logger = scope.ServiceProvider.GetService<ILoggerFactory>()?
             .CreateLogger(typeof(ReadWebTools).FullName!)
             ?? NullLogger.Instance;
+
+        var excludedHosts = await excludedHostService.GetExcludedHostsAsync(cancellationToken);
+        if (ReadWebHostPolicy.ShouldHonorExcludedHost(uri.Host, excludedHostService, excludedHosts))
+        {
+            logger.LogInformation("ReadWeb skipped fetch for excluded host {Host}.", uri.Host);
+            errorResult.Content = ReadWebHostPolicy.ExcludedHostMessage;
+            return errorResult;
+        }
+
         var totalStopwatch = Stopwatch.StartNew();
 
         logger.LogInformation("ReadWeb start for host {Host}.", uri.Host);
@@ -91,7 +100,7 @@ public static class ReadWebTools
             return ConvertHtmlToMarkdown(rendered.Html, baseUri);
         }
 
-        if (ShouldExcludeForAccessDenied(directFetch, rendered))
+        if (ReadWebHostPolicy.ShouldAutoExcludeHost(uri.Host, ShouldExcludeForAccessDenied(directFetch, rendered)))
         {
             await excludedHostService.TryAddExcludedHostAsync(
                 uri.Host,
@@ -100,6 +109,15 @@ public static class ReadWebTools
 
             logger.LogInformation(
                 "ReadWeb excluded host {Host} due to access denied. DirectStatus={DirectStatus}, RenderStatus={RenderStatus}, ElapsedMs={ElapsedMs}.",
+                uri.Host,
+                directFetch.StatusCode,
+                rendered.StatusCode,
+                totalStopwatch.ElapsedMilliseconds);
+        }
+        else if (ShouldExcludeForAccessDenied(directFetch, rendered))
+        {
+            logger.LogInformation(
+                "ReadWeb skipped excluding protected host {Host}. DirectStatus={DirectStatus}, RenderStatus={RenderStatus}, ElapsedMs={ElapsedMs}.",
                 uri.Host,
                 directFetch.StatusCode,
                 rendered.StatusCode,
@@ -115,7 +133,11 @@ public static class ReadWebTools
                 totalStopwatch.ElapsedMilliseconds);
         }
 
-        errorResult.Content = "Error: Request failed or timed out.";
+        errorResult.Content = ReadWebFetchErrors.BuildMessage(
+            directFetch.StatusCode,
+            directFetch.Error,
+            rendered.StatusCode,
+            rendered.Error);
         return errorResult;
     }
 

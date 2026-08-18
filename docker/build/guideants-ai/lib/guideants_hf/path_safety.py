@@ -85,10 +85,11 @@ def resolve_repository_destination(
 def validate_ordered_artifact_paths(
     model_files: Iterable[str],
     mmproj_files: Iterable[str],
+    companion_files: Iterable[str] | None = None,
     *,
     store_root: str,
     target_subdir: str,
-) -> tuple[str, list[tuple[str, str]], list[tuple[str, str]]]:
+) -> tuple[str, list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
     target_subdir_norm = target_subdir.strip().strip("/\\")
     if not target_subdir_norm:
         raise PathSafetyError("TARGET_REQUIRED", "Target directory is required.")
@@ -100,6 +101,7 @@ def validate_ordered_artifact_paths(
 
     model_specs: list[tuple[str, str]] = []
     mmproj_specs: list[tuple[str, str]] = []
+    companion_specs: list[tuple[str, str]] = []
     seen_dest_names: dict[str, str] = {}
 
     def add_spec(relative_path: str, bucket: list[tuple[str, str]]) -> None:
@@ -124,8 +126,10 @@ def validate_ordered_artifact_paths(
         add_spec(path, model_specs)
     for path in mmproj_files:
         add_spec(path, mmproj_specs)
+    for path in companion_files or []:
+        add_spec(path, companion_specs)
 
-    return target_dir, model_specs, mmproj_specs
+    return target_dir, model_specs, mmproj_specs, companion_specs
 
 
 def delete_obsolete_repository_paths(

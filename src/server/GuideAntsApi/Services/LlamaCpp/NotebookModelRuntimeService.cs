@@ -19,7 +19,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
     private readonly ApplicationDbContext _context;
     private readonly ILlamaServerRuntimeClient _llamaClient;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly IMemoryCache _cache;
     private readonly ILlamaRuntimeCoordinator _coordinator;
     private readonly IChatModelResolver _chatModelResolver;
@@ -37,7 +36,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     public NotebookModelRuntimeService(
         ApplicationDbContext context,
         ILlamaServerRuntimeClient llamaClient,
-        IRuntimeProfileResolver runtimeProfileResolver,
         IMemoryCache cache,
         ILlamaRuntimeCoordinator coordinator,
         IChatModelResolver chatModelResolver,
@@ -47,7 +45,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     {
         _context = context;
         _llamaClient = llamaClient;
-        _runtimeProfileResolver = runtimeProfileResolver;
         _cache = cache;
         _coordinator = coordinator;
         _chatModelResolver = chatModelResolver;
@@ -306,10 +303,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     op.State = "unloading";
                     InvalidateRouterModelsCache();
 
-                    // Return to the default routed warmup state via the orchestrator, the single
-                    // authority for llama load/unload ordering (D6/D11). The orchestrator reconciles
-                    // away any notebook-specific aliases that are not part of the default desired
-                    // state, so we no longer unload individual aliases through _llamaClient here.
+                    // Return to default routed warmup via GuideAntsApi policy
+                    // (SyncDesiredAndApplyAsync). ga-admin executes aux drain/restore;
+                    // this path does not unload individual aliases via _llamaClient.
                     await _localAiWarmup.SyncDesiredAndApplyAsync(
                         waitForCompletion: true,
                         cancellationToken: CancellationToken.None).ConfigureAwait(false);
@@ -692,7 +688,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     private ModelRuntimeConfigDto ToLocalRuntimeDescriptor(string modelId, string runtimeConfigJson)
     {
         var parsed = LocalRuntimeConfigurationParser.Parse(modelId, runtimeConfigJson);
-        return new ModelRuntimeConfigDto(parsed.RouterModelId, null);
+        return new ModelRuntimeConfigDto(parsed.RouterModelId);
     }
 }
 

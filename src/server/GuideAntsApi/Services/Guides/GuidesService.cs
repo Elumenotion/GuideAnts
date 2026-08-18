@@ -22,7 +22,6 @@ namespace GuideAntsApi.Services.Guides;
 public class GuidesService(
     ApplicationDbContext context,
     MarkdownExtractionService markdownExtractionService,
-    IRuntimeProfileResolver runtimeProfileResolver,
     IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions,
     ISystemGuideCatalogFilter systemGuideCatalogFilter,
     IMcpSandboxSetupStagingService mcpSandboxSetupStagingService,
@@ -32,7 +31,6 @@ public class GuidesService(
 {
     private readonly ApplicationDbContext _context = context;
     private readonly MarkdownExtractionService _markdownExtractionService = markdownExtractionService;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver = runtimeProfileResolver;
     private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptions = settingsSecretsOptions;
     private readonly ISystemGuideCatalogFilter _systemGuideCatalogFilter = systemGuideCatalogFilter;
     private readonly IMcpSandboxSetupStagingService _mcpSandboxSetupStagingService = mcpSandboxSetupStagingService;

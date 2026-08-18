@@ -5,9 +5,8 @@ using Microsoft.EntityFrameworkCore;
 namespace GuideAntsApi.Services.Bootstrap;
 
 /// <summary>
-/// Re-runs the full local AI warmup when the llama router is reachable but the
-/// configured default model is not loaded — for example after a guideants-ai
-/// container restart while the web API process stayed up.
+/// Re-submits API-owned lifecycle policy after the executor restarts, and repairs
+/// a missing configured local llama model while the API process remains alive.
 /// </summary>
 public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
 {
@@ -16,26 +15,33 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILocalAiStartupWarmupService _warmupService;
+    private readonly ILocalAiWarmupOrchestrationClient _orchestrationClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<LocalAiRuntimeWatchdogHostedService> _logger;
+
+    private readonly ILocalAiStackHostResolver _stackHostResolver;
 
     public LocalAiRuntimeWatchdogHostedService(
         IServiceScopeFactory scopeFactory,
         ILocalAiStartupWarmupService warmupService,
+        ILocalAiWarmupOrchestrationClient orchestrationClient,
+        ILocalAiStackHostResolver stackHostResolver,
         IConfiguration configuration,
         ILogger<LocalAiRuntimeWatchdogHostedService> logger)
     {
         _scopeFactory = scopeFactory;
         _warmupService = warmupService;
+        _orchestrationClient = orchestrationClient;
+        _stackHostResolver = stackHostResolver;
         _configuration = configuration;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!IsLocalLlamaWarmupConfigured())
+        if (!IsLifecycleExecutorConfigured())
         {
-            _logger.LogDebug("Local AI runtime watchdog disabled: LlamaCpp:BaseUrl is not configured.");
+            _logger.LogDebug("Local AI lifecycle watchdog disabled: LlamaCpp:BaseUrl is not configured.");
             return;
         }
 
@@ -53,11 +59,12 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
             try
             {
                 if (!_warmupService.IsWarmupInProgress
-                    && !await IsConfiguredDefaultLlamaLoadedAsync(stoppingToken).ConfigureAwait(false)
-                    && !await IsConfiguredDefaultLlamaFailedAsync(stoppingToken).ConfigureAwait(false))
+                    && (await ExecutorHasNoApiPlanAsync(stoppingToken).ConfigureAwait(false)
+                        || (!await IsConfiguredDefaultLlamaLoadedAsync(stoppingToken).ConfigureAwait(false)
+                            && !await IsConfiguredDefaultLlamaFailedAsync(stoppingToken).ConfigureAwait(false))))
                 {
                     _logger.LogInformation(
-                        "Configured default llama model is not loaded; syncing warmup desired state.");
+                        "Local AI executor needs current API lifecycle policy; submitting a complete plan.");
                     await _warmupService.WarmupAllAsync(stoppingToken).ConfigureAwait(false);
                 }
             }
@@ -81,16 +88,17 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
         }
     }
 
-    private bool IsLocalLlamaWarmupConfigured()
-    {
-        if (!RuntimeConfigurationPlaceholders.HasUsableUrl(_configuration["LlamaCpp:BaseUrl"]))
-        {
-            return false;
-        }
+    private bool IsLifecycleExecutorConfigured() => _stackHostResolver.HasAnyConfiguredStack();
 
-        var defaultModelId = (_configuration["ChatDefaults:DefaultModelId"] ?? string.Empty).Trim();
-        return !string.IsNullOrWhiteSpace(defaultModelId);
+    private async Task<bool> ExecutorHasNoApiPlanAsync(CancellationToken cancellationToken)
+    {
+        var status = await _orchestrationClient.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        return ExecutorNeedsApiPlan(status);
     }
+
+    internal static bool ExecutorNeedsApiPlan(WarmupStatusDocument status) =>
+        status.DesiredRevision == 0
+            || string.Equals(status.ApplyStatus, "idle", StringComparison.OrdinalIgnoreCase);
 
     private async Task<bool> IsConfiguredDefaultLlamaLoadedAsync(CancellationToken cancellationToken)
     {

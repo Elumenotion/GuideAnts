@@ -1,4 +1,6 @@
-# Parameter Surface Test Plan (Row-Owned Non-Local Contract)
+# Parameter Surface Test Plan (Row-Owned Catalog Contract)
+
+> **Universal contract (all providers):** [model-chat-behavior-contract.md](model-chat-behavior-contract.md)
 
 Last updated: 2026-07-30
 

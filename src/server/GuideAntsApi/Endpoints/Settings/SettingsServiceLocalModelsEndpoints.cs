@@ -270,18 +270,16 @@ public static class SettingsServiceLocalModelsEndpoints
         // Load / activate a model for an auxiliary local service (ASR, TTS, Embeddings,
         // Image Generation).
         //
-        // SINGLE LOADING AUTHORITY: this endpoint does NOT talk to the engine's
-        // /admin/load directly. It hands the desired model to the reconciler
-        // (LocalAiStartupWarmupService), which is the one place that decides — from
-        // routing (active provider) — what gets loaded and unloads the rest. A load
-        // requested while the service is not the active provider is refused (409), per
-        // the rule that a non-active local service must load nothing.
+        // GuideAntsApi is the loading-policy authority. This endpoint persists the
+        // selection in ServiceModes; LocalAiStartupWarmupService derives a complete
+        // plan from live routing and sends it to ga-admin for mechanical execution.
+        // A load requested while the local provider is inactive is refused (409).
         //
         //  - ASR / TTS / Embeddings: optional model_path or model_id selects a specific
         //    downloaded model folder; the ref is persisted verbatim on ServiceModes
-        //    and written into warmup-desired.ini as model_path before apply.
+        //    and sent in the API-owned lifecycle plan as modelPath.
         //  - Image Generation: bundle_id (or model_path/model_id alias) is persisted on
-        //    ServiceModes and written into warmup-desired.ini as bundle_id before apply.
+        //    ServiceModes and sent in the API-owned lifecycle plan as bundleId.
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/load", async (
             string serviceId,
             [FromBody] JsonElement payload,
@@ -350,9 +348,9 @@ public static class SettingsServiceLocalModelsEndpoints
         })
         .WithName("UnloadServiceLocalModel");
 
-        // Select which downloaded model/bundle should be the active one for an aux
-        // service, then reconcile. Same single-authority path as /load: the reconciler
-        // loads it only if the service is the active provider, otherwise refuses (409).
+        // Select a downloaded model/bundle in API-owned ServiceModes, then submit the
+        // routing-derived plan. ga-admin executes a load only when the local provider
+        // is active; otherwise the API refuses the request (409).
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/{modelRef}/select-active", async (
             string serviceId,
             string modelRef,

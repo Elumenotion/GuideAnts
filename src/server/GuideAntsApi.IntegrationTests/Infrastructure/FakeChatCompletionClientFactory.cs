@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AntRunner.Chat.Abstractions;
+using AntRunner.Chat.LlamaCpp;
 
 namespace GuideAntsApi.IntegrationTests.Infrastructure;
 
@@ -15,6 +16,7 @@ internal enum FakeChatScenario
     ToolCallThenReply,
     ThinkingStream,
     RepeatedToolCalls,
+    PartialTimeoutStream,
 }
 
 internal sealed class FakeChatCompletionBehavior
@@ -105,6 +107,7 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
             FakeChatScenario.ToolCallThenReply => ToolCallThenReplyAsync(onChunk, cancellationToken),
             FakeChatScenario.ThinkingStream => ThinkingStreamAsync(onChunk, cancellationToken),
             FakeChatScenario.RepeatedToolCalls => RepeatedToolCallsAsync(request, onChunk),
+            FakeChatScenario.PartialTimeoutStream => PartialTimeoutStreamAsync(onChunk, cancellationToken),
             _ => DefaultStreamAsync(onChunk)
         };
     }
@@ -229,6 +232,27 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
         return new ChatCompletionResponse(
             [new ChatChoice(message, "stop")],
             CreateUsage());
+    }
+
+    private async Task<ChatCompletionResponse> PartialTimeoutStreamAsync(
+        Action<ChatCompletionChunk> onChunk,
+        CancellationToken cancellationToken)
+    {
+        foreach (var word in _behavior.SlowStreamText.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            onChunk(new ChatCompletionChunk(
+            [
+                new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, word + " "), null)
+            ]));
+            await Task.Delay(10, cancellationToken);
+        }
+
+        var partialResponse = CreateResponse(_behavior.SlowStreamText, finishReason: "stop");
+        throw new LlamaInferenceTimeoutException(
+            "test-deployment",
+            30,
+            partialResponse);
     }
 
     private ChatCompletionResponse CreateDefaultResponse() =>

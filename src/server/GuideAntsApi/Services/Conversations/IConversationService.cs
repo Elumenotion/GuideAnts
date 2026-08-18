@@ -23,6 +23,11 @@ public interface IConversationService
     Task EditMessageAsync(Guid messageId, string newContent);
     Task UndoLastForConversationAsync(Guid conversationId);
     Task UndoForConversationAsync(Guid conversationId, Guid messageId);
+
+    /// <summary>
+    /// Requests cancellation of an in-process stream for the given turn.
+    /// </summary>
+    Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId);
     
     // User conversations across all projects
     Task<PagedUserConversationsDto> GetUserConversationsAsync(UserConversationsQuery query);

@@ -6,7 +6,6 @@ using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Guides;
 using GuideAntsApi.Services.Guides.Skills;
 using GuideAntsApi.Services.Mcp;
-using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.SandboxWireApi;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Tests.TestUtils;
@@ -22,13 +21,11 @@ internal static class GuidesServiceTestHelper
 {
     internal static GuidesService CreateGuidesService(
         ApplicationDbContext context,
-        IRuntimeProfileResolver? runtimeProfileResolver = null,
         ISystemGuideCatalogFilter? catalogFilter = null) =>
         new(
             context,
             CreateMarkdownExtractionService(),
-            runtimeProfileResolver ?? Mock.Of<IRuntimeProfileResolver>(),
-            new StaticOptionsMonitor<SettingsSecretsOptions>(CreateSecretsOptions()),
+new StaticOptionsMonitor<SettingsSecretsOptions>(CreateSecretsOptions()),
             catalogFilter ?? EmptySystemGuideCatalogFilter.Instance,
             Mock.Of<IMcpSandboxSetupStagingService>(),
             new AssistantSkillMetaSync(context),

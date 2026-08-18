@@ -92,7 +92,6 @@ public class HuggingFaceModelDownloadServiceTests
             TargetDirectory: "/models/router-a",
             CatalogModelId: "model-a",
             CatalogDisplayName: "Model A",
-            CatalogRuntimeProfileId: "profile-a",
             CatalogDescription: "description",
             CatalogIsActive: true,
             CatalogDisplayOrder: 1,

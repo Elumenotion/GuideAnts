@@ -43,6 +43,7 @@ public class NotebookConversationStreamingEndpointsTests
         public Task RenameConversationAsync(Guid conversationId, string newTitle) => throw new NotImplementedException();
         public Task DeleteConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task EditMessageAsync(Guid messageId, string newContent) => throw new NotImplementedException();
+        public Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId) => Task.FromResult(false);
 
 
         
@@ -100,6 +101,7 @@ public class NotebookConversationStreamingEndpointsTests
         public Task RenameConversationAsync(Guid conversationId, string newTitle) => throw new NotImplementedException();
         public Task DeleteConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task EditMessageAsync(Guid messageId, string newContent) => throw new NotImplementedException();
+        public Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId) => Task.FromResult(false);
         public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             await Task.Yield();

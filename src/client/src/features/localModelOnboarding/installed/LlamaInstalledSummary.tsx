@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { api } from '../../../services/api';
-import type { LlamaInstallationDetailDto, LlamaRouterEntryDto } from '../../../types/settings';
+import type { InstallationArtifactDto, LlamaInstallationDetailDto, LlamaRouterEntryDto } from '../../../types/settings';
 import type { ActiveModelOperationState } from '../../../pages/settings/types';
 import { getErrorMessage } from '../../../pages/settings/utils';
 import { formatBytes } from '../curated/format';
@@ -20,6 +20,21 @@ export interface LlamaInstalledSummaryProps {
   onOperationStarted: (operation: ActiveModelOperationState) => void;
 }
 
+function containerArtifactPath(targetDirectory: string, artifact?: InstallationArtifactDto): string {
+  if (!artifact) {
+    return '';
+  }
+  const relative = artifact.installedRelativePath.trim();
+  if (relative) {
+    return `/models-local/llama/${relative.replace(/^\/+/, '')}`;
+  }
+  const fileName = artifact.repositoryPath.split('/').pop()?.trim();
+  if (!fileName || !targetDirectory.trim()) {
+    return '';
+  }
+  return `/models-local/llama/${targetDirectory.trim()}/${fileName}`;
+}
+
 export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, LlamaInstalledSummaryProps>(
   function LlamaInstalledSummary({ modelId, onChanged, onOperationStarted }, ref) {
   const presetPanelRef = useRef<AliasPresetSavePanelHandle>(null);
@@ -27,22 +42,40 @@ export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, Lla
   const [routerEntry, setRouterEntry] = useState<LlamaRouterEntryDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [routerEntriesError, setRouterEntriesError] = useState<string | null>(null);
   const [changeQuantOpen, setChangeQuantOpen] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setRouterEntriesError(null);
+
+    const installationPromise = api.settings.getLlamaInstallationDetail(modelId);
+    const entriesPromise = api.settings.getLlamaRouterEntries();
+
+    let installation: LlamaInstallationDetailDto;
     try {
-      const [installation, entries] = await Promise.all([
-        api.settings.getLlamaInstallationDetail(modelId),
-        api.settings.getLlamaRouterEntries(),
-      ]);
+      installation = await installationPromise;
       setDetail(installation);
-      setRouterEntry(entries.entries.find((entry) => entry.alias === installation.routerModelId) ?? null);
-    } catch (loadError) {
-      setError(getErrorMessage(loadError, 'Failed to load installation detail.'));
-    } finally {
       setLoading(false);
+    } catch (loadError) {
+      setDetail(null);
+      setRouterEntry(null);
+      setError(getErrorMessage(loadError, 'Failed to load installation detail.'));
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const entries = await entriesPromise;
+      setRouterEntry(
+        entries.entries.find((entry) => entry.alias === installation.routerModelId) ?? null,
+      );
+    } catch (entriesError) {
+      setRouterEntry(null);
+      setRouterEntriesError(
+        getErrorMessage(entriesError, 'Live router entries unavailable. Editing last saved snapshot.'),
+      );
     }
   }, [modelId]);
 
@@ -82,14 +115,24 @@ export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, Lla
   }
 
   const isCurated = !!detail.catalogId;
+  const fallbackModelPath = containerArtifactPath(detail.targetDirectory, detail.modelArtifacts[0]);
+  const fallbackMmprojPath = containerArtifactPath(detail.targetDirectory, detail.projectorArtifacts[0]);
 
   return (
     <div className="space-y-4">
+      {routerEntriesError ? (
+        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          {routerEntriesError} Save still writes the router INI.
+        </div>
+      ) : null}
+
       <AliasPresetSavePanel
         ref={presetPanelRef}
         alias={detail.routerModelId}
         routerEntry={routerEntry}
         fallbackPreset={detail.routerPresetSnapshot}
+        fallbackModelPath={fallbackModelPath}
+        fallbackMmprojPath={fallbackMmprojPath}
       />
 
       <ModelChatBehaviorPanel detail={detail} onChanged={handleChanged} />

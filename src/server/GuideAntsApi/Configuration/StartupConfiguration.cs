@@ -35,6 +35,7 @@ using GuideAntsApi.Settings;
 using GuideAntsApi.Services.Infrastructure;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.NotebookHeaderToolbar;
 using GuideAntsApi.Services.Mcp;
@@ -99,7 +100,6 @@ public static class StartupConfiguration
         services.AddScoped<IProjectService, ProjectService>();
         services.AddSingleton<ISettingsSectionRegistry, SettingsSectionRegistry>();
         services.AddSingleton<IProviderConfigurationResolver, ProviderConfigurationResolver>();
-        services.AddSingleton<IRuntimeProfileResolver, RuntimeProfileResolver>();
         services.AddSingleton<IServiceEditorMetadataProvider, ServiceEditorMetadataProvider>();
         services.AddSingleton<IChatDefaultsStore, ChatDefaultsStore>();
         services.AddScoped<IApplicationSettingsService, ApplicationSettingsService>();
@@ -111,20 +111,19 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSessionService, GuideAntsApi.Services.SystemGuide.SystemGuideSessionService>();
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideCatalogFilter, GuideAntsApi.Services.SystemGuide.SystemGuideCatalogFilter>();
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSandboxAdminProxy, GuideAntsApi.Services.SystemGuide.SystemGuideSandboxAdminProxy>();
-        services.AddScoped<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder, GuideAntsApi.Services.Bootstrap.RuntimeProfileSeeder>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IBundleDefinitionMigrationService, GuideAntsApi.Services.Bootstrap.BundleDefinitionMigrationService>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IBundleDefinitionProjectionService, GuideAntsApi.Services.Bootstrap.BundleDefinitionProjectionService>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IImageGenerationBundleDefinitionBootstrapper, GuideAntsApi.Services.Bootstrap.ImageGenerationBundleDefinitionBootstrapper>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiDesiredStateBuilder, GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>();
-        services.AddHttpClient<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupOrchestrationClient, GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient>(client =>
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStackHostResolver, GuideAntsApi.Services.Bootstrap.LocalAiStackHostResolver>();
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.LocalAiWarmupPlanSplitter>();
+        services.AddHttpClient(GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient.HttpClientName, client =>
         {
-            var config = configuration.GetSection("LlamaCpp");
-            var baseUrl = config["BaseUrl"]
-                ?? throw new InvalidOperationException("LlamaCpp:BaseUrl is required.");
-            client.BaseAddress = DeriveLlamaAdminBaseUri(baseUrl);
             client.Timeout = TimeSpan.FromHours(4);
         });
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupOrchestrationClient, GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient>();
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiRuntimeAlignmentVerifier, GuideAntsApi.Services.Bootstrap.LocalAiRuntimeAlignmentVerifier>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService>(
             static sp => (GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService)sp.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService>());
@@ -153,6 +152,7 @@ public static class StartupConfiguration
         services.AddScoped<IConversationHistoryBuilder, ConversationHistoryBuilder>();
         services.AddScoped<IConversationPersistence, ConversationPersistence>();
         services.AddScoped<IConversationUsageReporter, ConversationUsageReporter>();
+        services.AddSingleton<ConversationStreamRunRegistry>();
         services.AddScoped<ConversationStreamLockCoordinator>();
         services.AddScoped<PrivateConversationStreamPolicy>();
         services.AddScoped<PublishedConversationStreamPolicy>();
@@ -189,7 +189,7 @@ public static class StartupConfiguration
             var config = configuration.GetSection("LlamaCpp");
             var baseUrl = config["BaseUrl"]
                 ?? throw new InvalidOperationException("LlamaCpp:BaseUrl is required.");
-            client.BaseAddress = DeriveLlamaAdminBaseUri(baseUrl);
+            client.BaseAddress = LocalAiStackHostUrls.DeriveAdminBaseUriFromLlamaCppUrl(baseUrl);
             client.Timeout = TimeSpan.FromHours(4);
         });
         services.Configure<LlamaInferenceTimeoutRecoveryOptions>(
@@ -281,6 +281,7 @@ public static class StartupConfiguration
         // Conversation Management Services
         services.AddSingleton<IConversationBroadcastHub, ConversationBroadcastHub>();
         services.AddScoped<IDistributedConversationLock, DistributedConversationLockService>();
+        services.AddHostedService<GuideAntsApi.Services.Conversations.Recovery.ConversationTurnRecoveryService>();
         services.AddHostedService<LockCleanupBackgroundService>();
         services.AddHostedService<HostFolderMountStartupReconciliationService>();
         phaseLogger?.Invoke("ConfigureServices.RegisterServices.ConversationAndHosted");
@@ -644,7 +645,7 @@ public static class StartupConfiguration
                             .AsNoTracking()
                             .Where(userRole => userRole.UserId == userId)
                             .Select(userRole => new { userRole.User.SecurityStamp, userRole.Role })
-                            .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+                            .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
 
                         if (account is null || account.SecurityStamp != tokenSecurityStamp)
                         {
@@ -834,25 +835,6 @@ public static class StartupConfiguration
         }
     }
 
-    private static Uri DeriveLlamaAdminBaseUri(string llamaBaseUrl)
-    {
-        var llamaUri = new Uri(llamaBaseUrl, UriKind.Absolute);
-        var builder = new UriBuilder(llamaUri)
-        {
-            Query = string.Empty,
-            Fragment = string.Empty
-        };
-
-        var path = builder.Path.TrimEnd('/');
-        if (path.EndsWith(ServiceRoutingContracts.LlamaCppPath, StringComparison.OrdinalIgnoreCase))
-        {
-            path = path[..^ServiceRoutingContracts.LlamaCppPath.Length];
-        }
-
-        path = path.TrimEnd('/') + ServiceRoutingContracts.LlamaAdminPath + "/";
-        builder.Path = path;
-        return builder.Uri;
-    }
 }
 
 internal sealed class BearerSecurityRequirementsOperationFilter : IOperationFilter

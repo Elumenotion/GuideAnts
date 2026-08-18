@@ -32,7 +32,7 @@ namespace GuideAntsApi.IntegrationTests.Settings;
 /// </list>
 /// No notebook / guide / crew is seeded here — chat dispatch in the routing
 /// factory is assistant-driven but only reads <see cref="Model"/> and
-/// <see cref="RuntimeProfile"/>. Load orchestration (per-notebook readiness,
+/// model-owned chat behavior columns. Load orchestration (per-notebook readiness,
 /// crew-wide required-model sets) is exercised by the existing
 /// <c>NotebookModelRuntimeServiceTests</c> suite and is not duplicated here.
 /// </para>
@@ -42,12 +42,9 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
 {
     private const string CatalogModelId = "qwen3.6-35b-a3b-local";
     private const string RouterAlias = "qwen3.6-35b-a3b";
-    private const string RuntimeProfileId = "qwen3_6";
-
     private static readonly string RuntimeConfigJson = JsonSerializer.Serialize(new
     {
-        routerModelId = RouterAlias,
-        runtimeProfileId = RuntimeProfileId
+        routerModelId = RouterAlias
     });
 
     [ClassInitialize]
@@ -71,16 +68,15 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
         var items = await response.Content.ReadFromJsonAsync<List<LlamaRuntimeInventoryItemDto>>();
         items.Should().NotBeNull();
         items!.Should().BeEmpty(
-            "ResetRoutingStateAsync wipes Models + RuntimeProfiles and ResetStubs clears the router stub; " +
+            "ResetRoutingStateAsync wipes Models and ResetStubs clears the router stub; " +
             "inventory is the union of catalog + router aliases and both sides are empty.");
     }
 
     [TestMethod]
     public async Task AddCatalogAndRouterAlias_InventoryReportsAlias_Unloaded()
     {
-        // R-8 steps 2+3: seed the catalog row, runtime profile and router alias.
-        await SeedQwenRuntimeProfileAsync();
-        await SeedQwenCatalogAsync();
+        // R-8 steps 2+3: seed the catalog row and router alias.
+await SeedQwenCatalogAsync();
         SeedRouterAliasWithArtifacts();
 
         var response = await Client.GetAsync("/api/settings/llama/runtime/inventory");
@@ -104,8 +100,7 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
         // + stub client. We observe the state transition via the inventory
         // endpoint rather than reaching into the stub directly so this stays an
         // end-to-end HTTP assertion.
-        await SeedQwenRuntimeProfileAsync();
-        await SeedQwenCatalogAsync();
+await SeedQwenCatalogAsync();
         SeedRouterAliasWithArtifacts();
 
         var load = await Client.PostAsJsonAsync(
@@ -127,8 +122,7 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
         // alias + loaded state is in place. The client itself does not make a
         // network call at construction time (validated by inspection of
         // LlamaCppChatClientFactory.CreateClientForProfile).
-        await SeedQwenRuntimeProfileAsync();
-        await SeedQwenCatalogAsync();
+await SeedQwenCatalogAsync();
         SeedRouterAliasWithArtifacts();
         LlamaStub.SeedState(RouterAlias, "loaded");
 
@@ -148,8 +142,7 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
         // state is an orchestration concern, not a per-turn validator concern.
         // We verify this by leaving the stub in its default "unloaded" state
         // and confirming client construction still succeeds.
-        await SeedQwenRuntimeProfileAsync();
-        await SeedQwenCatalogAsync();
+await SeedQwenCatalogAsync();
         SeedRouterAliasWithArtifacts();
 
         using var scope = SharedFactory!.Services.CreateScope();
@@ -217,8 +210,7 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
         // will re-load on demand. The factory itself never peeks at runtime
         // state, so the unload does not cause ROUTING_RUNTIME_NOT_READY at
         // validator time.
-        await SeedQwenRuntimeProfileAsync();
-        await SeedQwenCatalogAsync();
+await SeedQwenCatalogAsync();
         SeedRouterAliasWithArtifacts();
 
         var load = await Client.PostAsJsonAsync(
@@ -238,36 +230,14 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
 
     // ---------------- helpers ----------------
 
-    private static async Task SeedQwenRuntimeProfileAsync()
-    {
-        using var scope = SharedFactory!.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var profile = new RuntimeProfile
-        {
-            ProfileId = RuntimeProfileId,
-            DisplayName = "Qwen3.6",
-            Description = "Phase G.2 test runtime profile",
-            CombineSystemAndDeveloperMessages = true,
-            ThoughtBlockPattern = @"<think>[\s\S]*?</think>",
-            SamplingParametersJson = "{}",
-            ThinkingControlJson = "{\"defaultChoice\":\"enabled\",\"choiceActions\":{}}"
-        };
-        db.RuntimeProfiles.Add(profile);
-        await db.SaveChangesAsync();
-
-        // Bust the resolver cache so the newly-seeded row is visible to the
-        // next Resolve() call. The resolver is a singleton with a 5-minute TTL
-        // so without this the second test in a class re-uses the stale entry.
-        var resolver = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.LlamaCpp.IRuntimeProfileResolver>();
-        resolver.InvalidateCache();
-    }
 
     private static Task SeedQwenCatalogAsync() =>
         SeedCatalogModelAsync(
             modelId: CatalogModelId,
             provider: "llama-cpp",
             RuntimeConfigJson: RuntimeConfigJson,
-            displayName: "Qwen3.6 35B A3B (local)");
+            displayName: "Qwen3.6 35B A3B (local)",
+            ThinkingControlJson: "{\"defaultChoice\":\"enabled\",\"choiceActions\":{\"enabled\":[]}}");
 
     private static void SeedRouterAliasWithArtifacts()
     {

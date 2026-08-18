@@ -15,16 +15,13 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
 {
     private readonly ILlamaRuntimeAdminClient _adminClient;
     private readonly IHuggingFaceTokenResolver _tokenResolver;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
 
     public CuratedInstallResolver(
         ILlamaRuntimeAdminClient adminClient,
-        IHuggingFaceTokenResolver tokenResolver,
-        IRuntimeProfileResolver runtimeProfileResolver)
+        IHuggingFaceTokenResolver tokenResolver)
     {
         _adminClient = adminClient;
         _tokenResolver = tokenResolver;
-        _runtimeProfileResolver = runtimeProfileResolver;
     }
 
     public async Task<CuratedImmutableOperationInput> ResolveAsync(
@@ -242,25 +239,33 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
 
         try
         {
-            await _runtimeProfileResolver.ResolveAsync(defaults.RuntimeProfileId, cancellationToken).ConfigureAwait(false);
+            ManifestChatBehavior.Validate(defaults.ChatBehavior, catalogId);
         }
         catch (InvalidOperationException ex)
         {
             throw new AddModelException(
-                "RUNTIME_PROFILE_NOT_FOUND",
+                CuratedInstallErrorCodes.PresetInvalid,
                 step: "validation",
                 message: ex.Message,
-                remediation: "Ensure runtime profiles are seeded and retry.");
+                remediation: "Fix chatBehavior in the catalog manifest for this definition.");
         }
 
         var routerPreset = RouterPresetValidator.ValidateAndNormalize(defaults.RouterPreset);
+        var chatBehavior = defaults.ChatBehavior;
+        var samplingParametersJson = ManifestChatBehavior.SerializeSamplingParameters(chatBehavior);
+        var thinkingControlJson = ManifestChatBehavior.SerializeThinkingControl(chatBehavior);
+        var requestFieldsWhenToolsPresentJson =
+            ManifestChatBehavior.SerializeRequestFieldsWhenToolsPresent(chatBehavior);
+        var reasoningChoicesJson = ManifestChatBehavior.DeriveReasoningChoicesJson(chatBehavior);
 
         var modelFiles = quant.Files.Select(f => f.Path).ToList();
         var mmprojFiles = quantsAtCommit.Projector is null
             ? Array.Empty<string>()
             : new[] { quantsAtCommit.Projector.Path };
+        var companions = quantsAtCommit.Companions ?? Array.Empty<LlamaProjectorArtifactDto>();
+        var companionFiles = companions.Select(c => c.Path).ToList();
 
-        var artifactMetadata = BuildArtifactMetadata(quant, quantsAtCommit.Projector);
+        var artifactMetadata = BuildArtifactMetadata(quant, quantsAtCommit.Projector, companions);
 
         var catalogModelId = string.IsNullOrWhiteSpace(request.Catalog.ModelId)
             ? defaults.CatalogModelId.Trim()
@@ -287,16 +292,23 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
             QuantLabel: quant.Label,
             ModelFiles: modelFiles,
             MmprojFiles: mmprojFiles,
+            CompanionFiles: companionFiles,
             RouterModelId: defaults.RouterModelId.Trim(),
-            RuntimeProfileId: defaults.RuntimeProfileId.Trim(),
             TargetDirectory: defaults.TargetDirectory.Trim(),
             RouterPreset: routerPreset,
+            SamplingParametersJson: samplingParametersJson,
+            ReasoningChoicesJson: reasoningChoicesJson,
+            ThinkingControlJson: thinkingControlJson,
+            RequestFieldsWhenToolsPresentJson: requestFieldsWhenToolsPresentJson,
+            CombineSystemAndDeveloperMessages: chatBehavior.CombineSystemAndDeveloperMessages,
+            ThoughtBlockPattern: chatBehavior.ThoughtBlockPattern,
             ArtifactMetadata: artifactMetadata);
     }
 
     private static IReadOnlyList<CuratedArtifactMetadataInput> BuildArtifactMetadata(
         LlamaQuantGroupDto quant,
-        LlamaProjectorArtifactDto? projector)
+        LlamaProjectorArtifactDto? projector,
+        IReadOnlyList<LlamaProjectorArtifactDto> companions)
     {
         var items = quant.Files
             .Select(f => new CuratedArtifactMetadataInput(
@@ -312,6 +324,15 @@ public sealed class CuratedInstallResolver : ICuratedInstallResolver
                 Path: projector.Path,
                 Size: projector.Size,
                 Digest: projector.GitOid ?? projector.LfsOid,
+                Etag: null));
+        }
+
+        foreach (var companion in companions)
+        {
+            items.Add(new CuratedArtifactMetadataInput(
+                Path: companion.Path,
+                Size: companion.Size,
+                Digest: companion.GitOid ?? companion.LfsOid,
                 Etag: null));
         }
 

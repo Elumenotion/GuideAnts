@@ -210,8 +210,8 @@ public sealed class PublishedConversationStreamingTests : BaseEndpointTest
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var turn = await verifyDb.ConversationTurns
             .SingleAsync(t => t.NotebookConversationId == seeded.ConversationId && t.TurnIndex == 1);
-        turn.Status.Should().Be("streaming");
-        turn.ChatRunOutputJson.Should().BeNull();
+        turn.Status.Should().Be("pending_client_tool");
+        turn.ChatRunOutputJson.Should().NotBeNullOrWhiteSpace();
 
         var assistantMessage = await verifyDb.NotebookConversationMessages
             .SingleAsync(m =>

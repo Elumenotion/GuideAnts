@@ -5,33 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $env:DOCKER_BUILDKIT = '1'
 
-function Get-CombinedHash {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Paths
-    )
-
-    $lines = foreach ($path in $Paths) {
-        if (-not (Test-Path $path)) {
-            throw "Hash input file not found: $path"
-        }
-
-        $hash = (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLowerInvariant()
-        "$path|$hash"
-    }
-
-    $joined = [string]::Join("`n", $lines)
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($joined)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $digest = $sha.ComputeHash($bytes)
-    }
-    finally {
-        $sha.Dispose()
-    }
-
-    -join ($digest | ForEach-Object { $_.ToString('x2') })
-}
+. (Join-Path $PSScriptRoot 'lib\combined-hash.ps1')
 
 function Test-DockerImageExists {
     param(
@@ -80,7 +54,10 @@ function Get-FilePathsRecursive {
 function Build-ScriptExecutionAgent {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$ServerPath
+        [string]$ServerPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot
     )
 
     $scriptAgentProject = Join-Path $ServerPath 'ScriptExecutionAgent'
@@ -100,7 +77,7 @@ function Build-ScriptExecutionAgent {
         Sort-Object FullName |
         Select-Object -ExpandProperty FullName
 
-    $scriptAgentSourceHash = Get-CombinedHash -Paths $scriptAgentSourceFiles
+    $scriptAgentSourceHash = Get-CombinedHash -Paths $scriptAgentSourceFiles -RelativeTo $RepoRoot
     $canReusePublish = $false
     if ((Test-Path $publishOutput) -and (Test-Path $scriptAgentHashFile)) {
         $previousHash = (Get-Content -Path $scriptAgentHashFile -Raw).Trim()
@@ -164,7 +141,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Rebuild base:  $RebuildBase"
 Write-Host ""
 
-$scriptAgentPublish = Build-ScriptExecutionAgent -ServerPath $serverPath
+$scriptAgentPublish = Build-ScriptExecutionAgent -ServerPath $serverPath -RepoRoot $repoRoot
 
 $plantumlContainerPath = Join-Path $PSScriptRoot "Sandboxes" "PlantUml"
 $plantumlScriptAgentPath = Join-Path $plantumlContainerPath "ScriptExecutionAgent"
@@ -173,7 +150,7 @@ $plantumlImageTag = "plantuml-1.2025.2"
 $plantumlHashFile = Join-Path $buildStateDir "plantuml.hash"
 
 $plantumlInputFiles = @($plantumlDockerfilePath) + (Get-FilePathsRecursive -Root $scriptAgentPublish)
-$plantumlHash = Get-CombinedHash -Paths $plantumlInputFiles
+$plantumlHash = Get-CombinedHash -Paths $plantumlInputFiles -RelativeTo $repoRoot
 $plantumlCanReuse =
     (-not $RebuildBase) -and
     (Test-DockerImageExists -ImageTag $plantumlImageTag) -and
@@ -207,7 +184,7 @@ if (-not (Test-Path $mssqlDockerfilePath)) {
     Write-Error "MSSQL Dockerfile not found at $mssqlDockerfilePath"
     exit 1
 }
-$mssqlHash = Get-CombinedHash -Paths (Get-FilePathsRecursive -Root $mssqlBuildContext)
+$mssqlHash = Get-CombinedHash -Paths (Get-FilePathsRecursive -Root $mssqlBuildContext) -RelativeTo $repoRoot
 $mssqlCanReuse =
     (-not $RebuildBase) -and
     (Test-DockerImageExists -ImageTag $mssqlImageTag) -and
@@ -234,7 +211,7 @@ if (-not (Test-Path $searxngDockerfilePath)) {
     exit 1
 }
 $searxngInputFiles = @($searxngDockerfilePath) + (Get-FilePathsRecursive -Root (Join-Path $PSScriptRoot "searxng"))
-$searxngHash = Get-CombinedHash -Paths $searxngInputFiles
+$searxngHash = Get-CombinedHash -Paths $searxngInputFiles -RelativeTo $repoRoot
 $searxngCanReuse =
     (-not $RebuildBase) -and
     (Test-DockerImageExists -ImageTag $searxngImageTag) -and
@@ -264,7 +241,7 @@ $webApiUiInputs = @(
     $webApiUiBuildScript,
     (Join-Path $PSScriptRoot "webapi-ui\Dockerfile")
 ) + (Get-FilePathsRecursive -Root (Join-Path $repoRoot "src\client")) + (Get-FilePathsRecursive -Root (Join-Path $repoRoot "src\server"))
-$webApiUiHash = Get-CombinedHash -Paths $webApiUiInputs
+$webApiUiHash = Get-CombinedHash -Paths $webApiUiInputs -RelativeTo $repoRoot
 
 $existingWebApiUiImage = $null
 if (Test-Path $envFile) {

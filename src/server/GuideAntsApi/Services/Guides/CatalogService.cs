@@ -76,7 +76,7 @@ public class CatalogService : ICatalogService
                     try
                     {
                         var localRuntime = LocalRuntimeConfigurationParser.ParseRequired(m.ModelId, m.RuntimeConfigJson);
-                        runtimeConfig = new ModelRuntimeConfigDto(localRuntime.RouterModelId, null);
+                        runtimeConfig = new ModelRuntimeConfigDto(localRuntime.RouterModelId);
                     }
                     catch
                     {

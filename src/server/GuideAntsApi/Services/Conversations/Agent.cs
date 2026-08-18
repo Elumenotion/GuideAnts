@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
 using AntRunner.ToolCalling;
+using AntRunner.ToolCalling.AssistantDefinitions;
 using AntRunner.ToolCalling.Attributes;
 using AntRunner.ToolCalling.Functions;
 using AntRunner.Chat.Abstractions;
+using AntRunner.Chat.LlamaCpp;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -286,6 +288,34 @@ public static class Agent
 
             throw;
         }
+        catch (LlamaInferenceTimeoutException timeoutEx)
+        {
+            return await FinishAgentInvocationWithPartialErrorAsync(
+                scope,
+                context,
+                assistant,
+                opts,
+                invocationId,
+                startTime,
+                llmRoundTrips,
+                timeoutEx,
+                timeoutEx.Message);
+        }
+        catch (ChatConversationException chatEx) when (chatEx.InnerException is LlamaInferenceTimeoutException)
+        {
+            var timeoutEx = (LlamaInferenceTimeoutException)chatEx.InnerException!;
+            return await FinishAgentInvocationWithPartialErrorAsync(
+                scope,
+                context,
+                assistant,
+                opts,
+                invocationId,
+                startTime,
+                llmRoundTrips,
+                chatEx,
+                timeoutEx.Message,
+                chatEx.ChatRunOutput);
+        }
         catch (Exception ex)
         {
             var elapsed = Stopwatch.GetElapsedTime(startTime);
@@ -303,6 +333,70 @@ public static class Agent
                 durationMs: (long)elapsed.TotalMilliseconds);
             throw;
         }
+    }
+
+    private static async Task<ScriptExecutionResult> FinishAgentInvocationWithPartialErrorAsync(
+        IServiceScope scope,
+        InvocationContext context,
+        AssistantDefinition assistant,
+        ChatRunOptions opts,
+        Guid invocationId,
+        long startTimestamp,
+        int llmRoundTrips,
+        Exception surfacedException,
+        string errorMessage,
+        ChatRunOutput? partialOutput = null)
+    {
+        var toolCallCount = await ComputeToolCallCountAsync(invocationId, CancellationToken.None);
+        var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+        var partialText = partialOutput?.LastMessage;
+        if (string.IsNullOrWhiteSpace(partialText))
+        {
+            partialText = partialOutput?.Messages?
+                .LastOrDefault(m => m.Role == AntRunner.Chat.Abstractions.ChatRole.Assistant)?
+                .GetText();
+        }
+
+        AgentInvocationTracker.FinishInvocation(
+            invocationId: invocationId,
+            status: "timed_out",
+            errorMessage: errorMessage,
+            usageJson: partialOutput?.Usage != null ? JsonSerializer.Serialize(partialOutput.Usage) : null,
+            llmRoundTrips: llmRoundTrips,
+            toolCallCount: toolCallCount,
+            durationMs: (long)elapsed.TotalMilliseconds);
+
+        if (partialOutput?.Usage != null)
+        {
+            try
+            {
+                var scopeFactory = scope.ServiceProvider.GetService<IServiceScopeFactory>();
+                var usageService = LlmProviderResolver.ResolveUsageServiceName(opts.DeploymentId, scopeFactory);
+
+                ChatUsage.RecordChatCompletion(
+                    projectId: context.ProjectId,
+                    notebookId: context.NotebookId,
+                    conversationId: context.ConversationId,
+                    service: usageService,
+                    operation: "agent_invoke",
+                    modelDeploymentId: opts.DeploymentId,
+                    inputTokens: partialOutput.Usage.PromptTokens ?? 0,
+                    cachedInputTokens: partialOutput.Usage.CachedPromptTokens ?? 0,
+                    reasoningTokens: 0,
+                    outputTokens: partialOutput.Usage.CompletionTokens ?? 0,
+                    assistantId: assistant.Id,
+                    agentInvocationId: invocationId);
+            }
+            catch { /* non-fatal usage logging */ }
+        }
+
+        return new ScriptExecutionResult
+        {
+            StandardOutput = string.IsNullOrWhiteSpace(partialText) ? string.Empty : partialText,
+            StandardError = $"ERROR: {errorMessage}",
+            NewFiles = partialOutput?.NewFiles,
+            ModifiedFiles = partialOutput?.ModifiedFiles
+        };
     }
 
     private static void TryReportToolActivity(

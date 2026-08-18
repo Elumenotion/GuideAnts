@@ -53,8 +53,6 @@ describe('api.settings (table-driven)', () => {
     { name: 'getReadiness', call: () => api.settings.getReadiness(), urlPart: '/settings/readiness', sample: { ready: true } },
     { name: 'getSection', call: () => api.settings.getSection('OpenAI'), urlPart: '/settings/sections/OpenAI', sample: { sectionName: 'OpenAI' } },
     { name: 'getModels', call: () => api.settings.getModels(), urlPart: '/settings/models', sample: [] },
-    { name: 'getRuntimeProfiles', call: () => api.settings.getRuntimeProfiles(), urlPart: '/settings/runtime-profiles', sample: [] },
-    { name: 'getRuntimeProfile', call: () => api.settings.getRuntimeProfile('rp-1'), urlPart: '/settings/runtime-profiles/rp-1', sample: { id: 'rp-1' } },
     { name: 'getLlamaInventory', call: () => api.settings.getLlamaInventory(), urlPart: '/settings/llama/runtime/inventory', sample: [] },
     { name: 'getLlamaRuntimeStatus', call: () => api.settings.getLlamaRuntimeStatus(), urlPart: '/settings/llama/runtime/status', sample: [] },
     { name: 'getOverview', call: () => api.settings.getOverview(), urlPart: '/settings/overview', sample: {} },
@@ -108,18 +106,6 @@ describe('api.settings (table-driven)', () => {
       name: 'updateModel',
       call: () => api.settings.updateModel('m1', { displayName: 'M' } as never),
       urlPart: '/settings/models/m1',
-      method: 'PUT',
-    },
-    {
-      name: 'createRuntimeProfile',
-      call: () => api.settings.createRuntimeProfile({ name: 'p' } as never),
-      urlPart: '/settings/runtime-profiles',
-      method: 'POST',
-    },
-    {
-      name: 'updateRuntimeProfile',
-      call: () => api.settings.updateRuntimeProfile('rp-1', { name: 'p2' } as never),
-      urlPart: '/settings/runtime-profiles/rp-1',
       method: 'PUT',
     },
     {
@@ -237,7 +223,6 @@ describe('api.settings (table-driven)', () => {
 
   const deleteCases: Array<{ name: string; call: () => Promise<unknown>; urlPart: string }> = [
     { name: 'deleteModel', call: () => api.settings.deleteModel('m1'), urlPart: '/settings/models/m1' },
-    { name: 'deleteRuntimeProfile', call: () => api.settings.deleteRuntimeProfile('rp-1'), urlPart: '/settings/runtime-profiles/rp-1' },
     { name: 'deleteLlamaRouterEntry', call: () => api.settings.deleteLlamaRouterEntry('router-1'), urlPart: '/settings/llama/router/entries/router-1' },
     { name: 'localModels.remove', call: () => api.settings.localModels.remove('SpeechSynthesis', 'ref'), urlPart: '/settings/services/SpeechSynthesis/local-models/ref' },
   ];

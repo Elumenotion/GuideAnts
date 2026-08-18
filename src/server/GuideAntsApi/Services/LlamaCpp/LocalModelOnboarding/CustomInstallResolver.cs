@@ -73,6 +73,7 @@ public sealed class CustomInstallResolver : ICustomInstallResolver
             ResolvedRevision: explicitInput.ResolvedRevision.Trim(),
             ModelFiles: explicitInput.ModelFiles.Select(p => p.Trim()).ToList(),
             MmprojFiles: mmprojFiles.Select(p => p.Trim()).ToList(),
+            CompanionFiles: Array.Empty<string>(),
             RouterModelId: command.RouterModelId,
             SamplingParametersJson: command.SamplingParametersJson,
             ReasoningChoicesJson: command.ReasoningChoicesJson,

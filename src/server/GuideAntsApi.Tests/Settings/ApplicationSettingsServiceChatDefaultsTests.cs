@@ -131,8 +131,7 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
 
     private static ApplicationSettingsService CreateService(
         ApplicationDbContext db,
-        IConfiguration configuration,
-        Mock<IRuntimeProfileResolver>? runtimeProfileResolver = null)
+        IConfiguration configuration)
     {
         var environment = new Mock<IWebHostEnvironment>();
         environment.SetupGet(value => value.ContentRootPath).Returns(AppContext.BaseDirectory);
@@ -147,14 +146,11 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
             }
         });
 
-        runtimeProfileResolver ??= new Mock<IRuntimeProfileResolver>();
-
         return new ApplicationSettingsService(
             db,
             new SettingsSectionRegistry(),
             environment.Object,
             configuration,
-            settingsSecrets.Object,
-            runtimeProfileResolver.Object);
+            settingsSecrets.Object);
     }
 }

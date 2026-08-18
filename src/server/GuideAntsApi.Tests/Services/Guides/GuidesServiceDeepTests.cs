@@ -251,8 +251,7 @@ public sealed class GuidesServiceDeepTests
         context.Models.Add(CreateLocalModelWithTemperatureRange(min: 0, max: 2));
         await context.SaveChangesAsync();
 
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>(MockBehavior.Strict);
-        var service = GuidesServiceTestHelper.CreateGuidesService(context, runtimeProfileResolver.Object);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
 
         var dto = MinimalCreateGuideDto("Guide") with { ModelId = "local-x", Temperature = 0.7f };
 
@@ -260,9 +259,6 @@ public sealed class GuidesServiceDeepTests
 
         var details = await service.GetGuideAsync(created.Id);
         details!.Temperature.Should().BeApproximately(0.7f, 0.0001f);
-        runtimeProfileResolver.Verify(
-            r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never);
     }
 
     [TestMethod]
@@ -546,40 +542,6 @@ public sealed class GuidesServiceDeepTests
             Created = DateTime.UtcNow,
         };
 
-    private static IRuntimeProfileResolver CreateResolverWithTemperatureRange(string profileId, double min, double max)
-    {
-        var resolver = new Mock<IRuntimeProfileResolver>();
-        resolver.Setup(r => r.ResolveAsync(profileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RuntimeProfileData(
-                profileId,
-                CombineSystemAndDeveloperMessages: false,
-                ThoughtBlockPattern: null,
-                SamplingParameters: new Dictionary<string, SamplingParameterDefinition>
-                {
-                    ["temperature"] = new("temperature", "Temperature", "", min, max, 0.1, 0.7, 0, true)
-                },
-                ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
-                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
-        return resolver.Object;
-    }
-
-    private static IRuntimeProfileResolver CreateResolverWithOpenAiChatStandardProfile(string profileId)
-    {
-        var resolver = new Mock<IRuntimeProfileResolver>();
-        resolver.Setup(r => r.ResolveAsync(profileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RuntimeProfileData(
-                profileId,
-                CombineSystemAndDeveloperMessages: false,
-                ThoughtBlockPattern: null,
-                SamplingParameters: new Dictionary<string, SamplingParameterDefinition>
-                {
-                    ["temperature"] = new("temperature", "Temperature", "", 0, 2, 0.1, 1.0, 0, true),
-                    ["top_p"] = new("top_p", "Top P", "", 0, 1, 0.05, 1.0, 1, true)
-                },
-                ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
-                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
-        return resolver.Object;
-    }
 
     private static async Task<Guid> SeedOperationAsync(ApplicationDbContext context)
     {

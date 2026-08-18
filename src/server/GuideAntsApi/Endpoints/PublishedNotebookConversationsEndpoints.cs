@@ -187,12 +187,9 @@ public static class PublishedNotebookConversationsEndpoints
 				}, statusCode: StatusCodes.Status403Forbidden);
 			}
 
-			ctx.Response.Headers["Content-Type"] = "text/event-stream";
-
-			await foreach (var ev in publishedService.SendMessageStreamAsync(convoId, request, pubId, authResult.UserIdentity, authResult.InternalUserId, ctx.RequestAborted))
-            {
-                await ctx.Response.WriteSseEventAsync(ev.EventType, ev.Payload, ctx.RequestAborted);
-            }
+			await ctx.Response.WriteSseStreamWithKeepAliveAsync(
+				publishedService.SendMessageStreamAsync(convoId, request, pubId, authResult.UserIdentity, authResult.InternalUserId, ctx.RequestAborted),
+				ctx.RequestAborted);
 
             return Results.Empty;
         })
@@ -573,16 +570,14 @@ public static class PublishedNotebookConversationsEndpoints
             // If resume requested, stream continuation
             if (resume == true)
             {
-                ctx.Response.Headers["Content-Type"] = "text/event-stream";
-                await foreach (var ev in publishedService.ResumeAfterExternalToolResultsStreamAsync(
-                                   convoId,
-                                   pubId,
-                                   authResult.UserIdentity,
-                                   authResult.InternalUserId,
-                                   cancellationToken: ctx.RequestAborted))
-                {
-                    await ctx.Response.WriteSseEventAsync(ev.EventType, ev.Payload, ctx.RequestAborted);
-                }
+                await ctx.Response.WriteSseStreamWithKeepAliveAsync(
+                    publishedService.ResumeAfterExternalToolResultsStreamAsync(
+                        convoId,
+                        pubId,
+                        authResult.UserIdentity,
+                        authResult.InternalUserId,
+                        cancellationToken: ctx.RequestAborted),
+                    ctx.RequestAborted);
                 return Results.Empty;
             }
 

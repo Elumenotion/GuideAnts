@@ -353,23 +353,8 @@ public static class SettingsLlamaEndpoints
                 var replaceRequest = request with { PresetMode = "replace" };
                 var result = await adminClient.PutRouterEntryAsync(replaceRequest, cancellationToken).ConfigureAwait(false);
                 await UpdateRouterPresetSnapshotAsync(db, replaceRequest, cancellationToken).ConfigureAwait(false);
-                if (result.RuntimeApply is { Applied: false })
-                {
-                    return Results.Json(
-                        new
-                        {
-                            ok = result.Ok,
-                            iniSha256 = result.IniSha256,
-                            runtimeApply = new
-                            {
-                                applied = result.RuntimeApply.Applied,
-                                iniSha256 = result.RuntimeApply.IniSha256,
-                                remediation = result.RuntimeApply.Remediation,
-                            },
-                        },
-                        statusCode: StatusCodes.Status502BadGateway);
-                }
-
+                // INI write is the recovery path when llama-server is down. Do not 502
+                // the catalog editor after a successful commit just because reload failed.
                 return Results.Ok(new
                 {
                     ok = result.Ok,

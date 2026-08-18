@@ -13,9 +13,9 @@ This checklist is the sign-off path for local ASR in `guideants-ai`.
    - Gateway routes respond concurrently without regression.
 
 2. Local model load
-   - ASR model can load from the mounted ASR volume via `/asr/admin/load`.
-   - If startup autoload is enabled (`GA_ASR_AUTO_LOAD_ON_STARTUP=1`), `/asr/ready` becomes ready automatically after startup load succeeds.
-   - If startup autoload is disabled, `/asr/ready` stays not-ready until `/asr/admin/load` succeeds.
+   - Select the installed ASR model through GuideAntsApi ServiceModes.
+   - `/asr/ready` stays not-ready until the API submits and applies that plan.
+   - `/asr/admin/load` is an internal executor endpoint, not an operator API.
 
 3. API behavior
    - With `SpeechTranscription__Provider=local-asr`, `POST /api/speech/transcribe` returns valid `{ text, durationSeconds }`.
@@ -46,19 +46,9 @@ This checklist is the sign-off path for local ASR in `guideants-ai`.
    - If already ready, continue to step 5.
    - If not ready, run step 4.
 
-4. Load local model (example local path under mounted ASR volume):
-
-```bash
-curl -X POST http://localhost:8110/asr/admin/load \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_path": "Qwen3-ASR-0.6B",
-    "dtype": "bfloat16",
-    "device_map": "auto",
-    "max_inference_batch_size": 8,
-    "max_new_tokens": 512
-  }'
-```
+4. In Settings, select the installed local ASR model and activate the local
+   SpeechTranscription provider. This updates ServiceModes; GuideAntsApi then
+   submits the complete lifecycle plan.
 
 5. Verify readiness:
    - `GET http://localhost:8110/asr/ready`

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using AntRunner.Chat;
+using AntRunner.Chat.LlamaCpp;
 using AntRunner.Chat.Abstractions;
 using GuideAnts.Usage;
 using GuideAntsApi.Models.Conversations;
@@ -118,22 +119,6 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
         }
         finally
         {
-            if (!streamingSucceeded && !sawPendingClientTool && context.DbTurn != null)
-            {
-                try
-                {
-                    await _persistence.SetTurnStatusAsync(
-                        context.DbTurn.Id,
-                        "cancelled",
-                        onlyIfCurrentStatus: "streaming",
-                        ct: CancellationToken.None);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error updating turn status to cancelled for {ConversationId}", context.ConversationId);
-                }
-            }
-
             await ReleaseStreamLockIfHeldAsync();
         }
 
@@ -165,11 +150,13 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
             Guid? currentAssistantMessageId = null;
             var currentAssistantContent = new StringBuilder();
+            var currentThinkingContent = new StringBuilder();
             var currentMessageSequence = context.InitialMessageSequence;
             var filenameUrlMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var assistantMessageIds = new List<Guid>();
             var thinkingEmittedInStream = false;
             var flushCounter = 0;
+            var checkpointVersion = 0;
             const int flushInterval = 20;
             var fileUrlContext = policy.BuildFileUrlContext(context.Conversation, context.PublisherId, context.HostUrl);
             var turnTraceCollector = new TurnTraceCollector(context.AssistantName, context.ModelDeploymentId);
@@ -192,6 +179,12 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
             void TryWrite(StreamingEvent ev)
             {
+                if (ConversationStreamEventWriter.IsTerminal(ev.EventType))
+                {
+                    ConversationStreamEventWriter.WriteTerminal(writer, ev, TimeSpan.FromSeconds(2));
+                    return;
+                }
+
                 if (externalCt.IsCancellationRequested)
                 {
                     return;
@@ -235,6 +228,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 if (isThinking)
                 {
                     thinkingEmittedInStream = true;
+                    currentThinkingContent.Append(e.ContentDelta);
                 }
 
                 if (currentAssistantMessageId == null)
@@ -264,12 +258,18 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         {
                             if (currentAssistantMessageId != null)
                             {
-                                _persistence.AppendOrFinalizeAssistantMessageAsync(
-                                    new AssistantMessageUpdateRequest(
-                                        currentAssistantMessageId.Value,
-                                        context.DbTurn.Id,
-                                        currentAssistantContent.ToString(),
-                                        Finalize: false),
+                                checkpointVersion++;
+                                string? thinkingJson = currentThinkingContent.Length > 0
+                                    ? JsonSerializer.Serialize(
+                                        new[] { ChatThinkingBlock.ForThinking(currentThinkingContent.ToString(), string.Empty) },
+                                        JsonOptions)
+                                    : null;
+                                _persistence.CheckpointTurnAsync(
+                                    context.DbTurn.Id,
+                                    currentAssistantMessageId.Value,
+                                    currentAssistantContent.ToString(),
+                                    thinkingJson,
+                                    checkpointVersion,
                                     CancellationToken.None).GetAwaiter().GetResult();
                             }
 
@@ -332,6 +332,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         currentAssistantContent,
                         assistantMessageIds,
                         TryWrite);
+                    currentThinkingContent.Clear();
                     return;
                 }
 
@@ -434,33 +435,21 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 if (output?.Status != null
                     && output.Status.Equals("pending_client_tool", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (currentAssistantMessageId != null)
-                    {
-                        await _persistence.FinalizeStreamingAssistantMessageIfStillStreamingAsync(
-                            currentAssistantMessageId.Value,
-                            context.DbTurn.Id,
-                            currentAssistantContent.ToString(),
-                            noneCt);
-                    }
-
-                    await _persistence.PersistThinkingBlocksAsync(output, assistantMessageIds, noneCt);
-
-                    await _persistence.SetTurnStatusAsync(context.DbTurn.Id, "streaming", ct: noneCt);
+                    await _persistence.TerminalizeTurnAsync(
+                        ConversationTurnTerminalizer.BuildRequest(
+                            context,
+                            "pending_client_tool",
+                            output,
+                            currentAssistantMessageId,
+                            currentAssistantContent,
+                            currentThinkingContent,
+                            assistantMessageIds),
+                        noneCt);
                     await PersistTraceSegmentAsync("partial", ct: noneCt);
                     TryWrite(new StreamingEvent(StreamingEventTypes.PendingClientTool, "{}"));
                     return;
                 }
 
-                if (currentAssistantMessageId != null)
-                {
-                    await _persistence.FinalizeStreamingAssistantMessageIfStillStreamingAsync(
-                        currentAssistantMessageId.Value,
-                        context.DbTurn.Id,
-                        currentAssistantContent.ToString(),
-                        noneCt);
-                }
-
-                await _persistence.PersistThinkingBlocksAsync(output, assistantMessageIds, noneCt);
                 if (!thinkingEmittedInStream)
                 {
                     StreamingEvents.EmitThinkingMessages(output, assistantMessageIds, writer);
@@ -470,8 +459,16 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
                 if (output != null)
                 {
-                    await _persistence.SetTurnStatusAsync(context.DbTurn.Id, "completed", ct: noneCt);
-                    await _persistence.PersistRunOutputAsync(context.DbTurn.Id, output, noneCt);
+                    await _persistence.TerminalizeTurnAsync(
+                        ConversationTurnTerminalizer.BuildRequest(
+                            context,
+                            "completed",
+                            output,
+                            currentAssistantMessageId,
+                            currentAssistantContent,
+                            currentThinkingContent,
+                            assistantMessageIds),
+                        noneCt);
 
                     if (output.Usage != null)
                     {
@@ -491,6 +488,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         context,
                         currentAssistantMessageId,
                         currentAssistantContent,
+                        currentThinkingContent,
                         assistantMessageIds,
                         TryWrite,
                         partialOutput,
@@ -513,6 +511,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             catch (Exception ex)
             {
                 Exception surfacedException = ex;
+                ChatRunOutput? partialOutput = ex is ChatConversationException chatEx ? chatEx.ChatRunOutput : null;
                 try
                 {
                     await PersistTraceSegmentAsync("failed", ex.Message, noneCt);
@@ -529,22 +528,50 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         context.TurnIndex);
                 }
 
+                try
+                {
+                    var terminalStatus = ConversationTurnTerminalizer.MapTerminalStatus(partialOutput, ex);
+                    await _persistence.TerminalizeTurnAsync(
+                        ConversationTurnTerminalizer.BuildRequest(
+                            context,
+                            terminalStatus,
+                            partialOutput,
+                            currentAssistantMessageId,
+                            currentAssistantContent,
+                            currentThinkingContent,
+                            assistantMessageIds,
+                            terminationCode: ConversationTurnTerminalizer.MapTerminationCode(ex),
+                            terminationDetail: surfacedException.Message,
+                            pruneIncompleteToolCalls: !context.Policy.SupportsExternalToolResume),
+                        noneCt);
+
+                    await RecordToolUsageAsync(context, noneCt);
+
+                    if (partialOutput?.Usage != null)
+                    {
+                        await RecordChatUsageAsync(
+                            context,
+                            partialOutput,
+                            currentAssistantMessageId,
+                            assistantMessageIds,
+                            TryWrite,
+                            noneCt);
+                    }
+                }
+                catch (Exception terminalizeException)
+                {
+                    _logger.LogError(
+                        terminalizeException,
+                        "Failed to terminalize turn after error for {ConversationId} turn {TurnIndex}",
+                        context.Conversation.Id,
+                        context.TurnIndex);
+                }
+
                 _logger.LogError(
                     surfacedException,
                     "Streaming conversation failed for {ConversationId} turn {TurnIndex}",
                     context.Conversation.Id,
                     context.TurnIndex);
-
-                if (currentAssistantMessageId != null)
-                {
-                    await _persistence.AppendOrFinalizeAssistantMessageAsync(
-                        new AssistantMessageUpdateRequest(
-                            currentAssistantMessageId.Value,
-                            context.DbTurn.Id,
-                            currentAssistantContent.ToString(),
-                            Finalize: true),
-                        noneCt);
-                }
 
                 TryWrite(new StreamingEvent(
                     StreamingEventTypes.Error,
@@ -891,48 +918,25 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
         ConversationStreamRunContext context,
         Guid? currentAssistantMessageId,
         StringBuilder currentAssistantContent,
+        StringBuilder currentThinkingContent,
         IReadOnlyList<Guid> assistantMessageIds,
         Action<StreamingEvent> tryWrite,
         ChatRunOutput? partialOutput,
         CancellationToken ct)
     {
-        if (currentAssistantMessageId != null)
-        {
-            await _persistence.AppendOrFinalizeAssistantMessageAsync(
-                new AssistantMessageUpdateRequest(
-                    currentAssistantMessageId.Value,
-                    context.DbTurn.Id,
-                    currentAssistantContent.ToString(),
-                    Finalize: true),
-                ct);
-        }
-
-        if (!context.Policy.SupportsExternalToolResume)
-        {
-            try
-            {
-                await _persistence.PruneIncompleteToolCallsAsync(context.Conversation.Id, context.TurnIndex, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Failed to prune incomplete tool calls for conversation {ConversationId} turn {TurnIndex}",
-                    context.Conversation.Id,
-                    context.TurnIndex);
-            }
-        }
-        else
-        {
-            try
-            {
-                await _persistence.SetTurnStatusAsync(context.DbTurn.Id, "cancelled", ct: ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to mark published turn as cancelled");
-            }
-        }
+        await _persistence.TerminalizeTurnAsync(
+            ConversationTurnTerminalizer.BuildRequest(
+                context,
+                "cancelled",
+                partialOutput,
+                currentAssistantMessageId,
+                currentAssistantContent,
+                currentThinkingContent,
+                assistantMessageIds,
+                terminationCode: "cancelled",
+                terminationDetail: "Stream was cancelled by user",
+                pruneIncompleteToolCalls: !context.Policy.SupportsExternalToolResume),
+            ct);
 
         await RecordToolUsageAsync(context, ct);
 
@@ -946,29 +950,15 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 tryWrite,
                 ct);
         }
-        else
-        {
-            await _usageReporter.RecordCancelledTurnMarkerUsageAsync(
-                new CancelledTurnUsageRequest(
-                    context.Policy.UsageMode,
-                    context.Conversation.Notebook.ProjectId,
-                    context.Conversation.NotebookId,
-                    context.Conversation.Id,
-                    context.TurnIndex,
-                    context.ModelDeploymentId,
-                    context.AssistantId,
-                    PreferredAssistantMessageId: currentAssistantMessageId
-                        ?? (assistantMessageIds.Count > 0 ? assistantMessageIds[^1] : null),
-                    AssistantMessageIds: assistantMessageIds,
-                    ContextLabel: context.UsageContextLabel != null ? $"{context.UsageContextLabel}(cancelled)" : null),
-                ct);
-        }
 
         var cancelPayload = new
         {
             message = "Stream was cancelled by user",
             type = "Cancellation",
             timestamp = DateTime.UtcNow,
+            turnId = context.DbTurn.Id,
+            status = "cancelled",
+            terminationCode = "cancelled",
             turnIndex = context.Policy.SupportsExternalToolResume ? (int?)null : context.TurnIndex
         };
         tryWrite(new StreamingEvent(StreamingEventTypes.Cancelled, JsonSerializer.Serialize(cancelPayload, JsonOptions)));

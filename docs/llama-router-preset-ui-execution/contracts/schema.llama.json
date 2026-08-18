@@ -29,17 +29,23 @@
   "$defs": {
     "display": {
       "type": "object",
-      "required": ["name"],
+      "required": ["name", "description", "labels", "license", "documentationUrl"],
       "additionalProperties": false,
       "properties": {
         "name": { "type": "string", "minLength": 1 },
-        "description": { "type": "string" },
+        "description": { "type": "string", "minLength": 1 },
         "labels": {
           "type": "array",
-          "items": { "type": "string" }
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
         },
-        "license": { "type": "string" },
-        "documentationUrl": { "type": "string", "format": "uri" }
+        "license": { "type": "string", "minLength": 1 },
+        "documentationUrl": { "type": "string", "format": "uri" },
+        "recommendedQuantLabels": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "primaryRecommendation": { "type": "boolean" }
       }
     },
     "source": {
@@ -51,40 +57,59 @@
         "revision": { "type": "string" }
       }
     },
-    "mmproj": {
+    "mmprojRef": {
       "type": "object",
       "required": ["path"],
       "additionalProperties": false,
       "properties": {
-        "path": { "type": "string", "minLength": 1 }
+        "path": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "minLength": 3 },
+        "revision": { "type": "string" }
       }
     },
     "routerPreset": {
       "type": "object",
+      "minProperties": 1,
       "additionalProperties": { "type": "string" }
+    },
+    "chatBehavior": {
+      "type": "object",
+      "required": [
+        "combineSystemAndDeveloperMessages",
+        "samplingParametersJson",
+        "thinkingControlJson"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "combineSystemAndDeveloperMessages": { "type": "boolean" },
+        "thoughtBlockPattern": { "type": "string", "minLength": 1 },
+        "samplingParametersJson": { "type": "object" },
+        "thinkingControlJson": { "type": "object" },
+        "requestFieldsWhenToolsPresent": { "type": "object" }
+      }
     },
     "defaults": {
       "type": "object",
       "required": [
         "catalogModelId",
         "routerModelId",
-        "runtimeProfileId",
         "targetDirectory",
-        "routerPreset"
+        "routerPreset",
+        "chatBehavior"
       ],
       "additionalProperties": false,
       "properties": {
         "catalogModelId": { "type": "string", "minLength": 1 },
         "routerModelId": { "type": "string", "minLength": 1 },
-        "runtimeProfileId": { "type": "string", "minLength": 1 },
         "targetDirectory": { "type": "string", "minLength": 1 },
         "mmproj": {
           "oneOf": [
-            { "$ref": "#/$defs/mmproj" },
+            { "$ref": "#/$defs/mmprojRef" },
             { "type": "null" }
           ]
         },
-        "routerPreset": { "$ref": "#/$defs/routerPreset" }
+        "routerPreset": { "$ref": "#/$defs/routerPreset" },
+        "chatBehavior": { "$ref": "#/$defs/chatBehavior" }
       }
     },
     "quantMetadata": {
@@ -93,7 +118,7 @@
       "properties": {
         "recommendedLabels": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": { "type": "string", "minLength": 1 }
         },
         "guidance": {
           "type": "object",
@@ -102,22 +127,35 @@
             "required": ["summary"],
             "additionalProperties": false,
             "properties": {
-              "summary": { "type": "string" }
+              "summary": { "type": "string", "minLength": 1 }
             }
           }
         }
       }
     },
+    "hardwareNotes": {
+      "type": "object",
+      "required": ["summary", "contextClass"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "contextClass": {
+          "type": "string",
+          "enum": ["large", "compact"]
+        }
+      }
+    },
     "modelDefinition": {
       "type": "object",
-      "required": ["id", "source", "defaults"],
+      "required": ["id", "display", "source", "defaults", "quantMetadata", "hardwareNotes"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "display": { "$ref": "#/$defs/display" },
         "source": { "$ref": "#/$defs/source" },
         "defaults": { "$ref": "#/$defs/defaults" },
-        "quantMetadata": { "$ref": "#/$defs/quantMetadata" }
+        "quantMetadata": { "$ref": "#/$defs/quantMetadata" },
+        "hardwareNotes": { "$ref": "#/$defs/hardwareNotes" }
       }
     }
   }

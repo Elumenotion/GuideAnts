@@ -704,8 +704,8 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
   };
 
   const handleActivate = async (bundleId: string) => {
-    // Selection is persisted on ServiceModes and written into warmup-desired.ini
-    // by the web API reconcile path; the SD engine loads via orchestrator apply.
+    // ServiceModes is authoritative. The web API submits a complete lifecycle
+    // plan, and the container only executes that explicit API command.
     setActionError(null);
     setBusyBundleId(bundleId);
     try {

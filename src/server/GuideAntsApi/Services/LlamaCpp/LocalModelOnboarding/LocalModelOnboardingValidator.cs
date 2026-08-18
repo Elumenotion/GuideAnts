@@ -21,7 +21,6 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
     private readonly IConfiguration _configuration;
     private readonly IApplicationSettingsService _settingsService;
     private readonly IChatTargetValidator _chatTargetValidator;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly ILlamaRuntimeInventoryService _inventoryService;
     private readonly IHuggingFaceTokenResolver _huggingFaceTokenResolver;
     private readonly ICuratedInstallResolver _curatedInstallResolver;
@@ -31,7 +30,6 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         IConfiguration configuration,
         IApplicationSettingsService settingsService,
         IChatTargetValidator chatTargetValidator,
-        IRuntimeProfileResolver runtimeProfileResolver,
         ILlamaRuntimeInventoryService inventoryService,
         IHuggingFaceTokenResolver huggingFaceTokenResolver,
         ICuratedInstallResolver curatedInstallResolver,
@@ -40,7 +38,6 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         _configuration = configuration;
         _settingsService = settingsService;
         _chatTargetValidator = chatTargetValidator;
-        _runtimeProfileResolver = runtimeProfileResolver;
         _inventoryService = inventoryService;
         _huggingFaceTokenResolver = huggingFaceTokenResolver;
         _curatedInstallResolver = curatedInstallResolver;
@@ -82,6 +79,11 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
 
         ValidateRequiredFields(command);
         ValidateRouterKnobs(command);
+
+        if (string.Equals(command.InstallSource, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase))
+        {
+            ValidateRowOwnedChatBehavior(command);
+        }
 
         if (!RuntimeConfigurationPlaceholders.HasUsableUrl(_configuration["LlamaCpp:BaseUrl"]))
         {
@@ -276,11 +278,6 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
             forbidden.Add("install.routerModelId");
         }
 
-        if (!string.IsNullOrWhiteSpace(install.RuntimeProfileId))
-        {
-            forbidden.Add("install.runtimeProfileId");
-        }
-
         if (install.RouterContextSize is not null)
         {
             forbidden.Add("install.routerContextSize");
@@ -346,13 +343,13 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
 
         if (command.ExplicitHuggingFace is null
             && string.Equals(command.InstallSource, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
-            && string.IsNullOrWhiteSpace(command.RuntimeProfileId))
+            && !command.HasProviderConfigChatBehavior)
         {
             throw new AddModelException(
-                code: "RUNTIME_PROFILE_NOT_FOUND",
+                code: "INSTALL_STEP_FAILED",
                 step: "validation",
-                message: "Runtime profile is required for legacy Hugging Face onboarding.",
-                remediation: "Pick a runtime profile in Step 3.");
+                message: "Model chat behavior JSON is required for Hugging Face onboarding.",
+                remediation: "Provide samplingParametersJson and thinkingControlJson in providerConfig.");
         }
 
         if (string.Equals(command.InstallSource, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase))
@@ -486,10 +483,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         LocalModelOnboardingCommand command,
         CancellationToken cancellationToken)
     {
-        var chatBehavior = command.ExplicitHuggingFace is not null
-            || string.Equals(command.InstallSource, LocalModelInstallSources.ExistingAlias, StringComparison.OrdinalIgnoreCase)
-            ? command.ToRowOwnedRuntimeProfileData()
-            : await _runtimeProfileResolver.ResolveAsync(command.RuntimeProfileId.Trim(), cancellationToken).ConfigureAwait(false);
+        var chatBehavior = command.ToRowOwnedRuntimeProfileData();
 
         _chatTargetValidator.Validate(new ChatTarget(
             ModelId: command.CatalogModelId,

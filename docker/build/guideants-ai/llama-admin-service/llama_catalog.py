@@ -14,6 +14,7 @@ from guideants_hf.quant_grouping import (
     QuantGroupingError,
     enrich_quant_guidance,
     group_repository_quants,
+    resolve_companion_artifacts,
     resolve_projector,
 )
 from guideants_hf.repository import (
@@ -143,6 +144,28 @@ def validate_manifest_instance(manifest: dict[str, Any]) -> None:
                 f"Model '{model_id}' declares image-min-tokens without mmproj."
             )
 
+        companion_specs = defaults.get("companionArtifacts") if isinstance(defaults, dict) else None
+        if companion_specs is not None:
+            if not isinstance(companion_specs, list):
+                raise CatalogValidationError(f"Model '{model_id}' companionArtifacts must be an array.")
+            seen_companion_paths: set[str] = set()
+            mmproj_path = ""
+            if isinstance(mmproj, dict):
+                mmproj_path = str(mmproj.get("path", "")).strip()
+            for item in companion_specs:
+                if not isinstance(item, dict):
+                    raise CatalogValidationError(f"Model '{model_id}' companionArtifacts entries must be objects.")
+                path = str(item.get("path", "")).strip()
+                if not path:
+                    raise CatalogValidationError(f"Model '{model_id}' companionArtifacts entries require path.")
+                if path in seen_companion_paths:
+                    raise CatalogValidationError(f"Model '{model_id}' declares duplicate companion path '{path}'.")
+                seen_companion_paths.add(path)
+                if mmproj_path and os.path.basename(path.replace("\\", "/")) == os.path.basename(mmproj_path.replace("\\", "/")):
+                    raise CatalogValidationError(
+                        f"Model '{model_id}' companion '{path}' collides with mmproj destination filename."
+                    )
+
 
 def load_manifest() -> dict[str, Any]:
     path = manifest_path()
@@ -219,6 +242,9 @@ def resolve_definition_quants(
 
         defaults = definition.get("defaults")
         mmproj_spec = defaults.get("mmproj") if isinstance(defaults, dict) else None
+        companion_specs = defaults.get("companionArtifacts") if isinstance(defaults, dict) else None
+        if companion_specs is not None and not isinstance(companion_specs, list):
+            companion_specs = None
 
         def _resolve_external(repo: str, rev: str, token: str | None) -> list[dict[str, Any]]:
             commit = resolve_repository_commit(repo, rev, token)
@@ -226,6 +252,14 @@ def resolve_definition_quants(
 
         projector = resolve_projector(
             mmproj_spec if isinstance(mmproj_spec, dict) else None,
+            model_repository=repository,
+            model_revision=resolved_revision,
+            model_files=artifacts,
+            token=hf_token,
+            resolve_external_files=_resolve_external,
+        )
+        companions = resolve_companion_artifacts(
+            companion_specs if isinstance(companion_specs, list) else None,
             model_repository=repository,
             model_revision=resolved_revision,
             model_files=artifacts,
@@ -244,6 +278,7 @@ def resolve_definition_quants(
         "resolvedRevision": resolved_revision,
         "quants": quants,
         "projector": projector,
+        "companions": companions,
     }
 
 

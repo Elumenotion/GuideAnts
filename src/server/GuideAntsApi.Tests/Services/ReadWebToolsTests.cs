@@ -2,6 +2,7 @@ using System.Net;
 using AntRunner.ToolCalling;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -123,7 +124,8 @@ public sealed class ReadWebToolsTests
 
         var result = await ReadWebTools.GetContentFromUrl("https://example.com/page");
 
-        result.Content.Should().Contain("Error:");
+        result.Content.Should().Be(
+            "403 Forbidden. This host blocks unauthenticated access. Do not retry — use a different source or local files.");
         browser.CallCount.Should().Be(1);
 
         var excludedHosts = await _context.ExcludedHosts.ToListAsync();
@@ -147,8 +149,122 @@ public sealed class ReadWebToolsTests
 
         var result = await ReadWebTools.GetContentFromUrl("https://example.com/page");
 
-        result.Content.Should().Contain("Error:");
+        result.Content.Should().Be(
+            "Server error (5xx). You may retry once; if it fails again, use a different source.");
         browser.CallCount.Should().Be(1);
+        (await _context.ExcludedHosts.CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task GetContentFromUrl_WhenNotFound_ReturnsInstructiveMessage()
+    {
+        var browser = new FakeBrowserRenderingClient
+        {
+            Result = new BrowserRenderedPageResult(false, null, "HTTP 404", "https://example.com/missing", 404)
+        };
+
+        InitializeTool(
+            new FakeHttpClientFactory(new StaticHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.NotFound))),
+            browser);
+
+        var result = await ReadWebTools.GetContentFromUrl("https://example.com/missing");
+
+        result.Content.Should().Be(
+            "404 Not Found. This URL does not exist. Do not retry — fix the path or use local file search.");
+        browser.CallCount.Should().Be(1);
+        (await _context.ExcludedHosts.CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task GetContentFromUrl_WhenInvalidUrl_ReturnsInstructiveMessage()
+    {
+        InitializeTool(
+            new FakeHttpClientFactory(new StaticHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK))),
+            new FakeBrowserRenderingClient());
+
+        var result = await ReadWebTools.GetContentFromUrl("not-a-url");
+
+        result.Content.Should().Be("Invalid URL. Provide a complete https:// URL.");
+    }
+
+    [TestMethod]
+    public async Task GetContentFromUrl_WhenHostExcluded_ReturnsBlockedMessageWithoutFetching()
+    {
+        _context.ExcludedHosts.Add(new ExcludedHost
+        {
+            Host = "blocked.example.com",
+            Reason = "ReadWeb access denied.",
+            Created = DateTime.UtcNow,
+            Updated = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync();
+
+        var browser = new FakeBrowserRenderingClient();
+        var httpCalled = false;
+        InitializeTool(
+            new FakeHttpClientFactory(new StaticHttpMessageHandler(_ =>
+            {
+                httpCalled = true;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html><body><p>Hello</p></body></html>")
+                };
+            })),
+            browser);
+
+        var result = await ReadWebTools.GetContentFromUrl("https://blocked.example.com/page");
+
+        result.Content.Should().Be(ReadWebHostPolicy.ExcludedHostMessage);
+        httpCalled.Should().BeFalse();
+        browser.CallCount.Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task GetContentFromUrl_WhenProtectedHostIsExcludedInDatabase_StillFetches()
+    {
+        _context.ExcludedHosts.Add(new ExcludedHost
+        {
+            Host = "api.github.com",
+            Reason = "ReadWeb access denied.",
+            Created = DateTime.UtcNow,
+            Updated = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync();
+
+        var browser = new FakeBrowserRenderingClient();
+        InitializeTool(
+            new FakeHttpClientFactory(new StaticHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html><body><p>Hello github</p></body></html>")
+                })),
+            browser);
+
+        var result = await ReadWebTools.GetContentFromUrl("https://api.github.com/repos/example/example");
+
+        result.Content.Should().Contain("Hello github");
+        browser.CallCount.Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task GetContentFromUrl_WhenAccessDeniedOnProtectedHost_DoesNotWriteExcludedHost()
+    {
+        var browser = new FakeBrowserRenderingClient
+        {
+            Result = new BrowserRenderedPageResult(false, null, "forbidden", "https://api.github.com/repos/example/example", 403)
+        };
+
+        InitializeTool(
+            new FakeHttpClientFactory(new StaticHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.Forbidden))),
+            browser);
+
+        var result = await ReadWebTools.GetContentFromUrl("https://api.github.com/repos/example/example");
+
+        result.Content.Should().Be(
+            "403 Forbidden. This host blocks unauthenticated access. Do not retry — use a different source or local files.");
         (await _context.ExcludedHosts.CountAsync()).Should().Be(0);
     }
 

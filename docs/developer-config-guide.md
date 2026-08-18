@@ -78,6 +78,12 @@ Every command should print a version. If any fail, fix the install before moving
 
 ---
 
+## Contributors — catalog models and chat behavior
+
+Before adding **any** catalog model (OpenAI, Anthropic, Gemini, HF, OpenRouter, Azure, llama-cpp) or any feature touching sampling / reasoning / thinking control, read **[model-chat-behavior-contract.md](model-chat-behavior-contract.md)**. Chat behavior is owned by each `Models` row at runtime for every provider; runtime profiles are a local install copy bridge only.
+
+---
+
 # 1. Cross-Cutting / Host Requirements
 
 These are needed regardless of which lane you work in.
@@ -246,7 +252,7 @@ So local API URL = `http://localhost:5106` (which is what the client `.env.devel
 
 ### Bootstrap requirements
 
-On first boot the API seeds `Resources/bootstrap/` data (guides, assistants, runtime profiles `qwen3_5`, `qwen3_6`, `gemma4`). Seeding is idempotent.
+On first boot the API seeds `Resources/bootstrap/` data (guides, assistants, runtime-profile **install templates**). Chat behavior at inference is read from catalog `Models` rows after install. Seeding is idempotent. See [model-chat-behavior-contract.md](model-chat-behavior-contract.md).
 
 ---
 
@@ -320,7 +326,6 @@ GA_AI_CPU_IMAGE=guideants-ai:cpu-26126.1012
 GA_AI_ROCM_IMAGE=guideants-ai:rocm-26131.2226
 GA_AI_VULKAN_IMAGE=guideants-ai:vulkan-latest
 GA_EMB_DEFAULT_MODEL_PATH=harrier-oss-v1-0.6b
-GA_EMB_AUTO_LOAD_ON_STARTUP=1
 GA_EMB_WARMUP_ON_LOAD=1
 GA_DB_NAME=guideants-dev-major-refactor-20260415
 GA_DOCUMENTSERVER_ENABLED=true
@@ -329,7 +334,9 @@ GA_DOCUMENTSERVER_JWT_ENABLED=false
 
 These tags must exist locally for the `local` compose files. For `ghcr` compose files (the launcher default), the images are pulled from `ghcr.io/elumenotion/*` and these `GA_AI_*` tags are not strictly required.
 
-Optional env passthroughs the compose files read: `HF_TOKEN`, `GA_SQL_SA_PASSWORD`, GPU layer counts, ASR/TTS/SD/EMB warmup flags. Defaults are fine for first boot.
+Optional env passthroughs the compose files read: `HF_TOKEN`,
+`GA_SQL_SA_PASSWORD`, GPU layer counts, and load-mechanics settings. Routing and
+model lifecycle are owned by GuideAntsApi; no container autoload setting exists.
 For local debugging with API on the host and services in Docker, use `docker/.env.api-local-debug.example` as the baseline env file.
 
 ### Ports the stack publishes

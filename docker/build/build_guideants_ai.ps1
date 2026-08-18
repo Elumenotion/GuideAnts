@@ -8,37 +8,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $env:DOCKER_BUILDKIT = '1'
 
+. (Join-Path $PSScriptRoot 'lib\combined-hash.ps1')
+
 if ($All) {
     Write-Error "The -All support-image build was split out. Run build_support_images.ps1 separately after backend builds."
     exit 1
-}
-
-function Get-CombinedHash {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Paths
-    )
-
-    $lines = foreach ($path in $Paths) {
-        if (-not (Test-Path $path)) {
-            throw "Hash input file not found: $path"
-        }
-
-        $hash = (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLowerInvariant()
-        "$path|$hash"
-    }
-
-    $joined = [string]::Join("`n", $lines)
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($joined)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $digest = $sha.ComputeHash($bytes)
-    }
-    finally {
-        $sha.Dispose()
-    }
-
-    -join ($digest | ForEach-Object { $_.ToString('x2') })
 }
 
 function Write-DepsDockerfileSlice {
@@ -288,6 +262,15 @@ switch ($Backend) {
     }
 }
 
+# Upstream llama.cpp server images copied into each backend's deps image.
+$llamaCppImageByBackend = @{
+    cpu    = 'ghcr.io/ggml-org/llama.cpp:server'
+    cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    rocm   = 'ghcr.io/ggml-org/llama.cpp:server-rocm'
+    slim   = 'ghcr.io/ggml-org/llama.cpp:server'
+    vulkan = 'ghcr.io/ggml-org/llama.cpp:server-vulkan'
+}
+
 # Build a unique tag per build, and also maintain a stable backend-specific latest tag.
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
@@ -332,7 +315,7 @@ $scriptAgentSourceFiles = Get-ChildItem -Path $scriptAgentProject -Recurse -File
     Sort-Object FullName |
     Select-Object -ExpandProperty FullName
 
-$scriptAgentSourceHash = Get-CombinedHash -Paths $scriptAgentSourceFiles
+$scriptAgentSourceHash = Get-CombinedHash -Paths $scriptAgentSourceFiles -RelativeTo $repoRoot
 $canReusePublish = $false
 if ((Test-Path $publishOutput) -and (Test-Path $scriptAgentHashFile)) {
     $previousHash = (Get-Content -Path $scriptAgentHashFile -Raw).Trim()
@@ -391,18 +374,49 @@ $depsHashInputs = @(
     (Join-Path $buildContext 'emb-requirements.txt'),
     $reqDest
 )
-$depsHash = (Get-CombinedHash -Paths $depsHashInputs).Substring(0, 12)
+$depsInputHashLabel = 'org.guideants.deps-input-hash'
+$depsCanonicalFullHash = Get-CombinedHash -Paths $depsHashInputs -RelativeTo $repoRoot
+$depsLegacyFullHash = Get-LegacyAbsoluteCombinedHash -Paths $depsHashInputs
+$depsHash = $depsCanonicalFullHash.Substring(0, 12)
 $depsTag = "guideants-ai-deps:${Backend}-${depsHash}"
+$depsLegacyTag = "guideants-ai-deps:${Backend}-$($depsLegacyFullHash.Substring(0, 12))"
 $depsCacheTag = "guideants-ai-deps:${Backend}-cache"
 Write-Host "Dependency image tag: $depsTag"
 Write-Host "Dependency cache tag: $depsCacheTag"
 
 try {
-    $depsExists = Test-DockerImageExists -ImageTag $depsTag
+    $depsCandidateTags = @(docker images --format '{{.Repository}}:{{.Tag}}' 'guideants-ai-deps' 2>$null)
+    $reusableDepsImage = Find-ReusableDepsImage `
+        -CanonicalTag $depsTag `
+        -LegacyTag $depsLegacyTag `
+        -CanonicalFullHash $depsCanonicalFullHash `
+        -Backend $Backend `
+        -ImageExists { param($tag) Test-DockerImageExists -ImageTag $tag } `
+        -GetLabel {
+            param($tag)
+            $format = '{{index .Config.Labels "' + $depsInputHashLabel + '"}}'
+            $value = docker inspect --format $format $tag 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                return $null
+            }
+            if ([string]::IsNullOrWhiteSpace($value) -or $value -eq '<no value>') {
+                return $null
+            }
+            return $value.Trim()
+        } `
+        -CandidateTags $depsCandidateTags
+    $depsExists = -not [string]::IsNullOrWhiteSpace($reusableDepsImage)
     $depsCacheExists = Test-DockerImageExists -ImageTag $depsCacheTag
     if ($RebuildBase -or -not $depsExists) {
         if ($RebuildBase) {
             Write-Host "Rebuilding dependency image without cache..." -ForegroundColor Yellow
+            $llamaCppImage = $llamaCppImageByBackend[$Backend]
+            Write-Host "RebuildBase: pulling latest upstream llama.cpp image ($llamaCppImage)..." -ForegroundColor Yellow
+            docker pull $llamaCppImage
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Failed to pull upstream llama.cpp image '$llamaCppImage' for RebuildBase"
+                exit 1
+            }
         }
         else {
             Write-Host "Dependency image not found. Building $depsTag..." -ForegroundColor Cyan
@@ -411,17 +425,16 @@ try {
         $depsBuildArgs = @('buildx', 'build', '--load')
         if ($RebuildBase) {
             $depsBuildArgs += '--no-cache'
+            $depsBuildArgs += '--pull'
         }
         else {
-            $depsBuildArgs += @(
-                '--cache-from', "type=local,src=$depsCachePath",
-                '--cache-from', "type=local,src=$finalCachePath"
-            )
+            $depsBuildArgs += @(Get-LocalBuildxCacheFromArgs -CachePaths @($depsCachePath, $finalCachePath))
             if ($depsCacheExists) {
                 $depsBuildArgs += @('--cache-from', $depsCacheTag)
             }
         }
         $depsBuildArgs += @(
+            '--label', "${depsInputHashLabel}=$depsCanonicalFullHash",
             '--target', $depsTarget,
             '-t', $depsTag,
             '-t', $depsCacheTag,
@@ -440,10 +453,18 @@ try {
         Promote-LocalBuildxCache -CurrentPath $depsCachePath -NewPath $depsCachePathNew
     }
     else {
-        Write-Host "Reusing cached dependency image: $depsTag" -ForegroundColor Green
-        docker tag $depsTag $depsCacheTag
+        Write-Host "Reusing dependency image $($reusableDepsImage) as $depsTag" -ForegroundColor Green
+        if ($reusableDepsImage -eq $depsCacheTag) {
+            Write-Warning "Reused unlabeled $depsCacheTag. If Dockerfile or requirements changed, rerun with -RebuildBase."
+        }
+        docker tag $reusableDepsImage $depsTag
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to tag dependency cache image $depsCacheTag from $depsTag"
+            Write-Error "Failed to tag $depsTag from $reusableDepsImage"
+            exit 1
+        }
+        docker tag $reusableDepsImage $depsCacheTag
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to tag dependency cache image $depsCacheTag from $reusableDepsImage"
             exit 1
         }
     }
@@ -453,9 +474,8 @@ try {
     if ($RebuildBase) {
         $dockerArgs += '--no-cache'
     }
+    $dockerArgs += @(Get-LocalBuildxCacheFromArgs -CachePaths @($depsCachePath, $finalCachePath))
     $dockerArgs += @(
-        '--cache-from', "type=local,src=$depsCachePath",
-        '--cache-from', "type=local,src=$finalCachePath",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,

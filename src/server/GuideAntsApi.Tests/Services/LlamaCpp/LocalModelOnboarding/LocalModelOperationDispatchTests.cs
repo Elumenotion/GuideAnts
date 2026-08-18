@@ -10,9 +10,8 @@ using GuideAntsApi.Services.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using GuideAntsApi.Tests.TestUtils;
 using Moq;
-
-namespace GuideAntsApi.Tests.Services.LlamaCpp.LocalModelOnboarding;
 
 /// <summary>
 /// Guards the two invariants that together stop a router alias from being
@@ -152,7 +151,6 @@ public sealed class LocalModelOperationDispatchTests
 
         return new LocalModelOnboardingOrchestrator(
             new Mock<GuideAntsApi.Settings.IApplicationSettingsService>(MockBehavior.Strict).Object,
-            new Mock<IRuntimeProfileResolver>(MockBehavior.Strict).Object,
             new Mock<IHuggingFaceModelDownloadService>(MockBehavior.Strict).Object,
             new Mock<ICuratedInstallResolver>(MockBehavior.Strict).Object,
             curatedService.Object,
@@ -173,7 +171,6 @@ public sealed class LocalModelOperationDispatchTests
             new Mock<IHuggingFaceTokenResolver>().Object,
             new Mock<ILlamaServerRuntimeClient>(MockBehavior.Strict).Object,
             new Mock<ILlamaRuntimeCoordinator>().Object,
-            new Mock<IRuntimeProfileResolver>(MockBehavior.Strict).Object,
             NullLogger<LocalModelLifecycleOperationService>.Instance);
 
     private static LocalModelLifecycleService CreateLifecycleService(
@@ -220,8 +217,8 @@ public sealed class LocalModelOperationDispatchTests
                 "abc123",
                 ["model-q6.gguf"],
                 [],
+                [],
                 "qwen-local",
-                "qwen3_6",
                 "qwen-local",
                 new Dictionary<string, string> { ["ctx-size"] = "8192" }).ToJson(),
             Status = status,
@@ -250,10 +247,11 @@ public sealed class LocalModelOperationDispatchTests
                         new LlamaCatalogDefaultsDto(
                             "qwen-local",
                             "qwen-local",
-                            "qwen3_6",
                             "qwen-local",
                             null,
-                            new Dictionary<string, string> { ["ctx-size"] = "8192" }),
+                            null,
+                            new Dictionary<string, string> { ["ctx-size"] = "8192" },
+                            LlamaCatalogTestHelpers.CreateChatBehaviorDto()),
                         new LlamaCatalogQuantMetadataDto(),
                         new LlamaCatalogHardwareNotesDto("notes", "large")),
                 ]));
@@ -276,7 +274,8 @@ public sealed class LocalModelOperationDispatchTests
                         1000,
                         [new LlamaQuantArtifactDto("model-q4.gguf", 1000)]),
                 ],
-                null));
+                null,
+                []));
         return adminClient;
     }
 
@@ -308,6 +307,7 @@ public sealed class LocalModelOperationDispatchTests
             TargetDirectory = "qwen-local",
             ModelArtifactsJson = InstallationArtifactRecords.SerializeFromPaths("qwen-local", ["model-q6.gguf"]),
             ProjectorArtifactsJson = "[]",
+            CompanionArtifactsJson = "[]",
             RouterPresetSnapshotJson = JsonSerializer.Serialize(new Dictionary<string, string> { ["ctx-size"] = "8192" }),
             CreatedUtc = now,
             UpdatedUtc = now,

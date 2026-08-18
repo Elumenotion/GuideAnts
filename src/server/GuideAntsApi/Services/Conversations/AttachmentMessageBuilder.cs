@@ -250,30 +250,11 @@ public static class AttachmentMessageBuilder
         }
     }
 
-    private static string GetAttachmentPath(NotebookFile notebookFile, string storagePath)
-    {
-        // Files in Output/ folder: return just the filename (backward compatible)
-        // Note: Resources files are copied into notebook Resources/ and symlinked into Output/ at creation/copy time.
-        // Returning the filename here ensures scripts can access via CWD when symlinks exist.
-        if (notebookFile.RelativePath.StartsWith("Output/", StringComparison.OrdinalIgnoreCase) || 
-            notebookFile.RelativePath.StartsWith("Output\\", StringComparison.OrdinalIgnoreCase))
-        {
-            return Path.GetFileName(notebookFile.RelativePath);
-        }
-        
-        // Files in Runs/<runId>/ folder: return just the filename (CWD is the run folder)
-        if (notebookFile.RelativePath.StartsWith("Runs/", StringComparison.OrdinalIgnoreCase) || 
-            notebookFile.RelativePath.StartsWith("Runs\\", StringComparison.OrdinalIgnoreCase))
-        {
-            return Path.GetFileName(notebookFile.RelativePath);
-        }
-        
-        // All other files: return the path relative to the script working directory (Output/ or Runs/<id>/)
-        // Working directory is: /storage/projectId/notebooks/notebookId/Output (or Runs/<id>)
-        // File path is relative to notebook root (e.g., "data/myfile.csv"), so from Output it is "../data/myfile.csv"
-        var relativeFromNotebookRoot = notebookFile.RelativePath.Replace("\\", "/").TrimStart('/');
-        return $"../{relativeFromNotebookRoot}";
-    }
+    private static string GetAttachmentPath(NotebookFile notebookFile, string _) =>
+        // Sandbox CWD is Output/ (unpublished). Match ContextOptionFilesResolver so
+        // attachment path text is usable by tools the same way as [@files] listings.
+        // Output/foo/bar → foo/bar; data/file.csv → ../data/file.csv
+        ContextOptionFilesResolver.ToCwdRelativePath(notebookFile.RelativePath, isPublished: false);
 
     private static ContentUploadType DetermineUploadType(string fileName)
     {

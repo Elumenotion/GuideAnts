@@ -65,6 +65,7 @@ public class NotebookConversationAssistantSwitchingTests
         public Task RenameConversationAsync(Guid conversationId, string newTitle) => throw new NotImplementedException();
         public Task DeleteConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task EditMessageAsync(Guid messageId, string newContent) => throw new NotImplementedException();
+        public Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId) => Task.FromResult(false);
 
 
 

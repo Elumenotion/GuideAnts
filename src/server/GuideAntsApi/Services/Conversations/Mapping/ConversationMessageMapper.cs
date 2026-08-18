@@ -152,7 +152,10 @@ public static class ConversationMessageMapper
         foreach (var message in orderedMessages)
         {
             messageDtos.AddRange(BuildThinkingMessageDtos(message));
-            messageDtos.Add(ToMessageDto(message));
+            if (HasVisibleAssistantBody(message.Role, message.Content, !string.IsNullOrEmpty(message.ToolCalls), message.Attachments?.Count ?? 0))
+            {
+                messageDtos.Add(ToMessageDto(message));
+            }
         }
 
         return new ConversationDto(c.NotebookId, c.Created, messageDtos);
@@ -206,6 +209,20 @@ public static class ConversationMessageMapper
         }
 
         return new ChatMessage(role, m.Content);
+    }
+
+    public static bool HasVisibleAssistantBody(
+        DataModelChatRole role,
+        string? content,
+        bool hasToolCalls,
+        int attachmentCount)
+    {
+        if (role != DataModelChatRole.Assistant)
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(content) || hasToolCalls || attachmentCount > 0;
     }
 
     public static IReadOnlyList<MessageDto> BuildThinkingMessageDtos(NotebookConversationMessage message)

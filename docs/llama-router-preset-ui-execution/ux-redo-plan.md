@@ -1,5 +1,10 @@
 # Local Llama UX Redo — File-Level Plan
 
+> **Stale — runtime profile authority:** Layer 3 (chat behavior) is **model-row owned** at inference.
+> Manifest `runtimeProfileId` is an install-time copy template only. See
+> [model-chat-behavior-contract.md](../../model-chat-behavior-contract.md).
+> Do not use this plan to justify new runtime profiles or a Profiles tab.
+
 Last updated: 2026-07-11
 
 This plan replaces the shipped Phase 6/7 operator surface with the product goal from the Jul 10 conversation.

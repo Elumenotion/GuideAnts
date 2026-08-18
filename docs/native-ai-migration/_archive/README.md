@@ -1,6 +1,8 @@
 # Archive
 
-Historical plans. **Not authoritative.**
+Historical plans. **Not authoritative** for product lists, inventory, or
+**load/warm/unload policy**. For lifecycle authority see
+`docs/local-ai-lifecycle/ARCHITECTURE.md` and `Program.cs` startup comments.
 
 | Folder | Contents |
 |--------|----------|

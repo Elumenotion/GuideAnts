@@ -19,34 +19,34 @@ describe('useCopyPath', () => {
     });
   });
 
-  it('copies a single path as root-relative', async () => {
+  it('copies a single path as cwd-relative', async () => {
     const { result } = renderHook(() => useCopyPath(), { wrapper });
 
     await act(async () => {
       await result.current.copyPaths(['docs/api.md']);
     });
 
-    expect(writeText).toHaveBeenCalledWith('/docs/api.md');
+    expect(writeText).toHaveBeenCalledWith('../docs/api.md');
   });
 
-  it('does not double-prefix a path that already starts with "/"', async () => {
+  it('strips Output/ so paths under CWD stay unprefixed', async () => {
     const { result } = renderHook(() => useCopyPath(), { wrapper });
 
     await act(async () => {
-      await result.current.copyPaths(['/already/rooted']);
+      await result.current.copyPaths(['Output/result.txt']);
     });
 
-    expect(writeText).toHaveBeenCalledWith('/already/rooted');
+    expect(writeText).toHaveBeenCalledWith('result.txt');
   });
 
-  it('joins multiple paths with newlines, each made root-relative', async () => {
+  it('joins multiple paths with newlines, each made cwd-relative', async () => {
     const { result } = renderHook(() => useCopyPath(), { wrapper });
 
     await act(async () => {
       await result.current.copyPaths(['a', 'b/c']);
     });
 
-    expect(writeText).toHaveBeenCalledWith('/a\n/b/c');
+    expect(writeText).toHaveBeenCalledWith('../a\n../b/c');
   });
 
   it('filters out empty paths before copying', async () => {
@@ -56,7 +56,7 @@ describe('useCopyPath', () => {
       await result.current.copyPaths(['', 'real']);
     });
 
-    expect(writeText).toHaveBeenCalledWith('/real');
+    expect(writeText).toHaveBeenCalledWith('../real');
   });
 
   it('does nothing when every path is empty', async () => {

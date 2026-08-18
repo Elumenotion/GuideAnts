@@ -956,24 +956,24 @@ describe('NotebookFolderTree extended coverage', () => {
   });
 
   describe('copy path', () => {
-    it('copies a file path to the clipboard scoped under the notebook name', async () => {
+    it('copies a file path to the clipboard as cwd-relative', async () => {
       const { user, writeText } = setupClipboard();
       renderTree();
 
       fireEvent.contextMenu(screen.getByText('readme.txt'));
       await user.click(await findPortalButton('Copy path'));
 
-      expect(writeText).toHaveBeenCalledWith('/Test Notebook/readme.txt');
+      expect(writeText).toHaveBeenCalledWith('../readme.txt');
     });
 
-    it('copies a folder path to the clipboard scoped under the notebook name', async () => {
+    it('copies a folder path to the clipboard as cwd-relative', async () => {
       const { user, writeText } = setupClipboard();
       renderTree();
 
       fireEvent.contextMenu(screen.getByText('Docs'));
       await user.click(await findPortalButton('Copy path'));
 
-      expect(writeText).toHaveBeenCalledWith('/Test Notebook/Docs');
+      expect(writeText).toHaveBeenCalledWith('../Docs');
     });
 
     it('does not show Copy path for the root folder', () => {
@@ -982,7 +982,7 @@ describe('NotebookFolderTree extended coverage', () => {
       expect(screen.queryByText('Copy path')).not.toBeInTheDocument();
     });
 
-    it('copies multiple selected paths joined by newlines, each scoped under the notebook name', async () => {
+    it('copies multiple selected paths joined by newlines, each cwd-relative', async () => {
       const { user, writeText } = setupClipboard();
       renderTree();
 
@@ -990,17 +990,7 @@ describe('NotebookFolderTree extended coverage', () => {
       fireEvent.contextMenu(screen.getByText('readme.txt'));
       await user.click(await findPortalButton(/Copy \d+ Paths?/));
 
-      expect(writeText).toHaveBeenCalledWith('/Test Notebook/Assets\n/Test Notebook/Docs\n/Test Notebook/readme.txt');
-    });
-
-    it('falls back to a bare root-relative path when notebookName is not provided', async () => {
-      const { user, writeText } = setupClipboard();
-      renderTree({ notebookName: undefined });
-
-      fireEvent.contextMenu(screen.getByText('readme.txt'));
-      await user.click(await findPortalButton('Copy path'));
-
-      expect(writeText).toHaveBeenCalledWith('/readme.txt');
+      expect(writeText).toHaveBeenCalledWith('../Assets\n../Docs\n../readme.txt');
     });
   });
 
@@ -1064,7 +1054,7 @@ describe('NotebookFolderTree extended coverage', () => {
       fireEvent.contextMenu(screen.getByText('Assets'));
       await user.click(await findPortalButton(/Copy \d+ Paths?/));
 
-      expect(writeText).toHaveBeenCalledWith('/Test Notebook/Assets\n/Test Notebook/readme.txt');
+      expect(writeText).toHaveBeenCalledWith('../Assets\n../readme.txt');
     });
 
     it('right-clicking a folder outside the current selection collapses to just that folder', () => {

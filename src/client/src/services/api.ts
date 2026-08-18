@@ -11,13 +11,10 @@ import {
     AddModelResponse,
     SettingsModelDto,
     SettingsReadinessDto,
-    SettingsRuntimeProfileDto,
     SettingsSchemaDto,
     SettingsSectionDto,
     SettingsSectionSummaryDto,
-    CreateRuntimeProfileRequest,
     UpdateSettingsModelRequest,
-    UpdateRuntimeProfileRequest,
     UpdateSettingsSectionRequest,
     EmbeddingsRebuildResponse,
     LlamaRuntimeInventoryItemDto,
@@ -405,6 +402,16 @@ function parseHuggingFaceRepository(input: string): [string, string] | null {
     }
     return [owner, repo];
 }
+
+/** Max silence on a conversation SSE body before the client treats the server as gone. */
+export const CONVERSATION_STREAM_IDLE_TIMEOUT_MS = 45_000;
+
+const CONVERSATION_STREAM_TERMINAL_EVENT_TYPES = new Set([
+    'error',
+    'complete',
+    'cancelled',
+    'pending_client_tool',
+]);
 
 export const api = {
     public: {
@@ -1202,6 +1209,11 @@ export const api = {
                         `/notebooks/${notebookId}/llama-runtime/restart`,
                         { method: 'POST' }
                     ),
+                cancelTurn: (projectId: string, notebookId: string, convoId: string, turnId: string) =>
+                    callApi<void>(
+                        `/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/turns/${turnId}/cancel`,
+                        { method: 'POST' }
+                    ),
                 sendMessageStream: async (
                     projectId: string,
                     notebookId: string,
@@ -1210,7 +1222,10 @@ export const api = {
                     onEvent: (event: { type: string; data: any }) => void,
                     onError: (error: Error) => void,
                     onComplete: () => void,
-                    abortSignal?: AbortSignal
+                    abortSignal?: AbortSignal,
+                    streamControl?: {
+                        requestServerCancel?: () => Promise<void>;
+                    },
                 ) => {
                     const response = await fetchWithAuth(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/messages`, {
                         method: 'POST',
@@ -1238,6 +1253,40 @@ export const api = {
                     const decoder = new TextDecoder();
                     let buffer = '';
                     let currentEventType = '';
+                    let sawTerminalEvent = false;
+                    let idleTimedOut = false;
+
+                    const readChunkWithIdleTimeout = (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+                        let idleTimer: ReturnType<typeof setTimeout> | undefined;
+                        const readPromise = reader.read();
+                        const idlePromise = new Promise<never>((_, reject) => {
+                            idleTimer = setTimeout(() => {
+                                idleTimedOut = true;
+                                const idleError = Object.assign(
+                                    new Error(
+                                        'The conversation stream stopped sending data. The server is no longer answering this request.',
+                                    ),
+                                    { name: 'StreamIdleTimeoutError' },
+                                );
+                                void (async () => {
+                                    try {
+                                        if (streamControl?.requestServerCancel) {
+                                            await streamControl.requestServerCancel();
+                                        }
+                                    } catch {
+                                        // Best-effort server cancel before surfacing idle timeout.
+                                    }
+                                    reject(idleError);
+                                    void reader.cancel().catch(() => undefined);
+                                })();
+                            }, CONVERSATION_STREAM_IDLE_TIMEOUT_MS);
+                        });
+                        return Promise.race([readPromise, idlePromise]).finally(() => {
+                            if (idleTimer !== undefined) {
+                                clearTimeout(idleTimer);
+                            }
+                        });
+                    };
 
                     try {
                         while (true) {
@@ -1245,7 +1294,7 @@ export const api = {
                                 throw new DOMException('Operation was aborted', 'AbortError');
                             }
 
-                            const { done, value } = await reader.read();
+                            const { done, value } = await readChunkWithIdleTimeout();
                             if (done) break;
 
                             buffer += decoder.decode(value, { stream: true });
@@ -1262,13 +1311,18 @@ export const api = {
                                 } else if (line.startsWith('data: ')) {
                                     const eventData = line.slice(6);
                                     if (eventData === '[DONE]') {
+                                        sawTerminalEvent = true;
                                         onComplete();
                                         return;
                                     }
                                     
                                     try {
                                         const parsed = JSON.parse(eventData);
-                                        onEvent({ type: currentEventType || 'data', data: parsed });
+                                        const eventType = currentEventType || 'data';
+                                        if (CONVERSATION_STREAM_TERMINAL_EVENT_TYPES.has(eventType)) {
+                                            sawTerminalEvent = true;
+                                        }
+                                        onEvent({ type: eventType, data: parsed });
                                     } catch (err) {
                                         console.error('Failed to parse SSE data:', err);
                                     }
@@ -1277,15 +1331,25 @@ export const api = {
                                 }
                             }
                         }
+                        if (!sawTerminalEvent) {
+                            onError(new Error(
+                                'The conversation stream ended without a reply. The server is no longer answering this request.',
+                            ));
+                            return;
+                        }
                         onComplete();
                     } catch (err) {
-                        if (err instanceof DOMException && err.name === 'AbortError') {
+                        if (!idleTimedOut && err instanceof DOMException && err.name === 'AbortError') {
                             console.log('Stream was cancelled by user');
                             return;
                         }
                         onError(err as Error);
                     } finally {
-                        reader.releaseLock();
+                        try {
+                            reader.releaseLock();
+                        } catch {
+                            // cancel() may already have released the lock
+                        }
                     }
                 },
 
@@ -1406,29 +1470,6 @@ export const api = {
 
         deleteModel: (modelId: string) =>
             callApi<void>(`/settings/models/${encodeURIComponent(modelId)}`, {
-                method: 'DELETE',
-            }),
-
-        getRuntimeProfiles: () =>
-            callApi<SettingsRuntimeProfileDto[]>('/settings/runtime-profiles'),
-
-        getRuntimeProfile: (profileId: string) =>
-            callApi<SettingsRuntimeProfileDto>(`/settings/runtime-profiles/${encodeURIComponent(profileId)}`),
-
-        createRuntimeProfile: (request: CreateRuntimeProfileRequest) =>
-            callApi<SettingsRuntimeProfileDto>('/settings/runtime-profiles', {
-                method: 'POST',
-                body: JSON.stringify(request),
-            }),
-
-        updateRuntimeProfile: (profileId: string, request: UpdateRuntimeProfileRequest) =>
-            callApi<SettingsRuntimeProfileDto>(`/settings/runtime-profiles/${encodeURIComponent(profileId)}`, {
-                method: 'PUT',
-                body: JSON.stringify(request),
-            }),
-
-        deleteRuntimeProfile: (profileId: string) =>
-            callApi<void>(`/settings/runtime-profiles/${encodeURIComponent(profileId)}`, {
                 method: 'DELETE',
             }),
 
@@ -1709,12 +1750,11 @@ export const api = {
             /**
              * Load the local model / engine for the given service.
              *
-             * - ASR / TTS: `request` MUST carry `model_id` or `model_path` plus
-             *   optional runtime knobs, which the sub-service loads into
-             *   memory. Pass `{}` only if the caller intends a no-op probe.
-             * - Image Generation: the active bundle is authoritative on disk
-             *   (set via `selectActive`), so the request body is ignored.
-             *   Pass `{}`.
+             * - ASR / TTS / Embeddings: `request` MUST carry `model_id` or `model_path`
+             *   plus optional runtime knobs. GuideAntsApi persists the selection on
+             *   ServiceModes and applies load via the API-owned lifecycle plan.
+             * - Image Generation: pass `bundle_id` (or alias) in the request body.
+             *   Selection authority is ServiceModes, not on-disk engine markers.
              */
             load: (serviceId: string, request: Record<string, unknown>) =>
                 callApi<any>(`/settings/services/${encodeURIComponent(serviceId)}/local-models/load`, {

@@ -55,8 +55,15 @@ public record NotebookConversationWithMessagesDto(
     string? AssistantName,
     DateTime Created,
     DateTime? LastActivity,
-    IReadOnlyList<MessageDto> Messages
-);
+    IReadOnlyList<MessageDto> Messages,
+    ConversationTurnStatusDto? ActiveTurn = null);
+
+public record ConversationTurnStatusDto(
+    Guid TurnId,
+    int TurnIndex,
+    string Status,
+    string? TerminationCode,
+    DateTime? TerminalizedAt);
 
 public class SendMessageRequest
 {

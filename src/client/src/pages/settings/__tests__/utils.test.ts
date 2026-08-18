@@ -26,7 +26,6 @@ import {
   parseCanonicalLocalRuntimeJson,
   prepareSectionPayloadForSave,
   parseFieldValue,
-  parseRuntimeProfileId,
   payloadSignature,
   stripStoredSecretPlaceholders,
   withSecretPreserved,
@@ -208,17 +207,12 @@ describe('buildCatalogEditRequest', () => {
 });
 
 describe('legacy runtime config parsers', () => {
-  it('parses runtime profile id from legacy PascalCase runtime config', () => {
-    expect(parseRuntimeProfileId('{"RuntimeProfileId":"openai_chat_standard"}')).toBe('openai_chat_standard');
-  });
-
   it('imports canonical local runtime config from legacy PascalCase keys', () => {
     const parsed = parseCanonicalLocalRuntimeJson(
       '{"RouterModelId":"QwenAlias","RuntimeProfileId":"qwen3_5","LoadParams":{"model":"QwenAlias"}}'
     );
     expect(parsed).toEqual({
       routerModelId: 'QwenAlias',
-      runtimeProfileId: 'qwen3_5',
       loadParams: { model: 'QwenAlias' },
     });
   });
@@ -235,7 +229,6 @@ describe('catalog edit helpers', () => {
       isActive: true,
       runtimeConfigJson: JSON.stringify({
         routerModelId: 'QwenAlias',
-        runtimeProfileId: 'qwen3_5',
         parallelToolCalls: true,
         routerContextSize: 8192,
       }),
@@ -515,14 +508,7 @@ describe('getInputTextValue', () => {
   });
 });
 
-describe('parseRuntimeProfileId and parseCanonicalLocalRuntimeJson', () => {
-  it('reads runtime profile id from mixed-case keys', () => {
-    expect(parseRuntimeProfileId('{"runtimeprofileid":"local_default"}')).toBe('local_default');
-    expect(parseRuntimeProfileId('{"RuntimeProfileId":"pascal_case"}')).toBe('pascal_case');
-    expect(parseRuntimeProfileId('not-json')).toBe('');
-    expect(parseRuntimeProfileId(undefined)).toBe('');
-  });
-
+describe('parseCanonicalLocalRuntimeJson', () => {
   it('returns null for invalid canonical local runtime json', () => {
     expect(parseCanonicalLocalRuntimeJson('')).toBeNull();
     expect(parseCanonicalLocalRuntimeJson('[]')).toBeNull();
@@ -541,14 +527,12 @@ describe('parseRuntimeProfileId and parseCanonicalLocalRuntimeJson', () => {
       parseCanonicalLocalRuntimeJson(
         JSON.stringify({
           routerModelId: 'Qwen',
-          runtimeProfileId: 'qwen3_5',
           parallelToolCalls: true,
           routerCacheRamMib: 256,
         })
       )
     ).toEqual({
       routerModelId: 'Qwen',
-      runtimeProfileId: 'qwen3_5',
       parallelToolCalls: true,
       routerCacheRamMib: 256,
     });
@@ -695,12 +679,6 @@ describe('buildCatalogEditRequest edge cases', () => {
         thoughtBlockPattern: '',
       })
     ).toThrow('valid JSON');
-  });
-});
-
-describe('parseRuntimeProfileId edge cases', () => {
-  it('returns empty string when runtime profile id key is not a string', () => {
-    expect(parseRuntimeProfileId('{"runtimeprofileid":42}')).toBe('');
   });
 });
 

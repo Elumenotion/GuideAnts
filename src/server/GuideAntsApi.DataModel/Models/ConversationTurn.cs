@@ -92,11 +92,38 @@ public class ConversationTurn
 
     /// <summary>
     /// Status of the turn for collaboration tracking.
-    /// Values: 'streaming', 'completed', 'cancelled'
+    /// Values: 'streaming', 'completed', 'cancelled', 'timed_out', 'failed', 'interrupted', 'pending_client_tool'
     /// </summary>
     [Required]
     [StringLength(20)]
     public string Status { get; set; } = "completed";
+
+    /// <summary>
+    /// Unique id for the active stream execution. Used to make terminalization and recovery race-safe.
+    /// </summary>
+    public Guid? ExecutionId { get; set; }
+
+    /// <summary>
+    /// UTC timestamp when this turn reached a durable terminal state.
+    /// </summary>
+    public DateTime? TerminalizedAt { get; set; }
+
+    /// <summary>
+    /// Machine-readable termination code (e.g. local_llm_timeout, cancelled).
+    /// </summary>
+    [StringLength(64)]
+    public string? TerminationCode { get; set; }
+
+    /// <summary>
+    /// Bounded human-readable termination detail for reconciliation surfaces.
+    /// </summary>
+    [StringLength(500)]
+    public string? TerminationDetail { get; set; }
+
+    /// <summary>
+    /// Monotonic checkpoint version for in-flight assistant text/thinking persistence.
+    /// </summary>
+    public int CheckpointVersion { get; set; }
 
     /// <summary>
     /// UTC timestamp when this turn was last updated.

@@ -50,8 +50,8 @@ export GA_ASR_DEFAULT_MODEL_ID="${GA_ASR_DEFAULT_MODEL_ID:-Qwen/Qwen3-ASR-0.6B}"
 export GA_ASR_DEFAULT_MODEL_PATH="${GA_ASR_DEFAULT_MODEL_PATH:-Qwen3-ASR-0.6B}"
 export GA_ASR_SERVER_PATH="${GA_ASR_SERVER_PATH:-/usr/local/bin/audiocpp_server}"
 # Must match the ENGINE_ENABLE_* flags this image's audiocpp_server was built with
-# (cuda flavor -> cuda, cpu flavor -> cpu, vulkan flavor -> vulkan, rocm flavor -> cuda
-# via GGML_HIP). Set per flavor in docker-compose.*.yml; this default only covers cuda.
+# (cuda flavor -> cuda, cpu flavor -> cpu, vulkan flavor -> vulkan, rocm flavor -> rocm).
+# Set per flavor in docker-compose.*.yml; this default only covers cuda.
 export GA_ASR_BACKEND="${GA_ASR_BACKEND:-cuda}"
 export GA_ASR_ENGINE_HOST="${GA_ASR_ENGINE_HOST:-127.0.0.1}"
 export GA_ASR_ENGINE_PORT="${GA_ASR_ENGINE_PORT:-18082}"

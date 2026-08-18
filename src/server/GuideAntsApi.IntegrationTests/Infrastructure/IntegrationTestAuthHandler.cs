@@ -152,7 +152,7 @@ public sealed class IntegrationTestAuthHandler : AuthenticationHandler<Authentic
             .AsNoTracking()
             .Where(userRole => userRole.UserId == userId)
             .Select(userRole => new { userRole.User.SecurityStamp, userRole.Role })
-            .SingleOrDefaultAsync(Context.RequestAborted)
+            .FirstOrDefaultAsync(Context.RequestAborted)
             .ConfigureAwait(false);
 
         if (account is null || account.SecurityStamp != tokenSecurityStamp)

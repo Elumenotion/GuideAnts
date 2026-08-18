@@ -48,7 +48,6 @@ public static class SettingsModelsEndpoints
             [FromBody] AddModelRequest request,
             IApplicationSettingsService settingsService,
             IChatTargetValidator chatTargetValidator,
-            IRuntimeProfileResolver runtimeProfileResolver,
             ILocalModelOnboardingValidator localModelOnboardingValidator,
             ILocalModelOnboardingOrchestrator localModelOnboardingOrchestrator,
             ILoggerFactory loggerFactory,

@@ -63,9 +63,9 @@ curl -s -X POST http://127.0.0.1:8082/admin/load \
   -H "Content-Type: application/json" -d '{"model_id": "qwen3_asr_0_6b"}'
 ```
 
-Note: GuideAnts' desired-state reconciler owns wrapper load state — a sideload
-can be silently undone by a later reconcile (e.g. after a local-LLM switch).
-Treat sideloads as session-scoped experiments, not durable configuration.
+Note: GuideAntsApi routing policy (lifecycle plan + apply) owns wrapper load state —
+a sideload can be silently undone by a later API apply (e.g. after a local-LLM
+switch). Treat sideloads as session-scoped experiments, not durable configuration.
 
 ## Related
 

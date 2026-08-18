@@ -15,9 +15,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using GuideAntsApi.Tests.TestUtils;
 using Moq;
-
-namespace GuideAntsApi.Tests.Services.LlamaCpp.LocalModelOnboarding;
 
 [TestClass]
 public sealed class LocalModelLifecycleTests
@@ -102,8 +101,8 @@ public sealed class LocalModelLifecycleTests
                 "abc123",
                 ["model-q6.gguf"],
                 [],
+                [],
                 "qwen-local",
-                "qwen3_6",
                 "qwen-local",
                 new Dictionary<string, string> { ["ctx-size"] = "8192" }).ToJson(),
             Status = "provenanceFinalization",
@@ -233,7 +232,6 @@ public sealed class LocalModelLifecycleTests
             new Mock<IHuggingFaceTokenResolver>().Object,
             new Mock<ILlamaServerRuntimeClient>(MockBehavior.Strict).Object,
             new Mock<ILlamaRuntimeCoordinator>().Object,
-            new Mock<IRuntimeProfileResolver>(MockBehavior.Strict).Object,
             NullLogger<LocalModelLifecycleOperationService>.Instance);
     }
 
@@ -253,10 +251,11 @@ public sealed class LocalModelLifecycleTests
                         new LlamaCatalogDefaultsDto(
                             "qwen-local",
                             "qwen-local",
-                            "qwen3_6",
                             "qwen-local",
                             null,
-                            new Dictionary<string, string> { ["ctx-size"] = "8192" }),
+                            null,
+                            new Dictionary<string, string> { ["ctx-size"] = "8192" },
+                            LlamaCatalogTestHelpers.CreateChatBehaviorDto()),
                         new LlamaCatalogQuantMetadataDto(),
                         new LlamaCatalogHardwareNotesDto("notes", "large")),
                 ]));
@@ -279,7 +278,8 @@ public sealed class LocalModelLifecycleTests
                         1000,
                         [new LlamaQuantArtifactDto("model-q4.gguf", 1000)]),
                 ],
-                null));
+                null,
+                []));
         return adminClient;
     }
 
@@ -311,6 +311,7 @@ public sealed class LocalModelLifecycleTests
             TargetDirectory = "qwen-local",
             ModelArtifactsJson = InstallationArtifactRecords.SerializeFromPaths("qwen-local", ["model-q6.gguf"]),
             ProjectorArtifactsJson = "[]",
+            CompanionArtifactsJson = "[]",
             RouterPresetSnapshotJson = JsonSerializer.Serialize(new Dictionary<string, string> { ["ctx-size"] = "8192" }),
             CreatedUtc = now,
             UpdatedUtc = now,

@@ -87,6 +87,19 @@ public static class NotebookConversationsEndpoints
         .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent);
 
+        // POST cancel an in-flight stream turn (idempotent Stop control)
+        group.MapPost("/{convoId:guid}/turns/{turnId:guid}/cancel", async (
+            [FromServices] IConversationService svc,
+            Guid convoId,
+            Guid turnId) =>
+        {
+            var cancelled = await svc.CancelTurnStreamAsync(convoId, turnId);
+            return cancelled ? Results.NoContent() : Results.NotFound();
+        })
+        .RequireAuthorization("RequireContributor")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status404NotFound);
+
         // POST send message (requires SSE via Accept: text/event-stream)
         group.MapPost("/{convoId:guid}/messages", async (
             HttpContext ctx, 
@@ -173,14 +186,11 @@ public static class NotebookConversationsEndpoints
                 }
             }
 
-            ctx.Response.Headers["Content-Type"] = "text/event-stream";
-
             try
             {
-                await foreach (var ev in service.SendMessageStreamToConversationAsync(convoId, request, ctx.RequestAborted))
-                {
-                    await ctx.Response.WriteSseEventAsync(ev.EventType, ev.Payload, ctx.RequestAborted);
-                }
+                await ctx.Response.WriteSseStreamWithKeepAliveAsync(
+                    service.SendMessageStreamToConversationAsync(convoId, request, ctx.RequestAborted),
+                    ctx.RequestAborted);
             }
             catch (UnauthorizedAccessException)
             {

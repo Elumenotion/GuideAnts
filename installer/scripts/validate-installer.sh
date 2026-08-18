@@ -42,6 +42,7 @@ combos=(
   "compose/base.yml compose/core-separate.yml"
   "compose/base.yml compose/core-bundled.yml compose/ai-slim.yml"
   "compose/base.yml compose/core-separate.yml compose/ai-cuda13.yml compose/docling-cuda.yml compose/documentserver.yml compose/plantuml.yml compose/searxng.yml"
+  "compose/base.yml compose/core-separate.yml compose/ai-rocm.yml"
 )
 
 cd "$DOCKER_DIR"
