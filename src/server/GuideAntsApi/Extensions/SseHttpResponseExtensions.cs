@@ -34,6 +34,12 @@ public static class SseHttpResponseExtensions
     /// Writes conversation SSE events and emits comment keepalives while the
     /// engine is silent so the client can tell a live wait from a dead socket.
     /// </summary>
+    /// <remarks>
+    /// Compiler-generated async iterators throw <see cref="NotSupportedException"/> from
+    /// <c>DisposeAsync</c> when an outstanding <c>MoveNextAsync</c> has not completed.
+    /// Keepalive uses <see cref="Task.WhenAny"/>, so a pending move-next is normal; cleanup
+    /// must cancel and await that task before disposing the enumerator.
+    /// </remarks>
     public static async Task WriteSseStreamWithKeepAliveAsync(
         this HttpResponse response,
         IAsyncEnumerable<StreamingEvent> events,
@@ -46,31 +52,73 @@ public static class SseHttpResponseExtensions
         response.HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 
         var interval = keepAliveInterval ?? DefaultKeepAliveInterval;
-        await using var enumerator = events.GetAsyncEnumerator(cancellationToken);
-        var moveNextTask = enumerator.MoveNextAsync().AsTask();
-
-        while (true)
+        using var enumeratorCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var enumerator = events.GetAsyncEnumerator(enumeratorCts.Token);
+        Task<bool>? moveNextTask = null;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var delayTask = Task.Delay(interval, delayCts.Token);
-            var completed = await Task.WhenAny(moveNextTask, delayTask).ConfigureAwait(false);
-            if (completed != moveNextTask)
+            moveNextTask = enumerator.MoveNextAsync().AsTask();
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await response.WriteSseCommentAsync("keepalive", cancellationToken).ConfigureAwait(false);
-                continue;
-            }
+                using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var delayTask = Task.Delay(interval, delayCts.Token);
+                var completed = await Task.WhenAny(moveNextTask, delayTask).ConfigureAwait(false);
+                if (completed != moveNextTask)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await response.WriteSseCommentAsync("keepalive", cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
 
-            delayCts.Cancel();
-            if (!await moveNextTask.ConfigureAwait(false))
+                delayCts.Cancel();
+                var hasNext = await moveNextTask.ConfigureAwait(false);
+                moveNextTask = null;
+                if (!hasNext)
+                {
+                    break;
+                }
+
+                var ev = enumerator.Current;
+                await response.WriteSseEventAsync(ev.EventType, ev.Payload, cancellationToken).ConfigureAwait(false);
+                moveNextTask = enumerator.MoveNextAsync().AsTask();
+            }
+        }
+        finally
+        {
+            // Cancel first so a blocked MoveNextAsync can complete, then await it.
+            // Disposing while MoveNextAsync is in flight throws NotSupportedException and
+            // aborts long-running conversation streams (observed as mid-turn SSE halts).
+            try
             {
-                break;
+                enumeratorCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
             }
 
-            var ev = enumerator.Current;
-            await response.WriteSseEventAsync(ev.EventType, ev.Payload, cancellationToken).ConfigureAwait(false);
-            moveNextTask = enumerator.MoveNextAsync().AsTask();
+            if (moveNextTask is not null)
+            {
+                try
+                {
+                    await moveNextTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception)
+                {
+                    // Tear-down only: preserve the original exception from the try block.
+                }
+            }
+
+            try
+            {
+                await enumerator.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
     }
 }
