@@ -9,20 +9,20 @@ _SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(_SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(_SERVICE_ROOT))
 
-from warmup_desired_ini import (
+from warmup_plan import (
     SERVICE_LLAMA,
-    WarmupDesiredDocument,
+    WarmupPlanDocument,
     WarmupServiceSection,
-    write_warmup_desired,
 )
 import warmup_orchestrator
 from warmup_orchestrator import (
-    _aux_services_to_drain_before_llama,
+    _aux_services_to_drain_before_llama_with_state,
     _reconcile_aux,
     _run_reconcile_loop,
-    _run_startup_apply,
-    apply_warmup_on_startup,
+    _store_plan,
     compute_transitions,
+    derive_plan_commands,
+    initialize_warmup_executor_on_startup,
     request_warmup_apply,
 )
 from warmup_state import (
@@ -30,15 +30,15 @@ from warmup_state import (
     APPLY_STATUS_APPLYING,
     APPLY_STATUS_APPLIED,
     atomic_write_warmup_state,
-    build_initial_state_from_desired,
+    build_initial_state_from_plan,
     build_warmup_state_document,
     read_warmup_state,
 )
 
 
-def _sample_document(revision: int = 1, sections: dict | None = None) -> WarmupDesiredDocument:
+def _sample_document(revision: int = 1, sections: dict | None = None) -> WarmupPlanDocument:
     default_sections = {
-        SERVICE_LLAMA: WarmupServiceSection(router_alias="Qwen-Test"),
+        SERVICE_LLAMA: WarmupServiceSection(enabled=True, router_alias="Qwen-Test"),
         "SpeechTranscription": WarmupServiceSection(enabled=False),
         "Embeddings": WarmupServiceSection(enabled=False),
         "SpeechSynthesis": WarmupServiceSection(enabled=False),
@@ -46,11 +46,10 @@ def _sample_document(revision: int = 1, sections: dict | None = None) -> WarmupD
     }
     if sections is not None:
         default_sections.update(sections)
-    return WarmupDesiredDocument(
-        version=1,
+    return WarmupPlanDocument(
+        schema_version=1,
         revision=revision,
-        updated_at_utc="2026-07-12T19:00:00Z",
-        sections=default_sections,
+        services=default_sections,
     )
 
 
@@ -65,37 +64,37 @@ def _mark_loaded(state: dict, service: str, *, ref_key: str, ref_value: str) -> 
 
 
 class WarmupOrchestratorTests(unittest.TestCase):
-    def test_compute_transitions_only_asr_to_idle(self) -> None:
+    def test_derive_plan_commands_explicit_off_is_always_unload(self) -> None:
         document = _sample_document_with_sections(
             SpeechTranscription=WarmupServiceSection(enabled=False, model_id="asr-model"),
         )
-        state = build_initial_state_from_desired(document, desired_sha256=document.content_fingerprint())
-        _mark_loaded(state, "SpeechTranscription", ref_key="modelId", ref_value="asr-model")
-        _mark_loaded(state, SERVICE_LLAMA, ref_key="routerAlias", ref_value="Qwen-Test")
-        transitions = compute_transitions(document, state)
-        by_service = {item.service: item.action for item in transitions}
-        self.assertEqual(by_service["SpeechTranscription"], "unload")
-        self.assertEqual(by_service.get(SERVICE_LLAMA), "noop")
-        self.assertEqual(by_service.get("Embeddings"), "noop")
+        commands = derive_plan_commands(document)
+        self.assertEqual(commands["SpeechTranscription"], "unload")
+        self.assertEqual(commands[SERVICE_LLAMA], "load")
+        self.assertEqual(commands["Embeddings"], "unload")
 
-    def test_compute_transitions_model_change_is_load(self) -> None:
+    def test_derive_plan_commands_enabled_service_is_load(self) -> None:
         document = _sample_document_with_sections(
-            Embeddings=WarmupServiceSection(model_id="new-emb"),
+            Embeddings=WarmupServiceSection(enabled=True, model_id="new-emb"),
         )
-        state = build_initial_state_from_desired(document, desired_sha256=document.content_fingerprint())
-        state["services"]["Embeddings"]["modelId"] = "old-emb"
+        commands = derive_plan_commands(document)
+        self.assertEqual(commands["Embeddings"], "load")
+
+    def test_compute_transitions_legacy_helper_matches_derive_plan_commands(self) -> None:
+        document = _sample_document_with_sections(
+            Embeddings=WarmupServiceSection(enabled=True, model_id="new-emb"),
+        )
+        state = build_initial_state_from_plan(document, desired_sha256=document.content_fingerprint())
         transitions = compute_transitions(document, state)
         by_service = {item.service: item.action for item in transitions}
         self.assertEqual(by_service["Embeddings"], "load")
 
-    def test_request_apply_noop_when_revision_applied(self) -> None:
+    @mock.patch("warmup_orchestrator._start_apply_worker_if_needed", return_value=True)
+    def test_request_apply_starts_worker_even_when_revision_already_applied(self, _mock_start) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            ini_path = os.path.join(tmp, "warmup-desired.ini")
             state_path = os.path.join(tmp, ".warmup-state.json")
-            os.environ["GA_WARMUP_DESIRED_PATH"] = ini_path
             os.environ["GA_WARMUP_STATE_PATH"] = state_path
             document = _sample_document_with_sections()
-            write_warmup_desired(document)
             atomic_write_warmup_state(
                 build_warmup_state_document(
                     desired_revision=1,
@@ -106,26 +105,38 @@ class WarmupOrchestratorTests(unittest.TestCase):
                     services={},
                 )
             )
-            result = request_warmup_apply()
-            self.assertTrue(result["noop"])
-            self.assertEqual(result["appliedRevision"], 1)
+            result = request_warmup_apply(document)
+            self.assertFalse(result["noop"])
+            self.assertTrue(result["started"])
 
-    @mock.patch("warmup_orchestrator._start_startup_worker_if_needed", return_value=True)
-    def test_apply_warmup_on_startup_initializes_state_and_starts_loader(self, mock_start) -> None:
+    def test_startup_purges_legacy_ini_and_stays_idle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            ini_path = os.path.join(tmp, "warmup-desired.ini")
             state_path = os.path.join(tmp, ".warmup-state.json")
-            os.environ["GA_WARMUP_DESIRED_PATH"] = ini_path
+            ini_path = os.path.join(tmp, "warmup-desired.ini")
             os.environ["GA_WARMUP_STATE_PATH"] = state_path
-            document = _sample_document_with_sections()
-            write_warmup_desired(document)
+            os.environ["GA_WARMUP_DESIRED_PATH"] = ini_path
+            with open(ini_path, "w", encoding="utf-8") as handle:
+                handle.write("revision = 99\n[ImageGeneration]\nbundle_id = stale\n")
+
+            initialize_warmup_executor_on_startup()
+
+            self.assertFalse(os.path.exists(ini_path))
+            state = read_warmup_state()
+            assert state is not None
+            self.assertEqual(state["applyStatus"], "idle")
+            self.assertEqual(state["services"], {})
+
+    def test_startup_initializes_empty_idle_state_without_loading(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = os.path.join(tmp, ".warmup-state.json")
+            os.environ["GA_WARMUP_STATE_PATH"] = state_path
             atomic_write_warmup_state(
                 build_warmup_state_document(
                     desired_revision=1,
                     applied_revision=1,
                     apply_status=APPLY_STATUS_APPLIED,
                     apply_error=None,
-                    desired_sha256=document.content_fingerprint(),
+                    desired_sha256="stale-plan",
                     services={
                         SERVICE_LLAMA: {
                             "phase": "ready",
@@ -135,61 +146,44 @@ class WarmupOrchestratorTests(unittest.TestCase):
                 )
             )
 
-            apply_warmup_on_startup()
+            initialize_warmup_executor_on_startup()
 
             state = read_warmup_state()
             self.assertIsNotNone(state)
             assert state is not None
+            self.assertEqual(state["desiredRevision"], 0)
             self.assertEqual(state["appliedRevision"], 0)
-            self.assertEqual(state["applyStatus"], APPLY_STATUS_PENDING)
-            self.assertEqual(state["services"][SERVICE_LLAMA]["phase"], "idle")
-            mock_start.assert_called_once()
+            self.assertEqual(state["applyStatus"], "idle")
+            self.assertEqual(state["services"], {})
 
     @mock.patch("warmup_orchestrator._start_apply_worker_if_needed", return_value=True)
     def test_request_apply_starts_worker_when_pending(self, _mock_start) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            ini_path = os.path.join(tmp, "warmup-desired.ini")
             state_path = os.path.join(tmp, ".warmup-state.json")
-            os.environ["GA_WARMUP_DESIRED_PATH"] = ini_path
             os.environ["GA_WARMUP_STATE_PATH"] = state_path
             document = _sample_document_with_sections()
-            write_warmup_desired(document)
-            atomic_write_warmup_state(
-                build_initial_state_from_desired(document, desired_sha256=document.content_fingerprint())
-            )
-            result = request_warmup_apply()
+            initialize_warmup_executor_on_startup()
+            result = request_warmup_apply(document)
             self.assertFalse(result["noop"])
             self.assertTrue(result["started"])
 
-
-    def test_compute_transitions_llama_change_drains_applied_warm_aux(self) -> None:
+    @mock.patch("warmup_orchestrator.aux_engine_reports_loaded", return_value=True)
+    def test_llama_change_drains_engine_reported_warm_aux(self, _mock_loaded) -> None:
         document = _sample_document_with_sections(
-            Embeddings=WarmupServiceSection(model_id="qwen3_embedding_0_6b"),
+            Embeddings=WarmupServiceSection(enabled=True, model_id="qwen3_embedding_0_6b"),
         )
-        state = build_initial_state_from_desired(document, desired_sha256=document.content_fingerprint())
-        _mark_loaded(state, SERVICE_LLAMA, ref_key="routerAlias", ref_value="Old-Alias")
-        _mark_loaded(
-            state,
-            "Embeddings",
-            ref_key="modelId",
-            ref_value="qwen3_embedding_0_6b",
-        )
-        document.sections[SERVICE_LLAMA] = WarmupServiceSection(router_alias="New-Alias")
-        state["services"][SERVICE_LLAMA]["routerAlias"] = "Old-Alias"
-        transitions = compute_transitions(document, state)
-        by_service = {item.service: item.action for item in transitions}
-        self.assertEqual(by_service[SERVICE_LLAMA], "load")
-        self.assertEqual(by_service["Embeddings"], "noop")
-        drained = _aux_services_to_drain_before_llama(document, state)
+        document.services[SERVICE_LLAMA] = WarmupServiceSection(enabled=True, router_alias="New-Alias")
+        drained = _aux_services_to_drain_before_llama_with_state(document, state={})
         self.assertIn("Embeddings", drained)
 
 
 class FakeEngine:
-    """Records engine admin calls so tests can assert D11 order + GPU drain/restore."""
+    """Records engine admin calls so tests can assert GPU drain order."""
 
-    def __init__(self, loaded_llama_aliases=None):
-        self.calls: list[tuple[str, str]] = []
+    def __init__(self, loaded_llama_aliases=None, loaded_aux=None):
+        self.calls: list[tuple] = []
         self._loaded_llama = list(loaded_llama_aliases or [])
+        self._loaded_aux = dict(loaded_aux or {})
 
     def list_llama_models(self):
         return [
@@ -197,12 +191,24 @@ class FakeEngine:
             for alias in self._loaded_llama
         ]
 
+    def llama_engine_loaded_aliases(self):
+        return list(self._loaded_llama)
+
+    def aux_engine_reports_loaded(self, service):
+        return service in self._loaded_aux
+
+    def aux_engine_loaded_ref(self, service):
+        return self._loaded_aux.get(service)
+
     def post_aux_load(self, service, model_ref=None, load_field="model_path"):
         self.calls.append(("aux-load", service, model_ref, load_field))
+        if model_ref:
+            self._loaded_aux[service] = model_ref
         return True
 
     def post_aux_unload(self, service):
         self.calls.append(("aux-unload", service))
+        self._loaded_aux.pop(service, None)
         return True
 
     def wait_aux_ready(self, service, timeout_seconds=None, expected_model_ref=None):
@@ -229,11 +235,14 @@ class FakeEngine:
 
 
 class WarmupReconcileExecutionTests(unittest.TestCase):
-    """End-to-end reconcile loop with a fake engine (no real HTTP)."""
+    """End-to-end apply loop with a fake engine (no real HTTP)."""
 
     def _patch_engine(self, engine: FakeEngine):
         names = [
             "list_llama_models",
+            "llama_engine_loaded_aliases",
+            "aux_engine_reports_loaded",
+            "aux_engine_loaded_ref",
             "post_aux_load",
             "post_aux_unload",
             "wait_aux_ready",
@@ -253,89 +262,104 @@ class WarmupReconcileExecutionTests(unittest.TestCase):
 
     def _all_loaded_aux(self):
         return {
-            "SpeechTranscription": WarmupServiceSection(model_id="asr-model"),
-            "Embeddings": WarmupServiceSection(model_id="emb-model"),
-            "SpeechSynthesis": WarmupServiceSection(model_id="tts-model"),
-            "ImageGeneration": WarmupServiceSection(bundle_id="sd-bundle"),
+            "SpeechTranscription": WarmupServiceSection(enabled=True, model_id="asr-model"),
+            "Embeddings": WarmupServiceSection(enabled=True, model_id="emb-model"),
+            "SpeechSynthesis": WarmupServiceSection(enabled=True, model_id="tts-model"),
+            "ImageGeneration": WarmupServiceSection(enabled=True, bundle_id="sd-bundle"),
         }
 
-    def _mark_all_aux_loaded(self, state: dict) -> None:
-        _mark_loaded(state, "SpeechTranscription", ref_key="modelId", ref_value="asr-model")
-        _mark_loaded(state, "Embeddings", ref_key="modelId", ref_value="emb-model")
-        _mark_loaded(state, "SpeechSynthesis", ref_key="modelId", ref_value="tts-model")
-        _mark_loaded(state, "ImageGeneration", ref_key="bundleId", ref_value="sd-bundle")
-
     def test_llama_change_drains_all_warm_aux_then_restores_in_d11_order(self) -> None:
-        engine = FakeEngine(loaded_llama_aliases=["Old-Alias"])
+        engine = FakeEngine(
+            loaded_llama_aliases=["Old-Alias"],
+            loaded_aux={
+                "SpeechTranscription": "asr-model",
+                "Embeddings": "emb-model",
+                "SpeechSynthesis": "tts-model",
+                "ImageGeneration": "sd-bundle",
+            },
+        )
         self._patch_engine(engine)
 
         with tempfile.TemporaryDirectory() as tmp:
-            os.environ["GA_WARMUP_DESIRED_PATH"] = os.path.join(tmp, "warmup-desired.ini")
             os.environ["GA_WARMUP_STATE_PATH"] = os.path.join(tmp, ".warmup-state.json")
 
-            # Desired: llama warm on a NEW alias, every aux warm.
             document = _sample_document(revision=2, sections=self._all_loaded_aux())
-            document.sections[SERVICE_LLAMA] = WarmupServiceSection(router_alias="New-Alias")
-            write_warmup_desired(document)
+            document.services[SERVICE_LLAMA] = WarmupServiceSection(enabled=True, router_alias="New-Alias")
 
-            state = build_initial_state_from_desired(document, desired_sha256=document.content_fingerprint())
-            state["appliedRevision"] = 1
-            _mark_loaded(state, SERVICE_LLAMA, ref_key="routerAlias", ref_value="Old-Alias")
-            self._mark_all_aux_loaded(state)
+            state = build_warmup_state_document(
+                desired_revision=1,
+                applied_revision=1,
+                apply_status=APPLY_STATUS_APPLIED,
+                apply_error=None,
+                desired_sha256="prior-plan",
+                services=build_initial_state_from_plan(
+                    document,
+                    desired_sha256=document.content_fingerprint(),
+                )["services"],
+            )
             atomic_write_warmup_state(state)
+            _store_plan(document)
 
             _run_reconcile_loop()
 
-        # GPU drain unloads every warm aux in D11 unload order.
         unloads = [call[1] for call in engine.calls if call[0] == "aux-unload"]
         self.assertEqual(
             unloads,
             ["ImageGeneration", "SpeechSynthesis", "Embeddings", "SpeechTranscription"],
         )
 
-        # Aux restored in D11 load order after the llama reconcile.
         loads = [call[1] for call in engine.calls if call[0] == "aux-load"]
         self.assertEqual(
             loads,
             ["SpeechTranscription", "Embeddings", "SpeechSynthesis", "ImageGeneration"],
         )
 
-        # All aux drained before the llama load; all aux reloaded after it.
         llama_load_index = next(i for i, call in enumerate(engine.calls) if call[0] == "llama-load")
         last_unload_index = max(i for i, call in enumerate(engine.calls) if call[0] == "aux-unload")
         first_reload_index = min(i for i, call in enumerate(engine.calls) if call[0] == "aux-load")
         self.assertLess(last_unload_index, llama_load_index, "aux must drain before llama load")
         self.assertLess(llama_load_index, first_reload_index, "aux must reload after llama load")
 
-        # The stale llama alias is unloaded and the new alias loaded.
         self.assertIn(("llama-unload", "Old-Alias"), engine.calls)
         self.assertIn(("llama-load", "New-Alias"), engine.calls)
 
     def test_single_aux_routing_change_does_not_touch_others(self) -> None:
-        engine = FakeEngine(loaded_llama_aliases=["Primary"])
+        engine = FakeEngine(
+            loaded_llama_aliases=["Primary"],
+            loaded_aux={
+                "SpeechTranscription": "asr-model",
+                "Embeddings": "emb-model",
+                "SpeechSynthesis": "tts-model",
+                "ImageGeneration": "sd-bundle",
+            },
+        )
         self._patch_engine(engine)
 
         with tempfile.TemporaryDirectory() as tmp:
-            os.environ["GA_WARMUP_DESIRED_PATH"] = os.path.join(tmp, "warmup-desired.ini")
             os.environ["GA_WARMUP_STATE_PATH"] = os.path.join(tmp, ".warmup-state.json")
 
-            # Only SpeechTranscription flips to idle; llama + other aux unchanged.
             sections = self._all_loaded_aux()
             sections["SpeechTranscription"] = WarmupServiceSection(enabled=False, model_id="asr-model")
             document = _sample_document(revision=2, sections=sections)
-            document.sections[SERVICE_LLAMA] = WarmupServiceSection(router_alias="Primary")
-            write_warmup_desired(document)
+            document.services[SERVICE_LLAMA] = WarmupServiceSection(enabled=True, router_alias="Primary")
 
-            state = build_initial_state_from_desired(document, desired_sha256=document.content_fingerprint())
-            state["appliedRevision"] = 1
-            _mark_loaded(state, SERVICE_LLAMA, ref_key="routerAlias", ref_value="Primary")
-            self._mark_all_aux_loaded(state)
+            state = build_warmup_state_document(
+                desired_revision=1,
+                applied_revision=1,
+                apply_status=APPLY_STATUS_APPLIED,
+                apply_error=None,
+                desired_sha256="prior-plan",
+                services=build_initial_state_from_plan(
+                    document,
+                    desired_sha256=document.content_fingerprint(),
+                )["services"],
+            )
             atomic_write_warmup_state(state)
+            _store_plan(document)
 
             _run_reconcile_loop()
             final_state = read_warmup_state()
 
-        # No GPU drain: llama is unchanged, so only the single aux is unloaded.
         unloads = [call[1] for call in engine.calls if call[0] == "aux-unload"]
         self.assertEqual(unloads, ["SpeechTranscription"])
         self.assertEqual([call[1] for call in engine.calls if call[0] == "aux-load"], [])
@@ -343,31 +367,71 @@ class WarmupReconcileExecutionTests(unittest.TestCase):
         self.assertEqual(final_state["applyStatus"], APPLY_STATUS_APPLIED)
         self.assertEqual(final_state["appliedRevision"], 2)
 
-    def test_startup_apply_loads_warm_services_from_ini(self) -> None:
+    def test_startup_discards_stale_status_and_does_not_call_engines(self) -> None:
         engine = FakeEngine()
         self._patch_engine(engine)
 
         with tempfile.TemporaryDirectory() as tmp:
-            os.environ["GA_WARMUP_DESIRED_PATH"] = os.path.join(tmp, "warmup-desired.ini")
             os.environ["GA_WARMUP_STATE_PATH"] = os.path.join(tmp, ".warmup-state.json")
 
             document = _sample_document(revision=1, sections=self._all_loaded_aux())
-            document.sections[SERVICE_LLAMA] = WarmupServiceSection(router_alias="Primary")
-            write_warmup_desired(document)
             atomic_write_warmup_state(
-                build_initial_state_from_desired(document, desired_sha256=document.content_fingerprint())
+                build_warmup_state_document(
+                    desired_revision=1,
+                    applied_revision=1,
+                    apply_status=APPLY_STATUS_APPLIED,
+                    apply_error=None,
+                    desired_sha256=document.content_fingerprint(),
+                    services={
+                        SERVICE_LLAMA: {
+                            "phase": "ready",
+                            "routerAlias": "Primary",
+                        }
+                    },
+                )
             )
 
-            _run_startup_apply()
+            initialize_warmup_executor_on_startup()
             final_state = read_warmup_state()
 
-        self.assertEqual([c for c in engine.calls if c[0] == "llama-load"], [("llama-load", "Primary")])
-        self.assertEqual(
-            [call[1] for call in engine.calls if call[0] == "aux-load"],
-            ["SpeechTranscription", "Embeddings", "SpeechSynthesis", "ImageGeneration"],
+        self.assertEqual(engine.calls, [])
+        assert final_state is not None
+        self.assertEqual(final_state["desiredRevision"], 0)
+        self.assertEqual(final_state["applyStatus"], "idle")
+        self.assertEqual(final_state["appliedRevision"], 0)
+        self.assertEqual(final_state["services"], {})
+
+    def test_first_cloud_plan_after_reset_explicitly_unloads_every_aux_engine(self) -> None:
+        engine = FakeEngine(
+            loaded_aux={
+                "SpeechTranscription": "asr-model",
+                "Embeddings": "emb-model",
+                "SpeechSynthesis": "tts-model",
+                "ImageGeneration": "sd-bundle",
+            }
         )
+        self._patch_engine(engine)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["GA_WARMUP_STATE_PATH"] = os.path.join(tmp, ".warmup-state.json")
+            initialize_warmup_executor_on_startup()
+            cloud_plan = _sample_document(
+                sections={
+                    SERVICE_LLAMA: WarmupServiceSection(enabled=False),
+                }
+            )
+            _store_plan(cloud_plan)
+
+            _run_reconcile_loop()
+            final_state = read_warmup_state()
+
+        self.assertEqual(
+            [call[1] for call in engine.calls if call[0] == "aux-unload"],
+            ["ImageGeneration", "SpeechSynthesis", "Embeddings", "SpeechTranscription"],
+        )
+        self.assertEqual([call for call in engine.calls if call[0] == "aux-load"], [])
+        assert final_state is not None
         self.assertEqual(final_state["applyStatus"], APPLY_STATUS_APPLIED)
-        self.assertEqual(final_state["appliedRevision"], 1)
 
     def test_image_generation_load_without_bundle_id_fails_without_engine_calls(self) -> None:
         engine = FakeEngine()
@@ -377,7 +441,7 @@ class WarmupReconcileExecutionTests(unittest.TestCase):
             os.environ["GA_WARMUP_STATE_PATH"] = os.path.join(tmp, ".warmup-state.json")
             document = _sample_document(revision=1)
             atomic_write_warmup_state(
-                build_initial_state_from_desired(document, desired_sha256=document.content_fingerprint())
+                build_initial_state_from_plan(document, desired_sha256=document.content_fingerprint())
             )
             ok = _reconcile_aux("ImageGeneration", WarmupServiceSection(enabled=False), "load")
             final_state = read_warmup_state()

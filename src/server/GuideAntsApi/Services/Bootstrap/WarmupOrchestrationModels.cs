@@ -1,10 +1,5 @@
 namespace GuideAntsApi.Services.Bootstrap;
 
-public sealed record WarmupDesiredWriteResult(
-    int Revision,
-    string Sha256,
-    bool Changed);
-
 public sealed record WarmupApplyResult(
     bool Ok,
     bool Noop,
@@ -12,7 +7,8 @@ public sealed record WarmupApplyResult(
     bool Started,
     int DesiredRevision,
     int AppliedRevision,
-    string ApplyStatus);
+    string ApplyStatus,
+    bool Changed);
 
 public sealed record WarmupServiceStatus(
     string Desired,

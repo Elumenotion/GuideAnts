@@ -1,4 +1,4 @@
-"""Persisted warmup orchestrator state (.warmup-state.json)."""
+"""Persisted status emitted by the API-commanded warmup executor."""
 
 from __future__ import annotations
 
@@ -8,12 +8,10 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from warmup_desired_ini import (
+from warmup_plan import (
     WARMUP_SERVICE_SECTIONS,
-    WarmupDesiredDocument,
+    WarmupPlanDocument,
     WarmupServiceSection,
-    read_warmup_desired,
-    resolve_warmup_desired_path,
     section_execution_ref,
 )
 
@@ -31,10 +29,7 @@ SERVICE_PHASE_IDLE = "idle"
 
 def resolve_warmup_state_path() -> str:
     explicit = (os.getenv("GA_WARMUP_STATE_PATH") or "").strip()
-    if explicit:
-        return explicit
-    desired_path = resolve_warmup_desired_path()
-    return os.path.join(os.path.dirname(desired_path), ".warmup-state.json")
+    return explicit or WARMUP_STATE_PATH
 
 
 def _utc_now_iso() -> str:
@@ -52,7 +47,7 @@ def _loaded_ref_from_service_state(service_state: dict[str, Any]) -> str | None:
 
 
 def _service_state_from_section(section_name: str, section: WarmupServiceSection) -> dict[str, Any]:
-    """Fresh service state — plan ref from INI, nothing loaded yet."""
+    """Fresh service state from the latest explicit API command."""
     plan_ref = section_execution_ref(section_name, section)
     state: dict[str, Any] = {
         "phase": SERVICE_PHASE_IDLE,
@@ -63,10 +58,10 @@ def _service_state_from_section(section_name: str, section: WarmupServiceSection
     return state
 
 
-def build_service_states_from_desired(document: WarmupDesiredDocument) -> dict[str, dict[str, Any]]:
+def build_service_states_from_desired(document: WarmupPlanDocument) -> dict[str, dict[str, Any]]:
     services: dict[str, dict[str, Any]] = {}
     for section_name in WARMUP_SERVICE_SECTIONS:
-        section = document.sections.get(section_name)
+        section = document.services.get(section_name)
         if section is None:
             continue
         services[section_name] = _service_state_from_section(section_name, section)
@@ -97,8 +92,8 @@ def build_warmup_state_document(
     }
 
 
-def build_initial_state_from_desired(
-    document: WarmupDesiredDocument,
+def build_initial_state_from_plan(
+    document: WarmupPlanDocument,
     *,
     desired_sha256: str,
 ) -> dict[str, Any]:
@@ -141,17 +136,17 @@ def read_warmup_state() -> dict[str, Any] | None:
         return _read_warmup_state_unlocked()
 
 
-def sync_state_after_desired_write(
-    document: WarmupDesiredDocument,
+def sync_state_after_plan_submission(
+    document: WarmupPlanDocument,
     *,
     desired_sha256: str,
     changed: bool,
 ) -> dict[str, Any]:
-    """Update warmup state after a runtime plan write."""
+    """Update executor status after GuideAntsApi submits a complete plan."""
     with WARMUP_STATE_LOCK:
         current = _read_warmup_state_unlocked()
         if current is None:
-            state = build_initial_state_from_desired(document, desired_sha256=desired_sha256)
+            state = build_initial_state_from_plan(document, desired_sha256=desired_sha256)
             atomic_write_warmup_state(state)
             return state
 
@@ -163,7 +158,7 @@ def sync_state_after_desired_write(
 
         services = dict(next_state.get("services") or {})
         for section_name in WARMUP_SERVICE_SECTIONS:
-            section = document.sections.get(section_name)
+            section = document.services.get(section_name)
             if section is None:
                 prior = services.get(section_name)
                 if prior and _loaded_ref_from_service_state(prior):
@@ -227,13 +222,7 @@ def mutate_warmup_state(mutator: Callable[[dict[str, Any]], None]) -> dict[str, 
 
 
 def get_warmup_status_response() -> dict[str, Any]:
-    desired = read_warmup_desired()
     state = read_warmup_state()
-    if state is None and desired is not None:
-        state = build_initial_state_from_desired(
-            desired,
-            desired_sha256=desired.content_fingerprint(),
-        )
     if state is None:
         return build_warmup_state_document(
             desired_revision=0,

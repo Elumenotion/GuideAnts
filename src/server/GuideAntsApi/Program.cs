@@ -227,19 +227,21 @@ public class Program
 
         ServiceRoutingStartupValidator.Validate(app.Services.GetRequiredService<IConfiguration>());
 
-        // API startup: build the correct warmup-desired.ini for every local service,
-        // write it when out of date, then POST /warmup/apply. ga-admin runs the same
-        // apply path again on AI container startup (apply_warmup_on_startup).
+        // API startup owns lifecycle policy: derive a complete plan from live routing and
+        // POST /warmup/apply. The AI container starts with no retained plan and cannot
+        // load or warm engines until this API sends an explicit command.
         app.Lifetime.ApplicationStarted.Register(() =>
         {
             _ = Task.Run(async () =>
             {
                 using var warmupScope = app.Services.CreateScope();
                 var localAiWarmup = warmupScope.ServiceProvider
-                    .GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService>();
+                    .GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService>();
                 try
                 {
-                    await localAiWarmup.WarmupAllAsync().ConfigureAwait(false);
+                    // Must wait + verify: fire-and-forget startup left engines loaded under
+                    // cloud routing when ga-admin was still on retired INI autoload.
+                    await localAiWarmup.SyncDesiredAndApplyAsync(waitForCompletion: true).ConfigureAwait(false);
                     LogPhase("LocalAiStartupWarmup (background)");
                 }
                 catch (Exception ex)

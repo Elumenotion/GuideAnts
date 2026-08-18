@@ -35,6 +35,7 @@ using GuideAntsApi.Settings;
 using GuideAntsApi.Services.Infrastructure;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.NotebookHeaderToolbar;
 using GuideAntsApi.Services.Mcp;
@@ -115,14 +116,14 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IImageGenerationBundleDefinitionBootstrapper, GuideAntsApi.Services.Bootstrap.ImageGenerationBundleDefinitionBootstrapper>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiDesiredStateBuilder, GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>();
-        services.AddHttpClient<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupOrchestrationClient, GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient>(client =>
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStackHostResolver, GuideAntsApi.Services.Bootstrap.LocalAiStackHostResolver>();
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.LocalAiWarmupPlanSplitter>();
+        services.AddHttpClient(GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient.HttpClientName, client =>
         {
-            var config = configuration.GetSection("LlamaCpp");
-            var baseUrl = config["BaseUrl"]
-                ?? throw new InvalidOperationException("LlamaCpp:BaseUrl is required.");
-            client.BaseAddress = DeriveLlamaAdminBaseUri(baseUrl);
             client.Timeout = TimeSpan.FromHours(4);
         });
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupOrchestrationClient, GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient>();
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiRuntimeAlignmentVerifier, GuideAntsApi.Services.Bootstrap.LocalAiRuntimeAlignmentVerifier>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService>(
             static sp => (GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService)sp.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService>());
@@ -188,7 +189,7 @@ public static class StartupConfiguration
             var config = configuration.GetSection("LlamaCpp");
             var baseUrl = config["BaseUrl"]
                 ?? throw new InvalidOperationException("LlamaCpp:BaseUrl is required.");
-            client.BaseAddress = DeriveLlamaAdminBaseUri(baseUrl);
+            client.BaseAddress = LocalAiStackHostUrls.DeriveAdminBaseUriFromLlamaCppUrl(baseUrl);
             client.Timeout = TimeSpan.FromHours(4);
         });
         services.Configure<LlamaInferenceTimeoutRecoveryOptions>(
@@ -834,25 +835,6 @@ public static class StartupConfiguration
         }
     }
 
-    private static Uri DeriveLlamaAdminBaseUri(string llamaBaseUrl)
-    {
-        var llamaUri = new Uri(llamaBaseUrl, UriKind.Absolute);
-        var builder = new UriBuilder(llamaUri)
-        {
-            Query = string.Empty,
-            Fragment = string.Empty
-        };
-
-        var path = builder.Path.TrimEnd('/');
-        if (path.EndsWith(ServiceRoutingContracts.LlamaCppPath, StringComparison.OrdinalIgnoreCase))
-        {
-            path = path[..^ServiceRoutingContracts.LlamaCppPath.Length];
-        }
-
-        path = path.TrimEnd('/') + ServiceRoutingContracts.LlamaAdminPath + "/";
-        builder.Path = path;
-        return builder.Uri;
-    }
 }
 
 internal sealed class BearerSecurityRequirementsOperationFilter : IOperationFilter
