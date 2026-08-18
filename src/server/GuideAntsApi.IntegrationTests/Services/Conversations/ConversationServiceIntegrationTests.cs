@@ -1256,6 +1256,90 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
     }
 
     [TestMethod]
+    public async Task SendMessageStream_Checkpoints_thinking_before_terminalization()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Thinking heartbeat");
+        }
+
+        FakeChatCompletionBehavior.Instance.Reset();
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.LongThinkingStream;
+        FakeChatCompletionBehavior.Instance.ChunkDelayMs = 40;
+        FakeChatCompletionBehavior.Instance.ThinkingText = string.Join(
+            ' ',
+            Enumerable.Range(1, 25).Select(i => $"word{i}"));
+        FakeChatCompletionBehavior.Instance.FinalAssistantText = "should not be reached before cancel";
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var streamTask = Task.Run(async () =>
+        {
+            try
+            {
+                await SendConversationStreamUntilCancelledAsync(
+                    projectId,
+                    notebookId,
+                    conversationId,
+                    new { instructions = "Long thinking heartbeat", assistantName = "assistant" },
+                    cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // expected when the HTTP stream is aborted
+            }
+        });
+
+        var sawHeartbeat = false;
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            using var pollScope = SharedFactory!.Services.CreateScope();
+            var db = pollScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var turn = await db.ConversationTurns
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.NotebookConversationId == conversationId);
+            if (turn is { Status: "streaming", CheckpointVersion: > 0 })
+            {
+                turn.LastUpdated.Should().BeAfter(turn.Created);
+
+                var checkpointedAssistant = await db.NotebookConversationMessages
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(m =>
+                        m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.Assistant);
+                checkpointedAssistant.Should().NotBeNull();
+                checkpointedAssistant!.ThinkingBlocksJson.Should().NotBeNullOrWhiteSpace();
+                checkpointedAssistant.ThinkingBlocksJson.Should().Contain("word");
+
+                sawHeartbeat = true;
+                break;
+            }
+
+            await Task.Delay(100);
+        }
+
+        sawHeartbeat.Should().BeTrue("thinking-only stream should checkpoint before terminalization");
+
+        await cts.CancelAsync();
+        await streamTask;
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await WaitForTurnStatusAsync(db2, conversationId, "cancelled");
+
+        var assistant = await db2.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.Assistant)
+            .SingleAsync();
+        assistant.ThinkingBlocksJson.Should().NotBeNullOrWhiteSpace();
+        assistant.ThinkingBlocksJson.Should().Contain("word1");
+        assistant.Content.Should().NotBe("should not be reached before cancel");
+    }
+
+    [TestMethod]
     public async Task SendMessageStream_Complete_event_is_emitted_after_unlock_for_stream_client_and_observers()
     {
         Guid projectId;

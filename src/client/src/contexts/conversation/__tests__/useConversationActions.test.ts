@@ -329,7 +329,7 @@ describe('useConversationActions', () => {
       }));
     });
 
-    it('handles stream onError AbortError', async () => {
+    it('handles stream onError AbortError without force refresh', async () => {
       let onError: ((err: Error) => void) | undefined;
       vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
         async (_p, _n, _c, _payload, _onEvent, errCb) => {
@@ -337,7 +337,7 @@ describe('useConversationActions', () => {
         },
       );
 
-      const { actions, dispatch } = mountActions();
+      const { actions, dispatch, deps } = mountActions();
 
       await act(async () => {
         await actions.sendMessage('hello');
@@ -349,6 +349,45 @@ describe('useConversationActions', () => {
 
       expect(dispatch).toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
       expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      expect(deps.refreshConversation).not.toHaveBeenCalled();
+      expect(deps.showToast).not.toHaveBeenCalled();
+      const errorDispatches = dispatch.mock.calls.filter(
+        ([action]) => action.type === 'SET_STREAMING_ERROR' && typeof action.payload === 'string' && action.payload.length > 0,
+      );
+      expect(errorDispatches).toHaveLength(0);
+    });
+
+    it('handles stream onError StreamIdleTimeoutError without force refresh but with error UI', async () => {
+      let onError: ((err: Error) => void) | undefined;
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
+        async (_p, _n, _c, _payload, _onEvent, errCb) => {
+          onError = errCb;
+        },
+      );
+
+      const { actions, dispatch, deps } = mountActions();
+
+      await act(async () => {
+        await actions.sendMessage('hello');
+      });
+
+      act(() => {
+        onError?.(Object.assign(
+          new Error('The conversation stream stopped sending data. The server is no longer answering this request.'),
+          { name: 'StreamIdleTimeoutError' },
+        ));
+      });
+
+      expect(dispatch).toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      expect(dispatch).toHaveBeenCalledWith({
+        type: 'SET_STREAMING_ERROR',
+        payload: 'The conversation stream stopped sending data. The server is no longer answering this request.',
+      });
+      expect(deps.refreshConversation).not.toHaveBeenCalled();
+      expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Chat Request Failed',
+      }));
     });
 
     it('handles stream onError generic failure', async () => {
@@ -376,6 +415,7 @@ describe('useConversationActions', () => {
       expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
         title: 'Chat Request Failed',
       }));
+      expect(deps.refreshConversation).toHaveBeenCalledWith({ force: true });
     });
 
     it('invokes onComplete callback to clear attachments and refresh files', async () => {

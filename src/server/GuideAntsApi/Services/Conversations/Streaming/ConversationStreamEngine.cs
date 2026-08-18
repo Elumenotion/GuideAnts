@@ -155,9 +155,8 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             var filenameUrlMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var assistantMessageIds = new List<Guid>();
             var thinkingEmittedInStream = false;
-            var flushCounter = 0;
+            var progressCheckpoint = new StreamingAssistantProgressCheckpoint(flushInterval: 20);
             var checkpointVersion = 0;
-            const int flushInterval = 20;
             var fileUrlContext = policy.BuildFileUrlContext(context.Conversation, context.PublisherId, context.HostUrl);
             var turnTraceCollector = new TurnTraceCollector(context.AssistantName, context.ModelDeploymentId);
             context.ChatOptions.TraceCollector = turnTraceCollector;
@@ -228,7 +227,6 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 if (isThinking)
                 {
                     thinkingEmittedInStream = true;
-                    currentThinkingContent.Append(e.ContentDelta);
                 }
 
                 if (currentAssistantMessageId == null)
@@ -247,56 +245,56 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     assistantMessageIds.Add(msgId);
                 }
 
-                if (!isThinking)
+                if (isThinking)
+                {
+                    currentThinkingContent.Append(e.ContentDelta);
+                }
+                else
                 {
                     currentAssistantContent.Append(e.ContentDelta);
-                    flushCounter++;
+                }
 
-                    if (flushCounter % flushInterval == 0)
+                if (progressCheckpoint.ShouldCheckpoint() && currentAssistantMessageId != null)
+                {
+                    try
                     {
-                        try
-                        {
-                            if (currentAssistantMessageId != null)
-                            {
-                                checkpointVersion++;
-                                string? thinkingJson = currentThinkingContent.Length > 0
-                                    ? JsonSerializer.Serialize(
-                                        new[] { ChatThinkingBlock.ForThinking(currentThinkingContent.ToString(), string.Empty) },
-                                        JsonOptions)
-                                    : null;
-                                _persistence.CheckpointTurnAsync(
-                                    context.DbTurn.Id,
-                                    currentAssistantMessageId.Value,
-                                    currentAssistantContent.ToString(),
-                                    thinkingJson,
-                                    checkpointVersion,
-                                    CancellationToken.None).GetAwaiter().GetResult();
-                            }
+                        checkpointVersion++;
+                        string? thinkingJson = currentThinkingContent.Length > 0
+                            ? JsonSerializer.Serialize(
+                                new[] { ChatThinkingBlock.ForThinking(currentThinkingContent.ToString(), string.Empty) },
+                                JsonOptions)
+                            : null;
+                        _persistence.CheckpointTurnAsync(
+                            context.DbTurn.Id,
+                            currentAssistantMessageId.Value,
+                            currentAssistantContent.ToString(),
+                            thinkingJson,
+                            checkpointVersion,
+                            CancellationToken.None).GetAwaiter().GetResult();
 
-                            if (!policy.SupportsExternalToolResume)
-                            {
-                                _ = Task.Run(async () =>
-                                {
-                                    try
-                                    {
-                                        await policy.BroadcastStreamingProgressAsync(
-                                            context.ConversationId,
-                                            context.User,
-                                            currentAssistantContent.Length,
-                                            flushCounter,
-                                            CancellationToken.None);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning(ex, "Failed to broadcast streaming progress");
-                                    }
-                                });
-                            }
-                        }
-                        catch
+                        if (!isThinking && !policy.SupportsExternalToolResume)
                         {
-                            // logged on finalization
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await policy.BroadcastStreamingProgressAsync(
+                                        context.ConversationId,
+                                        context.User,
+                                        currentAssistantContent.Length,
+                                        progressCheckpoint.FlushCounter,
+                                        CancellationToken.None);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to broadcast streaming progress");
+                                }
+                            });
                         }
+                    }
+                    catch
+                    {
+                        // logged on finalization
                     }
                 }
 

@@ -41,4 +41,10 @@ public sealed class ConversationStreamRunRegistry
             return false;
         }
     }
+
+    /// <summary>
+    /// True while an in-process stream worker is registered for <paramref name="turnId"/>.
+    /// Stale-turn recovery must not terminalize these; wall-clock silence during thinking is normal.
+    /// </summary>
+    public bool IsActive(Guid turnId) => _activeRuns.ContainsKey(turnId);
 }
