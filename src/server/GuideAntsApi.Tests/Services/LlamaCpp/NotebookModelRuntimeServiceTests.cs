@@ -551,10 +551,8 @@ public class NotebookModelRuntimeServiceTests
         });
         await _context.SaveChangesAsync();
 
-        // The orchestrator is the single authority for aux load/unload ordering (D6/D11).
-        // The notebook load first drives an INI+apply with aux forced idle (GPU drain), then
-        // reconciles the multi-alias llama delta directly, then restores desired via an
-        // INI+apply carrying the primary router alias override.
+        // GuideAntsApi owns policy: aux drain/restore via lifecycle apply; bounded
+        // direct llama client calls for the multi-alias notebook delta (D7).
         var callOrder = new List<string>();
         string? restoreAliasOverride = null;
         _mockLocalAiWarmup

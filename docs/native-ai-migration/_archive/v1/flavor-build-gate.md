@@ -49,8 +49,8 @@ Pass when, for **each** of cuda13 / vulkan / rocm / cpu:
 
 1. Build `docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm,vulkan}` (pin audio.cpp by
    ref, mirroring the SD builder-stage caching pattern).
-2. Boot each with the phase's env (`GA_{ASR,TTS,EMB}_AUTO_LOAD_ON_STARTUP=1`,
-   `_WAIT_FOR_READY_ON_STARTUP=1`); confirm `HEALTHCHECK` green.
+2. Superseded historical step: boot unloaded, submit the API-owned lifecycle
+   plan for the service under test, then confirm `HEALTHCHECK` green.
 3. Smoke each affected engine once (one `/emb/embed`, `/asr/transcribe`, `/tts/synthesize`,
    or `/sd/txt2img` call) to prove the native path runs on the intended backend.
 4. Confirm the backend in the engine's own startup log (CUDA/Vulkan/ROCm/CPU) matches the

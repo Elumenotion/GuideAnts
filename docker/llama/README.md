@@ -62,7 +62,8 @@ pwsh .\run\test-openai-chat.ps1
 - Keep each model + its `mmproj` in a dedicated subdirectory (for example `/models/Qwen3.5-27B-Q6_K/*` and `/models/Gemma-4-31B-Q6_K_XL/*`) because `mmproj` filenames often collide across model families.
 - Server startup always includes `--jinja` (required for current local model families).
 - Runtime model loading is explicit through `/models/load`; no autoload fallback is assumed.
-- Startup load controls (ASR + SD + TTS + Embeddings) are environment-driven:
+- Execution controls are environment-driven; lifecycle intent comes only from
+  the complete JSON plan submitted by GuideAntsApi:
   - `CUDA_VISIBLE_DEVICES=<gpu-id-list>` (optional; sourced from active env)
     - Global ordering for all services in the container when set (example `1,0` maps `host GPU 1 -> cuda:0`, `host GPU 0 -> cuda:1`)
   - Optional per-service overrides (comma-separated physical GPU ids; empty means inherit global ordering):
@@ -70,22 +71,17 @@ pwsh .\run\test-openai-chat.ps1
     - `GA_ASR_CUDA_VISIBLE_DEVICES`
     - `GA_TTS_CUDA_VISIBLE_DEVICES`
     - `GA_EMB_CUDA_VISIBLE_DEVICES`
-  - `GA_ASR_AUTO_LOAD_ON_STARTUP=1|0`
   - `GA_ASR_DEVICE_MAP=auto` (default)
-  - `GA_TTS_AUTO_LOAD_ON_STARTUP=1|0`
   - `GA_TTS_DEVICE_MAP=auto` (default)
-  - `GA_EMB_AUTO_LOAD_ON_STARTUP=1|0`
-  - `GA_EMB_WARMUP_ON_LOAD=1|0` (autoload forces warmup)
-  - `GA_EMB_WAIT_FOR_READY_ON_STARTUP=1|0`
+  - `GA_EMB_WARMUP_ON_LOAD=1|0`
   - `GA_EMB_READY_TIMEOUT_SECONDS`
-  - `GA_SD_AUTO_LOAD_ON_STARTUP=1|0`
   - `GA_SD_CUDA_VISIBLE_DEVICES=<gpu-id-list>` (optional SD-only physical GPU pinning; empty inherits global ordering)
   - `GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS`
   - `GA_SD_WARMUP_PROMPT`, `GA_SD_WARMUP_SIZE`, `GA_SD_WARMUP_STEPS`, `GA_SD_WARMUP_OUTPUT_FORMAT`
   - `GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS`
-  - `GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP=1|0` (when `1`, startup warmup failure is non-fatal; use `/sd/admin/warmup` to retry)
-  - `GA_SD_WAIT_FOR_READY_ON_STARTUP=1|0`, `GA_SD_READY_TIMEOUT_SECONDS`
-  - Default behavior: the web API orchestrates startup warmup (LLM first, then ASR, embeddings, TTS, and SD). Container-side autoload flags default to off; do not enable `GA_SD_AUTO_LOAD_ON_STARTUP` unless you intentionally bypass web API orchestration.
+  - `GA_SD_READY_TIMEOUT_SECONDS`
+  - The container always starts unloaded. There is no supported bypass around
+    GuideAntsApi lifecycle authority.
 - llama health endpoint via gateway: `http://localhost:8110/llama-cpp/health`
 - embeddings health endpoint via gateway: `http://localhost:8110/emb/health`
 - SD warmup retry endpoint via gateway: `http://localhost:8110/sd/admin/warmup` (`POST`)

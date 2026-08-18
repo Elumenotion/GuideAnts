@@ -16,16 +16,13 @@ namespace GuideAntsApi.Tests.Services.Bootstrap;
 public sealed class LocalAiStartupWarmupServiceTests
 {
     [TestMethod]
-    public async Task SyncDesiredAndApplyAsync_WritesIniAndApplies()
+    public async Task SyncDesiredAndApplyAsync_SubmitsCompletePlan()
     {
-        string? capturedIni = null;
+        string? capturedPlan = null;
         var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
         orchestration
-            .Setup(c => c.PutDesiredAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
-            .Callback<string, int?, CancellationToken>((ini, _, _) => capturedIni = ini)
-            .ReturnsAsync(new WarmupDesiredWriteResult(Revision: 3, Sha256: "abc", Changed: true));
-        orchestration
-            .Setup(c => c.ApplyAsync(It.IsAny<CancellationToken>()))
+            .Setup(c => c.ApplyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((planJson, _) => capturedPlan = planJson)
             .ReturnsAsync(new WarmupApplyResult(
                 Ok: true,
                 Noop: false,
@@ -33,7 +30,8 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Started: true,
                 DesiredRevision: 3,
                 AppliedRevision: 0,
-                ApplyStatus: "applying"));
+                ApplyStatus: "applying",
+                Changed: true));
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -58,37 +56,33 @@ public sealed class LocalAiStartupWarmupServiceTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver,
-            CreateHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
             builder,
             orchestration.Object,
+            CreateAlignedVerifier(),
             modeResolver,
-            CreateHttpClientFactory(),
+            new LocalAiStackHostResolver(configuration),
             NullLogger<LocalAiStartupWarmupService>.Instance);
 
         await service.SyncDesiredAndApplyAsync(waitForCompletion: false);
 
-        capturedIni.Should().NotBeNullOrWhiteSpace();
-        capturedIni.Should().Contain("model_path = qwen3_embedding_0_6b");
+        capturedPlan.Should().NotBeNullOrWhiteSpace();
+        capturedPlan.Should().Contain("\"modelPath\":\"qwen3_embedding_0_6b\"");
         orchestration.VerifyAll();
     }
 
     [TestMethod]
-    public async Task SyncDesiredAndApplyAsync_ProjectsImageBundlesWhenLocalModeIsConfiguredButCloudIsActive()
+    public async Task SyncDesiredAndApplyAsync_SkipsImageBundleProjectionWhenCloudIsActive()
     {
-        string? capturedIni = null;
+        string? capturedPlan = null;
         var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
         orchestration
-            .Setup(c => c.PutDesiredAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
-            .Callback<string, int?, CancellationToken>((ini, _, _) => capturedIni = ini)
-            .ReturnsAsync(new WarmupDesiredWriteResult(Revision: 1, Sha256: "abc", Changed: true));
-        orchestration
-            .Setup(c => c.ApplyAsync(It.IsAny<CancellationToken>()))
+            .Setup(c => c.ApplyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((planJson, _) => capturedPlan = planJson)
             .ReturnsAsync(new WarmupApplyResult(
                 Ok: true,
                 Noop: false,
@@ -96,7 +90,8 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Started: true,
                 DesiredRevision: 1,
                 AppliedRevision: 0,
-                ApplyStatus: "applying"));
+                ApplyStatus: "applying",
+                Changed: true));
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -137,48 +132,41 @@ public sealed class LocalAiStartupWarmupServiceTests
             ]);
 
         var bundleBootstrapper = new Mock<IImageGenerationBundleDefinitionBootstrapper>(MockBehavior.Strict);
-        bundleBootstrapper
-            .Setup(b => b.ProjectAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver,
-            CreateHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object, bundleBootstrapper.Object),
             builder,
             orchestration.Object,
+            CreateAlignedVerifier(),
             modeResolver,
-            CreateHttpClientFactory(),
+            new LocalAiStackHostResolver(configuration),
             NullLogger<LocalAiStartupWarmupService>.Instance);
 
         await service.SyncDesiredAndApplyAsync(waitForCompletion: false);
 
-        capturedIni.Should().NotBeNullOrWhiteSpace();
-        capturedIni.Should().Contain("[ImageGeneration]");
-        capturedIni.Should().Contain("enabled = off");
+        capturedPlan.Should().NotBeNullOrWhiteSpace();
+        capturedPlan.Should().Contain(
+            "\"ImageGeneration\":{\"enabled\":false,\"bundleId\":\"saved-bundle\"}");
         bundleBootstrapper.Verify(
             b => b.ProjectAsync(It.IsAny<CancellationToken>()),
-            Times.Once);
+            Times.Never);
         orchestration.VerifyAll();
     }
 
     [TestMethod]
-    public async Task SyncDesiredAndApplyAsync_ForceAuxiliaryIdle_ProjectsConfiguredImageBundlesWithoutLoadingThem()
+    public async Task SyncDesiredAndApplyAsync_ForceAuxiliaryIdle_SkipsImageBundleProjection()
     {
-        string? capturedIni = null;
+        string? capturedPlan = null;
         var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
         orchestration
-            .Setup(c => c.PutDesiredAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
-            .Callback<string, int?, CancellationToken>((ini, _, _) => capturedIni = ini)
-            .ReturnsAsync(new WarmupDesiredWriteResult(Revision: 1, Sha256: "abc", Changed: true));
-        orchestration
-            .Setup(c => c.ApplyAsync(It.IsAny<CancellationToken>()))
+            .Setup(c => c.ApplyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((planJson, _) => capturedPlan = planJson)
             .ReturnsAsync(new WarmupApplyResult(
                 Ok: true,
                 Noop: false,
@@ -186,7 +174,8 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Started: true,
                 DesiredRevision: 1,
                 AppliedRevision: 0,
-                ApplyStatus: "applying"));
+                ApplyStatus: "applying",
+                Changed: true));
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -210,34 +199,30 @@ public sealed class LocalAiStartupWarmupServiceTests
             (RoutedServiceNames.ImageGeneration, imageGenerationMode));
 
         var bundleBootstrapper = new Mock<IImageGenerationBundleDefinitionBootstrapper>(MockBehavior.Strict);
-        bundleBootstrapper
-            .Setup(b => b.ProjectAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver,
-            CreateHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object, bundleBootstrapper.Object),
             builder,
             orchestration.Object,
+            CreateAlignedVerifier(),
             modeResolver,
-            CreateHttpClientFactory(),
+            new LocalAiStackHostResolver(configuration),
             NullLogger<LocalAiStartupWarmupService>.Instance);
 
         await service.SyncDesiredAndApplyAsync(
             new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true },
             waitForCompletion: false);
 
-        capturedIni.Should().NotBeNullOrWhiteSpace();
+        capturedPlan.Should().NotBeNullOrWhiteSpace();
         bundleBootstrapper.Verify(
             b => b.ProjectAsync(It.IsAny<CancellationToken>()),
-            Times.Once);
+            Times.Never);
         orchestration.VerifyAll();
     }
 
@@ -267,8 +252,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             new ServiceScopeFactoryStub(),
             builder.Object,
             orchestration.Object,
+            CreateAlignedVerifier(),
             modeResolver,
-            CreateHttpClientFactory(),
+            new LocalAiStackHostResolver(configuration),
             NullLogger<LocalAiStartupWarmupService>.Instance);
 
         var result = await service.ReconcileLocalServiceAsync(
@@ -281,14 +267,11 @@ public sealed class LocalAiStartupWarmupServiceTests
     [TestMethod]
     public async Task ReconcileLocalServiceAsync_PersistsFolderRefVerbatim()
     {
-        string? capturedIni = null;
+        string? capturedPlan = null;
         var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
         orchestration
-            .Setup(c => c.PutDesiredAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
-            .Callback<string, int?, CancellationToken>((ini, _, _) => capturedIni = ini)
-            .ReturnsAsync(new WarmupDesiredWriteResult(Revision: 2, Sha256: "abc", Changed: true));
-        orchestration
-            .Setup(c => c.ApplyAsync(It.IsAny<CancellationToken>()))
+            .Setup(c => c.ApplyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((planJson, _) => capturedPlan = planJson)
             .ReturnsAsync(new WarmupApplyResult(
                 Ok: true,
                 Noop: false,
@@ -296,7 +279,8 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Started: true,
                 DesiredRevision: 2,
                 AppliedRevision: 0,
-                ApplyStatus: "applying"));
+                ApplyStatus: "applying",
+                Changed: true));
         orchestration
             .Setup(c => c.GetStatusAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WarmupStatusDocument(
@@ -358,17 +342,16 @@ public sealed class LocalAiStartupWarmupServiceTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver,
-            CreateHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
             builder,
             orchestration.Object,
+            CreateAlignedVerifier(),
             modeResolver,
-            CreateHttpClientFactory(),
+            new LocalAiStackHostResolver(configuration),
             NullLogger<LocalAiStartupWarmupService>.Instance);
 
         var result = await service.ReconcileLocalServiceAsync(
@@ -376,8 +359,11 @@ public sealed class LocalAiStartupWarmupServiceTests
             requestedModelRef: "OmniVoice");
 
         result.Outcome.Should().Be(LocalServiceReconcileOutcome.Warm);
-        capturedIni.Should().Contain("model_path = OmniVoice");
-        settingsMock.VerifyAll();
+        capturedPlan.Should().Contain("\"modelPath\":\"OmniVoice\"");
+        settingsMock.Verify(s => s.SetServiceModeModelIdAsync(
+            RoutedServiceNames.SpeechSynthesis,
+            "OmniVoice",
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [TestMethod]
@@ -385,10 +371,7 @@ public sealed class LocalAiStartupWarmupServiceTests
     {
         var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
         orchestration
-            .Setup(c => c.PutDesiredAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new WarmupDesiredWriteResult(Revision: 2, Sha256: "abc", Changed: true));
-        orchestration
-            .Setup(c => c.ApplyAsync(It.IsAny<CancellationToken>()))
+            .Setup(c => c.ApplyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WarmupApplyResult(
                 Ok: true,
                 Noop: false,
@@ -396,7 +379,8 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Started: true,
                 DesiredRevision: 2,
                 AppliedRevision: 0,
-                ApplyStatus: "applying"));
+                ApplyStatus: "applying",
+                Changed: true));
         orchestration
             .Setup(c => c.GetStatusAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WarmupStatusDocument(
@@ -475,17 +459,16 @@ public sealed class LocalAiStartupWarmupServiceTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver,
-            CreateHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
             builder,
             orchestration.Object,
+            CreateAlignedVerifier(),
             modeResolver,
-            CreateHttpClientFactory(),
+            new LocalAiStackHostResolver(configuration),
             NullLogger<LocalAiStartupWarmupService>.Instance);
 
         var result = await service.ReconcileLocalServiceAsync(
@@ -493,8 +476,20 @@ public sealed class LocalAiStartupWarmupServiceTests
             requestedModelRef: "flux2-klein-4b");
 
         result.Outcome.Should().Be(LocalServiceReconcileOutcome.Warm);
-        settingsMock.VerifyAll();
+        settingsMock.Verify(s => s.SetServiceModeModelIdAsync(
+            ImageGenerationOptions.SectionName,
+            "flux2-klein-4b",
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
         orchestration.VerifyAll();
+    }
+
+    private static ILocalAiRuntimeAlignmentVerifier CreateAlignedVerifier()
+    {
+        var mock = new Mock<ILocalAiRuntimeAlignmentVerifier>(MockBehavior.Strict);
+        mock
+            .Setup(v => v.FindMismatchesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LocalAiRuntimeAlignmentMismatch>());
+        return mock.Object;
     }
 
     private sealed class ServiceScopeFactoryStub : IServiceScopeFactory

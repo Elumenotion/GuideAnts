@@ -10,16 +10,9 @@ namespace GuideAntsApi.IntegrationTests.TestUtils;
 /// </summary>
 public sealed class StubLocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchestrationClient
 {
-    public Task<WarmupDesiredWriteResult> PutDesiredAsync(
-        string iniText,
-        int? expectedRevision = null,
+    public Task<WarmupApplyResult> ApplyAsync(
+        string planJson,
         CancellationToken cancellationToken = default) =>
-        Task.FromResult(new WarmupDesiredWriteResult(
-            Revision: expectedRevision ?? 1,
-            Sha256: "stub",
-            Changed: false));
-
-    public Task<WarmupApplyResult> ApplyAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(new WarmupApplyResult(
             Ok: true,
             Noop: true,
@@ -27,7 +20,8 @@ public sealed class StubLocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchest
             Started: false,
             DesiredRevision: 0,
             AppliedRevision: 0,
-            ApplyStatus: "idle"));
+            ApplyStatus: "idle",
+            Changed: false));
 
     public Task<WarmupStatusDocument> GetStatusAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(new WarmupStatusDocument(

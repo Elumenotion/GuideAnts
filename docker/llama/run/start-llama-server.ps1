@@ -127,7 +127,6 @@ $dockerArgs = @(
     '-e', 'GA_ASR_MODEL_DIR=/models-local/asr',
     '-e', 'GA_ASR_DEFAULT_MODEL_PATH=Qwen3-ASR-0.6B',
     '-e', 'GA_ASR_DEFAULT_MODEL_ID=Qwen/Qwen3-ASR-0.6B',
-    '-e', 'GA_ASR_AUTO_LOAD_ON_STARTUP=1',
     '-e', 'GA_ASR_DEVICE_MAP=auto',
     '-e', 'GA_ASR_BACKEND=cuda',
     '-e', "GA_ASR_CUDA_VISIBLE_DEVICES=$AsrCudaVisibleDevices",
@@ -139,7 +138,6 @@ $dockerArgs = @(
     '-e', 'GA_TTS_MODEL_DIR=/models-local/tts',
     '-e', 'GA_TTS_DEFAULT_MODEL_PATH=chatterbox',
     '-e', 'GA_TTS_DEFAULT_MODEL_ID=chatterbox',
-    '-e', 'GA_TTS_AUTO_LOAD_ON_STARTUP=0',
     '-e', 'GA_TTS_DEVICE_MAP=auto',
     '-e', 'GA_TTS_BACKEND=cuda',
     '-e', "GA_TTS_CUDA_VISIBLE_DEVICES=$TtsCudaVisibleDevices",
@@ -157,31 +155,24 @@ $dockerArgs = @(
     '-e', "GA_EMB_DEVICE=$EmbDevice",
     '-e', "GA_EMB_TARGET_DEVICES=$EmbTargetDevices",
     '-e', "GA_EMB_CUDA_VISIBLE_DEVICES=$EmbCudaVisibleDevices",
-    '-e', 'GA_EMB_AUTO_LOAD_ON_STARTUP=0',
     '-e', 'GA_EMB_WARMUP_ON_LOAD=1',
-    '-e', 'GA_EMB_WAIT_FOR_READY_ON_STARTUP=0',
     '-e', 'GA_EMB_READY_TIMEOUT_SECONDS=1800',
     '-e', 'GA_SD_HOST=127.0.0.1',
     '-e', 'GA_SD_PORT=8083',
     '-e', 'GA_SD_MODEL_DIR=/models-local/sd',
-    # Diffusion / VAE / text-encoder files are resolved from the SD
-    # service's active bundle under /models-local/sd/bundles/<id>/.
-    # No GA_SD_DIFFUSION_MODEL_PATH/... env seam: bundle = single source
-    # of truth.
+    # GuideAntsApi ServiceModes selects the SD bundle. Files are resolved under
+    # /models-local/sd/bundles/<id>/ only after an explicit API plan.
     '-e', 'GA_SD_TIMEOUT_SECONDS=900',
     '-e', 'GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=120',
-    # Sampling (steps/cfg/method) comes from the active SD bundle definition only.
+    # Sampling comes from the API-selected SD bundle definition.
     '-e', 'GA_SD_STRENGTH=0.75',
     '-e', 'GA_SD_OFFLOAD_TO_CPU=0',
     '-e', 'GA_SD_DIFFUSION_FA=1',
-    '-e', 'GA_SD_AUTO_LOAD_ON_STARTUP=1',
     '-e', 'GA_SD_WARMUP_PROMPT=startup-warmup',
     '-e', 'GA_SD_WARMUP_SIZE=512x512',
     '-e', 'GA_SD_WARMUP_STEPS=1',
     '-e', 'GA_SD_WARMUP_OUTPUT_FORMAT=png',
     '-e', 'GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS=180',
-    '-e', 'GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP=1',
-    '-e', 'GA_SD_WAIT_FOR_READY_ON_STARTUP=0',
     '-e', 'GA_SD_READY_TIMEOUT_SECONDS=1800',
     '-e', "GA_SD_CUDA_VISIBLE_DEVICES=$SdCudaVisibleDevices"
 )

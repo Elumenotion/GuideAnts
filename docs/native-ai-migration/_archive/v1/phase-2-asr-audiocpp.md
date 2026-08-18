@@ -51,10 +51,9 @@ HTTP contract.
   `POST /admin/load` (`{model_id | model_path, hf_token, …}`), `POST /admin/unload`,
   `GET /admin/models`, `POST /admin/models/download` (+ operation poll at
   `GET /admin/models/{operation_id}`), `DELETE /admin/models/{model_ref}`.
-- Entrypoint monitor (`entrypoint.sh:421-428`): `/ready` on `GA_ASR_PORT` (8082) when
-  `GA_ASR_AUTO_LOAD_ON_STARTUP=1` + `GA_ASR_WAIT_FOR_READY_ON_STARTUP=1`; warmup uses
-  `GA_ASR_WARMUP_AUDIO_PATH` (default `/app/asr-service/warmup.webm` — note: webm, so
-  decode support is part of warmup parity).
+- Historical note: this phase used an entrypoint readiness/autoload mechanism.
+  It has been removed; current engines start unloaded and accept only an
+  explicit GuideAntsApi lifecycle plan.
 - Health filter detail: `asr_service.py:41` suppresses access-log noise for
   `/health` + `/ready` — cosmetic, not contract.
 
@@ -111,7 +110,7 @@ existing `/asr/` prefix. This enforcement moves into `ga-admin` in Phase 4.
 
 | Var | Disposition |
 |-----|-------------|
-| `GA_ASR_HOST/PORT/MODEL_DIR/DEFAULT_MODEL_PATH/DEFAULT_MODEL_ID/AUTO_LOAD_ON_STARTUP/WAIT_FOR_READY_ON_STARTUP/READY_TIMEOUT_SECONDS/TIMEOUT_SECONDS/WARMUP_ON_LOAD/WARMUP_AUDIO_PATH/WARMUP_LANGUAGE/CUDA_VISIBLE_DEVICES` | Kept, same meaning. |
+| ASR runtime environment | Historical values only. Startup lifecycle flags were removed; see `docs/local-ai-lifecycle/ARCHITECTURE.md`. |
 | `GA_ASR_DEVICE_MAP`, `GA_ASR_DTYPE` | Retired (torch concepts). Replacement: `GA_ASR_BACKEND` (`cuda|vulkan|cpu|best`, default per flavor) and optional weight-type knob mapping to `qwen3_asr.weight_type`. Unknown-set values fail loudly at startup. |
 | `GA_ASR_MAX_INFERENCE_BATCH_SIZE`, `GA_ASR_MAX_NEW_TOKENS` | Map to engine session/request options if equivalents exist; **to be validated in this phase** against `engine_runtime` request options — otherwise retire with a deprecation log. |
 

@@ -69,25 +69,29 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILocalAiDesiredStateBuilder _desiredStateBuilder;
     private readonly ILocalAiWarmupOrchestrationClient _orchestrationClient;
+    private readonly ILocalAiRuntimeAlignmentVerifier _runtimeAlignmentVerifier;
     private readonly IServiceModeResolver _serviceModeResolver;
-    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<LocalAiStartupWarmupService> _logger;
+
+    private readonly ILocalAiStackHostResolver _stackHostResolver;
 
     public LocalAiStartupWarmupService(
         IConfiguration configuration,
         IServiceScopeFactory scopeFactory,
         ILocalAiDesiredStateBuilder desiredStateBuilder,
         ILocalAiWarmupOrchestrationClient orchestrationClient,
+        ILocalAiRuntimeAlignmentVerifier runtimeAlignmentVerifier,
         IServiceModeResolver serviceModeResolver,
-        IHttpClientFactory httpClientFactory,
+        ILocalAiStackHostResolver stackHostResolver,
         ILogger<LocalAiStartupWarmupService> logger)
     {
         _configuration = configuration;
         _scopeFactory = scopeFactory;
         _desiredStateBuilder = desiredStateBuilder;
         _orchestrationClient = orchestrationClient;
+        _runtimeAlignmentVerifier = runtimeAlignmentVerifier;
         _serviceModeResolver = serviceModeResolver;
-        _httpClientFactory = httpClientFactory;
+        _stackHostResolver = stackHostResolver;
         _logger = logger;
     }
 
@@ -143,42 +147,32 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
 
         try
         {
-            await ProjectImageGenerationBundlesIfConfiguredAsync(cancellationToken).ConfigureAwait(false);
+            await ProjectImageGenerationBundlesIfConfiguredAsync(options, cancellationToken).ConfigureAwait(false);
 
-            await EnsureConfiguredLocalSelectionsSyncedAsync(cancellationToken).ConfigureAwait(false);
-
-            var ini = await _desiredStateBuilder.BuildIniAsync(options, cancellationToken).ConfigureAwait(false);
-            var writeResult = await _orchestrationClient
-                .PutDesiredAsync(ini, cancellationToken: cancellationToken)
+            var planJson = await _desiredStateBuilder
+                .BuildPlanJsonAsync(options, cancellationToken)
                 .ConfigureAwait(false);
-
-            if (await ShouldRequestWarmupApplyAsync(writeResult, cancellationToken).ConfigureAwait(false))
+            var applyResult = await _orchestrationClient
+                .ApplyAsync(planJson, cancellationToken)
+                .ConfigureAwait(false);
+            if (applyResult.Noop)
             {
-                if (writeResult.Changed)
-                {
-                    _logger.LogInformation(
-                        "Warmup desired INI was out of date; wrote revision {Revision}.",
-                        writeResult.Revision);
-                }
-                else
-                {
-                    _logger.LogInformation(
-                        "Warmup desired INI is correct; applying revision {Revision} to engines.",
-                        writeResult.Revision);
-                }
-
-                await _orchestrationClient.ApplyAsync(cancellationToken).ConfigureAwait(false);
+                _logger.LogDebug(
+                    "Local AI lifecycle plan revision {Revision} is already applied.",
+                    applyResult.DesiredRevision);
             }
             else
             {
-                _logger.LogDebug(
-                    "Warmup desired INI is correct and applied at revision {Revision}.",
-                    writeResult.Revision);
+                _logger.LogInformation(
+                    "Submitted API-owned local AI lifecycle plan revision {Revision}.",
+                    applyResult.DesiredRevision);
             }
 
             if (waitForCompletion)
             {
                 await WaitForApplyCompleteAsync(cancellationToken).ConfigureAwait(false);
+                await VerifyRuntimeAlignmentAndRetryApplyOnceAsync(planJson, cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -364,61 +358,9 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
         }
     }
 
-    private async Task EnsureConfiguredLocalSelectionsSyncedAsync(CancellationToken cancellationToken)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
-        await ConfiguredLocalServiceSelectionSync
-            .SyncAllWarmLocalServicesAsync(
-                settings,
-                _configuration,
-                _httpClientFactory,
-                IsLocalRoutingWarmAsync,
-                cancellationToken)
-            .ConfigureAwait(false);
-    }
-
     private async Task<bool> IsLocalRoutingWarmAsync(string serviceId, CancellationToken cancellationToken) =>
         await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false)
         == LocalRoutingDesiredState.Warm;
-
-    private async Task<bool> ShouldRequestWarmupApplyAsync(
-        WarmupDesiredWriteResult writeResult,
-        CancellationToken cancellationToken)
-    {
-        if (writeResult.Changed)
-        {
-            return true;
-        }
-
-        var status = await _orchestrationClient.GetStatusAsync(cancellationToken).ConfigureAwait(false);
-        if (status.DesiredRevision > status.AppliedRevision)
-        {
-            return true;
-        }
-
-        if (string.Equals(status.ApplyStatus, "failed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status.ApplyStatus, "pending", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return OrchestratorNeedsLoad(status);
-    }
-
-    private static bool OrchestratorNeedsLoad(WarmupStatusDocument status)
-    {
-        foreach (var serviceStatus in status.Services.Values)
-        {
-            if (string.Equals(serviceStatus.Desired, "on", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(serviceStatus.Phase, "ready", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     private async Task<LocalServiceReconcileResult> MapServiceOutcomeAsync(
         string serviceId,
@@ -510,11 +452,47 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
             await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
         }
 
-        throw new TimeoutException("Timed out waiting for warmup orchestrator to finish applying.");
+        throw new TimeoutException("Timed out waiting for warmup executor to finish applying.");
     }
 
-    private bool IsOrchestrationConfigured() =>
-        RuntimeConfigurationPlaceholders.HasUsableUrl(_configuration["LlamaCpp:BaseUrl"]);
+    /// <summary>
+    /// GuideAntsApi-owned verification — ga-admin appliedRevision is not trusted alone.
+    /// </summary>
+    private async Task VerifyRuntimeAlignmentAndRetryApplyOnceAsync(
+        string planJson,
+        CancellationToken cancellationToken)
+    {
+        var mismatches = await _runtimeAlignmentVerifier
+            .FindMismatchesAsync(planJson, cancellationToken)
+            .ConfigureAwait(false);
+        if (mismatches.Count == 0)
+        {
+            return;
+        }
+
+        _logger.LogWarning(
+            "Local AI runtime misaligned with API plan after apply ({Count} services): {Details}",
+            mismatches.Count,
+            string.Join("; ", mismatches.Select(static m => $"{m.ServiceId}: {m.Detail}")));
+
+        var retryResult = await _orchestrationClient.ApplyAsync(planJson, cancellationToken).ConfigureAwait(false);
+        if (!retryResult.Noop)
+        {
+            await WaitForApplyCompleteAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var afterRetry = await _runtimeAlignmentVerifier
+            .FindMismatchesAsync(planJson, cancellationToken)
+            .ConfigureAwait(false);
+        if (afterRetry.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Local AI engines still misaligned with API plan after mechanical re-apply: "
+                + string.Join("; ", afterRetry.Select(static m => $"{m.ServiceId}: {m.Detail}")));
+        }
+    }
+
+    private bool IsOrchestrationConfigured() => _stackHostResolver.HasAnyConfiguredStack();
 
     private static bool IsLocalAuxiliaryService(string serviceId) =>
         string.Equals(serviceId, RoutedServiceNames.SpeechTranscription, StringComparison.Ordinal)
@@ -661,6 +639,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
     }
 
     private async Task ProjectImageGenerationBundlesIfConfiguredAsync(
+        WarmupDesiredBuildOptions? options,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(LocalServiceAdminRouting.ResolveAdminBase("ImageGeneration", _configuration)))
@@ -668,10 +647,17 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
             return;
         }
 
+        if (!await IsImageGenerationWarmDesiredAsync(options, cancellationToken).ConfigureAwait(false))
+        {
+            _logger.LogDebug(
+                "Skipping ImageGeneration bundle projection: service is not warm-desired for this warmup sync.");
+            return;
+        }
+
         using var projectionScope = _scopeFactory.CreateScope();
         var settings = projectionScope.ServiceProvider.GetService<IApplicationSettingsService>();
         if (settings is null
-            || !await ConfiguredLocalServiceSelectionSync
+            || !await LocalServiceModeSelectionReader
                 .HasLocalServiceModeAsync(settings, RoutedServiceNames.ImageGeneration, cancellationToken)
                 .ConfigureAwait(false))
         {
@@ -686,5 +672,27 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
         }
 
         await bootstrapper.ProjectAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> IsImageGenerationWarmDesiredAsync(
+        WarmupDesiredBuildOptions? options,
+        CancellationToken cancellationToken)
+    {
+        if (options?.ForceAuxiliaryIdle == true)
+        {
+            return false;
+        }
+
+        if (options?.ServiceDesiredOverrides is not null
+            && options.ServiceDesiredOverrides.TryGetValue(
+                RoutedServiceNames.ImageGeneration,
+                out var desiredOverride))
+        {
+            var normalized = desiredOverride.Trim().ToLowerInvariant();
+            return normalized is "warm" or "on";
+        }
+
+        return await IsLocalRoutingWarmAsync(RoutedServiceNames.ImageGeneration, cancellationToken)
+            .ConfigureAwait(false);
     }
 }
