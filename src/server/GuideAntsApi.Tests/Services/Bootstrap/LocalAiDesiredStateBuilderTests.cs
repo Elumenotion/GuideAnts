@@ -1,5 +1,3 @@
-using System.Net;
-using System.Text;
 using FluentAssertions;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.Bootstrap;
@@ -8,7 +6,6 @@ using GuideAntsApi.Settings;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace GuideAntsApi.Tests.Services.Bootstrap;
@@ -17,7 +14,7 @@ namespace GuideAntsApi.Tests.Services.Bootstrap;
 public sealed class LocalAiDesiredStateBuilderTests
 {
     [TestMethod]
-    public async Task BuildIniAsync_EmbeddingsLocalWithModel_WritesWarmAndModelPath()
+    public async Task BuildPlanJsonAsync_EmbeddingsLocalWithModel_WritesEnabledModelPath()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -59,21 +56,16 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver,
-            new StubHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
-        var ini = await builder.BuildIniAsync();
+        var planJson = await builder.BuildPlanJsonAsync();
 
-        ini.Should().Contain("[Embeddings]");
-        ini.Should().Contain("model_path = qwen3_embedding_0_6b");
-        ini.Should().NotContain("desired = warm");
-        ini.Should().Contain("[SpeechTranscription]");
-        ini.Should().Contain("enabled = off");
+        planJson.Should().Contain("\"Embeddings\":{\"enabled\":true,\"modelPath\":\"qwen3_embedding_0_6b\"}");
+        planJson.Should().Contain("\"SpeechTranscription\":{\"enabled\":false}");
     }
 
     [TestMethod]
-    public async Task BuildIniAsync_ForceAuxiliaryIdle_WritesAllAuxIdle()
+    public async Task BuildPlanJsonAsync_ForceAuxiliaryIdle_DisablesAllAuxiliaryServices()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -94,19 +86,16 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver,
-            new StubHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
-        var ini = await builder.BuildIniAsync(new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true });
+        var planJson = await builder.BuildPlanJsonAsync(
+            new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true });
 
-        ini.Should().Contain("[Embeddings]");
-        ini.Should().Contain("enabled = off");
-        ini.Should().Contain("model_path = qwen3_embedding_0_6b");
+        planJson.Should().Contain("\"Embeddings\":{\"enabled\":false,\"modelPath\":\"qwen3_embedding_0_6b\"}");
     }
 
     [TestMethod]
-    public async Task BuildIniAsync_ImageGenerationRemoteActive_PreservesLocalBundleIdAsOff()
+    public async Task BuildPlanJsonAsync_ImageGenerationRemoteActive_PreservesDisabledLocalBundle()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -134,19 +123,16 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver,
-            new StubHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
-        var ini = await builder.BuildIniAsync();
+        var planJson = await builder.BuildPlanJsonAsync();
 
-        ini.Should().Contain("[ImageGeneration]");
-        ini.Should().Contain("enabled = off");
-        ini.Should().Contain("bundle_id = flux2-klein-4b");
+        planJson.Should().Contain(
+            "\"ImageGeneration\":{\"enabled\":false,\"bundleId\":\"flux2-klein-4b\"}");
     }
 
     [TestMethod]
-    public async Task BuildIniAsync_ImageGenerationLocal_UsesPersistedServiceModeBundleId()
+    public async Task BuildPlanJsonAsync_ImageGenerationLocal_UsesServiceModeBundleId()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -167,19 +153,16 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver,
-            new StubHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
-        var ini = await builder.BuildIniAsync();
+        var planJson = await builder.BuildPlanJsonAsync();
 
-        ini.Should().Contain("[ImageGeneration]");
-        ini.Should().Contain("bundle_id = flux2-klein-4b");
-        ini.Should().NotContain("desired = warm");
+        planJson.Should().Contain(
+            "\"ImageGeneration\":{\"enabled\":true,\"bundleId\":\"flux2-klein-4b\"}");
     }
 
     [TestMethod]
-    public async Task BuildIniAsync_ImageGenerationLocalWithoutModelId_Throws()
+    public async Task BuildPlanJsonAsync_ImageGenerationLocalWithoutModelId_Throws()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -200,14 +183,33 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver,
-            new StubHttpClientFactory(),
-            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+            modeResolver);
 
-        var act = () => builder.BuildIniAsync();
+        var act = () => builder.BuildPlanJsonAsync();
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*no model or bundle configured in ServiceModes*");
+    }
+
+    [TestMethod]
+    public async Task BuildPlanJsonAsync_ServiceModesReadFails_DoesNotInventIdlePolicy()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+        var modeResolver = new Mock<IServiceModeResolver>(MockBehavior.Strict);
+        modeResolver
+            .Setup(x => x.GetModesAsync(
+                RoutedServiceNames.SpeechTranscription,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("settings unavailable"));
+        var builder = new LocalAiDesiredStateBuilder(
+            configuration,
+            new ServiceScopeFactoryStub(),
+            modeResolver.Object);
+
+        var act = () => builder.BuildPlanJsonAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("settings unavailable");
     }
 
     private static IApplicationSettingsService CreateBundleSettingsService()
@@ -225,57 +227,6 @@ public sealed class LocalAiDesiredStateBuilderTests
                     new BundleDefinitionRoleDto("org/te", "te.gguf")),
                 new BundleDefinitionSamplingDto(4, 1.0, "euler")));
         return settings.Object;
-    }
-
-    private sealed class StubHttpClientFactory : IHttpClientFactory
-    {
-        private readonly Dictionary<string, HttpResponseMessage> _responses;
-
-        public StubHttpClientFactory(Dictionary<string, HttpResponseMessage>? responses = null)
-        {
-            _responses = responses ?? new Dictionary<string, HttpResponseMessage>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        public HttpClient CreateClient(string name) =>
-            new(new StubHttpMessageHandler(_responses));
-
-        private sealed class StubHttpMessageHandler : HttpMessageHandler
-        {
-            private readonly Dictionary<string, HttpResponseMessage> _responses;
-
-            public StubHttpMessageHandler(Dictionary<string, HttpResponseMessage> responses) =>
-                _responses = responses;
-
-            protected override Task<HttpResponseMessage> SendAsync(
-                HttpRequestMessage request,
-                CancellationToken cancellationToken)
-            {
-                var uri = request.RequestUri?.ToString() ?? string.Empty;
-                foreach (var (key, response) in _responses)
-                {
-                    if (uri.Contains(key, StringComparison.OrdinalIgnoreCase)
-                        || key.Contains(uri, StringComparison.OrdinalIgnoreCase)
-                        || uri.TrimEnd('/').EndsWith("/sd/admin/bundles", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return Task.FromResult(CloneResponse(response));
-                    }
-                }
-
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
-            }
-
-            private static HttpResponseMessage CloneResponse(HttpResponseMessage template)
-            {
-                var clone = new HttpResponseMessage(template.StatusCode);
-                if (template.Content is not null)
-                {
-                    var body = template.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                    clone.Content = new StringContent(body, Encoding.UTF8, "application/json");
-                }
-
-                return clone;
-            }
-        }
     }
 
     private sealed class ServiceScopeFactoryStub : IServiceScopeFactory

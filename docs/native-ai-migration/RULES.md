@@ -107,12 +107,15 @@ Task 7 will add `verify-catalog-contract.ps1` to automate inventory ↔ manifest
 
 ### Admin (engine)
 
+Callable only by `ga-admin` while executing an accepted API lifecycle plan — not
+by clients or operators for routing policy.
+
 | Route | Purpose |
 |-------|---------|
 | `GET /{emb,asr,tts}/admin/catalog` | Curated model list |
 | `GET /tts/admin/voice-pack` | Voice preset manifest (to add) |
 | `POST /{service}/admin/models/download` | Start catalog download |
-| `POST /{service}/admin/load` | Load model by catalog/disk ref |
+| `POST /{service}/admin/load` | Mechanical load (executor only) |
 | `GET /{service}/ready` | Runtime readiness |
 
 ### Settings API (.NET proxy)
@@ -122,7 +125,7 @@ Task 7 will add `verify-catalog-contract.ps1` to automate inventory ↔ manifest
 | `GET /api/settings/services/{id}/local-models/catalog` | Catalog for pickers |
 | `GET /api/settings/services/{id}/local-models` | Disk model list |
 | `POST /api/settings/services/{id}/local-models/downloads` | Start download |
-| `POST /api/settings/services/{id}/local-models/load` | Load engine |
+| `POST /api/settings/services/{id}/local-models/load` | Persist selection + API lifecycle apply |
 
 `{id}` ∈ `Embeddings`, `SpeechTranscription`, `SpeechSynthesis`.
 
@@ -141,6 +144,7 @@ Task 7 will add `verify-catalog-contract.ps1` to automate inventory ↔ manifest
 | Silent fallback | Hides misconfiguration | Unknown voice → default to first pack voice |
 | STATE pass without evidence | False progress | Checking Task 4 done with no runtime test |
 | Reading `_archive/` for product list | Stale / contradictory | Using phase doc “optional citrinet” over INVENTORY |
+| Reading `_archive/` for warmup/routing policy | Pre-JSON-plan D11 and autoload gates | Treating archive D11 direct API→engine loops as current |
 
 ---
 

@@ -8,7 +8,8 @@ using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace GuideAntsApi.Services.Bootstrap;
 
@@ -24,7 +25,7 @@ public sealed class WarmupDesiredBuildOptions
 
 public interface ILocalAiDesiredStateBuilder
 {
-    Task<string> BuildIniAsync(
+    Task<string> BuildPlanJsonAsync(
         WarmupDesiredBuildOptions? options = null,
         CancellationToken cancellationToken = default);
 }
@@ -42,52 +43,47 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
     private readonly IConfiguration _configuration;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IServiceModeResolver _serviceModeResolver;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<LocalAiDesiredStateBuilder> _logger;
 
     public LocalAiDesiredStateBuilder(
         IConfiguration configuration,
         IServiceScopeFactory scopeFactory,
-        IServiceModeResolver serviceModeResolver,
-        IHttpClientFactory httpClientFactory,
-        ILogger<LocalAiDesiredStateBuilder> logger)
+        IServiceModeResolver serviceModeResolver)
     {
         _configuration = configuration;
         _scopeFactory = scopeFactory;
         _serviceModeResolver = serviceModeResolver;
-        _httpClientFactory = httpClientFactory;
-        _logger = logger;
     }
 
-    public async Task<string> BuildIniAsync(
+    public async Task<string> BuildPlanJsonAsync(
         WarmupDesiredBuildOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         options ??= new WarmupDesiredBuildOptions();
-        var builder = new StringBuilder();
-        builder.AppendLine("version = 1");
-        builder.AppendLine("revision = 0");
-        builder.AppendLine($"updated_at_utc = {DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}");
-        builder.AppendLine();
-
-        await AppendLlamaSectionAsync(builder, options, cancellationToken).ConfigureAwait(false);
+        var services = new JsonObject
+        {
+            ["llama"] = await BuildLlamaSectionAsync(options, cancellationToken).ConfigureAwait(false),
+        };
 
         foreach (var serviceId in AuxiliaryServices)
         {
-            await AppendAuxiliarySectionAsync(builder, serviceId, options, cancellationToken)
+            services[serviceId] = await BuildAuxiliarySectionAsync(
+                    serviceId,
+                    options,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
 
-        return builder.ToString().TrimEnd() + Environment.NewLine;
+        return new JsonObject
+        {
+            ["schemaVersion"] = 1,
+            ["services"] = services,
+        }.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
     }
 
-    private async Task AppendLlamaSectionAsync(
-        StringBuilder builder,
+    private async Task<JsonObject> BuildLlamaSectionAsync(
         WarmupDesiredBuildOptions options,
         CancellationToken cancellationToken)
     {
-        builder.AppendLine("[llama]");
-
         var aliasOverride = options.LlamaRouterAliasOverride?.Trim();
         var alias = !string.IsNullOrWhiteSpace(aliasOverride)
             ? aliasOverride
@@ -95,23 +91,21 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
 
         if (string.IsNullOrWhiteSpace(alias))
         {
-            builder.AppendLine("enabled = off");
-            builder.AppendLine();
-            return;
+            return new JsonObject { ["enabled"] = false };
         }
 
-        builder.AppendLine($"router_alias = {alias}");
-        builder.AppendLine();
+        return new JsonObject
+        {
+            ["enabled"] = true,
+            ["routerAlias"] = alias,
+        };
     }
 
-    private async Task AppendAuxiliarySectionAsync(
-        StringBuilder builder,
+    private async Task<JsonObject> BuildAuxiliarySectionAsync(
         string serviceId,
         WarmupDesiredBuildOptions options,
         CancellationToken cancellationToken)
     {
-        builder.AppendLine($"[{serviceId}]");
-
         var persistedLocalRef = await ResolvePersistedLocalModeModelRefAsync(serviceId, cancellationToken)
             .ConfigureAwait(false);
 
@@ -134,34 +128,25 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             var normalized = desiredOverride.Trim().ToLowerInvariant();
             if (normalized is "warm" or "on")
             {
-                AppendAuxiliaryExecutionPlan(
-                    builder,
+                return BuildAuxiliaryExecutionPlan(
                     serviceId,
                     loadRef: persistedLocalRef,
                     routingWarm: true);
             }
-            else
-            {
-                AppendAuxiliaryExecutionPlan(
-                    builder,
-                    serviceId,
-                    loadRef: persistedLocalRef,
-                    routingWarm: false);
-            }
 
-            builder.AppendLine();
-            return;
+            return BuildAuxiliaryExecutionPlan(
+                serviceId,
+                loadRef: persistedLocalRef,
+                routingWarm: false);
         }
 
         var routingWarm = !options.ForceAuxiliaryIdle
             && await IsLocalRoutingWarmAsync(serviceId, cancellationToken).ConfigureAwait(false);
 
-        AppendAuxiliaryExecutionPlan(
-            builder,
+        return BuildAuxiliaryExecutionPlan(
             serviceId,
             loadRef: persistedLocalRef,
             routingWarm: routingWarm);
-        builder.AppendLine();
     }
 
     private async Task<ImageGenerationBundleDefinitionDto?> GetImageGenerationBundleDefinitionAsync(
@@ -176,8 +161,7 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             .ConfigureAwait(false);
     }
 
-    private static void AppendAuxiliaryExecutionPlan(
-        StringBuilder builder,
+    private static JsonObject BuildAuxiliaryExecutionPlan(
         string serviceId,
         string? loadRef,
         bool routingWarm)
@@ -191,32 +175,30 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
 
         if (routingWarm && !string.IsNullOrWhiteSpace(loadRef))
         {
-            AppendAuxiliaryLoadRef(builder, serviceId, loadRef);
-            return;
+            return BuildAuxiliarySection(serviceId, loadRef, enabled: true);
         }
 
-        builder.AppendLine("enabled = off");
-        if (!string.IsNullOrWhiteSpace(loadRef))
-        {
-            AppendAuxiliaryLoadRef(builder, serviceId, loadRef);
-        }
+        return BuildAuxiliarySection(serviceId, loadRef, enabled: false);
     }
 
-    private static void AppendAuxiliaryLoadRef(StringBuilder builder, string serviceId, string? modelRef)
+    private static JsonObject BuildAuxiliarySection(string serviceId, string? modelRef, bool enabled)
     {
+        var section = new JsonObject { ["enabled"] = enabled };
         if (string.IsNullOrWhiteSpace(modelRef))
         {
-            return;
+            return section;
         }
 
         if (string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal))
         {
-            builder.AppendLine($"bundle_id = {modelRef}");
+            section["bundleId"] = modelRef;
         }
         else
         {
-            builder.AppendLine($"model_path = {modelRef}");
+            section["modelPath"] = modelRef;
         }
+
+        return section;
     }
 
     private async Task<string?> ResolvePersistedLocalModeModelRefAsync(
@@ -229,27 +211,16 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             return null;
         }
 
-        try
-        {
-            var modes = await _serviceModeResolver
-                .GetModesAsync(serviceId, cancellationToken)
-                .ConfigureAwait(false);
-            var localMode = modes.FirstOrDefault(mode =>
-                string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase));
-            return localMode?.ModelId?.Trim() is { Length: > 0 } modelId
-                ? string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)
-                    ? ImageGenerationBundleDefinitionContracts.NormalizeBundleId(modelId)
-                    : modelId
-                : null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(
-                ex,
-                "Failed resolving persisted local ServiceModes ModelId for service '{ServiceId}'.",
-                serviceId);
-            return null;
-        }
+        var modes = await _serviceModeResolver
+            .GetModesAsync(serviceId, cancellationToken)
+            .ConfigureAwait(false);
+        var localMode = modes.FirstOrDefault(mode =>
+            string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase));
+        return localMode?.ModelId?.Trim() is { Length: > 0 } modelId
+            ? string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)
+                ? ImageGenerationBundleDefinitionContracts.NormalizeBundleId(modelId)
+                : modelId
+            : null;
     }
 
     private async Task<bool> IsLocalRoutingWarmAsync(
@@ -298,23 +269,14 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             return null;
         }
 
-        try
-        {
-            return LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson)
-                .RouterModelId;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Default llama model '{ModelId}' has invalid RuntimeConfigJson.", defaultModelId);
-            return null;
-        }
+        return LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson)
+            .RouterModelId;
     }
 
     private enum LocalRoutingDesiredState
     {
         Warm,
         Idle,
-        Unknown,
     }
 
     private async Task<LocalRoutingDesiredState> ResolveLocalRoutingDesiredStateAsync(
@@ -323,10 +285,7 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
     {
         var expectedLocalProviderSection = ResolveLocalProviderSection(serviceId);
 
-        if (expectedLocalProviderSection is null)
-        {
-            return LocalRoutingDesiredState.Warm;
-        }
+        ArgumentNullException.ThrowIfNull(expectedLocalProviderSection);
 
         try
         {
@@ -341,10 +300,12 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
 
             return LocalRoutingDesiredState.Idle;
         }
-        catch (Exception ex)
+        catch (RoutingException ex) when (string.Equals(
+            ex.Code,
+            RoutingErrorCodes.ModeNotFound,
+            StringComparison.Ordinal))
         {
-            _logger.LogDebug(ex, "Could not resolve routing mode for {ServiceId}.", serviceId);
-            return LocalRoutingDesiredState.Unknown;
+            return LocalRoutingDesiredState.Idle;
         }
     }
 }

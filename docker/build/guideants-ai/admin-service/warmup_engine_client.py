@@ -1,4 +1,9 @@
-"""HTTP helpers for warmup orchestrator engine admin calls."""
+"""HTTP helpers for ga-admin warmup execution (load/unload + engine probes).
+
+DO NOT add routing policy, ServiceModes logic, revision reconciliation, or
+"runtime drift" detection here. GuideAntsApi owns policy. This module only
+talks to local engine admin ports on loopback.
+"""
 
 from __future__ import annotations
 
@@ -233,6 +238,62 @@ def _is_llama_loaded(entry: dict[str, Any]) -> bool:
             return True
     state = entry.get("state")
     return isinstance(state, str) and state.lower() == "loaded"
+
+
+def llama_engine_loaded_aliases() -> list[str]:
+    """Mechanical probe: which router aliases the llama engine reports as loaded."""
+    return [
+        str(entry.get("id"))
+        for entry in list_llama_models()
+        if entry.get("id") and _is_llama_loaded(entry)
+    ]
+
+
+def aux_engine_reports_loaded(service_id: str) -> bool:
+    """Mechanical probe: whether a local aux engine process is currently loaded.
+
+    This is NOT policy. It only answers what the engine HTTP port reports right now.
+    GuideAntsApi decides what should be loaded; this function is used to skip redundant
+    load calls and to perform GPU drain before llama changes.
+    """
+    base = SERVICE_ENGINE_BASE_URLS.get(service_id)
+    if not base:
+        return False
+    if service_id == "ImageGeneration":
+        status, payload = _get_json(f"{base.rstrip('/')}/health", timeout=5.0)
+        if status != 200 or not isinstance(payload, dict):
+            return False
+        engine = payload.get("engine") or {}
+        if engine.get("processAlive") is True:
+            return True
+        loaded_bundle = str(payload.get("loadedBundleId") or "").strip()
+        return bool(loaded_bundle)
+    status, payload = _get_json(f"{base.rstrip('/')}/ready", timeout=5.0)
+    if status != 200 or not isinstance(payload, dict):
+        return False
+    return payload.get("loaded") is True
+
+
+def aux_engine_loaded_ref(service_id: str) -> str | None:
+    """Return the model/bundle ref the aux engine reports, if any."""
+    base = SERVICE_ENGINE_BASE_URLS.get(service_id)
+    if not base:
+        return None
+    if service_id == "ImageGeneration":
+        status, payload = _get_json(f"{base.rstrip('/')}/health", timeout=5.0)
+        if status != 200 or not isinstance(payload, dict):
+            return None
+        engine = payload.get("engine") or {}
+        bundle = str(engine.get("loadedBundleId") or payload.get("loadedBundleId") or "").strip()
+        return bundle or None
+    status, payload = _get_json(f"{base.rstrip('/')}/ready", timeout=5.0)
+    if status != 200 or not isinstance(payload, dict) or payload.get("loaded") is not True:
+        return None
+    for key in ("modelRef", "model_ref", "catalogEntryId", "catalog_entry_id", "bundleId", "bundle_id"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return None
 
 
 def post_llama_load(alias: str) -> bool:

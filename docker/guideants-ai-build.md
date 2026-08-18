@@ -430,41 +430,39 @@ directory (`docker/volumes/sd/models`) that was then bind-mounted at
 
 The SD service looks for bundles at `/models-local/sd/bundles/<id>/`
 with `diffusion/`, `vae/`, and `text-encoder/` role subdirs containing
-exactly one file each. The active bundle is recorded in
-`/models-local/sd/active_bundle.json`.
+exactly one file each.
 
-### Active vs loaded bundle
+### Selected, loaded, and diagnostic bundle state
 
-"Active bundle" and "loaded bundle" are two different pieces of state:
+- **Selected bundle** is the local ImageGeneration `ServiceMode` model ID in
+  `GuideAntsApi`. It is the only input that may choose a bundle.
+- **Loaded bundle** is the bundle the `sd-server` child process has actually
+  mapped into GPU/RAM. It is runtime status.
+- `active_bundle.json` is a derived diagnostic marker written after a successful
+  API-commanded load. It is not read to select or load a bundle.
 
-- **Active bundle** (`active_bundle.json` on disk) is the bundle the
-  engine will pick up when it next starts. Modified by
-  `POST /sd/admin/bundles/{id}/select-active`.
-- **Loaded bundle** is the bundle the `sd-server` child process has
-  actually mapped into GPU/RAM right now. Surfaced on
-  `GET /sd/admin/bundles` as `loadedBundleId` + engine state
-  (`running` / `unloaded` / `degraded`).
+The container starts unloaded. `GuideAntsApi` submits a complete lifecycle plan;
+the executor calls SD admin endpoints only when that plan enables local image
+generation.
 
 Runtime lifecycle endpoints (all serialized by an internal lock; a
 second caller gets HTTP 409 rather than racing):
 
-- `POST /sd/admin/load` — start `sd-server` against the current active
-  bundle. No-op when already running.
+- `POST /sd/admin/load` — start `sd-server` against the required `bundle_id`.
+  This is an executor endpoint, not a policy or selection API.
 - `POST /sd/admin/unload` — stop `sd-server` and release GPU/RAM. Any
   in-flight generation will fail with a connection error; this is by
   design so unload is never blocked by a long job.
-- `POST /sd/admin/bundles/{id}/select-active` — update the on-disk
-  active marker AND, if an engine is already running, hot-swap it to
-  the newly active bundle. Changing the active bundle does **not**
-  require a `guideants-ai` restart.
+- `POST /sd/admin/bundles/{id}/select-active` is retired. Selection goes through
+  the GuideAnts API so ServiceModes and the submitted lifecycle plan remain one
+  atomic authority path.
 
-If startup warmup times out, the SD wrapper stays up (fail-open) and
-supports manual retry via `POST /sd/admin/warmup`. If `sd-server`
-itself fails to launch (bad paths, missing artifacts, subprocess
-crash during warmup), the service degrades to `unloaded` with
+If an API-commanded warmup times out, the SD wrapper stays up and reports the
+failure. If `sd-server` itself fails to launch (bad paths, missing artifacts,
+subprocess crash during warmup), the service degrades to `unloaded` with
 `config_error` populated on `/sd/health` and `/sd/admin/bundles`;
-the container stays up so the operator can re-select or re-download
-a bundle and call `POST /sd/admin/load` from the UI.
+the container stays up so the operator can re-select or re-download a bundle
+through the GuideAnts API.
 
 ## Local TTS Model Bootstrap (Pre-test, External Artifacts)
 
@@ -517,12 +515,14 @@ Required pre-test sequence for embeddings:
 2. `docker compose up -d` — the volume mounts at `/models-local` and the
    emb service reads from `/models-local/emb`.
 3. Verify `http://localhost:8110/emb/health`.
-4. Verify `http://localhost:8110/emb/ready` after autoload warmup finishes.
+4. Select the local embeddings mode through the GuideAnts API, then verify
+   `http://localhost:8110/emb/ready` after the API-owned plan applies.
 5. Run `/emb/embed` smoke calls with `purpose=document` and `purpose=query`.
 
-## Startup Load Controls (ASR + SD + TTS + Embeddings)
+## API-commanded load controls (ASR + SD + TTS + Embeddings)
 
-Startup loading behavior is configurable per service through environment variables.
+Environment variables configure execution mechanics only. They cannot enable a
+service, select a model, or trigger startup loading.
 
 - `CUDA_VISIBLE_DEVICES` (optional; sourced from active env)
   - global GPU ordering for processes in the container when set (example `1,0` maps `host GPU 1 -> cuda:0`, `host GPU 0 -> cuda:1`)
@@ -531,12 +531,6 @@ Startup loading behavior is configurable per service through environment variabl
   - `GA_ASR_CUDA_VISIBLE_DEVICES`
   - `GA_TTS_CUDA_VISIBLE_DEVICES`
   - `GA_EMB_CUDA_VISIBLE_DEVICES`
-- `GA_ASR_AUTO_LOAD_ON_STARTUP` (`1`/`0`)
-  - `1`: autoload ASR model on ASR service startup
-  - `0`: do not autoload ASR model
-- `GA_ASR_WAIT_FOR_READY_ON_STARTUP` (`1`/`0`, default `0`)
-  - `1`: run an ASR readiness monitor (`/asr/ready`) in background when autoload is enabled
-  - `0`: skip ASR readiness monitoring on startup
 - `GA_ASR_READY_TIMEOUT_SECONDS` (default `1800`)
 - `GA_ASR_DEVICE_MAP` (default `auto`)
 - `GA_ASR_BACKEND` (default `cuda`; must be `cpu`/`cuda`/`vulkan`/`rocm` and must match the `ENGINE_ENABLE_*` flags the image's `audiocpp_server` was built with — `cpu` for the CPU flavor, `vulkan` for the Vulkan flavor, `cuda` for the CUDA flavor, `rocm` for the ROCm flavor)
@@ -546,12 +540,6 @@ Startup loading behavior is configurable per service through environment variabl
 - `GA_ASR_WARMUP_AUDIO_PATH` (default `/app/asr-service/warmup.webm`)
 - `GA_ASR_WARMUP_LANGUAGE` (optional; blank by default)
 - `GA_ASR_WARMUP_LOG_TEXT_MAX_CHARS` (default `320`; caps logged warmup transcript length in startup logs)
-- `GA_TTS_AUTO_LOAD_ON_STARTUP` (`1`/`0`)
-  - `1`: autoload TTS model on TTS service startup
-  - `0`: do not autoload TTS model
-- `GA_TTS_WAIT_FOR_READY_ON_STARTUP` (`1`/`0`, default `0`)
-  - `1`: run a TTS readiness monitor (`/tts/ready`) in background when autoload is enabled
-  - `0`: skip TTS readiness monitoring on startup
 - `GA_TTS_READY_TIMEOUT_SECONDS` (default `1800`)
 - `GA_TTS_DEFAULT_MODEL_PATH` (default `chatterbox`)
 - `GA_TTS_DEFAULT_MODEL_ID` (default `chatterbox` catalog id; download resolves to `ResembleAI/chatterbox`)
@@ -563,22 +551,13 @@ Startup loading behavior is configurable per service through environment variabl
 - `GA_TTS_SPEED` (default `1.0`)
   - Local TTS runs Chatterbox via `audiocpp_server`. Voice selection uses the
     curated reference-voice pack exposed in the settings UI.
-- `GA_EMB_AUTO_LOAD_ON_STARTUP` (`1`/`0`)
-  - `1`: autoload embeddings model on startup
-  - `0`: do not autoload embeddings model
 - `GA_EMB_WARMUP_ON_LOAD` (`1`/`0`, default `1`)
   - `1`: run embedding warmup on model load
-  - `0`: skip warmup for manual loads (autoload still forces warmup)
-- `GA_EMB_WAIT_FOR_READY_ON_STARTUP` (`1`/`0`, default `0`)
-  - `1`: run an embeddings readiness monitor (`/emb/ready`) in background when autoload is enabled
-  - `0`: skip embeddings readiness monitoring on startup
+  - `0`: skip warmup after an API-commanded load
 - `GA_EMB_READY_TIMEOUT_SECONDS` (default `1800`)
 - `GA_EMB_MODEL_DIR` (default `/models-local/emb`)
 - `GA_EMB_DEFAULT_MODEL_PATH` (default `qwen3_embedding_0_6b`)
 - `GA_EMB_DEFAULT_MODEL_ID` (default `Qwen/Qwen3-Embedding-0.6B`)
-- `GA_SD_AUTO_LOAD_ON_STARTUP` (`1`/`0`)
-  - `1`: run SD warmup generation on SD service startup (primes generation path)
-  - `0`: skip SD warmup generation
 - `GA_SD_WARMUP_PROMPT` (default `startup-warmup`)
 - `GA_SD_WARMUP_SIZE` (default `512x512`)
 - `GA_SD_WARMUP_STEPS` (default `1`)
@@ -591,13 +570,7 @@ Startup loading behavior is configurable per service through environment variabl
   - per-request HTTP timeout used for sd-server submit/poll calls
 - `GA_SD_POLL_INTERVAL_SECONDS` (default `0.25`)
 - `GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS` (default `180`)
-  - request timeout override used specifically for startup/manual warmup calls
-- `GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP` (`1`/`0`, default `1`)
-  - `1`: keep SD wrapper alive when startup warmup fails; retry with `POST /sd/admin/warmup`
-  - `0`: fail startup if warmup fails
-- `GA_SD_WAIT_FOR_READY_ON_STARTUP` (`1`/`0`, default `0`)
-  - `1`: run an SD readiness monitor (`/sd/health`) in background during startup
-  - `0`: skip SD readiness monitoring on startup
+  - request timeout override for API-commanded warmup calls
 - `GA_SD_OFFLOAD_TO_CPU` (`1`/`0`)
 - `GA_SD_BACKEND` (optional sd-server `--backend` assignment, e.g. `diffusion=cuda0&cuda1`; quote in `.env`)
 - `GA_SD_READY_TIMEOUT_SECONDS` (default `1800`)

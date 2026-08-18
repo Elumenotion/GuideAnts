@@ -101,8 +101,8 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch main https://g
         -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang \
         -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
         -DENGINE_ENABLE_CUDA=OFF \
+        -DENGINE_ENABLE_HIP=ON \
         -DENGINE_ENABLE_VULKAN=OFF \
-        -DGGML_HIP=ON \
         -DGGML_HIP_NO_VMM=ON \
         "-DAMDGPU_TARGETS=${SD_GPU_TARGETS}" \
         "-DGPU_TARGETS=${SD_GPU_TARGETS}" \

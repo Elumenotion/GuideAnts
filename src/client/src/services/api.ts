@@ -1750,12 +1750,11 @@ export const api = {
             /**
              * Load the local model / engine for the given service.
              *
-             * - ASR / TTS: `request` MUST carry `model_id` or `model_path` plus
-             *   optional runtime knobs, which the sub-service loads into
-             *   memory. Pass `{}` only if the caller intends a no-op probe.
-             * - Image Generation: the active bundle is authoritative on disk
-             *   (set via `selectActive`), so the request body is ignored.
-             *   Pass `{}`.
+             * - ASR / TTS / Embeddings: `request` MUST carry `model_id` or `model_path`
+             *   plus optional runtime knobs. GuideAntsApi persists the selection on
+             *   ServiceModes and applies load via the API-owned lifecycle plan.
+             * - Image Generation: pass `bundle_id` (or alias) in the request body.
+             *   Selection authority is ServiceModes, not on-disk engine markers.
              */
             load: (serviceId: string, request: Record<string, unknown>) =>
                 callApi<any>(`/settings/services/${encodeURIComponent(serviceId)}/local-models/load`, {

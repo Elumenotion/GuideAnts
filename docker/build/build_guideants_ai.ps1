@@ -394,7 +394,8 @@ try {
         -ImageExists { param($tag) Test-DockerImageExists -ImageTag $tag } `
         -GetLabel {
             param($tag)
-            $value = docker inspect --format "{{index .Config.Labels `"$depsInputHashLabel`"}}" $tag 2>$null
+            $format = '{{index .Config.Labels "' + $depsInputHashLabel + '"}}'
+            $value = docker inspect --format $format $tag 2>$null
             if ($LASTEXITCODE -ne 0) {
                 return $null
             }

@@ -342,10 +342,9 @@ class SdRuntimeState:
         self.engine_process: Any = None
         self.engine_started_at_utc: str | None = None
         # id of the bundle whose files are currently loaded into the running
-        # sd-server. None when the engine is not running. This is intentionally
-        # distinct from `active_bundle.json` on disk (the "next bundle to load
-        # from") so the UI can reason about "active marker vs. loaded engine"
-        # during hot-swap failures.
+        # sd-server. None when the engine is not running. active_bundle.json is
+        # only a derived diagnostic record of the last successful API-commanded
+        # load; it is never an input to selection or startup.
         self.loaded_bundle_id: str | None = None
 
 
@@ -484,7 +483,7 @@ def resolve_runtime_config(*, bundle_id: str | None = None) -> SdRuntimeConfig:
     if not selected_bundle:
         raise RuntimeError(
             "bundle_id is required. Selection is owned by ServiceModes; "
-            "warmup orchestration must call POST /admin/load with bundle_id."
+            "the API-commanded plan executor must call POST /admin/load with bundle_id."
         )
 
     bundle_paths = expected_bundle_paths(model_dir, selected_bundle)
@@ -2343,9 +2342,8 @@ async def admin_list_bundles() -> JSONResponse:
     engine_alive = is_engine_process_alive()
     loaded_id = STATE.loaded_bundle_id if engine_alive else None
     for item in items:
-        # `active` == marked in active_bundle.json, `loaded` == present in the
-        # running engine. They differ briefly when a hot-swap is in flight or
-        # the engine has been unloaded while a marker is still set.
+        # `active` is a derived diagnostic marker; `loaded` reflects the running
+        # engine. Neither is a selection input—GuideAntsApi ServiceModes owns it.
         item["loaded"] = item["bundleId"] == loaded_id
     return JSONResponse(
         status_code=200,
@@ -2442,8 +2440,8 @@ async def admin_select_active_bundle(bundle_id: str) -> JSONResponse:
         status_code=410,
         detail=(
             "Bundle selection is owned by ServiceModes. Use the GuideAnts "
-            "select-active API, which writes warmup-desired.ini and calls "
-            "POST /admin/load with bundle_id."
+            "select-active API, which submits an explicit lifecycle plan. "
+            "The container does not infer selection from disk state."
         ),
     )
 

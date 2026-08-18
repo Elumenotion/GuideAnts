@@ -72,7 +72,7 @@ Last updated: 2026-08-03
 | I7 Voice-pack API | **pass** | `GET /admin/voice-pack` (tts_service.py) + `.../local-models/voice-pack` proxy + `api.settings.localModels.voicePackOutcome` |
 | I7 Voice-pack baked + attribution | pass | COPY in Dockerfile + `check-voice-pack-attribution.py` (54 voices, `kokoro_synthetic`/CC0-1.0) |
 | I7 NOTICE aligned | **pass** | NOTICE rewritten for Kokoro-82M synthetic provenance; `sourceDataset` corrected `common_voice`→`kokoro_synthetic` |
-| Cloud-active local inventory reporting | **pass (code)** | Saved local selections no longer overwrite cloud routing or runtime inventory. Tests: `ServiceLocalModelListEnricherTests.ProxyAndEnrichImageBundlesAsync_ExposesSavedSelectionWithoutRewritingRuntimeState`, `NotebookHeaderToolbarServiceTests.GetToolbarAsync_CloudProvidersDoNotPresentSavedLocalModelsAsActive`, `LocalAiStartupWarmupServiceTests.SyncDesiredAndApplyAsync_ProjectsImageBundlesWhenLocalModeIsConfiguredButCloudIsActive` |
+| Cloud-active local inventory reporting | **pass (code)** | Saved local selections no longer overwrite cloud routing or runtime inventory. Tests: `ServiceLocalModelListEnricherTests.ProxyAndEnrichImageBundlesAsync_ExposesSavedSelectionWithoutRewritingRuntimeState`, `NotebookHeaderToolbarServiceTests.GetToolbarAsync_CloudProvidersDoNotPresentSavedLocalModelsAsActive`, `LocalAiStartupWarmupServiceTests.SyncDesiredAndApplyAsync_SkipsImageBundleProjectionWhenCloudIsActive` |
 | I10 CI drift script | **pass** | `scripts/native-ai-migration/verify-catalog-contract.ps1` — ASR 2/2, TTS 5/5 shipped, Emb 3/3, no hardcoded lists |
 
 ---

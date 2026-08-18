@@ -86,7 +86,10 @@ Additional manifest-driven UI:
 
 ### Load path
 
-When the user loads a model (or autoload on start), the engine admin handler looks up the catalog entry by id, verifies files on disk, and initializes the audio.cpp / llama stack with the entry’s `family`.
+When GuideAntsApi submits a plan that enables a selected model, the engine admin
+handler looks up the catalog entry by ID, verifies files on disk, and initializes
+the audio.cpp / llama stack with the entry's `family`. Engines never autoload on
+container start.
 
 ### Inference path
 

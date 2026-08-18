@@ -303,10 +303,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     op.State = "unloading";
                     InvalidateRouterModelsCache();
 
-                    // Return to the default routed warmup state via the orchestrator, the single
-                    // authority for llama load/unload ordering (D6/D11). The orchestrator reconciles
-                    // away any notebook-specific aliases that are not part of the default desired
-                    // state, so we no longer unload individual aliases through _llamaClient here.
+                    // Return to default routed warmup via GuideAntsApi policy
+                    // (SyncDesiredAndApplyAsync). ga-admin executes aux drain/restore;
+                    // this path does not unload individual aliases via _llamaClient.
                     await _localAiWarmup.SyncDesiredAndApplyAsync(
                         waitForCompletion: true,
                         cancellationToken: CancellationToken.None).ConfigureAwait(false);

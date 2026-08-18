@@ -575,7 +575,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             // not present the dormant ServiceModes value as an active model.
             if (supportsPower)
             {
-                selectedLocalRef = await ConfiguredLocalServiceSelectionSync.TryReadPersistedLocalModelRefAsync(
+                selectedLocalRef = await LocalServiceModeSelectionReader.TryReadLocalModelRefAsync(
                         _settings,
                         serviceId,
                         cancellationToken)
