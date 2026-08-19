@@ -114,4 +114,45 @@ public sealed class ConversationMessageMapperTests
         dto.Messages.Should().Contain(m => m.Content == "where is the hosted file name");
         dto.Messages.Should().NotContain(m => m.Id == assistantId);
     }
+
+    [TestMethod]
+    public void IsOmittedFromModelPrompt_UsesEvictionFlagAndKeepsLegacyNotices()
+    {
+        var flagged = new NotebookConversationMessage
+        {
+            Role = DataModelChatRole.Tool,
+            Content = "{\"stdout\":\"keep me\"}",
+            ModelContextEviction = ModelContextEviction.Message
+        };
+        var legacy = new NotebookConversationMessage
+        {
+            Role = DataModelChatRole.Tool,
+            Content = "[Message aborted due to size restrictions]"
+        };
+        var normal = new NotebookConversationMessage
+        {
+            Role = DataModelChatRole.Tool,
+            Content = "{\"stdout\":\"keep me\"}"
+        };
+
+        ConversationMessageMapper.IsOmittedFromModelPrompt(flagged).Should().BeTrue();
+        ConversationMessageMapper.IsOmittedFromModelPrompt(legacy).Should().BeTrue();
+        ConversationMessageMapper.IsOmittedFromModelPrompt(normal).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void ToChatMessage_OmitsThinkingWhenThinkingWasEvicted_ButKeepsContent()
+    {
+        var message = new NotebookConversationMessage
+        {
+            Role = DataModelChatRole.Assistant,
+            Content = "visible answer",
+            ThinkingBlocksJson = """[{"type":"thinking","thinking":"secret"}]""",
+            ModelContextEviction = ModelContextEviction.Thinking
+        };
+
+        var chat = ConversationMessageMapper.ToChatMessage(message);
+        chat.GetText().Should().Be("visible answer");
+        chat.ThinkingBlocks.Should().BeNull();
+    }
 }

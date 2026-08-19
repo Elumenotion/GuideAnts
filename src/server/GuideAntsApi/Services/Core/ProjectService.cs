@@ -730,7 +730,9 @@ using var scope = CreateDbScope();
                         IsEdited = sourceMessage.IsEdited,
                         LastEditedByUserId = sourceMessage.LastEditedByUserId,
                         LastEditedAt = sourceMessage.LastEditedAt,
-                        IsStreaming = sourceMessage.IsStreaming
+                        IsStreaming = sourceMessage.IsStreaming,
+                        ThinkingBlocksJson = sourceMessage.ThinkingBlocksJson,
+                        ModelContextEviction = sourceMessage.ModelContextEviction
                     };
                     
                     context.NotebookConversationMessages.Add(newMessage);

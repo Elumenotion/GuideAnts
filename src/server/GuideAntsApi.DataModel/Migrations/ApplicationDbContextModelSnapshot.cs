@@ -2015,6 +2015,10 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<int>("MessageSequence")
                         .HasColumnType("int");
 
+                    b.Property<string>("ModelContextEviction")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<string>("ModelDeploymentId")
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
@@ -2054,7 +2058,10 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("NotebookConversationId", "TurnIndex", "MessageSequence");
 
-                    b.ToTable("NotebookConversationMessages");
+                    b.ToTable("NotebookConversationMessages", t =>
+                        {
+                            t.HasCheckConstraint("CK_Message_ModelContextEviction", "[ModelContextEviction] IS NULL OR [ModelContextEviction] IN ('message', 'thinking')");
+                        });
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.NotebookFile", b =>

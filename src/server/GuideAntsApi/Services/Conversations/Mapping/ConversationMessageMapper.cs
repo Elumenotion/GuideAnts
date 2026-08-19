@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AntRunner.Chat;
 using AntRunner.Chat.Abstractions;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
@@ -16,6 +17,21 @@ public static class ConversationMessageMapper
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
+
+    public static bool IsOmittedFromModelPrompt(NotebookConversationMessage message) =>
+        string.Equals(message.ModelContextEviction, ModelContextEviction.Message, StringComparison.Ordinal)
+        || ContextOverflowUnwinder.IsEvictionNotice(message.Content);
+
+    public static bool OmitThinkingFromModelPrompt(NotebookConversationMessage message) =>
+        string.Equals(message.ModelContextEviction, ModelContextEviction.Thinking, StringComparison.Ordinal);
+
+    public static IReadOnlyList<ChatThinkingBlock>? ThinkingBlocksForModelPrompt(NotebookConversationMessage message) =>
+        OmitThinkingFromModelPrompt(message)
+            ? null
+            : DeserializeThinkingBlocks(message.ThinkingBlocksJson);
+
+    public static bool IsExcludedFromModelContext(string? content) =>
+        ContextOverflowUnwinder.IsEvictionNotice(content);
 
     /// <summary>
     /// Filters out duplicate assistant messages that have the same content but no ToolCalls
@@ -129,7 +145,8 @@ public static class ConversationMessageMapper
             attachments,
             m.MessageContentType,
             UserName: m.User?.Name ?? m.LastEditedByUser?.Name,
-            UserEmail: m.User?.Email ?? m.LastEditedByUser?.Email
+            UserEmail: m.User?.Email ?? m.LastEditedByUser?.Email,
+            ModelContextEviction: m.ModelContextEviction
         );
     }
 
@@ -173,7 +190,9 @@ public static class ConversationMessageMapper
 
         if (role == ChatMessageRole.Assistant)
         {
-            var thinkingBlocks = DeserializeThinkingBlocks(m.ThinkingBlocksJson);
+            var thinkingBlocks = OmitThinkingFromModelPrompt(m)
+                ? null
+                : DeserializeThinkingBlocks(m.ThinkingBlocksJson);
 
             if (!string.IsNullOrEmpty(m.ToolCalls))
             {

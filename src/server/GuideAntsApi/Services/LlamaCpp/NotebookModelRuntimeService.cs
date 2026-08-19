@@ -106,12 +106,14 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
             var allModels = await GetLlamaModelsFromCatalogAsync(cancellationToken);
             status.LoadedModels = allModels
-                .Where(m => m.RuntimeConfig != null && loadedRouterIds.Contains(NormalizeRouterModelId(m.RuntimeConfig.RouterModelId)))
+                .Where(m => m.RuntimeConfig?.RouterModelId is string routerId && routerId.Length > 0
+                    && loadedRouterIds.Contains(NormalizeRouterModelId(routerId)))
                 .ToList();
 
             var requiredRouterIds = requiredModels
-                .Where(m => m.RuntimeConfig != null)
-                .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId))
+                .Select(m => m.RuntimeConfig?.RouterModelId)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => NormalizeRouterModelId(id!))
                 .ToHashSet();
 
             var failedRequiredModels = routerState.Data
@@ -341,8 +343,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             InvalidateRouterModelsCache();
 
             var requiredRouterIds = requiredModels
-                .Where(m => m.RuntimeConfig != null)
-                .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId))
+                .Select(m => m.RuntimeConfig?.RouterModelId)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => NormalizeRouterModelId(id!))
                 .ToHashSet();
 
             var primaryRouterId = requiredRouterIds.OrderBy(id => id, StringComparer.Ordinal).First();
@@ -364,7 +367,8 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
             var toUnload = loadedRouterIds.Except(requiredRouterIds).ToList();
             var toLoad = requiredModels
-                .Where(m => m.RuntimeConfig != null && !loadedRouterIds.Contains(NormalizeRouterModelId(m.RuntimeConfig.RouterModelId)))
+                .Where(m => m.RuntimeConfig?.RouterModelId is string routerId && routerId.Length > 0
+                    && !loadedRouterIds.Contains(NormalizeRouterModelId(routerId)))
                 .ToList();
 
             if (toUnload.Any())
@@ -382,7 +386,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 op.State = "loading";
                 foreach (var model in toLoad)
                 {
-                    var routerModelId = NormalizeRouterModelId(model.RuntimeConfig!.RouterModelId);
+                    var routerModelId = NormalizeRouterModelId(model.RuntimeConfig!.RouterModelId!);
                     await using var _loadAliasLock = await _coordinator.AcquireAliasLockAsync(routerModelId, CancellationToken.None);
                     await _llamaClient.LoadModelAsync(routerModelId, CancellationToken.None);
                 }

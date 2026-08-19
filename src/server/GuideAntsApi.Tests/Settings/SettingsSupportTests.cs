@@ -143,7 +143,7 @@ public sealed class SettingsSupportTests
     }
 
     [TestMethod]
-    public async Task ValidateImportDefinition_AcceptsCanonicalDefinition()
+    public Task ValidateImportDefinition_AcceptsCanonicalDefinition()
     {
         var definition = new ImageGenerationBundleDefinitionDto(
             "bundle-a",
@@ -158,6 +158,7 @@ public sealed class SettingsSupportTests
         var result = ServiceLocalModelDownloadValidator.ValidateImportDefinition(definition);
 
         result.Should().BeNull();
+        return Task.CompletedTask;
     }
 
     [TestMethod]

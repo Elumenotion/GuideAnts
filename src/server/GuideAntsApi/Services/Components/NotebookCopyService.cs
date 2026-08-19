@@ -95,6 +95,8 @@ using var scope = CreateDbScope();
                 ToolCallId = m.ToolCallId,
                 FunctionName = m.FunctionName,
                 ToolCalls = m.ToolCalls,
+                ThinkingBlocksJson = m.ThinkingBlocksJson,
+                ModelContextEviction = m.ModelContextEviction,
                 Created = m.Created
             }).ToList()
         };

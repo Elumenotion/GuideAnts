@@ -110,4 +110,19 @@ public class NotebookConversationMessage
     /// Null for legacy rows created before streaming support.
     /// </summary>
     public bool? IsStreaming { get; set; }
+
+    /// <summary>
+    /// When set, this row is omitted from the next model prompt (or its thinking is omitted)
+    /// after a context-window eviction. Original <see cref="Content"/>, <see cref="ToolCalls"/>,
+    /// and <see cref="ThinkingBlocksJson"/> are preserved for the notebook UI and usage history.
+    /// Values: <c>message</c>, <c>thinking</c>. Null means not evicted.
+    /// </summary>
+    [StringLength(20)]
+    public string? ModelContextEviction { get; set; }
+}
+
+public static class ModelContextEviction
+{
+    public const string Message = "message";
+    public const string Thinking = "thinking";
 } 

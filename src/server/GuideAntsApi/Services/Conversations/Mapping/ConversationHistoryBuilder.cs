@@ -67,6 +67,10 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         var filtered = new List<NotebookConversationMessage>();
         foreach (var m in deduped.OrderBy(x => x.TurnIndex).ThenBy(x => x.MessageSequence))
         {
+            if (ConversationMessageMapper.IsOmittedFromModelPrompt(m))
+            {
+                continue;
+            }
             if (m.Role == DataModelChatRole.Tool)
             {
                 if (string.IsNullOrEmpty(m.ToolCallId) || !validToolCallIds.Contains(m.ToolCallId))
@@ -174,12 +178,16 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             return dedupedMessages
                 .OrderBy(m => m.TurnIndex)
                 .ThenBy(m => m.MessageSequence)
+                .Where(m => !ConversationMessageMapper.IsOmittedFromModelPrompt(m))
                 .Select(ConversationMessageMapper.ToChatMessage)
                 .ToList();
         }
 
         var validToolCallIds = new HashSet<string>();
-        foreach (var m in dedupedMessages.Where(m => m.Role == DataModelChatRole.Assistant && !string.IsNullOrEmpty(m.ToolCalls)))
+        foreach (var m in dedupedMessages.Where(m =>
+            m.Role == DataModelChatRole.Assistant
+            && !string.IsNullOrEmpty(m.ToolCalls)
+            && !ConversationMessageMapper.IsOmittedFromModelPrompt(m)))
         {
             if (m.AssistantName == newAssistantName)
             {
@@ -204,6 +212,10 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         var filteredMessages = new List<ChatMessage>();
         foreach (var m in dedupedMessages.OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence))
         {
+            if (ConversationMessageMapper.IsOmittedFromModelPrompt(m))
+            {
+                continue;
+            }
             if (m.Role == DataModelChatRole.Tool)
             {
                 if (string.IsNullOrEmpty(m.ToolCallId) || !validToolCallIds.Contains(m.ToolCallId))
@@ -260,7 +272,7 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                         _ => ChatMessageRole.System
                     };
                     var thinkingBlocks = role == ChatMessageRole.Assistant
-                        ? ConversationMessageMapper.DeserializeThinkingBlocks(m.ThinkingBlocksJson)
+                        ? ConversationMessageMapper.ThinkingBlocksForModelPrompt(m)
                         : null;
 
                     filteredMessages.Add(new ChatMessage(role, contents, null, thinkingBlocks));
@@ -298,7 +310,10 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         );
 
         var validToolCallIds = new HashSet<string>();
-        foreach (var dbMsg in filteredMessages.Where(m => m.Role == DataModelChatRole.Assistant && !string.IsNullOrEmpty(m.ToolCalls)))
+        foreach (var dbMsg in filteredMessages.Where(m =>
+            m.Role == DataModelChatRole.Assistant
+            && !string.IsNullOrEmpty(m.ToolCalls)
+            && !ConversationMessageMapper.IsOmittedFromModelPrompt(m)))
         {
             if (dbMsg.AssistantName == assistantName)
             {
@@ -322,6 +337,10 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
 
         foreach (var dbMsg in filteredMessages.OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence))
         {
+            if (ConversationMessageMapper.IsOmittedFromModelPrompt(dbMsg))
+            {
+                continue;
+            }
             if (dbMsg.Role == DataModelChatRole.Tool)
             {
                 if (string.IsNullOrEmpty(dbMsg.ToolCallId) || !validToolCallIds.Contains(dbMsg.ToolCallId))
@@ -445,6 +464,10 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
 
             foreach (var m in historyMessages)
             {
+                if (ConversationMessageMapper.IsOmittedFromModelPrompt(m))
+                {
+                    continue;
+                }
                 List<MessageAttachment> attachments = await db.MessageAttachments
                     .Include(ma => ma.NotebookFile)
                     .Where(ma => ma.MessageId == m.Id)
@@ -469,7 +492,7 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                         _ => ChatMessageRole.System
                     };
                     var thinkingBlocks = role == ChatMessageRole.Assistant
-                        ? ConversationMessageMapper.DeserializeThinkingBlocks(m.ThinkingBlocksJson)
+                        ? ConversationMessageMapper.ThinkingBlocksForModelPrompt(m)
                         : null;
                     list.Add(new ChatMessage(role, contents, null, thinkingBlocks));
                     continue;
@@ -477,7 +500,7 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
 
                 if (m.Role == DataModelChatRole.Assistant)
                 {
-                    var thinkingBlocks = ConversationMessageMapper.DeserializeThinkingBlocks(m.ThinkingBlocksJson);
+                    var thinkingBlocks = ConversationMessageMapper.ThinkingBlocksForModelPrompt(m);
                     var assistantContent = string.IsNullOrEmpty(m.Content) ? Array.Empty<ChatContent>() : new[] { new ChatContent(m.Content) };
                     ChatMessage? msg = new ChatMessage(
                         ChatMessageRole.Assistant,
@@ -538,7 +561,7 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                     _ => ChatMessageRole.System
                 };
                 var basicThinkingBlocks = basicRole == ChatMessageRole.Assistant
-                    ? ConversationMessageMapper.DeserializeThinkingBlocks(m.ThinkingBlocksJson)
+                    ? ConversationMessageMapper.ThinkingBlocksForModelPrompt(m)
                     : null;
                 var basicContent = string.IsNullOrEmpty(m.Content) ? Array.Empty<ChatContent>() : new[] { new ChatContent(m.Content) };
                 list.Add(new ChatMessage(basicRole, basicContent, null, basicThinkingBlocks));
@@ -617,7 +640,10 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         string assistantName)
     {
         var validToolCallIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var m in messages.Where(m => m.Role == DataModelChatRole.Assistant && !string.IsNullOrEmpty(m.ToolCalls)))
+        foreach (var m in messages.Where(m =>
+            m.Role == DataModelChatRole.Assistant
+            && !string.IsNullOrEmpty(m.ToolCalls)
+            && !ConversationMessageMapper.IsOmittedFromModelPrompt(m)))
         {
             if (!string.Equals(m.AssistantName, assistantName, StringComparison.OrdinalIgnoreCase))
                 continue;

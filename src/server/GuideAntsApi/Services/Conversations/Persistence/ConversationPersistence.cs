@@ -428,13 +428,172 @@ public sealed class ConversationPersistence : IConversationPersistence
 
         foreach (var update in updates)
         {
-            var stub = new NotebookConversationMessage { Id = update.Id };
-            db.Attach(stub);
-            stub.ThinkingBlocksJson = update.ThinkingJson;
-            db.Entry(stub).Property(x => x.ThinkingBlocksJson).IsModified = true;
+            var msg = await db.NotebookConversationMessages.FirstOrDefaultAsync(m => m.Id == update.Id, ct);
+            if (msg == null
+                || string.Equals(msg.ModelContextEviction, ModelContextEviction.Message, StringComparison.Ordinal)
+                || string.Equals(msg.ModelContextEviction, ModelContextEviction.Thinking, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            msg.ThinkingBlocksJson = update.ThinkingJson;
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task ApplyContextOverflowEvictionAsync(
+        Guid conversationId,
+        MessageAddedEventArgs eviction,
+        CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var rows = await db.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId)
+            .ToListAsync(ct);
+
+        var changed = false;
+        if (eviction.ClearThinking)
+        {
+            NotebookConversationMessage? target = null;
+            var bestSize = -1;
+            foreach (var row in rows)
+            {
+                if (row.Role != DataModelChatRole.Assistant || string.IsNullOrEmpty(row.ThinkingBlocksJson))
+                {
+                    continue;
+                }
+
+                if (string.Equals(row.ModelContextEviction, ModelContextEviction.Message, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (eviction.Message != row.Content && !string.IsNullOrEmpty(eviction.Message))
+                {
+                    continue;
+                }
+
+                if (row.ThinkingBlocksJson.Length > bestSize)
+                {
+                    bestSize = row.ThinkingBlocksJson.Length;
+                    target = row;
+                }
+            }
+
+            if (target != null)
+            {
+                changed = MarkModelContextEviction(target, ModelContextEviction.Thinking) || changed;
+            }
+        }
+        else if (string.Equals(eviction.Role, "tool", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrEmpty(eviction.ToolCallId))
+        {
+            foreach (var row in rows.Where(m =>
+                m.Role == DataModelChatRole.Tool && m.ToolCallId == eviction.ToolCallId))
+            {
+                changed = MarkModelContextEviction(row, ModelContextEviction.Message) || changed;
+            }
+        }
+        else if (string.Equals(eviction.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrEmpty(eviction.ToolCallsJson))
+        {
+            var callIds = ParseToolCallIds(eviction.ToolCallsJson);
+            foreach (var row in rows.Where(m =>
+                m.Role == DataModelChatRole.Assistant && !string.IsNullOrEmpty(m.ToolCalls)))
+            {
+                if (!callIds.Overlaps(ParseToolCallIds(row.ToolCalls)))
+                {
+                    continue;
+                }
+
+                changed = MarkModelContextEviction(row, ModelContextEviction.Message) || changed;
+            }
+        }
+        else if (string.Equals(eviction.Role, "user", StringComparison.OrdinalIgnoreCase))
+        {
+            var oldest = rows
+                .Where(m =>
+                    m.Role == DataModelChatRole.User
+                    && !string.Equals(m.ModelContextEviction, ModelContextEviction.Message, StringComparison.Ordinal)
+                    && !ContextOverflowUnwinder.IsEvictionNotice(m.Content))
+                .OrderBy(m => m.TurnIndex)
+                .ThenBy(m => m.MessageSequence)
+                .FirstOrDefault();
+            if (oldest != null)
+            {
+                changed = MarkModelContextEviction(oldest, ModelContextEviction.Message) || changed;
+            }
+        }
+        else if (string.Equals(eviction.Role, "assistant", StringComparison.OrdinalIgnoreCase))
+        {
+            var oldest = rows
+                .Where(m =>
+                    m.Role == DataModelChatRole.Assistant
+                    && string.IsNullOrEmpty(m.ToolCalls)
+                    && !string.Equals(m.ModelContextEviction, ModelContextEviction.Message, StringComparison.Ordinal)
+                    && !ContextOverflowUnwinder.IsEvictionNotice(m.Content))
+                .OrderBy(m => m.TurnIndex)
+                .ThenBy(m => m.MessageSequence)
+                .FirstOrDefault();
+            if (oldest != null)
+            {
+                changed = MarkModelContextEviction(oldest, ModelContextEviction.Message) || changed;
+            }
+        }
+
+        if (changed)
+        {
+            await db.SaveChangesAsync(ct);
+        }
+    }
+
+    private static bool MarkModelContextEviction(NotebookConversationMessage row, string kind)
+    {
+        if (string.Equals(row.ModelContextEviction, ModelContextEviction.Message, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (string.Equals(row.ModelContextEviction, kind, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        row.ModelContextEviction = kind;
+        return true;
+    }
+
+    private static HashSet<string> ParseToolCallIds(string? toolCallsJson)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(toolCallsJson))
+        {
+            return ids;
+        }
+
+        try
+        {
+            var calls = JsonSerializer.Deserialize<List<ChatToolCall>>(toolCallsJson, JsonOptions);
+            if (calls == null)
+            {
+                return ids;
+            }
+
+            foreach (var call in calls)
+            {
+                if (!string.IsNullOrEmpty(call.Id))
+                {
+                    ids.Add(call.Id);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return ids;
     }
 
     public async Task AppendTurnTraceSegmentAsync(AppendTurnTraceSegmentRequest request, CancellationToken ct = default)
@@ -549,13 +708,19 @@ public sealed class ConversationPersistence : IConversationPersistence
                             continue;
                         }
 
+                        if (string.Equals(msg.ModelContextEviction, ModelContextEviction.Message, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
                         msg.Content = snapshot.Content;
                         if (snapshot.ToolCallsJson != null)
                         {
                             msg.ToolCalls = snapshot.ToolCallsJson;
                         }
 
-                        if (snapshot.ThinkingBlocksJson != null)
+                        if (snapshot.ThinkingBlocksJson != null
+                            && !string.Equals(msg.ModelContextEviction, ModelContextEviction.Thinking, StringComparison.Ordinal))
                         {
                             msg.ThinkingBlocksJson = snapshot.ThinkingBlocksJson;
                         }
@@ -599,7 +764,9 @@ public sealed class ConversationPersistence : IConversationPersistence
 
                             var messageId = request.AssistantMessageIdsForThinking[i];
                             var msg = await db.NotebookConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct);
-                            if (msg == null)
+                            if (msg == null
+                                || string.Equals(msg.ModelContextEviction, ModelContextEviction.Message, StringComparison.Ordinal)
+                                || string.Equals(msg.ModelContextEviction, ModelContextEviction.Thinking, StringComparison.Ordinal))
                             {
                                 continue;
                             }

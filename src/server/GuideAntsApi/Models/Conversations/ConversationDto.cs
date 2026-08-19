@@ -24,7 +24,8 @@ public record MessageDto(
     IReadOnlyList<string>? TurnFilesCreated = null,
     IReadOnlyList<string>? TurnFilesModified = null,
     string? UserName = null,
-    string? UserEmail = null
+    string? UserEmail = null,
+    string? ModelContextEviction = null
 );
 
 public record AttachedFileDto(

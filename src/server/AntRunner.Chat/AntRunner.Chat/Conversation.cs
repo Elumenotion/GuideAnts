@@ -19,13 +19,20 @@ namespace AntRunner.Chat
         /// </summary>
         public bool IsReplacement { get; }
 
+        /// <summary>
+        /// True when overflow unwind stripped thinking blocks from an existing assistant message.
+        /// Persistence must clear thinking in place and must not insert a new row.
+        /// </summary>
+        public bool ClearThinking { get; }
+
         public MessageAddedEventArgs(
             string role,
             string newMessage,
             string? toolCallId = null,
             string? functionName = null,
             string? toolCallsJson = null,
-            bool isReplacement = false)
+            bool isReplacement = false,
+            bool clearThinking = false)
         {
             Message = newMessage;
             Role = role;
@@ -33,6 +40,7 @@ namespace AntRunner.Chat
             FunctionName = functionName;
             ToolCallsJson = toolCallsJson;
             IsReplacement = isReplacement;
+            ClearThinking = clearThinking;
         }
     }
 

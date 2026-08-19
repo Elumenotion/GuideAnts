@@ -124,6 +124,11 @@ public interface IConversationPersistence
         IReadOnlyList<Guid> assistantMessageIds,
         CancellationToken ct = default);
 
+    Task ApplyContextOverflowEvictionAsync(
+        Guid conversationId,
+        MessageAddedEventArgs eviction,
+        CancellationToken ct = default);
+
     Task AppendTurnTraceSegmentAsync(AppendTurnTraceSegmentRequest request, CancellationToken ct = default);
 
     /// <summary>

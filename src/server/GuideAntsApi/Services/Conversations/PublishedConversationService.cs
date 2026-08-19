@@ -446,6 +446,15 @@ public class PublishedConversationService : IPublishedConversationService
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var fileUrlContext = _streamPolicy.BuildFileUrlContext(dbConversation, publisherId, hostUrl);
 
+            if (e.IsReplacement || e.ClearThinking)
+            {
+                _persistence.ApplyContextOverflowEvictionAsync(
+                    dbConversation.Id,
+                    e,
+                    CancellationToken.None).GetAwaiter().GetResult();
+                return;
+            }
+
             if (e.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
             {
                 var sanitizedAssistant = _streamPolicy.SanitizeAssistantContent(e.Message ?? string.Empty, new Dictionary<string, string>(), fileUrlContext);

@@ -571,10 +571,6 @@ namespace AntRunner.Chat
             var accumulatedNewFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var accumulatedModifiedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // Messages already replaced by an abort notice after a context-overflow rejection.
-            // Tracked so each retry targets a different (next-largest) message and the loop converges.
-            var unwoundMessages = new HashSet<ChatMessage>();
-
             try
             {
                 while (continueChat)
@@ -615,10 +611,9 @@ namespace AntRunner.Chat
                     }
                     catch (ChatContextOverflowException overflowEx)
                     {
-                        // Unwind the largest offending message in this turn, replace it with a short
-                        // abort notice, and retry. If nothing can be unwound the request is
-                        // irreducible (e.g. the system prompt alone overflows) so we rethrow.
-                        if (TryUnwindOversizedMessage(messages, unwoundMessages, overflowEx, tracedMessageAdded))
+                        // Evict one slice (oldest tool pair, then thinking, then oldest other
+                        // non-system message) and retry. Irreducible requests rethrow.
+                        if (TryUnwindOversizedMessage(messages, overflowEx, tracedMessageAdded))
                         {
                             continue;
                         }
@@ -1291,94 +1286,70 @@ namespace AntRunner.Chat
         }
 
         /// <summary>
-        /// Replaces the largest non-system message in the turn with a short "aborted for size" notice
-        /// after a context-overflow rejection, preserving tool-call pairing so the retried request
-        /// stays structurally valid. Returns false when there is nothing left to unwind.
+        /// Evicts one overflow slice from the in-memory provider thread and notifies persistence.
+        /// Returns false when nothing remains that can be evicted (e.g. system + current user only).
         /// </summary>
         private static bool TryUnwindOversizedMessage(
             List<ChatMessage> messages,
-            HashSet<ChatMessage> alreadyUnwound,
             ChatContextOverflowException overflowEx,
             MessageAddedEventHandler? onMessage)
         {
-            var targetIndex = -1;
-            var targetLength = -1;
-            for (var i = 0; i < messages.Count; i++)
-            {
-                var candidate = messages[i];
-                if (candidate.Role == ChatRole.System || candidate.Role == ChatRole.Developer)
-                {
-                    continue;
-                }
-
-                if (alreadyUnwound.Contains(candidate))
-                {
-                    continue;
-                }
-
-                var length = candidate.GetText().Length;
-                if (length > targetLength)
-                {
-                    targetLength = length;
-                    targetIndex = i;
-                }
-            }
-
-            if (targetIndex < 0)
+            if (!ContextOverflowUnwinder.TryUnwind(messages, out var unwind))
             {
                 return false;
             }
 
-            var original = messages[targetIndex];
-            var notice = BuildContextOverflowNotice(overflowEx);
-            var replacement = BuildAbortReplacement(original, notice);
-            messages[targetIndex] = replacement;
-            alreadyUnwound.Add(replacement);
-
             Logger.LogWarning(
-                "Chat request exceeded the model context window; unwound oversized {Role} message at index {Index} ({OriginalChars} chars) and retrying. PromptTokens={PromptTokens}, ContextSize={ContextSize}.",
-                original.Role,
-                targetIndex,
-                targetLength,
+                "Chat request exceeded the model context window; {UnwindDescription} PromptTokens={PromptTokens}, ContextSize={ContextSize}.",
+                unwind.Description,
                 overflowEx.PromptTokens,
                 overflowEx.ContextSize);
 
-            // Surface the substitution so the abort notice is persisted in place of the dropped content.
-            onMessage?.Invoke(null, new MessageAddedEventArgs(
-                replacement.Role.ToString(),
-                replacement.GetText(),
-                replacement.ToolCallId,
-                replacement.FunctionName,
-                toolCallsJson: null,
-                isReplacement: true));
-
+            NotifyContextOverflowUnwind(unwind, onMessage);
             return true;
         }
 
-        private static ChatMessage BuildAbortReplacement(ChatMessage original, string notice)
+        private static void NotifyContextOverflowUnwind(
+            ContextOverflowUnwindResult unwind,
+            MessageAddedEventHandler? onMessage)
         {
-            var content = new List<ChatContent> { new(notice) };
-
-            if (original.Role == ChatRole.Tool)
+            if (onMessage == null)
             {
-                // Preserve tool_call_id / name so the assistant tool_call ↔ tool result pairing holds.
-                return new ChatMessage(original.ToolCallId ?? string.Empty, original.FunctionName ?? string.Empty, content);
+                return;
             }
 
-            // Preserve any tool_calls on an assistant message so following tool results stay valid.
-            return new ChatMessage(original.Role, content, original.ToolCalls, original.ThinkingBlocks);
-        }
+            if (unwind.Phase == ContextOverflowUnwindPhase.Thinking && unwind.ThinkingStrippedFrom != null)
+            {
+                var stripped = unwind.ThinkingStrippedFrom;
+                onMessage.Invoke(null, new MessageAddedEventArgs(
+                    stripped.Role.ToString(),
+                    stripped.GetText(),
+                    stripped.ToolCallId,
+                    stripped.FunctionName,
+                    toolCallsJson: stripped.ToolCalls is { Count: > 0 }
+                        ? JsonSerializer.Serialize(stripped.ToolCalls)
+                        : null,
+                    isReplacement: true,
+                    clearThinking: true));
+                return;
+            }
 
-        private static string BuildContextOverflowNotice(ChatContextOverflowException overflowEx)
-        {
-            var detail = overflowEx.PromptTokens.HasValue && overflowEx.ContextSize.HasValue
-                ? $" (prompt was ~{overflowEx.PromptTokens.Value:N0} tokens vs the {overflowEx.ContextSize.Value:N0} token limit)"
-                : string.Empty;
-
-            return
-                $"[Message aborted due to size restrictions{detail}. The original content was too large for the model " +
-                "context window and has been removed. Retry with a different approach that limits the message size — " +
-                "for example, write large output to a file and return only a short summary instead of the full content.]";
+            foreach (var removed in unwind.RemovedMessages)
+            {
+                var notice = unwind.Phase == ContextOverflowUnwindPhase.ToolPair
+                    ? ContextOverflowUnwinder.ToolPairEvictionNotice
+                    : ContextOverflowUnwinder.MessageEvictionNotice;
+                var toolCallsJson = removed.ToolCalls is { Count: > 0 }
+                    ? JsonSerializer.Serialize(removed.ToolCalls)
+                    : null;
+                onMessage.Invoke(null, new MessageAddedEventArgs(
+                    removed.Role.ToString(),
+                    notice,
+                    removed.ToolCallId,
+                    removed.FunctionName,
+                    toolCallsJson,
+                    isReplacement: true));
+            }
         }
 
         private static void IncorporateCancelledStreamResponse(

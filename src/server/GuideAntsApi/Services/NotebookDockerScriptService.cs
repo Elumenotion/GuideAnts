@@ -161,8 +161,8 @@ namespace GuideAntsApi.Services
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
 
                             // Register known paths then queue full reconcile.
-                            var dbPaths = detectedNewFiles
-                                .Concat(detectedModifiedFiles)
+                            var dbPaths = (detectedNewFiles ?? [])
+                                .Concat(detectedModifiedFiles ?? [])
                                 .Select(p => GuideAntsApi.Services.Components.Sync.NotebookPathResolver.ToDbRelative(
                                     p,
                                     context!.IsPublished,

@@ -319,6 +319,23 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     return;
                 }
 
+                if (e.IsReplacement || e.ClearThinking)
+                {
+                    try
+                    {
+                        _persistence.ApplyContextOverflowEvictionAsync(
+                            context.Conversation.Id,
+                            e,
+                            CancellationToken.None).GetAwaiter().GetResult();
+                    }
+                    catch
+                    {
+                        // logged on finalization
+                    }
+
+                    return;
+                }
+
                 if (e.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleAssistantMessageAdded(

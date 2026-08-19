@@ -106,7 +106,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
 
         try
         {
-            await ValidateLlamaInstallTargetAsync(command, cancellationToken).ConfigureAwait(false);
+            ValidateLlamaInstallTarget(command);
         }
         catch (RoutingException ex)
         {
@@ -459,7 +459,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
 
         try
         {
-            await ValidateLlamaInstallTargetAsync(command, cancellationToken).ConfigureAwait(false);
+            ValidateLlamaInstallTarget(command);
         }
         catch (RoutingException ex)
         {
@@ -479,9 +479,8 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         }
     }
 
-    private async Task ValidateLlamaInstallTargetAsync(
-        LocalModelOnboardingCommand command,
-        CancellationToken cancellationToken)
+    private void ValidateLlamaInstallTarget(
+        LocalModelOnboardingCommand command)
     {
         var chatBehavior = command.ToRowOwnedRuntimeProfileData();
 

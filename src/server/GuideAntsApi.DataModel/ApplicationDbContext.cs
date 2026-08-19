@@ -294,6 +294,11 @@ namespace GuideAntsApi.DataModel
             modelBuilder.Entity<NotebookConversationMessage>()
                 .HasIndex(m => new { m.NotebookConversationId, m.Role, m.Created });
 
+            modelBuilder.Entity<NotebookConversationMessage>()
+                .ToTable(t => t.HasCheckConstraint(
+                    "CK_Message_ModelContextEviction",
+                    "[ModelContextEviction] IS NULL OR [ModelContextEviction] IN ('message', 'thinking')"));
+
             modelBuilder.Entity<ConversationTurn>()
                 .HasIndex(t => new { t.NotebookConversationId, t.TurnIndex })
                 .IncludeProperties(t => t.AssistantName);

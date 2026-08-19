@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Services.Conversations.Mapping;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
@@ -407,24 +408,96 @@ public static class NotebookConversationsEndpoints
         // Messages (already filtered by GetConversationWithMessagesAsync to remove duplicates)
         foreach (var message in conversation.Messages)
         {
+            // Skip assistant messages with no visible body at all (no text, no tool
+            // calls, no attachments) so the export contains no empty placeholder blocks.
+            // Reuse the mapper's visibility rule so the export and the API stay in sync.
+            var hasToolCalls = message.ToolCalls is { Count: > 0 };
+            if (!ConversationMessageMapper.HasVisibleAssistantBody(message.Role, message.Content, hasToolCalls, message.Attachments?.Count ?? 0))
+            {
+                continue;
+            }
+
             var roleLabel = message.Role switch
             {
                 ChatRole.User => "**User**",
                 ChatRole.Assistant => $"**Assistant**{(string.IsNullOrEmpty(message.AssistantName) ? "" : $" ({message.AssistantName})")}",
                 ChatRole.System => "**System**",
-                ChatRole.Tool => "**Tool**",
+                // Label tool results with the function that produced them when available,
+                // so the output can be matched back to its tool call input.
+                ChatRole.Tool => string.IsNullOrEmpty(message.FunctionName) ? "**Tool**" : $"**Tool** ({message.FunctionName})",
                 _ => $"**{message.Role}**"
             };
 
             sb.AppendLine(roleLabel);
             sb.AppendLine();
-            sb.AppendLine(message.Content);
-            sb.AppendLine();
+
+            if (!string.IsNullOrWhiteSpace(message.Content))
+            {
+                sb.AppendLine(message.Content);
+                sb.AppendLine();
+            }
+
+            // Emit the tool call inputs (function name + arguments) that preceded each
+            // tool result, so saved conversations are complete and auditable.
+            if (hasToolCalls)
+            {
+                for (var i = 0; i < message.ToolCalls!.Count; i++)
+                {
+                    var toolCall = message.ToolCalls[i];
+                    if (message.ToolCalls.Count > 1)
+                    {
+                        sb.AppendLine($"**Tool Call {i + 1}/{message.ToolCalls.Count}:** `{toolCall.Function.Name}`");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"**Tool Call:** `{toolCall.Function.Name}`");
+                    }
+                    sb.AppendLine();
+                    AppendToolCallArguments(sb, toolCall.Function.Arguments);
+                    sb.AppendLine();
+                }
+            }
+
             sb.AppendLine("---");
             sb.AppendLine();
         }
 
         return sb.ToString();
+    }
+
+    private static void AppendToolCallArguments(System.Text.StringBuilder sb, string arguments)
+    {
+        if (string.IsNullOrWhiteSpace(arguments))
+        {
+            sb.AppendLine("_(no arguments)_");
+            return;
+        }
+
+        // Pretty-print JSON arguments when possible; fall back to the raw string.
+        string formatted = arguments;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(arguments);
+            formatted = System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Not valid JSON - leave as-is.
+        }
+
+        // Use a fence longer than any backtick run in the payload so embedded
+        // code fences cannot prematurely close the block.
+        int longest = 0, run = 0;
+        foreach (var ch in formatted)
+        {
+            run = ch == '`' ? run + 1 : 0;
+            if (run > longest) longest = run;
+        }
+
+        var fence = new string('`', Math.Max(3, longest + 1));
+        sb.AppendLine($"{fence}json");
+        sb.AppendLine(formatted);
+        sb.AppendLine(fence);
     }
 
     private static string SanitizeFileName(string fileName)
