@@ -50,31 +50,22 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
     public async IAsyncEnumerable<StreamingEvent> RunStreamAsync(
         ConversationStreamRunContext context,
         IStreamLockHandle lockHandle,
-        [EnumeratorCancellation] CancellationToken externalCt)
+        [EnumeratorCancellation] CancellationToken sseCt,
+        CancellationToken workerCt,
+        Action? onWorkerCompleted = null)
     {
         var policy = context.Policy;
         var channel = CreateChannel();
-
-        await policy.OnStreamingStartedAsync(
-            context.ConversationId,
-            new StreamStreamingStartedInfo(context.AssistantName, context.TurnIndex),
-            CancellationToken.None);
-
-        StartBackgroundRun(context, channel.Writer, externalCt);
-
-        var streamingSucceeded = false;
-        var sawPendingClientTool = false;
-        var sawFailureEvent = false;
-        var distributedLockReleased = false;
+        var lockReleased = 0;
 
         async Task ReleaseStreamLockIfHeldAsync()
         {
-            if (distributedLockReleased)
+            if (Interlocked.CompareExchange(ref lockReleased, 1, 0) != 0)
             {
                 return;
             }
 
-            distributedLockReleased = await lockHandle.ReleaseAsync(CancellationToken.None);
+            var distributedLockReleased = await lockHandle.ReleaseAsync(CancellationToken.None);
             if (lockHandle.ConversationLockEventSent && distributedLockReleased)
             {
                 try
@@ -88,44 +79,22 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             }
         }
 
-        try
-        {
-            await foreach (var ev in channel.Reader.ReadAllAsync(externalCt))
-            {
-                if (ev.EventType == StreamingEventTypes.ExternalToolCall && policy.SupportsExternalToolResume)
-                {
-                    // guideants-chat resumes on external_tool_call (before pending_client_tool). Release
-                    // here so a parallel tool-calls/results?resume=true can acquire the lock.
-                    await ReleaseStreamLockIfHeldAsync();
-                }
-                else if (ev.EventType == StreamingEventTypes.PendingClientTool)
-                {
-                    sawPendingClientTool = true;
-                    // Belt-and-suspenders for clients that wait for pending_client_tool.
-                    await ReleaseStreamLockIfHeldAsync();
-                }
-                else if (ev.EventType == StreamingEventTypes.Cancelled || ev.EventType == StreamingEventTypes.Error)
-                {
-                    sawFailureEvent = true;
-                }
+        await policy.OnStreamingStartedAsync(
+            context.ConversationId,
+            new StreamStreamingStartedInfo(context.AssistantName, context.TurnIndex),
+            CancellationToken.None);
 
-                await policy.BroadcastEventAsync(context.ConversationId, ev, externalCt);
-                yield return ev;
-            }
+        StartBackgroundRun(
+            context,
+            channel.Writer,
+            sseCt,
+            workerCt,
+            ReleaseStreamLockIfHeldAsync,
+            onWorkerCompleted);
 
-            // The background run owns terminal turn status (completed / cancelled / pending). A clean
-            // channel drain with no terminal event therefore means a successful turn.
-            streamingSucceeded = !sawPendingClientTool && !sawFailureEvent;
-        }
-        finally
+        await foreach (var ev in channel.Reader.ReadAllAsync(sseCt))
         {
-            await ReleaseStreamLockIfHeldAsync();
-        }
-
-        if (streamingSucceeded && (distributedLockReleased || !lockHandle.ConversationLockEventSent))
-        {
-            await policy.OnCompleteAsync(context.ConversationId, CancellationToken.None);
-            yield return new StreamingEvent(StreamingEventTypes.Complete, "{}");
+            yield return ev;
         }
     }
 
@@ -140,13 +109,36 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
     private void StartBackgroundRun(
         ConversationStreamRunContext context,
         ChannelWriter<StreamingEvent> writer,
-        CancellationToken externalCt)
+        CancellationToken sseCt,
+        CancellationToken workerCt,
+        Func<Task> releaseStreamLockAsync,
+        Action? onWorkerCompleted)
     {
         _ = Task.Run(async () =>
         {
             var policy = context.Policy;
             var noneCt = CancellationToken.None;
+            var streamingSucceeded = false;
             SemaphoreSlim? throttler = policy.UsesProgressThrottling ? new SemaphoreSlim(50, 50) : null;
+            var hubWork = Channel.CreateUnbounded<Func<Task>>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = false
+            });
+            var hubPump = Task.Run(async () =>
+            {
+                await foreach (var work in hubWork.Reader.ReadAllAsync())
+                {
+                    try
+                    {
+                        await work().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to broadcast stream event for {ConversationId}", context.ConversationId);
+                    }
+                }
+            });
 
             Guid? currentAssistantMessageId = null;
             var currentAssistantContent = new StringBuilder();
@@ -178,14 +170,29 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
             void TryWrite(StreamingEvent ev)
             {
-                if (ConversationStreamEventWriter.IsTerminal(ev.EventType))
+                if ((ev.EventType == StreamingEventTypes.ExternalToolCall && policy.SupportsExternalToolResume)
+                    || ev.EventType == StreamingEventTypes.PendingClientTool)
                 {
-                    ConversationStreamEventWriter.WriteTerminal(writer, ev, TimeSpan.FromSeconds(2));
+                    // Resume clients acquire a new lock as soon as they see these events.
+                    releaseStreamLockAsync().GetAwaiter().GetResult();
+                }
+
+                if (!hubWork.Writer.TryWrite(() => policy.BroadcastEventAsync(context.ConversationId, ev, CancellationToken.None)))
+                {
+                    _logger.LogWarning(
+                        "Dropped hub event {EventType} for {ConversationId}",
+                        ev.EventType,
+                        context.ConversationId);
+                }
+
+                if (sseCt.IsCancellationRequested)
+                {
                     return;
                 }
 
-                if (externalCt.IsCancellationRequested)
+                if (ConversationStreamEventWriter.IsTerminal(ev.EventType))
                 {
+                    ConversationStreamEventWriter.WriteTerminal(writer, ev, TimeSpan.FromSeconds(2));
                     return;
                 }
 
@@ -218,7 +225,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
             StreamingMessageProgressEventHandler onProgress = (_, e) =>
             {
-                if (externalCt.IsCancellationRequested)
+                if (workerCt.IsCancellationRequested)
                 {
                     return;
                 }
@@ -274,22 +281,15 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
                         if (!isThinking && !policy.SupportsExternalToolResume)
                         {
-                            _ = Task.Run(async () =>
+                            if (!hubWork.Writer.TryWrite(() => policy.BroadcastStreamingProgressAsync(
+                                    context.ConversationId,
+                                    context.User,
+                                    currentAssistantContent.Length,
+                                    progressCheckpoint.FlushCounter,
+                                    CancellationToken.None)))
                             {
-                                try
-                                {
-                                    await policy.BroadcastStreamingProgressAsync(
-                                        context.ConversationId,
-                                        context.User,
-                                        currentAssistantContent.Length,
-                                        progressCheckpoint.FlushCounter,
-                                        CancellationToken.None);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "Failed to broadcast streaming progress");
-                                }
-                            });
+                                _logger.LogWarning("Dropped streaming progress broadcast for {ConversationId}", context.ConversationId);
+                            }
                         }
                     }
                     catch
@@ -312,7 +312,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
             MessageAddedEventHandler onMessageAdded = (_, e) =>
             {
-                if (externalCt.IsCancellationRequested || string.IsNullOrEmpty(e.Role))
+                if (workerCt.IsCancellationRequested || string.IsNullOrEmpty(e.Role))
                 {
                     return;
                 }
@@ -349,7 +349,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
             try
             {
-                externalCt.ThrowIfCancellationRequested();
+                workerCt.ThrowIfCancellationRequested();
                 var httpClient = _httpClientFactory.CreateClient();
                 ChatRunOutput? output;
 
@@ -398,7 +398,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         },
                         resumeWithoutNewUserMessage: context.ResumeWithoutNewUserMessage,
                         ctx: invocationContext,
-                        token: externalCt,
+                        token: workerCt,
                         isAgentInvocation: false);
                 }
                 else
@@ -427,7 +427,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                                 // Activity metadata is best-effort; never interrupt tool execution.
                             }
                         },
-                        cancellationToken: externalCt);
+                        cancellationToken: workerCt);
                 }
 
                 if (output?.Status != null
@@ -476,6 +476,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
                 await RegisterAndQueueNotebookSyncIfNeededAsync(context, output);
                 await PersistTraceSegmentAsync("completed", ct: noneCt);
+                streamingSucceeded = true;
             }
             catch (OperationCanceledException ex)
             {
@@ -577,10 +578,39 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             }
             finally
             {
+                try
+                {
+                    hubWork.Writer.TryComplete();
+                    try
+                    {
+                        await hubPump.ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Hub broadcast pump failed for {ConversationId}", context.ConversationId);
+                    }
+
+                    await releaseStreamLockAsync();
+
+                    if (streamingSucceeded)
+                    {
+                        await policy.OnCompleteAsync(context.ConversationId, CancellationToken.None);
+                        if (!sseCt.IsCancellationRequested)
+                        {
+                            writer.TryWrite(new StreamingEvent(StreamingEventTypes.Complete, "{}"));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to finalize stream lifecycle for {ConversationId}", context.ConversationId);
+                }
+
                 throttler?.Dispose();
-                writer.Complete();
+                writer.TryComplete();
+                onWorkerCompleted?.Invoke();
             }
-        }, externalCt);
+        }, CancellationToken.None);
     }
 
     private void HandleAssistantMessageAdded(

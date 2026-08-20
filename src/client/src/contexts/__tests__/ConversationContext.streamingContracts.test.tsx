@@ -148,11 +148,25 @@ describe('ConversationContext streaming contracts', () => {
     });
 
     await act(async () => {
+      capturedOnEvent?.({ type: 'turn_created', data: { turnId: 'turn-stop-1' } });
       capturedOnEvent?.({ type: 'assistant_message', data: { contentDelta: 'partial before cancel' } });
     });
 
     await act(async () => {
       result.current.cancelStream();
+    });
+
+    expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+      'test-project',
+      'test-notebook',
+      'test-conversation',
+      'turn-stop-1',
+    );
+    expect(result.current.isCancelling).toBe(true);
+    expect(result.current.isStreaming).toBe(true);
+
+    await act(async () => {
+      capturedOnEvent?.({ type: 'cancelled', data: { status: 'cancelled' } });
     });
 
     await waitFor(() => {
@@ -163,5 +177,33 @@ describe('ConversationContext streaming contracts', () => {
     const assistant = result.current.messages.find(m => m.role.toLowerCase() === 'assistant');
     expect(assistant?.content).toContain('partial before cancel');
     expect(mockShowToast).not.toHaveBeenCalled();
+  });
+
+  it('posts cancelTurn when Stop is clicked before turn_created arrives', async () => {
+    const { result } = renderHook(() => useConversation(), { wrapper: renderProvider() });
+    await waitFor(() => expect(result.current.isInitialized).toBe(true));
+
+    await act(async () => {
+      await result.current.sendMessage('hello');
+    });
+
+    await act(async () => {
+      result.current.cancelStream();
+    });
+
+    expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
+    expect(result.current.isCancelling).toBe(true);
+    expect(result.current.isStreaming).toBe(true);
+
+    await act(async () => {
+      capturedOnEvent?.({ type: 'turn_created', data: { turnId: 'turn-late' } });
+    });
+
+    expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+      'test-project',
+      'test-notebook',
+      'test-conversation',
+      'turn-late',
+    );
   });
 });

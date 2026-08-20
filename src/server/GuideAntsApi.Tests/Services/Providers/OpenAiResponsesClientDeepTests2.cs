@@ -45,16 +45,24 @@ public sealed class OpenAiResponsesClientDeepTests2
     private static string CompletedResponseJson(string outputItemsJson, string? usageJson = null)
     {
         var usagePart = usageJson == "null" ? "null" : (usageJson ?? DefaultUsageJson);
-        return "{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-4o\",\"output\":[" +
+        return "{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\"," +
+            "\"model\":\"gpt-4o\",\"output\":[" +
             outputItemsJson + "],\"usage\":" + usagePart + "}";
     }
 
-    private static Func<HttpRequestMessage, HttpResponseMessage> Responder(string outputItemsJson, string? usageJson = null)
+    private static Func<HttpRequestMessage, HttpResponseMessage> Responder(
+        string outputItemsJson,
+        string? usageJson = null)
     {
-        var getJson = CompletedResponseJson(outputItemsJson, usageJson);
+        var completedJson = CompletedResponseJson(outputItemsJson, usageJson);
+        var terminalSse =
+            "event: response.completed\n" +
+            "data: {\"type\":\"response.completed\",\"response\":" + completedJson + "}\n\n";
         return request => request.Method == HttpMethod.Get
-            ? ChatHttpResponses.Json(getJson)
-            : ChatHttpResponses.Sse(CreatedSse);
+            ? ChatHttpResponses.Json(
+                """{"error":{"message":"response retrieval is forbidden"}}""",
+                System.Net.HttpStatusCode.NotFound)
+            : ChatHttpResponses.Sse(CreatedSse + terminalSse);
     }
 
     [TestMethod]
@@ -154,7 +162,8 @@ public sealed class OpenAiResponsesClientDeepTests2
     public async Task GetCompletionAsync_ReasoningItemWithContent_MapsThinkingBlock()
     {
         var reasoningItem =
-            "{\"type\":\"reasoning\",\"id\":\"rs_2\",\"content\":[{\"type\":\"reasoning_text\",\"text\":\"deep reasoning\"}]}";
+            "{\"type\":\"reasoning\",\"id\":\"rs_2\",\"content\":[" +
+            "{\"type\":\"reasoning_text\",\"text\":\"deep reasoning\"}]}";
         var outputItems = reasoningItem + "," + AssistantTextItem("final");
         var handler = new CapturingHandler(Responder(outputItems));
         using var httpClient = new HttpClient(handler);

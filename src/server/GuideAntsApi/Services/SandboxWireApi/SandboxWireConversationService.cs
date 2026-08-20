@@ -38,6 +38,7 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
     private readonly IConversationHistoryBuilder _historyBuilder;
     private readonly PublishedConversationStreamPolicy _streamPolicy;
     private readonly IConversationStreamEngine _streamEngine;
+    private readonly ConversationStreamRunRegistry _streamRunRegistry;
     private readonly IConversationPersistence _persistence;
     private readonly IAttachmentContentService _attachmentContentService;
     private readonly IConfiguration? _configuration;
@@ -49,6 +50,7 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
         IConversationHistoryBuilder historyBuilder,
         PublishedConversationStreamPolicy streamPolicy,
         IConversationStreamEngine streamEngine,
+        ConversationStreamRunRegistry streamRunRegistry,
         IConversationPersistence persistence,
         IAttachmentContentService attachmentContentService,
         IConfiguration? configuration = null)
@@ -59,6 +61,7 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
         _historyBuilder = historyBuilder;
         _streamPolicy = streamPolicy;
         _streamEngine = streamEngine;
+        _streamRunRegistry = streamRunRegistry;
         _persistence = persistence;
         _attachmentContentService = attachmentContentService;
         _configuration = configuration;
@@ -208,7 +211,14 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
         };
 
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, ct);
-        await foreach (var ev in _streamEngine.RunStreamAsync(runContext, lockHandle, ct))
+        var turnId = runContext.DbTurn.Id;
+        var workerCts = _streamRunRegistry.Register(turnId);
+        await foreach (var ev in _streamEngine.RunStreamAsync(
+            runContext,
+            lockHandle,
+            ct,
+            workerCts.Token,
+            () => _streamRunRegistry.Unregister(turnId)))
         {
             yield return ev;
         }

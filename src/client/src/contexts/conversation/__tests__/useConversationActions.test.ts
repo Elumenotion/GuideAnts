@@ -3,21 +3,6 @@ import { renderHook, act } from '@testing-library/react';
 import type { ExtendedConversationState } from '../types';
 import { createMockMessage, createMockAssistantMessage } from '../../../test/conversationContextTestUtils';
 
-vi.mock('../../../services/api', () => ({
-  api: {
-    projects: {
-      notebooks: {
-        conversations: {
-          sendMessageStream: vi.fn().mockResolvedValue(undefined),
-          editMessage: vi.fn().mockResolvedValue({}),
-          undoLast: vi.fn().mockResolvedValue({}),
-          get: vi.fn().mockResolvedValue({ messages: [] }),
-        },
-      },
-    },
-  },
-}));
-
 vi.mock('../../../utils/notebookAuth', () => ({
   ensureValidTokensForTemplate: vi.fn().mockResolvedValue({ needsAuth: false, missingProviders: [] }),
 }));
@@ -75,6 +60,8 @@ function createDeps(overrides: Partial<Parameters<typeof useConversationActions>
     loadNotebookFiles: vi.fn().mockResolvedValue(undefined),
     currentStreamController: null as AbortController | null,
     setCurrentStreamController,
+    observerStreamController: null as AbortController | null,
+    setObserverStreamController: vi.fn(),
     inflightRuntimeChecksRef,
     runtimeReadyCacheRef,
     activeStreamTurnId: null as string | null,
@@ -112,9 +99,13 @@ describe('useConversationActions', () => {
     dispatchEventSpy = vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true);
     vi.mocked(ensureValidTokensForTemplate).mockResolvedValue({ needsAuth: false, missingProviders: [] });
     vi.mocked(checkRuntimeStatus).mockResolvedValue({ state: 'ready' });
-    vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockResolvedValue(undefined);
-    vi.mocked(api.projects.notebooks.conversations.editMessage).mockResolvedValue({});
-    vi.mocked(api.projects.notebooks.conversations.undoLast).mockResolvedValue({});
+    const conversations = api.projects.notebooks.conversations as Record<string, unknown>;
+    conversations.sendMessageStream = vi.fn().mockResolvedValue(undefined);
+    conversations.observeConversationEvents = vi.fn().mockResolvedValue(undefined);
+    conversations.cancelTurn = vi.fn().mockResolvedValue(undefined);
+    conversations.editMessage = vi.fn().mockResolvedValue({});
+    conversations.undoLast = vi.fn().mockResolvedValue({});
+    conversations.get = vi.fn().mockResolvedValue({ messages: [] });
   });
 
   afterEach(() => {
@@ -329,7 +320,7 @@ describe('useConversationActions', () => {
       }));
     });
 
-    it('handles stream onError AbortError without force refresh', async () => {
+    it('handles stream onError AbortError without completing the turn or force refresh', async () => {
       let onError: ((err: Error) => void) | undefined;
       vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
         async (_p, _n, _c, _payload, _onEvent, errCb) => {
@@ -347,8 +338,8 @@ describe('useConversationActions', () => {
         onError?.(Object.assign(new Error('aborted'), { name: 'AbortError' }));
       });
 
-      expect(dispatch).toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
-      expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
       expect(deps.refreshConversation).not.toHaveBeenCalled();
       expect(deps.showToast).not.toHaveBeenCalled();
       const errorDispatches = dispatch.mock.calls.filter(
@@ -521,28 +512,124 @@ describe('useConversationActions', () => {
   });
 
   describe('cancelStream', () => {
-    it('aborts controller and schedules finalization when still streaming', () => {
-      vi.useFakeTimers();
+    it('calls cancelTurn and does not abort the send SSE controller', () => {
       const controller = new AbortController();
       const abortSpy = vi.spyOn(controller, 'abort');
       const { actions, dispatch } = mountActions(
         { isStreaming: true },
-        { currentStreamController: controller },
+        {
+          currentStreamController: controller,
+          activeStreamTurnId: 'turn-1',
+          getActiveStreamTurnId: vi.fn(() => 'turn-1'),
+        },
       );
 
       act(() => {
         actions.cancelStream();
       });
 
-      expect(abortSpy).toHaveBeenCalled();
+      expect(abortSpy).not.toHaveBeenCalled();
+      expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+        PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-1',
+      );
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+    });
+
+    it('calls cancelTurn without aborting when only observing', () => {
+      const observerController = new AbortController();
+      const abortSpy = vi.spyOn(observerController, 'abort');
+      const { actions, dispatch } = mountActions(
+        { isStreaming: true, streamingMode: 'observing' },
+        {
+          observerStreamController: observerController,
+          activeStreamTurnId: 'turn-2',
+          getActiveStreamTurnId: vi.fn(() => 'turn-2'),
+        },
+      );
+
+      act(() => {
+        actions.cancelStream();
+      });
+
+      expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+        PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-2',
+      );
+      expect(abortSpy).not.toHaveBeenCalled();
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+    });
+
+    it('posts cancelTurn when Stop is clicked before turn_created then the turn id arrives', () => {
+      const controller = new AbortController();
+      const abortSpy = vi.spyOn(controller, 'abort');
+      const { actions, dispatch } = mountActions(
+        { isStreaming: true },
+        {
+          currentStreamController: controller,
+          activeStreamTurnId: null,
+          getActiveStreamTurnId: vi.fn(() => null),
+        },
+      );
+
+      act(() => {
+        actions.cancelStream();
+      });
+
+      expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
+      expect(abortSpy).not.toHaveBeenCalled();
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
 
       act(() => {
-        vi.advanceTimersByTime(500);
+        actions.onTurnIdAssigned('turn-late');
       });
 
-      expect(dispatch).toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
-      vi.useRealTimers();
+      expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+        PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-late',
+      );
+      expect(abortSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reattachIfStreaming', () => {
+    it('opens observer SSE when conversation is still streaming', async () => {
+      const setObserverStreamController = vi.fn();
+      const setActiveStreamTurnId = vi.fn();
+      const { actions, dispatch } = mountActions(
+        {},
+        { setObserverStreamController, setActiveStreamTurnId },
+      );
+
+      await act(async () => {
+        await actions.reattachIfStreaming({
+          activeTurn: { turnId: 'turn-1', status: 'streaming', turnIndex: 1 },
+          lock: { lockedByUserName: 'Alice' },
+          streamingPreview: { messageId: 'msg-1', content: 'partial', turnIndex: 1 },
+          assistantName: 'Claude',
+        });
+      });
+
+      expect(setActiveStreamTurnId).toHaveBeenCalledWith('turn-1');
+      expect(dispatch).toHaveBeenCalledWith({
+        type: 'SET_STREAMING_MODE',
+        payload: { mode: 'observing', activeUser: { userId: '', userName: 'Alice' } },
+      });
+      expect(api.projects.notebooks.conversations.observeConversationEvents).toHaveBeenCalled();
+      expect(setObserverStreamController).toHaveBeenCalled();
+    });
+
+    it('does not open observer SSE while the send stream is still attached', async () => {
+      const sendController = new AbortController();
+      const { actions } = mountActions(
+        {},
+        { currentStreamController: sendController },
+      );
+
+      await act(async () => {
+        await actions.reattachIfStreaming({
+          activeTurn: { turnId: 'turn-1', status: 'streaming', turnIndex: 1 },
+        });
+      });
+
+      expect(api.projects.notebooks.conversations.observeConversationEvents).not.toHaveBeenCalled();
     });
   });
 

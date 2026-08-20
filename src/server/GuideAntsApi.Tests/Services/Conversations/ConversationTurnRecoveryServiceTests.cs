@@ -20,7 +20,7 @@ public sealed class ConversationTurnRecoveryServiceTests
     {
         var (options, turnId, _) = await SeedStaleStreamingTurnAsync();
         var registry = new ConversationStreamRunRegistry();
-        _ = registry.Register(turnId, CancellationToken.None);
+        _ = registry.Register(turnId);
 
         var service = CreateService(options, registry);
         await service.RecoverStaleTurnsAsync(CancellationToken.None);

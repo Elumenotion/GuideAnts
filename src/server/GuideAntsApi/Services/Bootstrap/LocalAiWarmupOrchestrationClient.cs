@@ -202,7 +202,7 @@ public sealed class LocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchestrati
             Services: services);
     }
 
-    private static WarmupStatusDocument MergeStackStatuses(
+    internal static WarmupStatusDocument MergeStackStatuses(
         IReadOnlyList<WarmupStatusDocument> stackStatuses,
         Dictionary<string, WarmupServiceStatus> mergedServices)
     {
@@ -252,11 +252,10 @@ public sealed class LocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchestrati
                 : "idle";
         }
 
-        var allApplied = stackStatuses.All(static s => s.DesiredRevision <= s.AppliedRevision);
         return new WarmupStatusDocument(
             SchemaVersion: 1,
             DesiredRevision: stackStatuses.Max(static s => s.DesiredRevision),
-            AppliedRevision: allApplied ? stackStatuses.Min(static s => s.AppliedRevision) : stackStatuses.Max(static s => s.AppliedRevision),
+            AppliedRevision: stackStatuses.Max(static s => s.AppliedRevision),
             InProgressRevision: stackStatuses.Select(static s => s.InProgressRevision).FirstOrDefault(static r => r.HasValue),
             ApplyStatus: applyStatus,
             ApplyError: applyError,

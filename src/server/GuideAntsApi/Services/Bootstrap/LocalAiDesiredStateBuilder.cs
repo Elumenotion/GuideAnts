@@ -246,13 +246,17 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             return null;
         }
 
-        var defaultModelId = (_configuration["ChatDefaults:DefaultModelId"] ?? string.Empty).Trim();
+        using var scope = _scopeFactory.CreateScope();
+        var settingsService = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
+        var chatDefaultsSection = await settingsService
+            .GetSectionAsync("ChatDefaults", cancellationToken)
+            .ConfigureAwait(false);
+        var defaultModelId = ChatDefaultsSnapshot.FromSection(chatDefaultsSection).DefaultModelId?.Trim();
         if (string.IsNullOrWhiteSpace(defaultModelId))
         {
             return null;
         }
 
-        using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var row = await db.Models
             .AsNoTracking()

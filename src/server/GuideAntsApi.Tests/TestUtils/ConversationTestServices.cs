@@ -101,10 +101,12 @@ internal static class ConversationTestServices
             scopeFactory,
             Mock.Of<ILogger<ConversationStreamEngine>>(),
             notebookFileSyncService);
+        var streamRunRegistry = new ConversationStreamRunRegistry();
         var undoService = new ConversationUndoService(
             lockService,
             hub,
             streamPolicy,
+            streamRunRegistry,
             scopeFactory,
             Mock.Of<ILogger<ConversationUndoService>>());
 
@@ -120,7 +122,8 @@ internal static class ConversationTestServices
             undoService,
             streamPolicy,
             streamEngine,
-            new ConversationStreamRunRegistry(),
+            streamRunRegistry,
+            hub,
             logger ?? Mock.Of<ILogger<ConversationService>>(),
             toolOAuthService);
     }
@@ -180,6 +183,7 @@ internal static class ConversationTestServices
             undoLockService,
             Mock.Of<IConversationBroadcastHub>(),
             privateStreamPolicy,
+            new ConversationStreamRunRegistry(),
             scopeFactory,
             Mock.Of<ILogger<ConversationUndoService>>());
 
@@ -196,6 +200,7 @@ internal static class ConversationTestServices
             attachmentService,
             streamPolicy,
             streamEngine,
+            new ConversationStreamRunRegistry(),
             configuration);
     }
 }

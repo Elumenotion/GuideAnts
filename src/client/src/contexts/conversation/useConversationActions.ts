@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type { MessageDto, PendingAttachment } from '../../types/conversation';
 import { api } from '../../services/api';
 import { uploadTypeToServer } from '../../utils/attachments';
@@ -16,6 +16,8 @@ interface ActionDeps {
   loadNotebookFiles: () => Promise<void>;
   currentStreamController: AbortController | null;
   setCurrentStreamController: (c: AbortController | null) => void;
+  observerStreamController: AbortController | null;
+  setObserverStreamController: (c: AbortController | null) => void;
   inflightRuntimeChecksRef: React.MutableRefObject<Set<string>>;
   runtimeReadyCacheRef: React.MutableRefObject<Set<string>>;
   assistantByName: Record<string, { name: string; model?: string; avatarUrl: string; id?: string }>;
@@ -34,9 +36,35 @@ export function useConversationActions(
     projectId, notebookId, conversationId,
     handleStreamingEvent, showToast, loadNotebookFiles,
     currentStreamController, setCurrentStreamController,
+    observerStreamController, setObserverStreamController,
     inflightRuntimeChecksRef, runtimeReadyCacheRef, assistantByName,
     activeStreamTurnId, setActiveStreamTurnId, getActiveStreamTurnId, refreshConversation,
   } = deps;
+
+  const pendingStopRef = useRef(false);
+  const stopPostedForTurnRef = useRef<string | null>(null);
+
+  const clearPendingStop = useCallback(() => {
+    pendingStopRef.current = false;
+    stopPostedForTurnRef.current = null;
+  }, []);
+
+  const requestServerStop = useCallback((turnId: string) => {
+    if (stopPostedForTurnRef.current === turnId) {
+      return;
+    }
+
+    stopPostedForTurnRef.current = turnId;
+    void api.projects.notebooks.conversations
+      .cancelTurn(projectId, notebookId, conversationId, turnId)
+      .catch(err => console.warn('Failed to request server stream cancellation:', err));
+  }, [projectId, notebookId, conversationId]);
+
+  const onTurnIdAssigned = useCallback((turnId: string) => {
+    if (pendingStopRef.current) {
+      requestServerStop(turnId);
+    }
+  }, [requestServerStop]);
 
   const sendMessage = useCallback(
     async (content: string, attachments: PendingAttachment[] = []) => {
@@ -108,6 +136,7 @@ export function useConversationActions(
       dispatch({ type: 'SET_CANCELLING', payload: false });
       dispatch({ type: 'SET_STREAMING_ERROR', payload: undefined });
       dispatch({ type: 'SET_DRAFT', payload: '' });
+      clearPendingStop();
 
       const controller = new AbortController();
       setCurrentStreamController(controller);
@@ -172,17 +201,17 @@ export function useConversationActions(
             const isIdleTimeout = error.name === 'StreamIdleTimeoutError';
 
             if (isUserCancel) {
-              console.log('Stream cancelled by user - finalizing partial content without force refresh');
-              dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
-              dispatch({ type: 'COMPLETE_STREAMING_TURN' });
-              dispatch({ type: 'SET_CANCELLING', payload: false });
+              console.log('SSE client disconnected; server run may continue');
               setCurrentStreamController(null);
-              setActiveStreamTurnId?.(null);
+              if (!pendingStopRef.current) {
+                dispatch({ type: 'SET_CANCELLING', payload: false });
+              }
               return;
             }
 
             if (isIdleTimeout) {
               console.log('Stream idle timeout - finalizing partial content without force refresh');
+              clearPendingStop();
               dispatch({ type: 'SET_STREAMING', payload: false });
               dispatch({ type: 'SET_CANCELLING', payload: false });
               dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
@@ -212,6 +241,7 @@ export function useConversationActions(
 
             console.error('Streaming error:', error);
             void reconcile();
+            clearPendingStop();
             runtimeReadyCacheRef.current.clear();
             dispatch({ type: 'SET_STREAMING', payload: false });
             dispatch({ type: 'SET_CANCELLING', payload: false });
@@ -229,6 +259,7 @@ export function useConversationActions(
             });
           },
           () => {
+            clearPendingStop();
             dispatch({ type: 'COMPLETE_STREAMING_TURN' });
             dispatch({ type: 'SET_CANCELLING', payload: false });
             setCurrentStreamController(null);
@@ -254,15 +285,16 @@ export function useConversationActions(
         );
       } catch (error: any) {
         if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('aborted'))) {
-          dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
-          dispatch({ type: 'COMPLETE_STREAMING_TURN' });
-          dispatch({ type: 'SET_CANCELLING', payload: false });
           setCurrentStreamController(null);
+          if (!pendingStopRef.current) {
+            dispatch({ type: 'SET_CANCELLING', payload: false });
+          }
           return;
         }
 
         console.error('Send message failed', error);
         runtimeReadyCacheRef.current.clear();
+        clearPendingStop();
         dispatch({ type: 'SET_STREAMING', payload: false });
         dispatch({ type: 'SET_CANCELLING', payload: false });
         dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
@@ -437,27 +469,100 @@ export function useConversationActions(
     dispatch({ type: 'SET_STREAMING_MODE', payload: { mode, activeUser } });
   }, [projectId, notebookId, conversationId, dispatch]);
 
-  const cancelStream = useCallback(() => {
-    if (activeStreamTurnId) {
-      void api.projects.notebooks.conversations
-        .cancelTurn(projectId, notebookId, conversationId, activeStreamTurnId)
-        .catch(err => console.warn('Failed to request server stream cancellation:', err));
+  const reattachIfStreaming = useCallback(async (convo: {
+    activeTurn?: { turnId: string; status: string; turnIndex: number } | null;
+    lock?: { lockedByUserName: string } | null;
+    streamingPreview?: { messageId: string; content: string; turnIndex: number } | null;
+    assistantName?: string | null;
+    messages?: MessageDto[];
+  }) => {
+    if (!convo.activeTurn || convo.activeTurn.status !== 'streaming') {
+      return;
     }
-    if (currentStreamController) {
-      dispatch({ type: 'SET_CANCELLING', payload: true });
-      currentStreamController.abort();
-      setCurrentStreamController(null);
 
-      setTimeout(() => {
-        if (state.isStreaming) {
-          console.log('🔥 Forcing finalization of cancelled stream');
-          dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
-          dispatch({ type: 'COMPLETE_STREAMING_TURN' });
-          dispatch({ type: 'SET_CANCELLING', payload: false });
-        }
-      }, 500);
+    if (currentStreamController && !currentStreamController.signal.aborted) {
+      return;
     }
-  }, [activeStreamTurnId, currentStreamController, projectId, notebookId, conversationId, state.isStreaming, dispatch, setCurrentStreamController, setActiveStreamTurnId]);
+
+    if (observerStreamController && !observerStreamController.signal.aborted) {
+      return;
+    }
+
+    const activeUser = convo.lock
+      ? { userId: '', userName: convo.lock.lockedByUserName }
+      : undefined;
+
+    setActiveStreamTurnId(convo.activeTurn.turnId);
+    dispatch({
+      type: 'SET_STREAMING_MODE',
+      payload: { mode: 'observing', activeUser },
+    });
+
+    if (convo.streamingPreview) {
+      const previewId = `streaming-${convo.streamingPreview.messageId}`;
+      const knownMessages = convo.messages ?? state.messages;
+      const hasPreview = knownMessages.some(m => m.id === previewId);
+      if (!hasPreview) {
+        const placeholder: MessageDto = {
+          id: previewId,
+          role: 'assistant',
+          content: convo.streamingPreview.content,
+          created: new Date().toISOString(),
+          isEdited: false,
+          streaming: true,
+          assistantName: convo.assistantName || state.selectedAssistant || undefined,
+          turnIndex: convo.streamingPreview.turnIndex,
+        } as MessageDto;
+        dispatch({ type: 'ADD_MESSAGE', payload: placeholder });
+      }
+    }
+
+    const controller = new AbortController();
+    setObserverStreamController(controller);
+
+    void api.projects.notebooks.conversations.observeConversationEvents(
+      projectId,
+      notebookId,
+      conversationId,
+      handleStreamingEvent,
+      (error) => {
+        if (error.name === 'AbortError') {
+          return;
+        }
+        console.error('Observer stream error:', error);
+        dispatch({ type: 'SET_STREAMING_ERROR', payload: error.message || 'Observer stream failed' });
+      },
+      () => {
+        setObserverStreamController(null);
+        setActiveStreamTurnId(null);
+        dispatch({ type: 'SET_CANCELLING', payload: false });
+        clearPendingStop();
+      },
+      controller.signal,
+    );
+  }, [
+    observerStreamController,
+    projectId,
+    notebookId,
+    conversationId,
+    handleStreamingEvent,
+    dispatch,
+    setActiveStreamTurnId,
+    setObserverStreamController,
+    state.messages,
+    state.selectedAssistant,
+    currentStreamController,
+  ]);
+
+  const cancelStream = useCallback(() => {
+    dispatch({ type: 'SET_CANCELLING', payload: true });
+    pendingStopRef.current = true;
+
+    const turnId = getActiveStreamTurnId() ?? activeStreamTurnId;
+    if (turnId) {
+      requestServerStop(turnId);
+    }
+  }, [activeStreamTurnId, getActiveStreamTurnId, requestServerStop, dispatch]);
 
   const undoLastTurn = useCallback(async () => {
     if (state._isUndoing) {
@@ -533,6 +638,9 @@ export function useConversationActions(
     startEditingAssistant,
     cancelEditingAssistant,
     setStreamingMode,
+    reattachIfStreaming,
+    onTurnIdAssigned,
+    clearPendingStop,
     cancelStream,
     undoLastTurn,
     setSelectedAssistant,

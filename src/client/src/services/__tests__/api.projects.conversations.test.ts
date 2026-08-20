@@ -399,4 +399,35 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
       }
     });
   });
+
+  describe('observeConversationEvents', () => {
+    it('parses observer SSE events and calls onComplete on terminal event', async () => {
+      const onEvent = vi.fn();
+      const onComplete = vi.fn();
+      mockFetch.mockResolvedValue(sseResponse([
+        'event: token\n',
+        'data: {"role":"assistant","contentDelta":"Hi"}\n',
+        '\n',
+        'event: complete\n',
+        'data: {}\n',
+        '\n',
+      ]));
+
+      await api.projects.notebooks.conversations.observeConversationEvents(
+        projectId,
+        notebookId,
+        convoId,
+        onEvent,
+        vi.fn(),
+        onComplete,
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining(`/conversations/${convoId}/events`),
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'token' }));
+      expect(onComplete).toHaveBeenCalled();
+    });
+  });
 });
