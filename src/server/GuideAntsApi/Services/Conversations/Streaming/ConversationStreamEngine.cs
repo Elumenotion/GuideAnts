@@ -170,21 +170,19 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
             void TryWrite(StreamingEvent ev)
             {
+                if ((ev.EventType == StreamingEventTypes.ExternalToolCall && policy.SupportsExternalToolResume)
+                    || ev.EventType == StreamingEventTypes.PendingClientTool)
+                {
+                    // Resume clients acquire a new lock as soon as they see these events.
+                    releaseStreamLockAsync().GetAwaiter().GetResult();
+                }
+
                 if (!hubWork.Writer.TryWrite(() => policy.BroadcastEventAsync(context.ConversationId, ev, CancellationToken.None)))
                 {
                     _logger.LogWarning(
                         "Dropped hub event {EventType} for {ConversationId}",
                         ev.EventType,
                         context.ConversationId);
-                }
-
-                if (ev.EventType == StreamingEventTypes.ExternalToolCall && policy.SupportsExternalToolResume)
-                {
-                    _ = releaseStreamLockAsync();
-                }
-                else if (ev.EventType == StreamingEventTypes.PendingClientTool)
-                {
-                    _ = releaseStreamLockAsync();
                 }
 
                 if (sseCt.IsCancellationRequested)
@@ -582,13 +580,26 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             {
                 try
                 {
-                    if (streamingSucceeded)
+                    hubWork.Writer.TryComplete();
+                    try
                     {
-                        await policy.OnCompleteAsync(context.ConversationId, CancellationToken.None);
-                        TryWrite(new StreamingEvent(StreamingEventTypes.Complete, "{}"));
+                        await hubPump.ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Hub broadcast pump failed for {ConversationId}", context.ConversationId);
                     }
 
                     await releaseStreamLockAsync();
+
+                    if (streamingSucceeded)
+                    {
+                        await policy.OnCompleteAsync(context.ConversationId, CancellationToken.None);
+                        if (!sseCt.IsCancellationRequested)
+                        {
+                            writer.TryWrite(new StreamingEvent(StreamingEventTypes.Complete, "{}"));
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -596,16 +607,6 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 }
 
                 throttler?.Dispose();
-                hubWork.Writer.TryComplete();
-                try
-                {
-                    await hubPump.ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Hub broadcast pump failed for {ConversationId}", context.ConversationId);
-                }
-
                 writer.TryComplete();
                 onWorkerCompleted?.Invoke();
             }

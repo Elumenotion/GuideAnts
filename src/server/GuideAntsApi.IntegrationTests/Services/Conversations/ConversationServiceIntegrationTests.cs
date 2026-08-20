@@ -1647,7 +1647,7 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
                 .WithMessage("*locked*");
         }
 
-        using var observeCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        using var observeCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var observedEvents = new System.Collections.Concurrent.ConcurrentBag<(string EventType, string Payload)>();
         var observeTask = Task.Run(async () =>
         {
@@ -1684,6 +1684,36 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
                 }
             }
         });
+
+        var connectedDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < connectedDeadline)
+        {
+            if (observedEvents.Any(e => e.EventType == "connection_established"))
+            {
+                break;
+            }
+
+            await Task.Delay(25);
+        }
+
+        observedEvents.Should().Contain(
+            e => e.EventType == "connection_established",
+            "observer SSE must be subscribed before Stop so it can receive live hub events");
+
+        var liveDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < liveDeadline)
+        {
+            if (observedEvents.Any(e =>
+                    e.EventType == StreamingEventTypes.Token
+                    || e.EventType == StreamingEventTypes.AssistantMessage
+                    || e.EventType == StreamingEventTypes.Complete
+                    || e.EventType == StreamingEventTypes.Cancelled))
+            {
+                break;
+            }
+
+            await Task.Delay(50);
+        }
 
         await RequestTurnCancelAsync(turnId);
 
