@@ -189,7 +189,7 @@ public static class StartupConfiguration
             var config = configuration.GetSection("LlamaCpp");
             var baseUrl = config["BaseUrl"]
                 ?? throw new InvalidOperationException("LlamaCpp:BaseUrl is required.");
-            client.BaseAddress = LocalAiStackHostUrls.DeriveAdminBaseUriFromLlamaCppUrl(baseUrl);
+            LocalAiStackHostUrls.ApplyLlamaRuntimeAdminBaseAddress(client, baseUrl);
             client.Timeout = TimeSpan.FromHours(4);
         });
         services.Configure<LlamaInferenceTimeoutRecoveryOptions>(
