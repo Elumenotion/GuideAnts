@@ -734,7 +734,9 @@ describe('ConversationContext Provider', () => {
       });
 
       expect(mockUserService.getUserById).toHaveBeenCalledWith('user-9');
-      expect(result.current.userProfiles?.['user-9']?.name).toBe('Fetched Profile');
+      await waitFor(() => {
+        expect(result.current.userProfiles?.['user-9']?.name).toBe('Fetched Profile');
+      });
     });
 
     it('ignores llama runtime events for other notebooks', async () => {

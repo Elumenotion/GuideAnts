@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json.Nodes;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.OpenAI;
 using FluentAssertions;
@@ -56,7 +57,8 @@ public sealed class OpenAiReasoningSupportTests
             "ToResponseRequest",
             request);
 
-        GetPropertyValue(mapped, "Reasoning").Should().BeNull();
+        mapped.Should().BeOfType<JsonObject>();
+        ((JsonObject)mapped).ContainsKey("reasoning").Should().BeFalse();
     }
 
     [TestMethod]
@@ -73,7 +75,8 @@ public sealed class OpenAiReasoningSupportTests
             "ToResponseRequest",
             request);
 
-        GetPropertyValue(mapped, "Reasoning").Should().NotBeNull();
+        mapped.Should().BeOfType<JsonObject>();
+        ((JsonObject)mapped)["reasoning"].Should().NotBeNull();
     }
 
     private static object InvokeMapperMethod(

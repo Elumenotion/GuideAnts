@@ -12,6 +12,7 @@ using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Conversations.Mapping;
+using GuideAntsApi.Services.Conversations.Streaming;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
@@ -57,6 +58,26 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             .Select(t => t.Status)
             .SingleAsync();
         finalStatus.Should().Be(expectedStatus);
+    }
+
+    private static async Task WaitForLockReleasedAsync(
+        ApplicationDbContext db,
+        Guid conversationId,
+        TimeSpan? timeout = null)
+    {
+        var waitTimeout = timeout ?? TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + waitTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (!await db.ConversationLocks.AnyAsync(l => l.ConversationId == conversationId))
+            {
+                return;
+            }
+
+            await Task.Delay(100);
+        }
+
+        (await db.ConversationLocks.AnyAsync(l => l.ConversationId == conversationId)).Should().BeFalse();
     }
 
     [ClassInitialize]
@@ -334,6 +355,128 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         catch (IOException) when (cancellationToken.IsCancellationRequested)
         {
             // The test host aborts the response body when the client cancels mid-stream.
+        }
+
+        return events;
+    }
+
+    private static async Task<Guid> GetActiveTurnIdAsync(ApplicationDbContext db, Guid conversationId) =>
+        (await db.ConversationTurns
+            .AsNoTracking()
+            .Where(t => t.NotebookConversationId == conversationId)
+            .SingleAsync()).Id;
+
+    private async Task RequestTurnCancelAsync(Guid turnId)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(8);
+        while (DateTime.UtcNow < deadline)
+        {
+            using var scope = SharedFactory!.Services.CreateScope();
+            var registry = scope.ServiceProvider.GetRequiredService<ConversationStreamRunRegistry>();
+            if (registry.RequestCancel(turnId))
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.Fail($"Turn {turnId} was not active for cancellation");
+    }
+
+    private async Task CancelTurnViaApiAsync(
+        Guid projectId,
+        Guid notebookId,
+        Guid conversationId,
+        Guid turnId)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(8);
+        while (DateTime.UtcNow < deadline)
+        {
+            using (var scope = SharedFactory!.Services.CreateScope())
+            {
+                var registry = scope.ServiceProvider.GetRequiredService<ConversationStreamRunRegistry>();
+                if (!registry.IsActive(turnId))
+                {
+                    await Task.Delay(50);
+                    continue;
+                }
+            }
+
+            var resp = await Client.PostAsync(
+                $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/turns/{turnId}/cancel",
+                null);
+            if (resp.StatusCode == HttpStatusCode.NotFound)
+            {
+                await Task.Delay(50);
+                continue;
+            }
+
+            resp.EnsureSuccessStatusCode();
+            return;
+        }
+
+        Assert.Fail($"Turn {turnId} was not active for cancellation");
+    }
+
+    private async Task<HttpStatusCode> SendConversationStreamStatusAsync(
+        Guid projectId,
+        Guid notebookId,
+        Guid conversationId,
+        object requestBody)
+    {
+        using var req = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/messages")
+        {
+            Content = JsonContent.Create(requestBody)
+        };
+        req.Headers.Accept.Clear();
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        using var resp = await Client.SendAsync(req);
+        return resp.StatusCode;
+    }
+
+    private async Task<List<(string EventType, string Payload)>> ObserveConversationEventsCollectAsync(
+        Guid projectId,
+        Guid notebookId,
+        Guid conversationId,
+        CancellationToken cancellationToken)
+    {
+        using var req = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/events");
+        req.Headers.Accept.Clear();
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        using var resp = await Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        resp.EnsureSuccessStatusCode();
+
+        var events = new List<(string EventType, string Payload)>();
+        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+
+        string? currentEvent = null;
+        while (!reader.EndOfStream)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line == null)
+            {
+                break;
+            }
+
+            if (line.StartsWith("event:", StringComparison.Ordinal))
+            {
+                currentEvent = line["event:".Length..].Trim();
+                continue;
+            }
+
+            if (line.StartsWith("data:", StringComparison.Ordinal) && currentEvent != null)
+            {
+                events.Add((currentEvent, line["data:".Length..].Trim()));
+            }
         }
 
         return events;
@@ -856,11 +999,30 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             // expected when the HTTP stream is aborted
         }
 
+        Guid turnId;
+        using (var midScope = SharedFactory!.Services.CreateScope())
+        {
+            var midDb = midScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var registry = midScope.ServiceProvider.GetRequiredService<ConversationStreamRunRegistry>();
+            turnId = await GetActiveTurnIdAsync(midDb, conversationId);
+
+            (await midDb.ConversationTurns
+                .AsNoTracking()
+                .Where(t => t.Id == turnId)
+                .Select(t => t.Status)
+                .SingleAsync()).Should().Be("streaming");
+            (await midDb.ConversationLocks.AnyAsync(l => l.ConversationId == conversationId)).Should().BeTrue();
+            registry.IsActive(turnId).Should().BeTrue();
+        }
+
+        await RequestTurnCancelAsync(turnId);
+
         using (var verifyScope = SharedFactory!.Services.CreateScope())
         {
             var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
             await WaitForTurnStatusAsync(db2, conversationId, "cancelled");
+            await WaitForLockReleasedAsync(db2, conversationId);
 
             var turn = await db2.ConversationTurns.SingleAsync(t => t.NotebookConversationId == conversationId);
 
@@ -893,6 +1055,7 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         using var pruneCts = new CancellationTokenSource();
         FakeChatCompletionBehavior.Instance.Reset();
         FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.ToolCallsCancelBeforeExecution;
+        Guid pruneTurnId = Guid.Empty;
         FakeChatCompletionBehavior.Instance.OnToolCallsReturning = () => pruneCts.Cancel();
 
         try
@@ -906,8 +1069,21 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         }
         catch (OperationCanceledException)
         {
-            // expected when tool execution is cancelled before results are persisted
+            // expected when the HTTP stream is aborted
         }
+
+        using (var pruneMidScope = SharedFactory!.Services.CreateScope())
+        {
+            var pruneMidDb = pruneMidScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            pruneTurnId = await GetActiveTurnIdAsync(pruneMidDb, pruneConversationId);
+            (await pruneMidDb.ConversationTurns
+                .AsNoTracking()
+                .Where(t => t.Id == pruneTurnId)
+                .Select(t => t.Status)
+                .SingleAsync()).Should().Be("streaming");
+        }
+
+        await CancelTurnViaApiAsync(projectId, notebookId, pruneConversationId, pruneTurnId);
 
         using (var pruneVerifyScope = SharedFactory!.Services.CreateScope())
         {
@@ -999,7 +1175,7 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         FakeChatCompletionBehavior.Instance.FinalAssistantText = "should not be persisted";
 
         using var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(80));
+        cts.CancelAfter(TimeSpan.FromMilliseconds(120));
         try
         {
             await SendConversationStreamUntilCancelledAsync(
@@ -1014,10 +1190,20 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             // expected when the HTTP stream is aborted
         }
 
+        Guid turnId;
+        using (var midScope = SharedFactory!.Services.CreateScope())
+        {
+            var midDb = midScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            turnId = await GetActiveTurnIdAsync(midDb, conversationId);
+        }
+
+        await RequestTurnCancelAsync(turnId);
+
         using var verifyScope = SharedFactory!.Services.CreateScope();
         var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         await WaitForTurnStatusAsync(db2, conversationId, "cancelled");
+        await WaitForLockReleasedAsync(db2, conversationId);
 
         var turn = await db2.ConversationTurns.SingleAsync(t => t.NotebookConversationId == conversationId);
         turn.ChatRunOutputJson.Should().NotBeNullOrWhiteSpace();
@@ -1324,7 +1510,15 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
 
         sawHeartbeat.Should().BeTrue("thinking-only stream should checkpoint before terminalization");
 
+        Guid turnId;
+        using (var midScope = SharedFactory!.Services.CreateScope())
+        {
+            var midDb = midScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            turnId = await GetActiveTurnIdAsync(midDb, conversationId);
+        }
+
         await cts.CancelAsync();
+        await RequestTurnCancelAsync(turnId);
         await streamTask;
 
         using var verifyScope = SharedFactory!.Services.CreateScope();
@@ -1337,6 +1531,224 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         assistant.ThinkingBlocksJson.Should().NotBeNullOrWhiteSpace();
         assistant.ThinkingBlocksJson.Should().Contain("word1");
         assistant.Content.Should().NotBe("should not be reached before cancel");
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_SseDisconnect_keeps_worker_locked_until_explicit_cancel_and_reattach_observe()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "SSE disconnect reattach");
+        }
+
+        FakeChatCompletionBehavior.Instance.Reset();
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.SlowCancellableStream;
+        FakeChatCompletionBehavior.Instance.ChunkDelayMs = 400;
+        FakeChatCompletionBehavior.Instance.SlowStreamText = string.Join(
+            ' ',
+            Enumerable.Range(1, 80).Select(i => $"word{i}"));
+
+        using var sendCts = new CancellationTokenSource();
+        sendCts.CancelAfter(TimeSpan.FromMilliseconds(400));
+
+        var sendTask = Task.Run(async () =>
+        {
+            try
+            {
+                await SendConversationStreamUntilCancelledAsync(
+                    projectId,
+                    notebookId,
+                    conversationId,
+                    new { instructions = "Disconnect then observe", assistantName = "assistant" },
+                    sendCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // expected when the primary SSE client disconnects
+            }
+        });
+
+        Guid turnId = Guid.Empty;
+        var sawPartial = false;
+        var partialDeadline = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < partialDeadline)
+        {
+            using var pollScope = SharedFactory!.Services.CreateScope();
+            var pollDb = pollScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var assistant = await pollDb.NotebookConversationMessages
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m =>
+                    m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.Assistant);
+            if (assistant is { Content: { Length: > 0 } })
+            {
+                sawPartial = true;
+                turnId = await GetActiveTurnIdAsync(pollDb, conversationId);
+                break;
+            }
+
+            await Task.Delay(50);
+        }
+
+        sawPartial.Should().BeTrue("worker should persist partial content while SSE is active");
+
+        var streamingConfirmed = false;
+        var streamingDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < streamingDeadline)
+        {
+            using var pollScope = SharedFactory!.Services.CreateScope();
+            var pollDb = pollScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var registry = pollScope.ServiceProvider.GetRequiredService<ConversationStreamRunRegistry>();
+            var status = await pollDb.ConversationTurns
+                .AsNoTracking()
+                .Where(t => t.Id == turnId)
+                .Select(t => t.Status)
+                .SingleAsync();
+            if (status == "streaming" && registry.IsActive(turnId))
+            {
+                streamingConfirmed = true;
+                break;
+            }
+
+            await Task.Delay(25);
+        }
+
+        streamingConfirmed.Should().BeTrue("turn should remain streaming after SSE disconnect");
+
+        _ = sendTask;
+
+        (await SendConversationStreamStatusAsync(
+            projectId,
+            notebookId,
+            conversationId,
+            new { instructions = "Should be blocked", assistantName = "assistant" }))
+            .Should().Be(HttpStatusCode.Conflict);
+
+        using (var previewScope = SharedFactory!.Services.CreateScope())
+        {
+            var service = ResolveService(previewScope);
+            var dto = await service.GetConversationWithMessagesAsync(conversationId);
+            dto!.ActiveTurn.Should().NotBeNull();
+            dto.ActiveTurn!.Status.Should().Be("streaming");
+            dto.Lock.Should().NotBeNull();
+            dto.StreamingPreview.Should().NotBeNull();
+            dto.StreamingPreview!.Content.Should().NotBeEmpty();
+        }
+
+        using (var undoScope = SharedFactory!.Services.CreateScope())
+        {
+            var undoSvc = ResolveService(undoScope);
+            var act = () => undoSvc.UndoLastForConversationAsync(conversationId);
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*locked*");
+        }
+
+        using var observeCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var observedEvents = new System.Collections.Concurrent.ConcurrentBag<(string EventType, string Payload)>();
+        var observeTask = Task.Run(async () =>
+        {
+            using var req = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/events");
+            req.Headers.Accept.Clear();
+            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+            using var resp = await Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, observeCts.Token);
+            resp.EnsureSuccessStatusCode();
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(observeCts.Token);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            string? currentEvent = null;
+            while (!observeCts.Token.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(observeCts.Token);
+                if (line == null)
+                {
+                    break;
+                }
+
+                if (line.StartsWith("event:", StringComparison.Ordinal))
+                {
+                    currentEvent = line["event:".Length..].Trim();
+                    continue;
+                }
+
+                if (line.StartsWith("data:", StringComparison.Ordinal) && currentEvent != null)
+                {
+                    observedEvents.Add((currentEvent, line["data:".Length..].Trim()));
+                }
+            }
+        });
+
+        await RequestTurnCancelAsync(turnId);
+
+        var observeDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < observeDeadline)
+        {
+            if (observedEvents.Any(e =>
+                    e.EventType == StreamingEventTypes.Token
+                    || e.EventType == StreamingEventTypes.AssistantMessage
+                    || e.EventType == StreamingEventTypes.Complete
+                    || e.EventType == StreamingEventTypes.Cancelled))
+            {
+                break;
+            }
+
+            await Task.Delay(50);
+        }
+
+        observeCts.Cancel();
+        try
+        {
+            await observeTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // expected when ending the observer subscription
+        }
+
+        observedEvents.Should().Contain(e =>
+            e.EventType == StreamingEventTypes.Token
+            || e.EventType == StreamingEventTypes.AssistantMessage
+            || e.EventType == StreamingEventTypes.Complete
+            || e.EventType == StreamingEventTypes.Cancelled,
+            "GET /events should receive live hub events after SSE disconnect");
+
+        using (var verifyScope = SharedFactory!.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var registry = verifyScope.ServiceProvider.GetRequiredService<ConversationStreamRunRegistry>();
+
+            await WaitForTurnStatusAsync(verifyDb, conversationId, "cancelled");
+            await WaitForLockReleasedAsync(verifyDb, conversationId);
+            registry.IsActive(turnId).Should().BeFalse();
+        }
+    }
+
+    [TestMethod]
+    public async Task ObserveEvents_unknown_conversation_returns_404()
+    {
+        Guid projectId;
+        Guid notebookId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+        }
+
+        using var req = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{Guid.NewGuid()}/events");
+        req.Headers.Accept.Clear();
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        using var resp = await Client.SendAsync(req);
+        resp.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [TestMethod]

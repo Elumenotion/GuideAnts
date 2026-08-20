@@ -9,11 +9,15 @@ public sealed class ConversationStreamRunRegistry
 {
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _activeRuns = new();
 
-    public CancellationToken Register(Guid turnId, CancellationToken externalToken)
+    /// <summary>
+    /// Registers an in-process worker for <paramref name="turnId"/>.
+    /// The returned CTS is not linked to the HTTP SSE client; only explicit Stop cancels it.
+    /// </summary>
+    public CancellationTokenSource Register(Guid turnId)
     {
-        var linked = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
-        _activeRuns[turnId] = linked;
-        return linked.Token;
+        var cts = new CancellationTokenSource();
+        _activeRuns[turnId] = cts;
+        return cts;
     }
 
     public void Unregister(Guid turnId)

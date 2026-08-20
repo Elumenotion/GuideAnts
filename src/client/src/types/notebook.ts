@@ -297,7 +297,21 @@ export interface ConversationTurnStatusDto {
     terminalizedAt?: string | null;
 }
 
+export interface ConversationLockStatusDto {
+    lockedByUserName: string;
+    lockedAt: string;
+}
+
+export interface ConversationStreamingPreviewDto {
+    messageId: string;
+    content: string;
+    toolCallsJson?: string | null;
+    turnIndex: number;
+}
+
 export interface NotebookConversationWithMessagesDto extends NotebookConversationDto {
   messages: MessageDto[];
   activeTurn?: ConversationTurnStatusDto | null;
+  lock?: ConversationLockStatusDto | null;
+  streamingPreview?: ConversationStreamingPreviewDto | null;
 }

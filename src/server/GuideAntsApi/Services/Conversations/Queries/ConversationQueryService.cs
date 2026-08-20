@@ -1,5 +1,6 @@
 using AntRunner.Chat.Abstractions;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Conversations.Mapping;
@@ -261,6 +262,37 @@ public class ConversationQueryService : IConversationQueryService
                 latestTurn.TerminationCode,
                 latestTurn.TerminalizedAt);
 
+        ConversationLockStatusDto? lockStatus = null;
+        var activeLock = await db.ConversationLocks
+            .AsNoTracking()
+            .Where(l => l.ConversationId == conversationId && l.ExpiresAt > DateTime.UtcNow)
+            .FirstOrDefaultAsync();
+        if (activeLock != null)
+        {
+            lockStatus = new ConversationLockStatusDto(activeLock.LockedByUserName, activeLock.LockedAt);
+        }
+
+        ConversationStreamingPreviewDto? streamingPreview = null;
+        if (latestTurn != null && string.Equals(latestTurn.Status, "streaming", StringComparison.OrdinalIgnoreCase))
+        {
+            var streamingStub = await db.NotebookConversationMessages
+                .AsNoTracking()
+                .Where(m => m.NotebookConversationId == conversationId
+                    && m.TurnIndex == latestTurn.TurnIndex
+                    && m.IsStreaming == true
+                    && m.Role == DataModelChatRole.Assistant)
+                .OrderByDescending(m => m.MessageSequence)
+                .FirstOrDefaultAsync();
+            if (streamingStub != null)
+            {
+                streamingPreview = new ConversationStreamingPreviewDto(
+                    streamingStub.Id,
+                    streamingStub.Content,
+                    streamingStub.ToolCalls,
+                    streamingStub.TurnIndex);
+            }
+        }
+
         return new NotebookConversationWithMessagesDto(
             conversationData.Id,
             conversationData.Title ?? "Untitled",
@@ -268,7 +300,9 @@ public class ConversationQueryService : IConversationQueryService
             conversationData.Created,
             conversationData.LastActivity,
             filteredMessageDtos,
-            activeTurn
+            activeTurn,
+            lockStatus,
+            streamingPreview
         );
     }
 

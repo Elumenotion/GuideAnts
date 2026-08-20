@@ -9,13 +9,8 @@ namespace GuideAntsApi.Tests.Services.Providers;
 
 /// <summary>
 /// Deterministic HTTP-handler coverage for <see cref="AntRunner.Chat.OpenAI.OpenAiResponsesClient"/> driven
-/// through the real OpenAI-DotNet Responses transport.
-/// <para>
-/// The OpenAI-DotNet Responses endpoint always streams (a callback is always supplied) and then calls
-/// <c>WaitForStatusChangeAsync</c>, which polls <c>GET /responses/{id}</c> once and returns THAT body as the
-/// authoritative response. So tests answer the streaming POST with SSE (used for deltas + establishing the
-/// response id) and answer the poll GET with the final JSON response that drives mapping.
-/// </para>
+/// through the stateless Responses streaming transport. The terminal <c>response.completed</c> SSE event is
+/// authoritative; a provider response retrieval request is never made.
 /// </summary>
 [TestClass]
 public sealed class OpenAiResponsesClientDeepTests
@@ -63,18 +58,20 @@ public sealed class OpenAiResponsesClientDeepTests
         "{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-4o\",\"output\":[" +
         outputItemsJson + "],\"usage\":" + (usageJson ?? DefaultUsageJson) + "}";
 
-    /// <summary>
-    /// POST (stream) -> SSE that just establishes the response id; GET (poll) -> final JSON response.
-    /// </summary>
     private static Func<HttpRequestMessage, HttpResponseMessage> Responder(
         string outputItemsJson,
         string? usageJson = null,
         string? streamSse = null)
     {
-        var getJson = CompletedResponseJson(outputItemsJson, usageJson);
-        var sse = streamSse ?? CreatedSse;
+        var completedJson = CompletedResponseJson(outputItemsJson, usageJson);
+        var terminalSse =
+            "event: response.completed\n" +
+            "data: {\"type\":\"response.completed\",\"response\":" + completedJson + "}\n\n";
+        var sse = (streamSse ?? CreatedSse) + terminalSse;
         return request => request.Method == HttpMethod.Get
-            ? ChatHttpResponses.Json(getJson)
+            ? ChatHttpResponses.Json(
+                """{"error":{"message":"response retrieval is forbidden"}}""",
+                HttpStatusCode.NotFound)
             : ChatHttpResponses.Sse(sse);
     }
 
@@ -95,8 +92,11 @@ public sealed class OpenAiResponsesClientDeepTests
         using var body = JsonDocument.Parse(postRequest.Body);
         body.RootElement.GetProperty("model").GetString().Should().Be("gpt-4o");
         body.RootElement.GetProperty("stream").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("store").GetBoolean().Should().BeFalse();
+        body.RootElement.TryGetProperty("previous_response_id", out _).Should().BeFalse();
         body.RootElement.GetProperty("truncation").GetString().Should().Be("disabled");
         body.RootElement.GetProperty("input").GetArrayLength().Should().Be(2);
+        handler.RequestCount.Should().Be(1);
 
         response.FirstChoice!.Message.GetText().Should().Be("Hello world");
         response.FirstChoice.FinishReason.Should().Be("stop");
@@ -137,6 +137,7 @@ public sealed class OpenAiResponsesClientDeepTests
         toolCall.Id.Should().Be("call_1");
         toolCall.Function.Name.Should().Be("lookup_weather");
         toolCall.Function.Arguments.GetRawText().Should().Contain("Boston");
+        handler.RequestCount.Should().Be(1);
     }
 
     [TestMethod]
@@ -298,9 +299,49 @@ public sealed class OpenAiResponsesClientDeepTests
     }
 
     [TestMethod]
+    public async Task GetCompletionAsync_StreamWithoutTerminalEvent_ThrowsWithoutRetrieval()
+    {
+        var handler = new CapturingHandler(_ => ChatHttpResponses.Sse(CreatedSse));
+        using var httpClient = new HttpClient(handler);
+        var client = CreateClient(handler, httpClient);
+
+        Func<Task> act = () => client.GetCompletionAsync(TextRequest());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*without a terminal response.completed event*");
+        handler.RequestCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_AzureUsesResourceEndpointAndApiKeyHeader()
+    {
+        var handler = new CapturingHandler(Responder(AssistantTextItem("ok")));
+        using var httpClient = new HttpClient(handler);
+        var config = new AzureOpenAiConfig
+        {
+            ApiKey = "azure-test-key",
+            ResourceName = "test-resource",
+            ApiVersion = "2025-04-01-preview",
+            DeploymentId = "gpt-4o"
+        };
+        var client = new OpenAiResponsesClientFactory(
+                new StaticHttpClientFactory(httpClient),
+                config)
+            .CreateClient(null, httpClient);
+
+        await client.GetCompletionAsync(TextRequest());
+
+        var request = handler.Requests.Should().ContainSingle().Subject;
+        request.Uri!.ToString().Should().Be(
+            "https://test-resource.openai.azure.com/openai/responses?api-version=2025-04-01-preview");
+        request.Headers.Authorization.Should().BeNull();
+        request.Headers.TryGetValues("api-key", out var values).Should().BeTrue();
+        values.Should().ContainSingle().Which.Should().Be("azure-test-key");
+    }
+
+    [TestMethod]
     public async Task StreamCompletionAsync_EmitsTextDeltasAndMapsFinalResponse()
     {
-        // The client's EmitDelta computes the new suffix from accumulated delta values, so deltas grow.
         var sse =
             CreatedSse +
             "event: response.output_item.added\n" +
@@ -314,7 +355,7 @@ public sealed class OpenAiResponsesClientDeepTests
             "\"content_index\":0,\"delta\":\"Hel\"}\n\n" +
             "event: response.output_text.delta\n" +
             "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0," +
-            "\"content_index\":0,\"delta\":\"Hello\"}\n\n" +
+            "\"content_index\":0,\"delta\":\"lo\"}\n\n" +
             "event: response.output_text.done\n" +
             "data: {\"type\":\"response.output_text.done\",\"item_id\":\"msg_1\",\"output_index\":0," +
             "\"content_index\":0,\"text\":\"Hello\"}\n\n";
@@ -336,12 +377,13 @@ public sealed class OpenAiResponsesClientDeepTests
                 }
             });
 
-        // The streaming handler emits incremental text deltas as they arrive over SSE; the first
-        // emitted delta is the leading fragment. The authoritative final text/usage come from the poll.
+        // Streaming deltas are emitted directly; the terminal event supplies final text and usage.
         deltas.Should().NotBeEmpty();
         deltas[0].Should().Be("Hel");
+        deltas[1].Should().Be("lo");
         response.FirstChoice!.Message.GetText().Should().Be("Hello");
         response.FirstChoice.FinishReason.Should().Be("stop");
         response.Usage!.TotalTokens.Should().Be(5);
+        handler.RequestCount.Should().Be(1);
     }
 }

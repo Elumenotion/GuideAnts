@@ -483,6 +483,64 @@ public sealed class LocalAiStartupWarmupServiceTests
         orchestration.VerifyAll();
     }
 
+    [TestMethod]
+    public async Task SyncDesiredAndApplyAsync_WaitForCompletion_ClearsWarmupInProgress()
+    {
+        var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
+        orchestration
+            .Setup(c => c.ApplyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WarmupApplyResult(
+                Ok: true,
+                Noop: false,
+                Continue: false,
+                Started: true,
+                DesiredRevision: 2,
+                AppliedRevision: 0,
+                ApplyStatus: "applying",
+                Changed: true));
+        orchestration
+            .Setup(c => c.GetStatusAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WarmupStatusDocument(
+                SchemaVersion: 1,
+                DesiredRevision: 2,
+                AppliedRevision: 2,
+                InProgressRevision: null,
+                ApplyStatus: "applied",
+                ApplyError: null,
+                DesiredSha256: string.Empty,
+                WrittenAt: string.Empty,
+                Services: new Dictionary<string, WarmupServiceStatus>()));
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LlamaCpp:BaseUrl"] = "http://localhost:8080/llama-cpp",
+            })
+            .Build();
+
+        var modeResolver = new FakeServiceModeResolver();
+        var (settingsMock, _) = CreateSettingsMock();
+        var builder = new LocalAiDesiredStateBuilder(
+            configuration,
+            new ServiceScopeFactoryStub(settingsMock.Object),
+            modeResolver);
+
+        var service = new LocalAiStartupWarmupService(
+            configuration,
+            new ServiceScopeFactoryStub(settingsMock.Object),
+            builder,
+            orchestration.Object,
+            CreateAlignedVerifier(),
+            modeResolver,
+            new LocalAiStackHostResolver(configuration),
+            NullLogger<LocalAiStartupWarmupService>.Instance);
+
+        await service.SyncDesiredAndApplyAsync(waitForCompletion: true);
+
+        service.IsWarmupInProgress.Should().BeFalse();
+        orchestration.VerifyAll();
+    }
+
     private static ILocalAiRuntimeAlignmentVerifier CreateAlignedVerifier()
     {
         var mock = new Mock<ILocalAiRuntimeAlignmentVerifier>(MockBehavior.Strict);
@@ -598,6 +656,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             StringComparer.Ordinal);
 
         var settingsMock = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        settingsMock
+            .Setup(s => s.GetSectionAsync("ChatDefaults", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SettingsSectionDto?)null);
         foreach (var (serviceId, _) in modesByService)
         {
             settingsMock

@@ -14,7 +14,7 @@ public sealed class ConversationStreamRunRegistryTests
 
         registry.IsActive(turnId).Should().BeFalse();
 
-        _ = registry.Register(turnId, CancellationToken.None);
+        using var cts = registry.Register(turnId);
         registry.IsActive(turnId).Should().BeTrue();
 
         registry.Unregister(turnId);
@@ -26,10 +26,22 @@ public sealed class ConversationStreamRunRegistryTests
     {
         var registry = new ConversationStreamRunRegistry();
         var turnId = Guid.NewGuid();
-        var token = registry.Register(turnId, CancellationToken.None);
+        using var cts = registry.Register(turnId);
 
-        token.IsCancellationRequested.Should().BeFalse();
+        cts.Token.IsCancellationRequested.Should().BeFalse();
         registry.RequestCancel(turnId).Should().BeTrue();
-        token.IsCancellationRequested.Should().BeTrue();
+        cts.Token.IsCancellationRequested.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void Register_is_not_linked_to_http_abort_token()
+    {
+        var registry = new ConversationStreamRunRegistry();
+        var turnId = Guid.NewGuid();
+        using var httpCts = new CancellationTokenSource();
+        using var workerCts = registry.Register(turnId);
+
+        httpCts.Cancel();
+        workerCts.Token.IsCancellationRequested.Should().BeFalse();
     }
 }

@@ -44,8 +44,14 @@ public class NotebookConversationStreamingToolCallsTests
         public Task EditMessageAsync(Guid messageId, string newContent) => throw new NotImplementedException();
         public Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId) => Task.FromResult(false);
 
+        public async IAsyncEnumerable<StreamingEvent> ObserveConversationEventsAsync(
+            Guid conversationId,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
 
-        
         public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             // Simulate the complete flow with tool calls
@@ -327,6 +333,15 @@ public class NotebookConversationStreamingToolCallsTests
         public Task DeleteConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task EditMessageAsync(Guid messageId, string newContent) => throw new NotImplementedException();
         public Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId) => Task.FromResult(false);
+
+        public async IAsyncEnumerable<StreamingEvent> ObserveConversationEventsAsync(
+            Guid conversationId,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
         public Task UndoLastForConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task UndoForConversationAsync(Guid conversationId, Guid messageId) => throw new NotImplementedException();
         public Task<PagedUserConversationsDto> GetUserConversationsAsync(UserConversationsQuery query)

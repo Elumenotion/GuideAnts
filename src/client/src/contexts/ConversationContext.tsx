@@ -1,6 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useReducer, useMemo } from 'react';
 import { api } from '../services/api';
-import { userService } from '../services/userService';
 import { useNotebook } from './NotebookContext';
 import { useToast } from '../components/common/Toast';
 import { ensureValidTokensForTemplate } from '../utils/notebookAuth';
@@ -11,6 +10,11 @@ import { reducer, initialState } from './conversation/reducer';
 import { getNotebookRuntimeReadyCache, checkRuntimeStatus, clearNotebookRuntimeReadyCache } from './conversation/runtimeChecks';
 import { useStreamingEventHandler } from './conversation/useStreamingEventHandler';
 import { useConversationActions } from './conversation/useConversationActions';
+import {
+  appendStreamingPreviewMessage,
+  buildInlineUserProfiles,
+  fetchMissingUserProfiles,
+} from './conversation/conversationRefreshHelpers';
 
 const ConversationContext = createContext<ConversationContextProps | undefined>(undefined);
 
@@ -54,11 +58,19 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
   });
 
   const [currentStreamController, setCurrentStreamController] = React.useState<AbortController | null>(null);
-  const [activeStreamTurnId, setActiveStreamTurnId] = React.useState<string | null>(null);
+  const [observerStreamController, setObserverStreamController] = React.useState<AbortController | null>(null);
+  const reattachIfStreamingRef = React.useRef<(convo: any) => Promise<void>>(async () => {});
+  const onTurnIdAssignedRef = React.useRef<(turnId: string) => void>(() => {});
+  const onStreamTerminalRef = React.useRef<() => void>(() => {});
+  const [activeStreamTurnId, setActiveStreamTurnIdState] = React.useState<string | null>(null);
   const activeStreamTurnIdRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    activeStreamTurnIdRef.current = activeStreamTurnId;
-  }, [activeStreamTurnId]);
+  const assignActiveStreamTurnId = React.useCallback((turnId: string | null) => {
+    activeStreamTurnIdRef.current = turnId;
+    setActiveStreamTurnIdState(turnId);
+    if (turnId) {
+      onTurnIdAssignedRef.current(turnId);
+    }
+  }, []);
   const getActiveStreamTurnId = React.useCallback(() => activeStreamTurnIdRef.current, []);
   const templateStartersRef = React.useRef<string[]>([]);
   const inflightRuntimeChecksRef = React.useRef<Set<string>>(new Set());
@@ -105,47 +117,23 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     try {
       const convo = await api.projects.notebooks.conversations.get(projectId, notebookId, conversationId);
       if (convo) {
-        if (convo.messages) {
-          const idsSet = new Set<string>();
-          const profileMap: Record<string, any> = {};
-          convo.messages.forEach(m => { if (m.userId) idsSet.add(m.userId); });
-          convo.messages.forEach(m => {
-            if (m.userId && (m.userName || m.userEmail)) {
-              profileMap[m.userId] = {
-                ...(profileMap[m.userId] || {}),
-                id: m.userId,
-                name: m.userName,
-                email: m.userEmail,
-              };
-            }
-          });
-          try {
-            const me = await userService.getCurrentUser();
-            if (me?.id) {
-              idsSet.add(me.id);
-              profileMap[me.id] = { ...(profileMap[me.id] || {}), ...me };
-            }
-          } catch {}
-
-          const ids = Array.from(idsSet);
-          const idsToFetch = ids.filter(id => {
-            const cached = profileMap[id];
-            return !cached || (!cached.name && !cached.email);
-          });
-
-          if (idsToFetch.length > 0) {
-            const profiles = await Promise.all(idsToFetch.map(id => userService.getUserById(id as string).catch(() => null)));
-            idsToFetch.forEach((id, idx) => { if (id && profiles[idx]) profileMap[id] = profiles[idx]; });
-          }
-
-          dispatch({ type: 'SET_USER_PROFILES', payload: profileMap });
+        const baseMessages = convo.messages ?? [];
+        const inlineProfiles = buildInlineUserProfiles(baseMessages);
+        if (Object.keys(inlineProfiles).length > 0) {
+          dispatch({ type: 'SET_USER_PROFILES', payload: inlineProfiles });
         }
 
-        dispatch({ type: 'SET_MESSAGES', payload: convo.messages ?? [] });
+        const messages = appendStreamingPreviewMessage(
+          baseMessages,
+          convo.streamingPreview,
+          convo.assistantName,
+        );
+        dispatch({ type: 'SET_MESSAGES', payload: messages });
+
         if (convo.activeTurn?.turnId) {
-          setActiveStreamTurnId(convo.activeTurn.turnId);
+          assignActiveStreamTurnId(convo.activeTurn.turnId);
         } else if (convo.activeTurn?.status && convo.activeTurn.status !== 'streaming') {
-          setActiveStreamTurnId(null);
+          assignActiveStreamTurnId(null);
         }
 
         if (convo.assistantName) {
@@ -158,9 +146,19 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
           } else {
             console.warn('[llama-runtime] refresh: SKIPPED runtime check — assistant.id is falsy');
           }
-        } else if (convo.messages.length === 0 && !selectedAssistantRef.current) {
+        } else if (baseMessages.length === 0 && !selectedAssistantRef.current) {
           dispatch({ type: 'SET_ASSISTANT', payload: null });
         }
+
+        void reattachIfStreamingRef.current({ ...convo, messages });
+
+        void fetchMissingUserProfiles(baseMessages).then(profileMap => {
+          if (Object.keys(profileMap).length > 0) {
+            dispatch({ type: 'SET_USER_PROFILES', payload: profileMap });
+          }
+        }).catch(() => {
+          // best effort
+        });
       } else {
         console.warn(`Conversation ${conversationId} not found`);
         dispatch({ type: 'SET_MESSAGES', payload: [] });
@@ -323,18 +321,23 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
   // --- Cleanup on conversation change ---
   useEffect(() => {
     if (currentStreamController) {
-      console.log('🔥 Conversation changed, cancelling active stream');
+      console.log('🔥 Conversation changed, aborting active send stream');
       currentStreamController.abort();
       setCurrentStreamController(null);
-
-      dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
-      dispatch({ type: 'COMPLETE_STREAMING_TURN' });
-      dispatch({ type: 'SET_CANCELLING', payload: false });
-      dispatch({ type: 'CLEAR_ATTACHMENTS' });
     }
 
+    if (observerStreamController) {
+      console.log('🔥 Conversation changed, aborting observer stream');
+      observerStreamController.abort();
+      setObserverStreamController(null);
+    }
+
+    dispatch({ type: 'SET_CANCELLING', payload: false });
+    dispatch({ type: 'CLEAR_ATTACHMENTS' });
     dispatch({ type: 'SET_MESSAGES', payload: [] });
-  }, [conversationId]);
+    assignActiveStreamTurnId(null);
+    onStreamTerminalRef.current();
+  }, [conversationId, assignActiveStreamTurnId]);
 
   // --- Cleanup on unmount ---
   useEffect(() => {
@@ -342,6 +345,10 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
       if (currentStreamController) {
         currentStreamController.abort();
         setCurrentStreamController(null);
+      }
+      if (observerStreamController) {
+        observerStreamController.abort();
+        setObserverStreamController(null);
       }
     };
   }, []);
@@ -364,17 +371,23 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
   const handleStreamingEvent = useStreamingEventHandler(dispatch, state, {
     loadNotebookFiles, showToast,
     projectId, notebookId, conversationId, setCurrentStreamController,
-    setActiveStreamTurnId,
+    setActiveStreamTurnId: assignActiveStreamTurnId,
     refreshConversation: refresh,
+    onStreamTerminal: () => onStreamTerminalRef.current(),
   });
 
   const actions = useConversationActions(dispatch, state, {
     projectId, notebookId, conversationId,
     handleStreamingEvent, showToast, loadNotebookFiles,
     currentStreamController, setCurrentStreamController,
+    observerStreamController, setObserverStreamController,
     inflightRuntimeChecksRef, runtimeReadyCacheRef, assistantByName,
-    activeStreamTurnId, setActiveStreamTurnId, getActiveStreamTurnId, refreshConversation: refresh,
+    activeStreamTurnId, setActiveStreamTurnId: assignActiveStreamTurnId, getActiveStreamTurnId, refreshConversation: refresh,
   });
+
+  reattachIfStreamingRef.current = actions.reattachIfStreaming;
+  onTurnIdAssignedRef.current = actions.onTurnIdAssigned;
+  onStreamTerminalRef.current = actions.clearPendingStop;
 
   const currentAssistant = useMemo(() => {
     const name = state.selectedAssistant || undefined;

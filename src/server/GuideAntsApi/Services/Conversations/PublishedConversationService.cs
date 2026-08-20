@@ -37,6 +37,7 @@ public class PublishedConversationService : IPublishedConversationService
     private readonly IAttachmentContentService _attachmentContentService;
     private readonly PublishedConversationStreamPolicy _streamPolicy;
     private readonly IConversationStreamEngine _streamEngine;
+    private readonly ConversationStreamRunRegistry _streamRunRegistry;
 
     public PublishedConversationService(
         IServiceScopeFactory scopeFactory,
@@ -51,6 +52,7 @@ public class PublishedConversationService : IPublishedConversationService
         IAttachmentContentService attachmentContentService,
         PublishedConversationStreamPolicy streamPolicy,
         IConversationStreamEngine streamEngine,
+        ConversationStreamRunRegistry streamRunRegistry,
         IConfiguration? configuration = null)
     {
         _scopeFactory = scopeFactory;
@@ -65,6 +67,7 @@ public class PublishedConversationService : IPublishedConversationService
         _attachmentContentService = attachmentContentService;
         _streamPolicy = streamPolicy;
         _streamEngine = streamEngine;
+        _streamRunRegistry = streamRunRegistry;
         _configuration = configuration;
     }
 
@@ -181,7 +184,7 @@ public class PublishedConversationService : IPublishedConversationService
         };
 
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, cancellationToken);
-        await foreach (var ev in _streamEngine.RunStreamAsync(runContext, lockHandle, cancellationToken))
+        await foreach (var ev in RunRegisteredStreamAsync(runContext, lockHandle, cancellationToken))
         {
             yield return ev;
         }
@@ -330,7 +333,25 @@ public class PublishedConversationService : IPublishedConversationService
         };
 
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, cancellationToken);
-        await foreach (var ev in _streamEngine.RunStreamAsync(runContext, lockHandle, cancellationToken))
+        await foreach (var ev in RunRegisteredStreamAsync(runContext, lockHandle, cancellationToken))
+        {
+            yield return ev;
+        }
+    }
+
+    private async IAsyncEnumerable<StreamingEvent> RunRegisteredStreamAsync(
+        ConversationStreamRunContext runContext,
+        IStreamLockHandle lockHandle,
+        [EnumeratorCancellation] CancellationToken sseCt)
+    {
+        var turnId = runContext.DbTurn.Id;
+        var workerCts = _streamRunRegistry.Register(turnId);
+        await foreach (var ev in _streamEngine.RunStreamAsync(
+            runContext,
+            lockHandle,
+            sseCt,
+            workerCts.Token,
+            () => _streamRunRegistry.Unregister(turnId)))
         {
             yield return ev;
         }

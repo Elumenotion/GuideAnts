@@ -1214,6 +1214,107 @@ export const api = {
                         `/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/turns/${turnId}/cancel`,
                         { method: 'POST' }
                     ),
+                observeConversationEvents: async (
+                    projectId: string,
+                    notebookId: string,
+                    convoId: string,
+                    onEvent: (event: { type: string; data: any }) => void,
+                    onError: (error: Error) => void,
+                    onComplete: () => void,
+                    abortSignal?: AbortSignal,
+                ) => {
+                    const response = await fetchWithAuth(
+                        `${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/events`,
+                        {
+                            method: 'GET',
+                            headers: {
+                                Accept: 'text/event-stream',
+                            },
+                            signal: abortSignal,
+                        },
+                    );
+
+                    if (!response.ok) {
+                        const errorBody = await response.json().catch(() => null);
+                        const err: any = new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        err.status = response.status;
+                        err.body = errorBody;
+                        throw err;
+                    }
+
+                    if (!response.body) {
+                        throw new Error('No response body for observer streaming');
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let currentEventType = '';
+                    let sawTerminalEvent = false;
+
+                    try {
+                        while (true) {
+                            if (abortSignal?.aborted) {
+                                throw new DOMException('Operation was aborted', 'AbortError');
+                            }
+
+                            const { done, value } = await reader.read();
+                            if (done) break;
+
+                            buffer += decoder.decode(value, { stream: true });
+                            const lines = buffer.split('\n');
+                            buffer = lines.pop() || '';
+
+                            for (const line of lines) {
+                                if (abortSignal?.aborted) {
+                                    throw new DOMException('Operation was aborted', 'AbortError');
+                                }
+
+                                if (line.startsWith('event: ')) {
+                                    currentEventType = line.slice(7);
+                                } else if (line.startsWith('data: ')) {
+                                    const eventData = line.slice(6);
+                                    if (eventData === '[DONE]') {
+                                        sawTerminalEvent = true;
+                                        onComplete();
+                                        return;
+                                    }
+
+                                    try {
+                                        const parsed = JSON.parse(eventData);
+                                        const eventType = currentEventType || 'data';
+                                        if (CONVERSATION_STREAM_TERMINAL_EVENT_TYPES.has(eventType)) {
+                                            sawTerminalEvent = true;
+                                        }
+                                        onEvent({ type: eventType, data: parsed });
+                                    } catch (err) {
+                                        console.error('Failed to parse observer SSE data:', err);
+                                    }
+                                } else if (line === '') {
+                                    currentEventType = '';
+                                }
+                            }
+                        }
+
+                        if (!sawTerminalEvent) {
+                            onError(new Error('The observer stream ended without a terminal event.'));
+                            return;
+                        }
+
+                        onComplete();
+                    } catch (err) {
+                        if (err instanceof DOMException && err.name === 'AbortError') {
+                            return;
+                        }
+                        onError(err as Error);
+                    } finally {
+                        try {
+                            reader.releaseLock();
+                        } catch {
+                            // cancel() may already have released the lock
+                        }
+                    }
+                },
                 sendMessageStream: async (
                     projectId: string,
                     notebookId: string,

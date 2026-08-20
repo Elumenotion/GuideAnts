@@ -34,8 +34,13 @@ public interface IConversationStreamEngine
     /// completion event. The same orchestration serves both private and published conversations; the
     /// supplied <paramref name="lockHandle"/> is a no-op for paths that do not lock.
     /// </summary>
+    /// <param name="sseCt">Cancels when the primary SSE client disconnects; does not stop the worker.</param>
+    /// <param name="workerCt">Cancels the background worker (explicit Stop).</param>
+    /// <param name="onWorkerCompleted">Invoked when the background worker finishes (success, cancel, or error).</param>
     IAsyncEnumerable<StreamingEvent> RunStreamAsync(
         ConversationStreamRunContext context,
         IStreamLockHandle lockHandle,
-        CancellationToken externalCt);
+        CancellationToken sseCt,
+        CancellationToken workerCt,
+        Action? onWorkerCompleted = null);
 }
