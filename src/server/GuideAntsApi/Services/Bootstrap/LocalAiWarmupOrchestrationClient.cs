@@ -79,7 +79,22 @@ public sealed class LocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchestrati
         var stackStatuses = new List<WarmupStatusDocument>(stacks.Count);
         foreach (var stackBase in stacks)
         {
-            var status = await GetStatusForStackAsync(stackBase, cancellationToken).ConfigureAwait(false);
+            WarmupStatusDocument status;
+            try
+            {
+                status = await GetStatusForStackAsync(stackBase, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Split mode: one stack down/restarting must not hide the need to re-apply.
+                // Treat unreachable/failing status as idle revision 0 so the watchdog re-submits.
+                _logger.LogWarning(
+                    ex,
+                    "Warmup status unavailable for stack {StackBase}; treating stack as idle (needs API plan).",
+                    stackBase);
+                status = EmptyStatusDocument();
+            }
+
             stackStatuses.Add(status);
             foreach (var serviceId in LocalAiStackHostUrls.WarmupServiceIds)
             {

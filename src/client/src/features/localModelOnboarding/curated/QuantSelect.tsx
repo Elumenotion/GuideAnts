@@ -117,8 +117,9 @@ export function QuantSelect({
           </div>
           {installedName && selected.id !== installedQuantId ? (
             <div className="mt-1 text-gray-600">
-              Replaces <span className="font-mono">{installedName}</span>
-              {installedDetail ? ` (${installedDetail})` : ''}
+              Switches active quant from <span className="font-mono">{installedName}</span>
+              {installedDetail ? ` (${installedDetail})` : ''}. Other downloaded quants for this
+              model stay on disk.
             </div>
           ) : null}
           {guidance ? <div className="mt-1 text-gray-600">{guidance}</div> : null}

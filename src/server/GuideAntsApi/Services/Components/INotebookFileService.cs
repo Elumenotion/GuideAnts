@@ -6,6 +6,7 @@ public interface INotebookFileService
 {
     Task<IEnumerable<NotebookFileDto>> ListFilesAsync(Guid projectId, Guid notebookId);
     Task<NotebookFolderTreeDto?> GetFolderTreeAsync(Guid projectId, Guid notebookId);
+    Task<HostMountListingDto?> ListHostMountLevelAsync(Guid projectId, Guid notebookId, string relativePath);
     Task<(Stream Stream, string ContentType, string FileName)?> GetFileAsync(Guid projectId, Guid notebookId, string relativePath);
     Task<(Stream stream, string contentType)> GetFileContentStreamAsync(Guid projectId, Guid notebookId, string relativePath);
     Task<(Stream Stream, string ContentType, string FileName)?> GetFileContentStreamAsync(Guid notebookFileId, CancellationToken cancellationToken = default);

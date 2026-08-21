@@ -18,6 +18,8 @@ interface ActionDeps {
   setCurrentStreamController: (c: AbortController | null) => void;
   observerStreamController: AbortController | null;
   setObserverStreamController: (c: AbortController | null) => void;
+  sendStreamRef: React.MutableRefObject<AbortController | null>;
+  observerStreamRef: React.MutableRefObject<AbortController | null>;
   inflightRuntimeChecksRef: React.MutableRefObject<Set<string>>;
   runtimeReadyCacheRef: React.MutableRefObject<Set<string>>;
   assistantByName: Record<string, { name: string; model?: string; avatarUrl: string; id?: string }>;
@@ -35,8 +37,9 @@ export function useConversationActions(
   const {
     projectId, notebookId, conversationId,
     handleStreamingEvent, showToast, loadNotebookFiles,
-    currentStreamController, setCurrentStreamController,
-    observerStreamController, setObserverStreamController,
+    setCurrentStreamController,
+    setObserverStreamController,
+    sendStreamRef, observerStreamRef,
     inflightRuntimeChecksRef, runtimeReadyCacheRef, assistantByName,
     activeStreamTurnId, setActiveStreamTurnId, getActiveStreamTurnId, refreshConversation,
   } = deps;
@@ -48,6 +51,22 @@ export function useConversationActions(
     pendingStopRef.current = false;
     stopPostedForTurnRef.current = null;
   }, []);
+
+  const adoptSendStream = useCallback((controller: AbortController | null) => {
+    setCurrentStreamController(controller);
+  }, [setCurrentStreamController]);
+
+  const adoptObserverStream = useCallback((controller: AbortController | null) => {
+    setObserverStreamController(controller);
+  }, [setObserverStreamController]);
+
+  const abortObserverStream = useCallback(() => {
+    const existing = observerStreamRef.current;
+    if (existing && !existing.signal.aborted) {
+      existing.abort();
+    }
+    setObserverStreamController(null);
+  }, [observerStreamRef, setObserverStreamController]);
 
   const requestServerStop = useCallback((turnId: string) => {
     if (stopPostedForTurnRef.current === turnId) {
@@ -138,8 +157,11 @@ export function useConversationActions(
       dispatch({ type: 'SET_DRAFT', payload: '' });
       clearPendingStop();
 
+      // Send exclusively owns token appends for this turn.
+      abortObserverStream();
+
       const controller = new AbortController();
-      setCurrentStreamController(controller);
+      adoptSendStream(controller);
 
       const attList = (attachments && attachments.length > 0) ? attachments : (state.pendingAttachments ?? []);
 
@@ -202,7 +224,7 @@ export function useConversationActions(
 
             if (isUserCancel) {
               console.log('SSE client disconnected; server run may continue');
-              setCurrentStreamController(null);
+              adoptSendStream(null);
               if (!pendingStopRef.current) {
                 dispatch({ type: 'SET_CANCELLING', payload: false });
               }
@@ -217,7 +239,7 @@ export function useConversationActions(
               dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
               dispatch({ type: 'CONVERT_STREAMING_IDS' });
               dispatch({ type: 'COMPLETE_STREAMING_TURN' });
-              setCurrentStreamController(null);
+              adoptSendStream(null);
               setActiveStreamTurnId?.(null);
               const streamErrorMessage = error.message || 'The conversation stream stopped sending data.';
               dispatch({ type: 'SET_STREAMING_ERROR', payload: streamErrorMessage });
@@ -248,7 +270,7 @@ export function useConversationActions(
             dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
             dispatch({ type: 'CONVERT_STREAMING_IDS' });
             dispatch({ type: 'COMPLETE_STREAMING_TURN' });
-            setCurrentStreamController(null);
+            adoptSendStream(null);
             setActiveStreamTurnId?.(null);
             const streamErrorMessage = error.message || 'Chat request failed';
             dispatch({ type: 'SET_STREAMING_ERROR', payload: streamErrorMessage });
@@ -262,7 +284,7 @@ export function useConversationActions(
             clearPendingStop();
             dispatch({ type: 'COMPLETE_STREAMING_TURN' });
             dispatch({ type: 'SET_CANCELLING', payload: false });
-            setCurrentStreamController(null);
+            adoptSendStream(null);
             dispatch({ type: 'CLEAR_ATTACHMENTS' });
             try { window.dispatchEvent(new Event('refresh-notebook-toolbar')); } catch {}
             console.log('📄 [onComplete] Triggering loadNotebookFiles');
@@ -285,7 +307,7 @@ export function useConversationActions(
         );
       } catch (error: any) {
         if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('aborted'))) {
-          setCurrentStreamController(null);
+          adoptSendStream(null);
           if (!pendingStopRef.current) {
             dispatch({ type: 'SET_CANCELLING', payload: false });
           }
@@ -300,7 +322,7 @@ export function useConversationActions(
         dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
         dispatch({ type: 'CONVERT_STREAMING_IDS' });
         dispatch({ type: 'COMPLETE_STREAMING_TURN' });
-        setCurrentStreamController(null);
+        adoptSendStream(null);
 
         if (error.status === 409) {
           const body = error.body;
@@ -361,7 +383,7 @@ export function useConversationActions(
         });
       }
     },
-    [state._isUndoing, state.selectedAssistant, state.assistants, state.notebookTemplate, projectId, notebookId, conversationId, handleStreamingEvent, state.pendingAttachments, loadNotebookFiles, showToast]
+    [state._isUndoing, state.selectedAssistant, state.assistants, state.notebookTemplate, projectId, notebookId, conversationId, handleStreamingEvent, state.pendingAttachments, loadNotebookFiles, showToast, abortObserverStream, adoptSendStream, clearPendingStop, getActiveStreamTurnId, refreshConversation, runtimeReadyCacheRef, setActiveStreamTurnId]
   );
 
   const editAssistantMessage = useCallback(
@@ -480,11 +502,11 @@ export function useConversationActions(
       return;
     }
 
-    if (currentStreamController && !currentStreamController.signal.aborted) {
+    if (sendStreamRef.current && !sendStreamRef.current.signal.aborted) {
       return;
     }
 
-    if (observerStreamController && !observerStreamController.signal.aborted) {
+    if (observerStreamRef.current && !observerStreamRef.current.signal.aborted) {
       return;
     }
 
@@ -517,8 +539,9 @@ export function useConversationActions(
       }
     }
 
+    // Claim ownership synchronously before the fetch starts so a concurrent reattach cannot open a second socket.
     const controller = new AbortController();
-    setObserverStreamController(controller);
+    adoptObserverStream(controller);
 
     void api.projects.notebooks.conversations.observeConversationEvents(
       projectId,
@@ -533,7 +556,9 @@ export function useConversationActions(
         dispatch({ type: 'SET_STREAMING_ERROR', payload: error.message || 'Observer stream failed' });
       },
       () => {
-        setObserverStreamController(null);
+        if (observerStreamRef.current === controller) {
+          adoptObserverStream(null);
+        }
         setActiveStreamTurnId(null);
         dispatch({ type: 'SET_CANCELLING', payload: false });
         clearPendingStop();
@@ -541,17 +566,16 @@ export function useConversationActions(
       controller.signal,
     );
   }, [
-    observerStreamController,
     projectId,
     notebookId,
     conversationId,
     handleStreamingEvent,
     dispatch,
     setActiveStreamTurnId,
-    setObserverStreamController,
+    adoptObserverStream,
+    clearPendingStop,
     state.messages,
     state.selectedAssistant,
-    currentStreamController,
   ]);
 
   const cancelStream = useCallback(() => {

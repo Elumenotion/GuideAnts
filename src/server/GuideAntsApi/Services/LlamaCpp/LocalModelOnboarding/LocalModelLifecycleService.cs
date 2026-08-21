@@ -5,6 +5,7 @@ using GuideAntsApi.Services.HuggingFace;
 using GuideAntsApi.Services.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 
@@ -44,7 +45,10 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
     private readonly ILlamaRuntimeInventoryService _inventoryService;
     private readonly ILlamaRuntimeCoordinator _coordinator;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger<LocalModelLifecycleService> _logger;
+
+    private static readonly TimeSpan BackgroundReconcilePollInterval = TimeSpan.FromSeconds(2);
 
     public LocalModelLifecycleService(
         ApplicationDbContext db,
@@ -55,6 +59,7 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
         ILlamaRuntimeInventoryService inventoryService,
         ILlamaRuntimeCoordinator coordinator,
         IServiceScopeFactory scopeFactory,
+        IHostApplicationLifetime applicationLifetime,
         ILogger<LocalModelLifecycleService> logger)
     {
         _db = db;
@@ -65,6 +70,7 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
         _inventoryService = inventoryService;
         _coordinator = coordinator;
         _scopeFactory = scopeFactory;
+        _applicationLifetime = applicationLifetime;
         _logger = logger;
     }
 
@@ -157,15 +163,8 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
         var companions = quants.Companions ?? Array.Empty<LlamaProjectorArtifactDto>();
         var companionFiles = companions.Select(c => c.Path).ToList();
 
-        var oldPaths = InstallationArtifactRecords.Parse(installation.ModelArtifactsJson)
-            .Concat(InstallationArtifactRecords.Parse(installation.ProjectorArtifactsJson))
-            .Concat(InstallationArtifactRecords.Parse(installation.CompanionArtifactsJson))
-            .Select(a => a.RepositoryPath)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .ToList();
-        var newPaths = modelFiles.Concat(mmprojFiles).Concat(companionFiles).ToHashSet(StringComparer.Ordinal);
-        var obsoletePaths = oldPaths.Where(p => !newPaths.Contains(p)).ToList();
-
+        // Prior quants that are not the newly selected active set stay on disk.
+        // Change-quant only retargets alias + provenance; it does not delete siblings.
         var immutableInput = new ChangeQuantImmutableInput(
             ModelId: installation.ModelId,
             CatalogId: installation.CatalogId,
@@ -181,7 +180,6 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             RouterModelId: installation.RouterModelId!,
             TargetDirectory: installation.TargetDirectory!,
             RouterPreset: routerPreset,
-            ObsoleteRepositoryPaths: obsoletePaths,
             ArtifactMetadata: BuildArtifactMetadata(quant, quants.Projector, companions));
 
         var wasLoaded = await CaptureLoadedStateAsync(installation.RouterModelId!, cancellationToken).ConfigureAwait(false);
@@ -486,15 +484,30 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
 
     private void QueueBackgroundLifecycleReconciliation(Guid operationId, string failureMessageTemplate)
     {
+        var stopping = _applicationLifetime.ApplicationStopping;
         _ = Task.Run(async () =>
         {
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var operationService = scope.ServiceProvider.GetRequiredService<ILocalModelLifecycleOperationService>();
-                await operationService
-                    .ReconcileLifecycleOperationAsync(operationId, CancellationToken.None)
-                    .ConfigureAwait(false);
+                while (!stopping.IsCancellationRequested)
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var operationService = scope.ServiceProvider
+                        .GetRequiredService<ILocalModelLifecycleOperationService>();
+                    var status = await operationService
+                        .ReconcileLifecycleOperationAsync(operationId, stopping)
+                        .ConfigureAwait(false);
+
+                    if (LocalModelOperationStatuses.IsTerminal(status.Status))
+                    {
+                        return;
+                    }
+
+                    await Task.Delay(BackgroundReconcilePollInterval, stopping).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+            {
             }
             catch (Exception ex)
             {

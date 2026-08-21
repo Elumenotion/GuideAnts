@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using GuideAntsApi.Tests.TestUtils;
 using Moq;
@@ -42,7 +43,7 @@ public sealed class LocalModelLifecycleTests
     }
 
     [TestMethod]
-    public async Task ChangeQuant_CreatesOperation_WithObsoletePaths()
+    public async Task ChangeQuant_CreatesOperation_WithoutDeletingPriorQuants()
     {
         await using var db = CreateDbContext();
         SeedInstallation(db, managementMode: "curated");
@@ -59,7 +60,8 @@ public sealed class LocalModelLifecycleTests
         operation.OperationKind.Should().Be(LocalModelOperationKinds.ChangeQuant);
 
         var input = ChangeQuantImmutableInput.Deserialize(operation.ImmutableInputJson);
-        input.ObsoleteRepositoryPaths.Should().NotBeEmpty();
+        input.ModelFiles.Should().Contain("model-q4.gguf");
+        // Sibling quants that are not active stay on disk; change-quant does not track them for deletion.
     }
 
     [TestMethod]
@@ -210,7 +212,15 @@ public sealed class LocalModelLifecycleTests
             inventory.Object,
             new Mock<ILlamaRuntimeCoordinator>().Object,
             CreateLifecycleScopeFactory(db, adminClient.Object),
+            CreateHostApplicationLifetime(),
             NullLogger<LocalModelLifecycleService>.Instance);
+    }
+
+    private static IHostApplicationLifetime CreateHostApplicationLifetime()
+    {
+        var lifetime = new Mock<IHostApplicationLifetime>();
+        lifetime.Setup(x => x.ApplicationStopping).Returns(CancellationToken.None);
+        return lifetime.Object;
     }
 
     private static IServiceScopeFactory CreateLifecycleScopeFactory(

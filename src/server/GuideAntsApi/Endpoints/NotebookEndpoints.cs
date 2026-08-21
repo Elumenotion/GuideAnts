@@ -201,6 +201,26 @@ public static class NotebookEndpoints
         .Produces<NotebookFolderTreeDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status401Unauthorized);
 
+        fileGroup.MapGet("/host-mounts/listing", async (
+            Guid projectId,
+            Guid notebookId,
+            string path,
+            INotebookFileService fsService) =>
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return Results.BadRequest(new { message = "Query parameter 'path' is required." });
+            }
+
+            var listing = await fsService.ListHostMountLevelAsync(projectId, notebookId, path);
+            return listing == null ? Results.NotFound() : Results.Ok(listing);
+        })
+        .WithName("ListNotebookHostMountLevel")
+        .Produces<HostMountListingDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized);
+
         fileGroup.MapPost("/sync", async (
             Guid projectId,
             Guid notebookId,

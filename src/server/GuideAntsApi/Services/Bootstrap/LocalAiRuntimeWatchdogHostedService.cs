@@ -6,8 +6,9 @@ using Microsoft.EntityFrameworkCore;
 namespace GuideAntsApi.Services.Bootstrap;
 
 /// <summary>
-/// Re-submits API-owned lifecycle policy after the executor restarts, and repairs
-/// a missing configured local llama model while the API process remains alive.
+/// Re-submits API-owned lifecycle policy after an executor restarts (including a
+/// remote aux stack in split mode), and repairs a missing configured local llama
+/// model while the API process remains alive.
 /// </summary>
 public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
 {
@@ -97,9 +98,30 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
         return ExecutorNeedsApiPlan(status);
     }
 
-    internal static bool ExecutorNeedsApiPlan(WarmupStatusDocument status) =>
-        status.DesiredRevision == 0
-            || string.Equals(status.ApplyStatus, "idle", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// True when any configured stack has no API plan yet, was reset to idle, or has an
+    /// API-desired service that is not applied (e.g. remote aux stack restarted while the
+    /// local llama stack still looks healthy).
+    /// </summary>
+    internal static bool ExecutorNeedsApiPlan(WarmupStatusDocument status)
+    {
+        if (status.DesiredRevision == 0
+            || string.Equals(status.ApplyStatus, "idle", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (var service in status.Services.Values)
+        {
+            if (string.Equals(service.Desired, "on", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(service.Applied, "on", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private async Task<bool> IsConfiguredDefaultLlamaLoadedAsync(CancellationToken cancellationToken)
     {

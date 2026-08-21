@@ -57,8 +57,19 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     userProfiles: {},
   });
 
-  const [currentStreamController, setCurrentStreamController] = React.useState<AbortController | null>(null);
-  const [observerStreamController, setObserverStreamController] = React.useState<AbortController | null>(null);
+  const [currentStreamController, setCurrentStreamControllerState] = React.useState<AbortController | null>(null);
+  const [observerStreamController, setObserverStreamControllerState] = React.useState<AbortController | null>(null);
+  // Refs are authoritative for "is a socket open?" checks. State alone races with setState.
+  const sendStreamRef = React.useRef<AbortController | null>(null);
+  const observerStreamRef = React.useRef<AbortController | null>(null);
+  const setCurrentStreamController = React.useCallback((controller: AbortController | null) => {
+    sendStreamRef.current = controller;
+    setCurrentStreamControllerState(controller);
+  }, []);
+  const setObserverStreamController = React.useCallback((controller: AbortController | null) => {
+    observerStreamRef.current = controller;
+    setObserverStreamControllerState(controller);
+  }, []);
   const reattachIfStreamingRef = React.useRef<(convo: any) => Promise<void>>(async () => {});
   const onTurnIdAssignedRef = React.useRef<(turnId: string) => void>(() => {});
   const onStreamTerminalRef = React.useRef<() => void>(() => {});
@@ -320,15 +331,15 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
 
   // --- Cleanup on conversation change ---
   useEffect(() => {
-    if (currentStreamController) {
+    if (sendStreamRef.current) {
       console.log('🔥 Conversation changed, aborting active send stream');
-      currentStreamController.abort();
+      sendStreamRef.current.abort();
       setCurrentStreamController(null);
     }
 
-    if (observerStreamController) {
+    if (observerStreamRef.current) {
       console.log('🔥 Conversation changed, aborting observer stream');
-      observerStreamController.abort();
+      observerStreamRef.current.abort();
       setObserverStreamController(null);
     }
 
@@ -337,21 +348,21 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     dispatch({ type: 'SET_MESSAGES', payload: [] });
     assignActiveStreamTurnId(null);
     onStreamTerminalRef.current();
-  }, [conversationId, assignActiveStreamTurnId]);
+  }, [conversationId, assignActiveStreamTurnId, setCurrentStreamController, setObserverStreamController]);
 
   // --- Cleanup on unmount ---
   useEffect(() => {
     return () => {
-      if (currentStreamController) {
-        currentStreamController.abort();
+      if (sendStreamRef.current) {
+        sendStreamRef.current.abort();
         setCurrentStreamController(null);
       }
-      if (observerStreamController) {
-        observerStreamController.abort();
+      if (observerStreamRef.current) {
+        observerStreamRef.current.abort();
         setObserverStreamController(null);
       }
     };
-  }, []);
+  }, [setCurrentStreamController, setObserverStreamController]);
 
   // --- Custom hooks for streaming events and actions ---
   const assistants = useMemo(() => state.assistants ?? [], [state.assistants]);
@@ -381,6 +392,7 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     handleStreamingEvent, showToast, loadNotebookFiles,
     currentStreamController, setCurrentStreamController,
     observerStreamController, setObserverStreamController,
+    sendStreamRef, observerStreamRef,
     inflightRuntimeChecksRef, runtimeReadyCacheRef, assistantByName,
     activeStreamTurnId, setActiveStreamTurnId: assignActiveStreamTurnId, getActiveStreamTurnId, refreshConversation: refresh,
   });

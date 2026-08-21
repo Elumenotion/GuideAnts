@@ -9,6 +9,7 @@ using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using GuideAntsApi.Tests.TestUtils;
 using Moq;
@@ -82,6 +83,9 @@ public sealed class LocalModelOperationDispatchTests
         adminClient
             .Setup(x => x.GetDownloadStatusAsync(operationId.ToString("D"), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ModelDownloadOperationDto?)null);
+        adminClient
+            .Setup(x => x.GetRouterEntriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaAdminRouterEntriesResponseDto([]));
 
         var service = CreateLifecycleOperationService(db, adminClient.Object);
         await service.ReconcileInFlightLifecycleOperationsAsync(CancellationToken.None);
@@ -106,6 +110,9 @@ public sealed class LocalModelOperationDispatchTests
         adminClient
             .Setup(x => x.GetDownloadStatusAsync(strandedId.ToString("D"), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ModelDownloadOperationDto?)null);
+        adminClient
+            .Setup(x => x.GetRouterEntriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaAdminRouterEntriesResponseDto([]));
 
         var lifecycleOperations = CreateLifecycleOperationService(db, adminClient.Object);
         await lifecycleOperations.ReconcileInFlightLifecycleOperationsAsync(CancellationToken.None);
@@ -196,7 +203,187 @@ public sealed class LocalModelOperationDispatchTests
             inventory.Object,
             new Mock<ILlamaRuntimeCoordinator>().Object,
             services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            CreateHostApplicationLifetime(),
             NullLogger<LocalModelLifecycleService>.Instance);
+    }
+
+    private static IHostApplicationLifetime CreateHostApplicationLifetime()
+    {
+        var lifetime = new Mock<IHostApplicationLifetime>();
+        lifetime.Setup(x => x.ApplicationStopping).Returns(CancellationToken.None);
+        return lifetime.Object;
+    }
+
+    /// <summary>
+    /// SEV1: download finished and router already points at the new quant, but
+    /// llama-admin dropped the journal. Must finalize provenance — not MarkFailed
+    /// and not leave the alias blocked.
+    /// </summary>
+    [TestMethod]
+    public async Task Sweep_ChangeQuant_JournalLostButRouterHasArtifacts_CompletesAndUnblocksAlias()
+    {
+        await using var db = CreateDbContext();
+        SeedInstallation(db);
+        var operationId = Guid.Parse("ffffffff-0000-1111-2222-333333333333");
+        SeedChangeQuantOperation(db, operationId, status: "downloading", downloadStarted: true);
+
+        var llamaClient = new Mock<ILlamaServerRuntimeClient>();
+        llamaClient
+            .Setup(x => x.LoadModelAsync("qwen-local", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var adminClient = new Mock<ILlamaRuntimeAdminClient>();
+        adminClient
+            .Setup(x => x.GetDownloadStatusAsync(operationId.ToString("D"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ModelDownloadOperationDto?)null);
+        adminClient
+            .Setup(x => x.GetRouterEntriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaAdminRouterEntriesResponseDto(
+            [
+                new LlamaAdminRouterEntryDto(
+                    Alias: "qwen-local",
+                    ModelPath: "/models-local/llama/qwen-local/model-q4.gguf",
+                    MmprojPath: null,
+                    HasModelFile: true,
+                    HasMmprojFile: false,
+                    ContextSize: 8192,
+                    CacheRamMib: null,
+                    Preset: new Dictionary<string, string> { ["ctx-size"] = "8192" }),
+            ]));
+        adminClient
+            .Setup(x => x.AddOrUpdateRouterEntryAsync(
+                "qwen-local",
+                It.Is<string>(p => p.Contains("model-q4.gguf", StringComparison.OrdinalIgnoreCase)),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        adminClient
+            .Setup(x => x.DeleteObsoleteArtifactPathsAsync(
+                It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("change-quant must not delete prior quants"));
+
+        var service = new LocalModelLifecycleOperationService(
+            db,
+            adminClient.Object,
+            new Mock<IHuggingFaceTokenResolver>().Object,
+            llamaClient.Object,
+            new Mock<ILlamaRuntimeCoordinator>().Object,
+            NullLogger<LocalModelLifecycleOperationService>.Instance);
+
+        await service.ReconcileInFlightLifecycleOperationsAsync(CancellationToken.None);
+
+        var operation = await db.LocalModelOperations.SingleAsync(o => o.OperationId == operationId);
+        operation.Status.Should().Be(LocalModelOperationStatuses.Completed);
+        adminClient.Verify(
+            x => x.DeleteObsoleteArtifactPathsAsync(
+                It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        var installation = await db.LocalModelInstallations.SingleAsync();
+        installation.QuantId.Should().Be("q4_k_m");
+        installation.QuantLabel.Should().Be("Q4_K_M");
+        installation.ResolvedRevision.Should().Be("8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a");
+
+        var lifecycle = CreateLifecycleService(db, CreateAdminClientForChangeQuant());
+        var act = () => lifecycle.StartChangeQuantAsync(
+            "qwen-local",
+            new ChangeQuantRequestDto("q4_k_m", "8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a"),
+            CancellationToken.None);
+        // In-flight gate must be clear; same quant then correctly rejects as unchanged.
+        (await act.Should().ThrowAsync<LocalModelLifecycleException>())
+            .Which.Code.Should().Be("QUANT_UNCHANGED");
+    }
+
+    /// <summary>
+    /// SEV1 recovery: journal lost and router does not have the expected artifacts.
+    /// Must reach a terminal status so the alias is not permanently bricked.
+    /// </summary>
+    [TestMethod]
+    public async Task Sweep_ChangeQuant_JournalLostAndRouterMissingArtifacts_FailsAndUnblocksAlias()
+    {
+        await using var db = CreateDbContext();
+        SeedInstallation(db);
+        var strandedId = Guid.Parse("aaaaaaaa-1111-2222-3333-444444444444");
+        SeedChangeQuantOperation(db, strandedId, status: "downloading", downloadStarted: true);
+
+        var adminClient = new Mock<ILlamaRuntimeAdminClient>();
+        adminClient
+            .Setup(x => x.GetDownloadStatusAsync(strandedId.ToString("D"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ModelDownloadOperationDto?)null);
+        adminClient
+            .Setup(x => x.GetRouterEntriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaAdminRouterEntriesResponseDto(
+            [
+                new LlamaAdminRouterEntryDto(
+                    Alias: "qwen-local",
+                    ModelPath: "/models-local/llama/qwen-local/model-q6.gguf",
+                    MmprojPath: null,
+                    HasModelFile: true,
+                    HasMmprojFile: false,
+                    ContextSize: 8192,
+                    CacheRamMib: null,
+                    Preset: null),
+            ]));
+
+        var service = CreateLifecycleOperationService(db, adminClient.Object);
+        await service.ReconcileInFlightLifecycleOperationsAsync(CancellationToken.None);
+
+        var operation = await db.LocalModelOperations.SingleAsync(o => o.OperationId == strandedId);
+        operation.Status.Should().Be(LocalModelOperationStatuses.Failed);
+        operation.ErrorCode.Should().Be("INSTALL_STEP_FAILED");
+
+        var lifecycleAdmin = CreateAdminClientForChangeQuant();
+        var lifecycle = CreateLifecycleService(db, lifecycleAdmin);
+        var response = await lifecycle.StartChangeQuantAsync(
+            "qwen-local",
+            new ChangeQuantRequestDto("q4_k_m", "8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a"),
+            CancellationToken.None);
+        response.OperationId.Should().NotBeNullOrWhiteSpace();
+        response.Status.Should().Be("queued");
+    }
+
+    private static void SeedChangeQuantOperation(
+        ApplicationDbContext db,
+        Guid operationId,
+        string status,
+        bool downloadStarted)
+    {
+        db.LocalModelOperations.Add(new LocalModelOperation
+        {
+            OperationId = operationId,
+            OperationKind = LocalModelOperationKinds.ChangeQuant,
+            ModelId = "qwen-local",
+            RouterModelId = "qwen-local",
+            // Prior non-active quant path must not be deleted when this op finalizes.
+            ImmutableInputJson = new ChangeQuantImmutableInput(
+                "qwen-local",
+                "qwen3.6-35b-a3b",
+                "2026-07-10",
+                "q6_k_xl",
+                "q4_k_m",
+                "Q4_K_M",
+                "org/model",
+                "8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a",
+                ["model-q4.gguf"],
+                [],
+                [],
+                "qwen-local",
+                "qwen-local",
+                new Dictionary<string, string> { ["ctx-size"] = "8192" }).ToJson(),
+            Status = status,
+            CurrentStep = status,
+            CompletedSideEffectsJson = downloadStarted
+                ? """{"wasLoadedAtStart":true,"unloadedForOperation":true,"downloadStarted":true}"""
+                : "{}",
+            CreatedUtc = DateTime.UtcNow.AddMinutes(-30),
+            UpdatedUtc = DateTime.UtcNow.AddMinutes(-20),
+            RowVersion = DefaultRowVersion,
+        });
+        db.SaveChanges();
     }
 
     private static void SeedRepairOperation(

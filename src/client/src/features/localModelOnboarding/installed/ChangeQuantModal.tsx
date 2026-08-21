@@ -167,7 +167,9 @@ export function ChangeQuantModal({ isOpen, detail, onClose, onOperationStarted }
             installedQuantLabel={detail.quantLabel}
           />
           <p className="text-xs text-gray-500">
-            The download runs in the background. Progress appears on this model's row in the model list.
+            Downloads only what is missing. Other quants already on disk for this model stay there
+            so you can switch back without downloading again. Progress appears on this model&apos;s
+            row in the model list.
           </p>
         </div>
       ) : null}

@@ -54,6 +54,17 @@ export const notebookFilesApi = {
     return callNotebookApi<NotebookFolderTreeDto>(`/projects/${projectId}/notebooks/${notebookId}/files/tree`);
   },
 
+  listHostMountLevel: async (
+    projectId: string,
+    notebookId: string,
+    path: string,
+  ): Promise<import('../types/notebook').HostMountListingDto> => {
+    const encoded = encodeURIComponent(path);
+    return callNotebookApi(
+      `/projects/${projectId}/notebooks/${notebookId}/files/host-mounts/listing?path=${encoded}`,
+    );
+  },
+
   // Upload files to notebook
   uploadFiles: async (projectId: string, notebookId: string, files: File[], targetRelativePath: string, index: boolean): Promise<NotebookFileDto[]> => {
     const formData = new FormData();

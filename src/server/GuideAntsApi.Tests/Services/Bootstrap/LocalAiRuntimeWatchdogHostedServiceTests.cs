@@ -30,4 +30,32 @@ public sealed class LocalAiRuntimeWatchdogHostedServiceTests
 
         LocalAiRuntimeWatchdogHostedService.ExecutorNeedsApiPlan(status).Should().Be(expected);
     }
+
+    [TestMethod]
+    public void ExecutorNeedsApiPlan_DesiredServiceNotApplied_NeedsPlan()
+    {
+        var status = new WarmupStatusDocument(
+            SchemaVersion: 2,
+            DesiredRevision: 4,
+            AppliedRevision: 4,
+            InProgressRevision: null,
+            ApplyStatus: "applied",
+            ApplyError: null,
+            DesiredSha256: string.Empty,
+            WrittenAt: string.Empty,
+            Services: new Dictionary<string, WarmupServiceStatus>(StringComparer.Ordinal)
+            {
+                ["SpeechTranscription"] = new WarmupServiceStatus(
+                    Desired: "on",
+                    Applied: "off",
+                    Phase: "idle",
+                    Error: null,
+                    PlanRef: "whisper-large",
+                    RouterAlias: null,
+                    ModelId: null,
+                    BundleId: null),
+            });
+
+        LocalAiRuntimeWatchdogHostedService.ExecutorNeedsApiPlan(status).Should().BeTrue();
+    }
 }

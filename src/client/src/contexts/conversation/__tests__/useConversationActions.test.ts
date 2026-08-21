@@ -49,7 +49,14 @@ function createBaseState(overrides: Partial<ExtendedConversationState> = {}): Ex
 function createDeps(overrides: Partial<Parameters<typeof useConversationActions>[2]> = {}) {
   const inflightRuntimeChecksRef = { current: new Set<string>() };
   const runtimeReadyCacheRef = { current: new Set<string>() };
-  const setCurrentStreamController = vi.fn();
+  const sendStreamRef = { current: null as AbortController | null };
+  const observerStreamRef = { current: null as AbortController | null };
+  const setCurrentStreamController = vi.fn((c: AbortController | null) => {
+    sendStreamRef.current = c;
+  });
+  const setObserverStreamController = vi.fn((c: AbortController | null) => {
+    observerStreamRef.current = c;
+  });
 
   return {
     projectId: PROJECT_ID,
@@ -61,7 +68,9 @@ function createDeps(overrides: Partial<Parameters<typeof useConversationActions>
     currentStreamController: null as AbortController | null,
     setCurrentStreamController,
     observerStreamController: null as AbortController | null,
-    setObserverStreamController: vi.fn(),
+    setObserverStreamController,
+    sendStreamRef,
+    observerStreamRef,
     inflightRuntimeChecksRef,
     runtimeReadyCacheRef,
     activeStreamTurnId: null as string | null,
@@ -618,9 +627,10 @@ describe('useConversationActions', () => {
 
     it('does not open observer SSE while the send stream is still attached', async () => {
       const sendController = new AbortController();
+      const sendStreamRef = { current: sendController };
       const { actions } = mountActions(
         {},
-        { currentStreamController: sendController },
+        { currentStreamController: sendController, sendStreamRef },
       );
 
       await act(async () => {
@@ -630,6 +640,43 @@ describe('useConversationActions', () => {
       });
 
       expect(api.projects.notebooks.conversations.observeConversationEvents).not.toHaveBeenCalled();
+    });
+
+    it('does not open a second observer while one is already attached', async () => {
+      const observerController = new AbortController();
+      const observerStreamRef = { current: observerController };
+      const { actions } = mountActions(
+        {},
+        { observerStreamController: observerController, observerStreamRef },
+      );
+
+      await act(async () => {
+        await actions.reattachIfStreaming({
+          activeTurn: { turnId: 'turn-1', status: 'streaming', turnIndex: 1 },
+        });
+      });
+
+      expect(api.projects.notebooks.conversations.observeConversationEvents).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendMessage observer ownership', () => {
+    it('aborts an open observer before opening the send stream', async () => {
+      const observerController = new AbortController();
+      const abortSpy = vi.spyOn(observerController, 'abort');
+      const observerStreamRef = { current: observerController };
+      const { actions, deps } = mountActions(
+        {},
+        { observerStreamController: observerController, observerStreamRef },
+      );
+
+      await act(async () => {
+        await actions.sendMessage('hello');
+      });
+
+      expect(abortSpy).toHaveBeenCalled();
+      expect(deps.setObserverStreamController).toHaveBeenCalledWith(null);
+      expect(api.projects.notebooks.conversations.sendMessageStream).toHaveBeenCalled();
     });
   });
 
