@@ -59,7 +59,28 @@ internal static class LocalAiStackHostUrls
         return builder.Uri;
     }
 
+    public static Uri? TryDeriveAdminBaseUriFromLlamaCppUrl(string? llamaCppBaseUrl)
+    {
+        var normalized = NormalizeStackBaseUrl(llamaCppBaseUrl);
+        return normalized is null ? null : DeriveAdminBaseUri(normalized);
+    }
+
     public static Uri DeriveAdminBaseUriFromLlamaCppUrl(string llamaCppBaseUrl) =>
-        DeriveAdminBaseUri(NormalizeStackBaseUrl(llamaCppBaseUrl)
-            ?? throw new ArgumentException("LlamaCpp base URL is not usable.", nameof(llamaCppBaseUrl)));
+        TryDeriveAdminBaseUriFromLlamaCppUrl(llamaCppBaseUrl)
+            ?? throw new ArgumentException("LlamaCpp base URL is not usable.", nameof(llamaCppBaseUrl));
+
+    /// <summary>
+    /// Binds llama-admin on the typed HttpClient when <paramref name="llamaCppBaseUrl"/> is a real
+    /// stack host. Loopback port 9 is the operator sentinel for "not in use"; leave BaseAddress
+    /// unset so client construction cannot fail API startup.
+    /// </summary>
+    public static void ApplyLlamaRuntimeAdminBaseAddress(HttpClient client, string llamaCppBaseUrl)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        var adminBase = TryDeriveAdminBaseUriFromLlamaCppUrl(llamaCppBaseUrl);
+        if (adminBase is not null)
+        {
+            client.BaseAddress = adminBase;
+        }
+    }
 }

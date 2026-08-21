@@ -12,6 +12,7 @@ interface StreamingEventDeps {
   setCurrentStreamController: (c: AbortController | null) => void;
   setActiveStreamTurnId?: (turnId: string | null) => void;
   refreshConversation?: (options?: { force?: boolean }) => Promise<void>;
+  onStreamTerminal?: () => void;
 }
 
 export function useStreamingEventHandler(
@@ -83,6 +84,7 @@ export function useStreamingEventHandler(
 
       case 'complete':
         {
+          deps.onStreamTerminal?.();
           const streamingMsg = state.messages.find(m =>
             m.role.toLowerCase() === 'assistant' && m.id.startsWith('streaming-')
           );
@@ -124,6 +126,7 @@ export function useStreamingEventHandler(
         break;
 
       case 'pending_client_tool':
+        deps.onStreamTerminal?.();
         dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
         dispatch({ type: 'COMPLETE_STREAMING_TURN' });
         dispatch({ type: 'SET_STREAMING', payload: false });
@@ -138,6 +141,7 @@ export function useStreamingEventHandler(
 
       case 'cancelled':
         console.log('🔥 Stream was cancelled, preserving partial content');
+        deps.onStreamTerminal?.();
         dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
         dispatch({ type: 'COMPLETE_STREAMING_TURN' });
         break;
@@ -261,6 +265,7 @@ export function useStreamingEventHandler(
           // See GuideAntsApi/Services/Conversations/StreamingErrorEnvelope.cs.
           const errorCode = event.data?.code;
 
+          deps.onStreamTerminal?.();
           dispatch({ type: 'SET_STREAMING_ERROR', payload: displayMessage });
           dispatch({ type: 'SET_STREAMING', payload: false });
           dispatch({ type: 'SET_CANCELLING', payload: false });
@@ -331,5 +336,5 @@ export function useStreamingEventHandler(
         }
         break;
     }
-  }, [loadNotebookFiles, showToast, projectId, notebookId, conversationId]);
+  }, [loadNotebookFiles, showToast, projectId, notebookId, conversationId, setCurrentStreamController, deps, state.messages, state.currentTurn, dispatch]);
 }

@@ -31,6 +31,7 @@ public sealed class ConversationUndoService : IConversationUndoService
     private readonly IDistributedConversationLock _distributedLock;
     private readonly IConversationBroadcastHub _broadcastHub;
     private readonly PrivateConversationStreamPolicy _privateStreamPolicy;
+    private readonly ConversationStreamRunRegistry _streamRunRegistry;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<ConversationUndoService> _logger;
 
@@ -38,12 +39,14 @@ public sealed class ConversationUndoService : IConversationUndoService
         IDistributedConversationLock distributedLock,
         IConversationBroadcastHub broadcastHub,
         PrivateConversationStreamPolicy privateStreamPolicy,
+        ConversationStreamRunRegistry streamRunRegistry,
         IServiceScopeFactory scopeFactory,
         ILogger<ConversationUndoService> logger)
     {
         _distributedLock = distributedLock;
         _broadcastHub = broadcastHub;
         _privateStreamPolicy = privateStreamPolicy;
+        _streamRunRegistry = streamRunRegistry;
         _scopeFactory = scopeFactory;
         _logger = logger;
     }
@@ -154,6 +157,12 @@ public sealed class ConversationUndoService : IConversationUndoService
 
         if (lockResult.Status != LockAcquisitionStatus.Acquired)
         {
+            var streamingTurnId = await GetActiveStreamingTurnIdAsync(conversationId);
+            if (streamingTurnId != null && _streamRunRegistry.IsActive(streamingTurnId.Value))
+            {
+                throw new InvalidOperationException($"Conversation is locked by {lockResult.LockedByUserName}");
+            }
+
             if (_privateStreamPolicy.GetConversationGate(conversationId) is { CurrentCount: 0 })
             {
                 throw new InvalidOperationException($"Conversation is locked by {lockResult.LockedByUserName}");
@@ -188,6 +197,18 @@ public sealed class ConversationUndoService : IConversationUndoService
         }
 
         return streamGate;
+    }
+
+    private async Task<Guid?> GetActiveStreamingTurnIdAsync(Guid conversationId)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        return await db.ConversationTurns
+            .AsNoTracking()
+            .Where(t => t.NotebookConversationId == conversationId && t.Status == "streaming")
+            .OrderByDescending(t => t.TurnIndex)
+            .Select(t => (Guid?)t.Id)
+            .FirstOrDefaultAsync();
     }
 
     private async Task ReleaseUndoLockAsync(Guid conversationId, SemaphoreSlim streamGate)

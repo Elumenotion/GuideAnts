@@ -49,21 +49,33 @@ public record ToolCallFunctionDto(
 
 public record ConversationDto(Guid NotebookId, DateTime Created, IReadOnlyList<MessageDto> Messages);
 
-public record NotebookConversationWithMessagesDto(
-    Guid Id,
-    string Title, 
-    string? AssistantName,
-    DateTime Created,
-    DateTime? LastActivity,
-    IReadOnlyList<MessageDto> Messages,
-    ConversationTurnStatusDto? ActiveTurn = null);
-
 public record ConversationTurnStatusDto(
     Guid TurnId,
     int TurnIndex,
     string Status,
     string? TerminationCode,
     DateTime? TerminalizedAt);
+
+public record ConversationLockStatusDto(
+    string LockedByUserName,
+    DateTime LockedAt);
+
+public record ConversationStreamingPreviewDto(
+    Guid MessageId,
+    string Content,
+    string? ToolCallsJson,
+    int TurnIndex);
+
+public record NotebookConversationWithMessagesDto(
+    Guid Id,
+    string Title,
+    string? AssistantName,
+    DateTime Created,
+    DateTime? LastActivity,
+    IReadOnlyList<MessageDto> Messages,
+    ConversationTurnStatusDto? ActiveTurn = null,
+    ConversationLockStatusDto? Lock = null,
+    ConversationStreamingPreviewDto? StreamingPreview = null);
 
 public class SendMessageRequest
 {
@@ -74,10 +86,10 @@ public class SendMessageRequest
 
     // NEW: Optional list of notebook file attachments to include with this message
     public List<AttachmentDto>? Attachments { get; set; }
-    
+
     // NEW: Optional external OAuth tokens for accessing external APIs
     public Dictionary<string, string>? ExternalAuthTokens { get; set; }
-    
+
     // NEW: Optional client-provided context message (from page initialization callback)
     public string? ClientContext { get; set; }
 
@@ -108,10 +120,10 @@ public enum ContentUploadType
     TextFile,
     SandboxFile,
     Folder
-} 
+}
 
 public record AttachmentDto(
     Guid? NotebookFileId,
     ContentUploadType UploadType,
     string? RelativePath = null
-); 
+);

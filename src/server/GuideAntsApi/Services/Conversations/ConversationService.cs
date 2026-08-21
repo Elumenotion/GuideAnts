@@ -5,6 +5,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.Conversations.Attachments;
@@ -31,6 +32,7 @@ public class ConversationService : IConversationService
     private readonly PrivateConversationStreamPolicy _streamPolicy;
     private readonly IConversationStreamEngine _streamEngine;
     private readonly ConversationStreamRunRegistry _streamRunRegistry;
+    private readonly IConversationBroadcastHub _broadcastHub;
     private readonly IToolOAuthService? _toolOAuthService;
     private readonly ILogger<ConversationService> _logger;
 
@@ -47,6 +49,7 @@ public class ConversationService : IConversationService
         PrivateConversationStreamPolicy streamPolicy,
         IConversationStreamEngine streamEngine,
         ConversationStreamRunRegistry streamRunRegistry,
+        IConversationBroadcastHub broadcastHub,
         ILogger<ConversationService> logger,
         IToolOAuthService? toolOAuthService = null)
     {
@@ -62,6 +65,7 @@ public class ConversationService : IConversationService
         _streamPolicy = streamPolicy;
         _streamEngine = streamEngine;
         _streamRunRegistry = streamRunRegistry;
+        _broadcastHub = broadcastHub;
         _logger = logger;
         _toolOAuthService = toolOAuthService;
     }
@@ -142,6 +146,25 @@ public class ConversationService : IConversationService
             ? Task.FromResult(true)
             : Task.FromResult(false);
 
+    public async IAsyncEnumerable<StreamingEvent> ObserveConversationEventsAsync(
+        Guid conversationId,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var conversation = await _queryService.GetConversationByIdAsync(conversationId);
+        if (conversation == null)
+        {
+            throw new KeyNotFoundException($"Conversation {conversationId} was not found.");
+        }
+
+        await foreach (var ev in _broadcastHub.SubscribeToConversationAsync(
+            conversationId,
+            Guid.NewGuid().ToString("N"),
+            cancellationToken))
+        {
+            yield return ev;
+        }
+    }
+
     private async IAsyncEnumerable<StreamingEvent> SendMessageStreamCoreAsync(
         Guid conversationId,
         SendMessageRequest request,
@@ -151,6 +174,8 @@ public class ConversationService : IConversationService
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, CancellationToken.None);
 
         ConversationStreamRunContext runContext;
+        CancellationTokenSource? workerCts = null;
+        var registeredTurnId = Guid.Empty;
         try
         {
             var setupCt = CancellationToken.None;
@@ -165,10 +190,13 @@ public class ConversationService : IConversationService
                     conversationId);
             }
 
+            registeredTurnId = loaded.DbTurn.Id;
+            workerCts = _streamRunRegistry.Register(registeredTurnId);
+
             await _streamPolicy.OnTurnCreatedAsync(
                 conversationId,
                 new StreamTurnCreatedInfo(
-                    loaded.DbTurn!.Id,
+                    loaded.DbTurn.Id,
                     loaded.TurnIndex,
                     request.Instructions,
                     loaded.AssistantName,
@@ -182,21 +210,32 @@ public class ConversationService : IConversationService
         }
         catch
         {
+            if (workerCts != null)
+            {
+                _streamRunRegistry.Unregister(registeredTurnId);
+            }
+
             await lockHandle.ReleaseAsync(CancellationToken.None);
             throw;
         }
 
-        var streamToken = _streamRunRegistry.Register(runContext.DbTurn.Id, cancellationToken);
-        try
-        {
-            await foreach (var ev in _streamEngine.RunStreamAsync(runContext, lockHandle, streamToken))
+        yield return new StreamingEvent(
+            StreamingEventTypes.TurnCreated,
+            JsonSerializer.Serialize(new { turnId = registeredTurnId }, new JsonSerializerOptions
             {
-                yield return ev;
-            }
-        }
-        finally
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            }));
+
+        Action onWorkerCompleted = () => _streamRunRegistry.Unregister(registeredTurnId);
+
+        await foreach (var ev in _streamEngine.RunStreamAsync(
+            runContext,
+            lockHandle,
+            cancellationToken,
+            workerCts.Token,
+            onWorkerCompleted))
         {
-            _streamRunRegistry.Unregister(runContext.DbTurn.Id);
+            yield return ev;
         }
     }
 

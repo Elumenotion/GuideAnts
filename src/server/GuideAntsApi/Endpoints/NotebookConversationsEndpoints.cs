@@ -100,6 +100,45 @@ public static class NotebookConversationsEndpoints
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound);
 
+        // GET observer SSE (subscribe-only; does not start a turn or acquire a lock)
+        group.MapGet("/{convoId:guid}/events", async (
+            HttpContext ctx,
+            [FromServices] IConversationService service,
+            Guid convoId) =>
+        {
+            var accept = ctx.Request.Headers.Accept.ToString();
+            if (!accept.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.BadRequest(new { error = "Accept header must include text/event-stream" });
+            }
+
+            var existing = await service.GetConversationByIdAsync(convoId);
+            if (existing == null)
+            {
+                return Results.NotFound(new { error = "Conversation not found" });
+            }
+
+            try
+            {
+                await ctx.Response.WriteSseStreamWithKeepAliveAsync(
+                    service.ObserveConversationEventsAsync(convoId, ctx.RequestAborted),
+                    ctx.RequestAborted);
+            }
+            catch (KeyNotFoundException)
+            {
+                if (!ctx.Response.HasStarted)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+                    await ctx.Response.WriteAsJsonAsync(new { error = "Conversation not found" });
+                }
+            }
+
+            return Results.Empty;
+        })
+        .RequireAuthorization("RequireContributor")
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status404NotFound);
+
         // POST send message (requires SSE via Accept: text/event-stream)
         group.MapPost("/{convoId:guid}/messages", async (
             HttpContext ctx, 

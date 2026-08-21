@@ -28,6 +28,13 @@ public interface IConversationService
     /// Requests cancellation of an in-process stream for the given turn.
     /// </summary>
     Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId);
+
+    /// <summary>
+    /// Subscribe-only SSE stream for live conversation events (observers / reattach).
+    /// </summary>
+    IAsyncEnumerable<StreamingEvent> ObserveConversationEventsAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default);
     
     // User conversations across all projects
     Task<PagedUserConversationsDto> GetUserConversationsAsync(UserConversationsQuery query);

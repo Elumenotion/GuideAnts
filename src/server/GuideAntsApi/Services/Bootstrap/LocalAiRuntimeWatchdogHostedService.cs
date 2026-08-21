@@ -1,5 +1,6 @@
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Services.Bootstrap;
@@ -102,35 +103,10 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
 
     private async Task<bool> IsConfiguredDefaultLlamaLoadedAsync(CancellationToken cancellationToken)
     {
-        var defaultModelId = (_configuration["ChatDefaults:DefaultModelId"] ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(defaultModelId))
-        {
-            return true;
-        }
-
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<GuideAntsApi.DataModel.ApplicationDbContext>();
-        var row = await db.Models
-            .AsNoTracking()
-            .Where(m => m.ModelId == defaultModelId)
-            .Select(m => new { m.Provider, m.RuntimeConfigJson, m.IsActive })
-            .FirstOrDefaultAsync(cancellationToken)
+        var routerAlias = await ResolveConfiguredDefaultRouterAliasAsync(scope, cancellationToken)
             .ConfigureAwait(false);
-
-        if (row is null
-            || !row.IsActive
-            || !string.Equals(row.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-            || string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
-        {
-            return true;
-        }
-
-        string routerAlias;
-        try
-        {
-            routerAlias = LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson).RouterModelId;
-        }
-        catch
+        if (routerAlias is null)
         {
             return true;
         }
@@ -154,35 +130,10 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
 
     private async Task<bool> IsConfiguredDefaultLlamaFailedAsync(CancellationToken cancellationToken)
     {
-        var defaultModelId = (_configuration["ChatDefaults:DefaultModelId"] ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(defaultModelId))
-        {
-            return false;
-        }
-
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<GuideAntsApi.DataModel.ApplicationDbContext>();
-        var row = await db.Models
-            .AsNoTracking()
-            .Where(m => m.ModelId == defaultModelId)
-            .Select(m => new { m.Provider, m.RuntimeConfigJson, m.IsActive })
-            .FirstOrDefaultAsync(cancellationToken)
+        var routerAlias = await ResolveConfiguredDefaultRouterAliasAsync(scope, cancellationToken)
             .ConfigureAwait(false);
-
-        if (row is null
-            || !row.IsActive
-            || !string.Equals(row.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-            || string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
-        {
-            return false;
-        }
-
-        string routerAlias;
-        try
-        {
-            routerAlias = LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson).RouterModelId;
-        }
-        catch
+        if (routerAlias is null)
         {
             return false;
         }
@@ -201,6 +152,46 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
         return models.Data.Any(m =>
             string.Equals(m.Id, routerAlias, StringComparison.Ordinal)
             && IsRouterModelFailed(m));
+    }
+
+    private static async Task<string?> ResolveConfiguredDefaultRouterAliasAsync(
+        IServiceScope scope,
+        CancellationToken cancellationToken)
+    {
+        var settingsService = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
+        var chatDefaultsSection = await settingsService
+            .GetSectionAsync("ChatDefaults", cancellationToken)
+            .ConfigureAwait(false);
+        var defaultModelId = ChatDefaultsSnapshot.FromSection(chatDefaultsSection).DefaultModelId?.Trim();
+        if (string.IsNullOrWhiteSpace(defaultModelId))
+        {
+            return null;
+        }
+
+        var db = scope.ServiceProvider.GetRequiredService<GuideAntsApi.DataModel.ApplicationDbContext>();
+        var row = await db.Models
+            .AsNoTracking()
+            .Where(m => m.ModelId == defaultModelId)
+            .Select(m => new { m.Provider, m.RuntimeConfigJson, m.IsActive })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (row is null
+            || !row.IsActive
+            || !string.Equals(row.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson).RouterModelId;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static bool IsRouterModelLoaded(LlamaModelData model)

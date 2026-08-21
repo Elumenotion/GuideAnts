@@ -1,6 +1,7 @@
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations.Persistence;
+using GuideAntsApi.Services.Conversations.Streaming;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -10,20 +11,24 @@ namespace GuideAntsApi.Services.Conversations.Recovery;
 
 /// <summary>
 /// Recovers stale <c>streaming</c> turns that lost their in-process finalizer (crash, host restart, lost client).
+/// Must not terminalize turns that still have an active in-process stream worker.
 /// </summary>
 public sealed class ConversationTurnRecoveryService : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
-    private static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(3);
+    internal static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(3);
 
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ConversationStreamRunRegistry _runRegistry;
     private readonly ILogger<ConversationTurnRecoveryService> _logger;
 
     public ConversationTurnRecoveryService(
         IServiceScopeFactory scopeFactory,
+        ConversationStreamRunRegistry runRegistry,
         ILogger<ConversationTurnRecoveryService> logger)
     {
         _scopeFactory = scopeFactory;
+        _runRegistry = runRegistry;
         _logger = logger;
     }
 
@@ -51,7 +56,11 @@ public sealed class ConversationTurnRecoveryService : BackgroundService
         }
     }
 
-    private async Task RecoverStaleTurnsAsync(CancellationToken ct)
+    /// <summary>
+    /// Contract: skip turns still registered in <see cref="ConversationStreamRunRegistry"/>;
+    /// terminalize orphaned streaming turns whose LastUpdated is older than <see cref="StaleAfter"/>.
+    /// </summary>
+    internal async Task RecoverStaleTurnsAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -74,22 +83,16 @@ public sealed class ConversationTurnRecoveryService : BackgroundService
 
         foreach (var stale in staleTurns)
         {
-            var claimed = await db.ConversationTurns
-                .Where(t =>
-                    t.Id == stale.Id
-                    && t.Status == "streaming"
-                    && t.LastUpdated < cutoff
-                    && t.ExecutionId == stale.ExecutionId)
-                .ExecuteUpdateAsync(
-                    setters => setters
-                        .SetProperty(t => t.Status, "interrupted")
-                        .SetProperty(t => t.TerminalizedAt, DateTime.UtcNow)
-                        .SetProperty(t => t.TerminationCode, "stream_interrupted")
-                        .SetProperty(t => t.TerminationDetail, "Turn recovered after the stream stopped heartbeating.")
-                        .SetProperty(t => t.LastUpdated, DateTime.UtcNow),
-                    ct);
+            if (_runRegistry.IsActive(stale.Id))
+            {
+                _logger.LogDebug(
+                    "Skipping stale-turn recovery for {TurnId}; in-process stream is still active",
+                    stale.Id);
+                continue;
+            }
 
-            if (claimed == 0)
+            var claimed = await TryClaimStaleTurnAsync(db, stale.Id, stale.ExecutionId, cutoff, ct);
+            if (!claimed)
             {
                 continue;
             }
@@ -133,5 +136,34 @@ public sealed class ConversationTurnRecoveryService : BackgroundService
                 stale.NotebookConversationId,
                 stale.TurnIndex);
         }
+    }
+
+    /// <summary>
+    /// Atomically claims a stale streaming turn. Returns false when another worker already
+    /// terminalized the turn or a concurrent heartbeat advanced <see cref="ConversationTurn.LastUpdated"/>.
+    /// </summary>
+    internal static async Task<bool> TryClaimStaleTurnAsync(
+        ApplicationDbContext db,
+        Guid turnId,
+        Guid? executionId,
+        DateTime cutoff,
+        CancellationToken ct)
+    {
+        var claimed = await db.ConversationTurns
+            .Where(t =>
+                t.Id == turnId
+                && t.Status == "streaming"
+                && t.LastUpdated < cutoff
+                && t.ExecutionId == executionId)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(t => t.Status, "interrupted")
+                    .SetProperty(t => t.TerminalizedAt, DateTime.UtcNow)
+                    .SetProperty(t => t.TerminationCode, "stream_interrupted")
+                    .SetProperty(t => t.TerminationDetail, "Turn recovered after the stream stopped heartbeating.")
+                    .SetProperty(t => t.LastUpdated, DateTime.UtcNow),
+                ct);
+
+        return claimed > 0;
     }
 }
