@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Security.Cryptography;
+using AntRunner.Chat;
 using AntRunner.ToolCalling;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
@@ -39,10 +40,11 @@ public sealed class NotebookFileChangeReporterTests
     }
 
     [TestMethod]
-    public void ToCwdRelativePath_Private_SimpleFileReturnedAsIs()
+    public void ToCwdRelativePath_Private_NotebookRootFileGetsParentPrefix()
     {
+        // Private CWD is Output/; a notebook-root file must be addressed via ../
         NotebookFileChangeReporter.ToCwdRelativePath("notes.txt", isPublished: false, runId: null)
-            .Should().Be("notes.txt");
+            .Should().Be("../notes.txt");
     }
 
     [TestMethod]
@@ -88,7 +90,7 @@ public sealed class NotebookFileChangeReporterTests
     }
 
     [TestMethod]
-    public async Task DetectChangesAsync_ReturnsEmpty_WhenWorkingDirectoryMissing()
+    public async Task DetectChangesAsync_ReturnsEmpty_WhenNotebookRootMissing()
     {
         using var storage = new TempStorage();
         var projectId = Guid.NewGuid();
@@ -100,6 +102,63 @@ public sealed class NotebookFileChangeReporterTests
 
         newFiles.Should().BeEmpty();
         modifiedFiles.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task DetectChangesAsync_DetectsNotebookRootFile_AsParentRelativePath()
+    {
+        using var storage = new TempStorage();
+        var projectId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        storage.OutputDir(projectId, notebookId); // ensure Output exists (CWD)
+        File.WriteAllText(Path.Combine(storage.NotebookRoot(projectId, notebookId), "root-out.rttm"), "SPEAKER 1");
+
+        var provider = BuildProvider(storage.Root, projectId, notebookId);
+        var context = new InvocationContext(projectId, notebookId, Guid.NewGuid()) { IsPublished = false };
+
+        var (newFiles, modifiedFiles) = await NotebookFileChangeReporter.DetectChangesAsync(provider, storage.Root, context);
+
+        newFiles.Should().Contain("../root-out.rttm");
+        modifiedFiles.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task DetectChangesAsync_IgnoresCacheArtifactPaths()
+    {
+        using var storage = new TempStorage();
+        var projectId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var outputDir = storage.OutputDir(projectId, notebookId);
+        var cacheDir = Path.Combine(outputDir, "models", ".cache", "huggingface");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(Path.Combine(cacheDir, "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55");
+        File.WriteAllText(Path.Combine(outputDir, "real-output.txt"), "ok");
+
+        var provider = BuildProvider(storage.Root, projectId, notebookId);
+        var context = new InvocationContext(projectId, notebookId, Guid.NewGuid()) { IsPublished = false };
+
+        var (newFiles, modifiedFiles) = await NotebookFileChangeReporter.DetectChangesAsync(provider, storage.Root, context);
+
+        newFiles.Should().ContainSingle().Which.Should().Be("real-output.txt");
+        newFiles.Should().NotContain(p => p.Contains(".cache", StringComparison.OrdinalIgnoreCase));
+        modifiedFiles.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void GetDbRelativePaths_DropsExcludedArtifactPaths()
+    {
+        var output = new ChatRunOutput
+        {
+            NewFiles =
+            [
+                "real.txt",
+                "models/.cache/huggingface/CACHEDIR.TAG",
+            ]
+        };
+
+        var paths = NotebookFileChangeReporter.GetDbRelativePaths(output, isPublished: false, runId: null);
+
+        paths.Should().ContainSingle().Which.Should().Be("Output/real.txt");
     }
 
     [TestMethod]

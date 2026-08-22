@@ -93,6 +93,9 @@ public sealed partial class LocalAiLifecycleAuthorityContractTests
                 $"{Path.DirectorySeparatorChar}_archive{Path.DirectorySeparatorChar}",
                 StringComparison.OrdinalIgnoreCase))
             .Where(path => !path.Contains(
+                $"{Path.DirectorySeparatorChar}volumes{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Where(path => !path.Contains(
                 $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
                 StringComparison.OrdinalIgnoreCase))
             .Where(path => !path.Contains(

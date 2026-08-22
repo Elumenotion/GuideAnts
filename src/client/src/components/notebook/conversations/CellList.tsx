@@ -11,8 +11,6 @@ import { useConversationStore } from '../../../store/conversationStore';
 import WorkflowSection from './WorkflowSection';
 import { AssistantOption } from './AssistantSelector';
 import { AttachedFile } from '../../../types/conversation';
-import { useNotebookFilesPolling } from '../../../hooks/useNotebookFilesPolling';
-import { NotebookFolderTreeDto } from '../../../types/notebook';
 
 // Debounce utility hook
 function useDebounce<T extends (...args: any[]) => any>(
@@ -175,8 +173,7 @@ function AssistantCellWrapper({
   conversationId,
   totalMessages,
   canEdit,
-  onTurnFileClick,
-  isValidFilePath
+  onTurnFileClick
 }: { 
   message: MessageDto; 
   isLast: boolean;
@@ -191,8 +188,6 @@ function AssistantCellWrapper({
   totalMessages: number;
   canEdit?: boolean;
   onTurnFileClick?: (relativePath: string) => void;
-  /** Filter function to check if a file path exists in the notebook tree */
-  isValidFilePath?: (path: string) => boolean;
 }) {
   const [editorInfo, setEditorInfo] = useState<UserInfo | null>(null);
   
@@ -270,9 +265,9 @@ function AssistantCellWrapper({
         totalMessages: totalMessages,
       }}
       canEdit={Boolean(canEdit)}
-      // Turn file tracking - filter to only show files that exist in the notebook tree
-      turnFilesCreated={isValidFilePath ? message.turnFilesCreated?.filter(isValidFilePath) : message.turnFilesCreated}
-      turnFilesModified={isValidFilePath ? message.turnFilesModified?.filter(isValidFilePath) : message.turnFilesModified}
+      // Turn file pills: show what the turn recorded (do not gate on live tree membership).
+      turnFilesCreated={message.turnFilesCreated}
+      turnFilesModified={message.turnFilesModified}
       onTurnFileClick={onTurnFileClick}
     />
   );
@@ -334,50 +329,6 @@ const CellList = React.memo(function CellList({
 
   // Get notebook context for projectId/notebookId
   const { projectId, notebookId: contextNotebookId } = useNotebook();
-
-  // Get folder tree to validate which files actually exist (for filtering turn file pills)
-  const { folderTree } = useNotebookFilesPolling({
-    projectId: projectId || '',
-    notebookId: contextNotebookId || '',
-    enabled: Boolean(projectId && contextNotebookId),
-  });
-
-  // Helper to collect all file paths from the folder tree
-  const collectFilePaths = useCallback((node: NotebookFolderTreeDto | null): Set<string> => {
-    const paths = new Set<string>();
-    if (!node) return paths;
-    
-    // Add files in this folder
-    for (const file of node.files) {
-      // Add various path formats that might be used
-      paths.add(file.relativePath);
-      paths.add(file.fileName);
-      // Also add without Output/ prefix if present
-      if (file.relativePath.startsWith('Output/')) {
-        paths.add(file.relativePath.substring(7));
-      }
-    }
-    
-    // Recurse into subfolders
-    for (const subFolder of node.subFolders) {
-      const subPaths = collectFilePaths(subFolder);
-      subPaths.forEach(p => paths.add(p));
-    }
-    
-    return paths;
-  }, []);
-
-  // Memoize the set of valid file paths
-  const validFilePaths = useMemo(() => collectFilePaths(folderTree), [folderTree, collectFilePaths]);
-
-  // Filter function to check if a file path exists in the tree
-  const isValidFilePath = useCallback((filePath: string): boolean => {
-    if (!filePath) return false;
-    // Check exact match or common variations
-    return validFilePaths.has(filePath) || 
-           validFilePaths.has(`Output/${filePath}`) ||
-           validFilePaths.has(filePath.replace(/^\.\.\//, ''));
-  }, [validFilePaths]);
 
   const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
 
@@ -991,7 +942,6 @@ const CellList = React.memo(function CellList({
                       totalMessages={messages.length}
                       canEdit={canEdit}
                       onTurnFileClick={onPreviewFileByPath}
-                      isValidFilePath={isValidFilePath}
                     />
                   )}
                 </React.Fragment>
@@ -1033,7 +983,6 @@ const CellList = React.memo(function CellList({
                         totalMessages={messages.length}
                         canEdit={canEdit}
                         onTurnFileClick={onPreviewFileByPath}
-                        isValidFilePath={isValidFilePath}
                       />
                     );
                   }

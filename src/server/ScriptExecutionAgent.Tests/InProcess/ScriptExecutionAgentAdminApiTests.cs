@@ -193,11 +193,12 @@ public sealed class ScriptExecutionAgentAdminApiTests
 
         var packageName = $"ga_reconcile_probe_{Guid.NewGuid():N}".ToLowerInvariant();
         var createPackageScript = $$"""
-import site
+import sysconfig
 from pathlib import Path
 
 name = "{{packageName}}"
-site_packages = Path(site.getsitepackages()[0])
+# Prefer purelib: on Windows Python 3.12 venvs, site.getsitepackages()[0] is the venv root.
+site_packages = Path(sysconfig.get_paths()["purelib"])
 dist_info = site_packages / f"{name}-0.1.0.dist-info"
 dist_info.mkdir(parents=True, exist_ok=True)
 

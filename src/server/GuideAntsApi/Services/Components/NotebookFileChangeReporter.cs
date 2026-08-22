@@ -13,8 +13,8 @@ namespace GuideAntsApi.Services.Components;
 public static class NotebookFileChangeReporter
 {
     /// <summary>
-    /// Scans the notebook working directory and returns CWD-relative paths for new and modified files.
-    /// Call this BEFORE database sync to surface change hints to the assistant.
+    /// Scans the notebook root (same rules as sync indexing) and returns CWD-relative paths for
+    /// new and modified files. Call this BEFORE database sync to surface change hints to the assistant.
     /// <para>
     /// This is a best-effort, metadata-only heuristic: modification is inferred from a difference in
     /// file size or last-write time, NOT from content hashing. It intentionally trades precision for
@@ -30,47 +30,31 @@ public static class NotebookFileChangeReporter
         InvocationContext context,
         ILogger? logger = null)
     {
-        var localNotebookPath = NotebookPathHelper.GetLocalWorkingDirectory(context, storageRoot);
-        if (!Directory.Exists(localNotebookPath))
+        using var scope = serviceProvider.CreateScope();
+        var resolver = scope.ServiceProvider.GetService<IStoragePathResolver>();
+        var notebookRoot = resolver != null
+            ? resolver.GetNotebookRootPath(context.ProjectId, context.NotebookId)
+            : Path.Combine(storageRoot, context.ProjectId.ToString(), "notebooks", context.NotebookId.ToString());
+
+        if (!Directory.Exists(notebookRoot))
             return (new List<string>(), new List<string>());
 
-        using var scope = serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         var dbFiles = await dbContext.NotebookFiles
             .Where(f => f.NotebookId == context.NotebookId)
             .ToDictionaryAsync(f => f.RelativePath, f => new { f.FileSize, f.LastModifiedUtc });
 
-        var resourceFileNames = dbFiles.Keys
-            .Where(p => p.StartsWith("Resources/", StringComparison.OrdinalIgnoreCase) ||
-                        p.StartsWith("Resources\\", StringComparison.OrdinalIgnoreCase))
-            .Select(Path.GetFileName)
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => name!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var localFiles = Directory.GetFiles(localNotebookPath, "*", SearchOption.AllDirectories)
-            .Where(f => !IsTempScriptFile(Path.GetFileName(f)))
-            .ToArray();
+        var syncableRelativePaths = NotebookSyncFileEnumerator.EnumerateSyncableRelativePaths(
+            notebookRoot,
+            fileNameFilter: f => !IsTempScriptFile(f) && !NotebookFileIndexingRules.IsTemporaryScriptFile(f));
 
         var newFiles = new List<string>();
         var modifiedFiles = new List<string>();
 
-        var resolver = scope.ServiceProvider.GetService<IStoragePathResolver>();
-        var notebookRoot = resolver != null
-            ? resolver.GetNotebookRootPath(context.ProjectId, context.NotebookId)
-            : Path.Combine(storageRoot, context.ProjectId.ToString(), "notebooks", context.NotebookId.ToString());
-
-        foreach (var localFile in localFiles)
+        foreach (var dbRelativePath in syncableRelativePaths)
         {
-            // Get path relative to notebook root (for DB comparison)
-            var dbRelativePath = Path.GetRelativePath(notebookRoot, localFile).Replace("\\", "/");
-
-            // Internal bootstrap links (Output/* -> ../Resources/*) should not be surfaced as user-created files.
-            if (ShouldIgnoreProjectedResourceSymlink(localFile, dbRelativePath, notebookRoot, resourceFileNames, logger))
-            {
-                continue;
-            }
+            var localFile = Path.Combine(notebookRoot, dbRelativePath.Replace('/', Path.DirectorySeparatorChar));
 
             long fileSize;
             DateTime lastModifiedUtc;
@@ -110,20 +94,26 @@ public static class NotebookFileChangeReporter
         }
 
         logger?.LogDebug(
-            "Notebook {NotebookId} change report: {NewCount} new, {ModifiedCount} modified (of {ScannedCount} files scanned)",
+            "Notebook {NotebookId} change report: {NewCount} new, {ModifiedCount} modified (of {ScannedCount} syncable paths)",
             context.NotebookId,
             newFiles.Count,
             modifiedFiles.Count,
-            localFiles.Length);
+            syncableRelativePaths.Count);
 
         return (newFiles, modifiedFiles);
     }
 
     /// <summary>
     /// Collects DB-relative paths from turn output for fast register.
+    /// Excludes tooling/artifact paths that sync will not index.
     /// </summary>
-    public static IReadOnlyList<string> GetDbRelativePaths(ChatRunOutput? output, bool isPublished, string? runId) =>
-        NotebookPathResolver.GetDbRelativePaths(output, isPublished, runId);
+    public static IReadOnlyList<string> GetDbRelativePaths(ChatRunOutput? output, bool isPublished, string? runId)
+    {
+        var paths = NotebookPathResolver.GetDbRelativePaths(output, isPublished, runId);
+        return paths
+            .Where(p => !NotebookArtifactPathExclusions.IsExcludedRelativePath(p))
+            .ToList();
+    }
 
     /// <summary>
     /// Converts a specific file's relative path to CWD-relative format.
@@ -167,12 +157,9 @@ public static class NotebookFileChangeReporter
             {
                 return normalized.Substring(outputPrefix.Length);
             }
-            // File is elsewhere - return as-is or with ../
-            if (normalized.Contains('/'))
-            {
-                return $"../{normalized}";
-            }
-            return normalized;
+
+            // Notebook-root or other non-Output paths are addressed from Output/ via ../
+            return $"../{normalized}";
         }
     }
 
@@ -200,7 +187,7 @@ public static class NotebookFileChangeReporter
             {
                 var prefix = fileName.Substring(0, underscoreIdx);
                 // Check if it's a GUID (with or without hyphens)
-                if (Guid.TryParse(prefix, out _) || 
+                if (Guid.TryParse(prefix, out _) ||
                     (prefix.Length == 32 && prefix.All(c => char.IsAsciiHexDigit(c))))
                 {
                     return true;
@@ -210,112 +197,4 @@ public static class NotebookFileChangeReporter
 
         return false;
     }
-
-    private static bool ShouldIgnoreProjectedResourceSymlink(
-        string localFile,
-        string dbRelativePath,
-        string notebookRoot,
-        HashSet<string> resourceFileNames,
-        ILogger? logger)
-    {
-        if (!dbRelativePath.StartsWith("Output/", StringComparison.OrdinalIgnoreCase) &&
-            !dbRelativePath.StartsWith("Output\\", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (!TryGetAttributes(localFile, out var attributes) || !attributes.HasFlag(FileAttributes.ReparsePoint))
-        {
-            return false;
-        }
-
-        if (ResolvesUnderResourcesRoot(localFile, notebookRoot))
-        {
-            logger?.LogDebug("Ignoring projected resource symlink in file change reporting: {Path}", dbRelativePath);
-            return true;
-        }
-
-        var fileName = Path.GetFileName(dbRelativePath);
-        if (!string.IsNullOrWhiteSpace(fileName) && resourceFileNames.Contains(fileName))
-        {
-            logger?.LogDebug("Ignoring Output reparse-point file with matching Resources filename: {Path}", dbRelativePath);
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryGetAttributes(string path, out FileAttributes attributes)
-    {
-        attributes = default;
-        try
-        {
-            attributes = File.GetAttributes(path);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static bool ResolvesUnderResourcesRoot(string localFile, string notebookRoot)
-    {
-        var resourcesRoot = Path.GetFullPath(Path.Combine(notebookRoot, "Resources"));
-        var resolvedTarget = ResolveSymlinkTarget(localFile);
-        if (string.IsNullOrWhiteSpace(resolvedTarget))
-        {
-            return false;
-        }
-
-        return IsPathUnderRoot(resolvedTarget, resourcesRoot);
-    }
-
-    private static string? ResolveSymlinkTarget(string localFile)
-    {
-        try
-        {
-            var fileInfo = new FileInfo(localFile);
-            var linkTarget = fileInfo.LinkTarget;
-            if (!string.IsNullOrWhiteSpace(linkTarget))
-            {
-                var candidate = Path.IsPathRooted(linkTarget)
-                    ? linkTarget
-                    : Path.Combine(fileInfo.DirectoryName ?? Path.GetDirectoryName(localFile) ?? string.Empty, linkTarget);
-                return Path.GetFullPath(candidate);
-            }
-
-            var resolved = fileInfo.ResolveLinkTarget(returnFinalTarget: true);
-            if (resolved != null)
-            {
-                return Path.GetFullPath(resolved.FullName);
-            }
-        }
-        catch
-        {
-            // Best-effort resolution only.
-        }
-
-        return null;
-    }
-
-    private static bool IsPathUnderRoot(string candidatePath, string rootPath)
-    {
-        var rootFullPath = Path.GetFullPath(rootPath)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var candidateFullPath = Path.GetFullPath(candidatePath)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        if (candidateFullPath.Equals(rootFullPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var rootWithSeparator = rootFullPath + Path.DirectorySeparatorChar;
-        var rootWithAltSeparator = rootFullPath + Path.AltDirectorySeparatorChar;
-        return candidateFullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase) ||
-               candidateFullPath.StartsWith(rootWithAltSeparator, StringComparison.OrdinalIgnoreCase);
-    }
 }
-
-

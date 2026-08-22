@@ -113,6 +113,10 @@ describe('CellList scroll & file path integration', () => {
     await waitFor(() => {
       expect(screen.getByText('Created chart')).toBeInTheDocument();
     });
+
+    // Pills must reflect turn-recorded paths even when the file is not in the live tree yet.
+    expect(screen.getByText('chart.png')).toBeInTheDocument();
+    expect(screen.getByText('missing.png')).toBeInTheDocument();
   });
 
   it('pins scroll to bottom when images load and user was at bottom', async () => {

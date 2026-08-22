@@ -167,6 +167,7 @@ namespace GuideAntsApi.Services
                                     p,
                                     context!.IsPublished,
                                     context.RunId))
+                                .Where(p => !GuideAntsApi.Services.Components.Sync.NotebookArtifactPathExclusions.IsExcludedRelativePath(p))
                                 .Distinct(StringComparer.OrdinalIgnoreCase)
                                 .ToList();
 
