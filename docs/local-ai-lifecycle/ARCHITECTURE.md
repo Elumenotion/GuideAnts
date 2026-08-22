@@ -6,6 +6,13 @@
 service is enabled, which model or bundle is selected, and when the resulting
 plan must be applied.
 
+For local chat, the **active quant / GGUF set for a router alias** is owned by
+API installation provenance (`LocalModelInstallations` and the install /
+change-quant flows that write it). Router INI, loaded `--model` args,
+llama-admin journals, and files under the model store are apply outputs only.
+They must never be treated as a second source of which quant is selected —
+including during incident debugging.
+
 `ga-admin` is a mechanical executor. Engines are mechanical workers. Neither
 may infer policy from environment defaults, model folders, marker files,
 previous status, or container startup.

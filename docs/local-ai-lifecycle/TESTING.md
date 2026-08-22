@@ -11,6 +11,14 @@ The contract is protected at three layers:
   generation and skips bundle projection.
 - `LocalAiDesiredStateBuilderTests` proves ServiceModes produce explicit JSON
   lifecycle state and missing local selections fail.
+- `LocalAiDesiredStateBuilderTests` proves ApplicationSettings `ChatDefaults`
+  (not `IConfiguration`) drives the startup llama router alias when a local
+  catalog row exists.
+- `LocalAiWarmupOrchestrationClientTests` proves dual-stack status merge uses
+  `max(appliedRevision)` so independent revision counters do not block warmup
+  completion.
+- `LocalAiStartupWarmupServiceTests` proves `waitForCompletion: true` clears
+  `IsWarmupInProgress` once merged apply status reaches `applied`.
 - `LocalServiceModeSelectionReaderTests` proves selection reads do not mutate
   ServiceModes.
 - `LocalAiLifecycleAuthorityContractTests` scans runtime/configuration sources

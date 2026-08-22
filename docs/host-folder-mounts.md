@@ -167,6 +167,15 @@ primary security invariant — never bypass it with fallback logic.
 - Mounted contents are **not recursively indexed** by default (both sync paths
   skip reparse-point descent).
 
+### Folder tree browsing
+
+The folder tree shows a **depth-3 first page** of each linked mount (cached;
+default TTL 120s via `FileStorage:LinkedMountTreeCacheSeconds`). Expanding a
+folder under the mount lazy-loads **one directory level** through
+`GET .../host-mounts/listing?path=...`. Polling the tree must not re-walk the
+host while the cache is warm. Deeper content is never a hard ceiling — only an
+unexpanded page.
+
 ### Layout invariant
 
 Mapped folders appear as `{notebookRoot}/{leafName}`. Any `External/` (or
