@@ -253,6 +253,8 @@ public sealed class HostFolderMountService : IHostFolderMountService
             throw new InvalidOperationException(UnlinkFailureRemediation);
         }
 
+        HostMountListingCache.InvalidateMount(mountId.ToString("N"));
+
         var removeCommand = BuildRemoveCommandText(mount.Id);
 
         return new HostFolderMountRemoveCommandResult(
@@ -278,6 +280,7 @@ public sealed class HostFolderMountService : IHostFolderMountService
 
         db.HostFolderMounts.Remove(mount);
         await db.SaveChangesAsync(cancellationToken);
+        HostMountListingCache.InvalidateMount(mountId.ToString("N"));
         return true;
     }
 
@@ -303,6 +306,8 @@ public sealed class HostFolderMountService : IHostFolderMountService
             notebookId: null,
             mountId: mountId,
             cancellationToken);
+
+        HostMountListingCache.InvalidateMount(mountId.ToString("N"));
 
         await db.Entry(mount).ReloadAsync(cancellationToken);
         await db.Entry(mount).Collection(m => m.Links).LoadAsync(cancellationToken);

@@ -7,6 +7,11 @@ alwaysApply: true
 
 - `GuideAntsApi` alone decides enabled/disabled state and model/bundle selection.
 - `ServiceModes` is authoritative for auxiliary service routing and selections.
+- For local chat models, **active quant / artifact selection for an alias** is
+  owned by API installation provenance (`LocalModelInstallations` and the
+  change-quant / install flows that write it). Router INI, loaded `--model`
+  args, llama-admin journals, and files under the model store are apply
+  outputs only — never a second source of “which quant is selected.”
 - `ga-admin` only validates and executes a complete plan explicitly submitted by
   the API. It must start empty/idle and must not load engines on boot.
 - Engine folders, inventory endpoints, status, and marker files are diagnostic
@@ -26,3 +31,33 @@ alwaysApply: true
 
 Read `docs/local-ai-lifecycle/ARCHITECTURE.md` before changing local AI startup,
 routing, warmup, model selection, engine admin, or compose behavior.
+
+## Debugging and incident investigation (same severity as design)
+
+“Only diagnosing” is not an exception. Inspecting the AI container to learn
+what is selected is the same failure mode as autoloading from inventory.
+
+When API provenance and runtime behavior disagree:
+
+1. **Investigation root is GuideAntsApi only.** Start with
+   `LocalModelInstallations` / settings APIs / GuideAntsApi logs /
+   `LocalAiRuntimeAlignmentVerifier` and the API apply path that projects
+   selection to the executor.
+2. Executor evidence (e.g. a log line that a process loaded path X) may be
+   cited as a **one-line symptom**. It must not become a spelunking session
+   inside the executor.
+3. **Forbidden without the user explicitly authorizing it in that message:**
+   - `docker exec` into `guideants-ai` (or any llama/ga-admin engine host)
+     to decide or explain selection
+   - Reading or grepping `router-models.ini`, `router-models.runtime.ini`,
+     seed INI, or HostMounts copies of those files as “the real model”
+   - Treating llama-admin download journals, staging dirs, or on-disk GGUF
+     sets as authoritative for which quant is active
+   - Using loaded `--model` / inventory / `/v1/models` args to override or
+     second-guess API installation provenance
+4. **Allowed without extra permission:** GuideAntsApi DB/API reads, API
+   container logs, and edits under GuideAntsApi that apply API-owned
+   selection to the executor.
+5. Fixes belong in GuideAntsApi apply/verify paths. Do not “fix” drift by
+   hand-editing executor state unless the user explicitly orders that
+   intervention in the current message.

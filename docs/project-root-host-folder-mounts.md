@@ -142,20 +142,39 @@ Mount nodes carry metadata:
 - Unique deterministic IDs (SHA256 of mount ID + path) for stable
   expand/collapse state in the UI
 
-**Shared scanner.** `HostMountDirectoryScanner` is a static helper extracted from
-`NotebookFileService.BuildLinkedMountFileDtosAsync`. Both the notebook and
-project trees use the same budgeted directory scan with identical constraints:
+**Shared scanner.** `HostMountDirectoryScanner` is shared by notebook and project
+trees. The initial tree load is a **first page**, not a hard ceiling:
 
 | Parameter | Default | Config key |
 |---|---|---|
-| Max files | 5,000 | `FileStorage:LinkedMountTreeMaxFiles` |
-| Max depth | 3 | `FileStorage:LinkedMountTreeMaxDepth` |
+| Max files (per scan/list) | 5,000 | `FileStorage:LinkedMountTreeMaxFiles` |
+| Initial max depth | 3 | `FileStorage:LinkedMountTreeMaxDepth` |
 | Scan timeout | 2,500 ms | `FileStorage:LinkedMountTreeScanBudgetMs` |
+| Shallow + listing cache TTL | 120 s | `FileStorage:LinkedMountTreeCacheSeconds` |
+| Project overlay cache TTL | 120 s | `FileStorage:ProjectMountTreeCacheSeconds` |
 
-The scanner filters out temporary script files (`{hash}_script.sh/ps1/py`) and
+**Browse model (R1–R4):**
+
+1. **Initial window** — eager scan to depth 3 from the mount root, including
+   **directory stubs** (folders appear even when they have no files in-window).
+2. **Lazy load** — expanding a folder under a mount fetches **one directory
+   level** via `GET .../host-mounts/listing?path=...` (immediate files + child
+   folder stubs). Deeper levels require further expands.
+3. **Cache** — shallow root pages and per-path listings are cached. Polling
+   `.../tree` must not re-walk the host when the cache is warm. Invalidate on
+   mount reconcile/remove, API mutations under the mount, and explicit refresh.
+4. **Sync** — mount interiors are still not recursively indexed into
+   `NotebookFile`; browse APIs only.
+
+The scanner filters temporary script files (`{hash}_script.sh/ps1/py`) and
 `__pycache__/` directories. Notebook-specific filters (`Resources/`,
 `.guideants/`) are applied in `NotebookFileService` after scanning, not in the
 shared scanner.
+
+**Acceptance:** Playwright scenario
+`walkthroughs/scenarios/notebook/host-mount-lazy-tree.spec.ts` proves expand
+below depth 3 against the notebook’s **existing** linked host mount (default path
+`samples/skills/audiocpp skills`). Unit tests are supporting only.
 
 **DTO additions.** `FolderTreeDto` gained four optional fields:
 

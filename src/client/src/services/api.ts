@@ -921,6 +921,10 @@ export const api = {
             getFolderTree: (projectId: string) =>
                 dedupeInFlight(`project-folder-tree:${projectId}`, () =>
                     callApi<FolderTreeDto>(`/projects/${projectId}/folders/tree`)),
+
+            listHostMountLevel: (projectId: string, path: string) =>
+                callApi<import('../types/notebook').HostMountListingDto>(
+                    `/projects/${projectId}/folders/host-mounts/listing?path=${encodeURIComponent(path)}`),
             
             getFolders: (projectId: string) => 
                 callApi<ProjectFolderDto[]>(`/projects/${projectId}/folders`),

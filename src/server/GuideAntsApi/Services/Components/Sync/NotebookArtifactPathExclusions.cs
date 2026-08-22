@@ -20,6 +20,9 @@ public static class NotebookArtifactPathExclusions
         ".tox",
         ".mypy_cache",
         ".ruff_cache",
+        // Skill/runtime working state under the notebook CWD (not user content).
+        ".audiocpp-extended",
+        ".wire-attachments",
     };
 
     public static bool IsExcludedDirectorySegment(string directoryName) =>

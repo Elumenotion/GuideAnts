@@ -16,6 +16,10 @@ import { useToast } from '../../common/Toast';
 import { HostMountStateBadge } from '../../notebook/hostMounts/HostMountStateBadge';
 import type { HostFolderMountStatus } from '../../../types/hostFolderMount';
 import { deriveHostMountDisplayState } from '../../../utils/hostMountDisplayState';
+import {
+  graftLazyMountBranchesProject,
+  mergeHostMountListingIntoProjectTree,
+} from '../../../utils/hostMountTreeMerge';
 
 // Context for sharing state down the tree
 type TreeItem = 
@@ -38,6 +42,8 @@ interface FolderTreeContextType {
     focusIntentRef: React.MutableRefObject<boolean>;
     /** Mobile detection for touch-friendly single-tap behavior */
     isMobile: boolean;
+    listingCompletePaths: Set<string>;
+    loadHostMountListing: (relativePath: string) => Promise<void>;
 }
 
 const FolderTreeContext = createContext<FolderTreeContextType | undefined>(undefined);
@@ -323,7 +329,18 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     
     // Use expanded state from context or fallback
     const isExpanded = context?.expandedIds.has(folder.id || 'ROOT') ?? true;
-    const toggleExpand = () => context?.toggleExpansion(folder.id || 'ROOT');
+    const needsLazyListing = Boolean(
+      insideMount
+      && folder.relativePath
+      && context
+      && !context.listingCompletePaths.has(folder.relativePath),
+    );
+    const toggleExpand = () => {
+      context?.toggleExpansion(folder.id || 'ROOT');
+      if (needsLazyListing && folder.relativePath) {
+        void context?.loadHostMountListing(folder.relativePath);
+      }
+    };
 
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState(folder.name);
@@ -1251,13 +1268,58 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
 }) => {
     // Shared state
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set(['ROOT']));
+    const [listingCompletePaths, setListingCompletePaths] = useState<Set<string>>(() => new Set());
+    const [workingTree, setWorkingTree] = useState<FolderTreeDto | null>(null);
+    const listingInFlightRef = useRef<Set<string>>(new Set());
+    const { showToast } = useToast();
+
+    useEffect(() => {
+      setListingCompletePaths(new Set());
+      setWorkingTree(null);
+      listingInFlightRef.current.clear();
+    }, [projectId]);
+
+    useEffect(() => {
+      if (!folderTree) {
+        setWorkingTree(null);
+        return;
+      }
+      setWorkingTree((prev) => graftLazyMountBranchesProject(folderTree, prev, listingCompletePaths));
+    }, [folderTree, listingCompletePaths]);
+
+    const loadHostMountListing = useCallback(async (relativePath: string) => {
+      if (!projectId || !relativePath) return;
+      if (listingCompletePaths.has(relativePath)) return;
+      if (listingInFlightRef.current.has(relativePath)) return;
+      listingInFlightRef.current.add(relativePath);
+      try {
+        const listing = await api.projects.folders.listHostMountLevel(projectId, relativePath);
+        setWorkingTree((prev) => {
+          const base = prev ?? folderTree;
+          if (!base) return prev;
+          return mergeHostMountListingIntoProjectTree(base, listing);
+        });
+        setListingCompletePaths((prev) => {
+          const next = new Set(prev);
+          next.add(relativePath);
+          return next;
+        });
+      } catch (error) {
+        console.error('Failed to lazy-load project host mount listing', error);
+        showToast({ type: 'error', title: 'Failed to load mapped folder contents', message: 'Please try again.' });
+      } finally {
+        listingInFlightRef.current.delete(relativePath);
+      }
+    }, [projectId, listingCompletePaths, folderTree, showToast]);
+
+    const effectiveFolderTree = workingTree ?? folderTree;
     
     // Initialize expandedIds with root folder ID if present
     useEffect(() => {
-        if (folderTree?.id) {
-            setExpandedIds(prev => new Set(prev).add(folderTree.id || 'ROOT'));
+        if (effectiveFolderTree?.id) {
+            setExpandedIds(prev => new Set(prev).add(effectiveFolderTree.id || 'ROOT'));
         }
-    }, [folderTree?.id]);
+    }, [effectiveFolderTree?.id]);
 
     const toggleExpansion = useCallback((id: string) => {
         setExpandedIds(prev => {
@@ -1298,7 +1360,7 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
             // But we usually want to navigate *inside* the tree.
             // If n is root, we usually don't select it.
             // Let's assume root is handled separately or we filter it.
-            if (n.id && n.id !== 'ROOT' && n.id !== folderTree?.id) { 
+            if (n.id && n.id !== 'ROOT' && n.id !== effectiveFolderTree?.id) { 
                  results.push({ type: 'folder', data: n, id: n.id });
             }
 
@@ -1336,9 +1398,9 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
              }
         }
         return results;
-    }, [expandedIds, searchTerm, folderTree?.id]);
+    }, [expandedIds, searchTerm, effectiveFolderTree?.id]);
 
-    const visibleItems = useMemo(() => folderTree ? getVisibleItems(folderTree) : [], [folderTree, getVisibleItems]);
+    const visibleItems = useMemo(() => effectiveFolderTree ? getVisibleItems(effectiveFolderTree) : [], [effectiveFolderTree, getVisibleItems]);
 
     // Selection hooks
     const multiSelect = useMultiSelect<TreeItem>({
@@ -1466,14 +1528,16 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
         setRenamingId,
         isActive: activeSection === 'contentFiles',
         focusIntentRef: listNav.focusIntentRef,
-        isMobile
+        isMobile,
+        listingCompletePaths,
+        loadHostMountListing,
     };
 
     return (
         <FolderTreeContext.Provider value={contextValue}>
             <div className="folder-tree overflow-auto" onContextMenuCapture={(e)=>e.preventDefault()}>
                 <FolderNode
-                    folder={folderTree!}
+                    folder={effectiveFolderTree!}
                     level={0}
                     folders={folders}
                     projectId={projectId}

@@ -212,6 +212,18 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         {
             if (sideEffects.DownloadStarted)
             {
+                // Journal can disappear after a successful download. Verify the router
+                // already holds the expected artifacts before failing the operation —
+                // otherwise a completed change-quant bricks the alias forever.
+                if (await TryAdvanceCompletedDownloadWithoutJournalAsync(
+                        operation,
+                        sideEffects,
+                        cancellationToken)
+                    .ConfigureAwait(false))
+                {
+                    return null;
+                }
+
                 await MarkFailedAsync(
                     operation,
                     "INSTALL_STEP_FAILED",
@@ -245,14 +257,107 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
             return journalSnapshot;
         }
 
+        await AdvanceToProvenanceFinalizationAsync(operation, sideEffects, cancellationToken)
+            .ConfigureAwait(false);
+        return journalSnapshot;
+    }
+
+    /// <summary>
+    /// When llama-admin no longer has the download journal, treat the download as
+    /// complete only if the router alias already points at the expected model files.
+    /// </summary>
+    private async Task<bool> TryAdvanceCompletedDownloadWithoutJournalAsync(
+        LocalModelOperation operation,
+        LifecycleSideEffects sideEffects,
+        CancellationToken cancellationToken)
+    {
+        bool verified;
+        try
+        {
+            verified = await IsDownloadOutcomePresentOnRouterAsync(operation, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not verify router outcome for lifecycle operation {OperationId} after journal loss.",
+                operation.OperationId);
+            return false;
+        }
+
+        if (!verified)
+        {
+            return false;
+        }
+
+        _logger.LogInformation(
+            "Lifecycle operation {OperationId} journal is gone but router already has expected artifacts; finalizing.",
+            operation.OperationId);
+
+        await AdvanceToProvenanceFinalizationAsync(operation, sideEffects, cancellationToken)
+            .ConfigureAwait(false);
+        return true;
+    }
+
+    private async Task AdvanceToProvenanceFinalizationAsync(
+        LocalModelOperation operation,
+        LifecycleSideEffects sideEffects,
+        CancellationToken cancellationToken)
+    {
         sideEffects.ArtifactsActivated = true;
         sideEffects.AliasRegistered = true;
         operation.CompletedSideEffectsJson = SerializeSideEffects(sideEffects);
         operation.Status = "provenanceFinalization";
         operation.CurrentStep = "provenanceFinalization";
+        operation.UpdatedUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         await TryProvenanceFinalizationAsync(operation, sideEffects, cancellationToken).ConfigureAwait(false);
-        return journalSnapshot;
+    }
+
+    private async Task<bool> IsDownloadOutcomePresentOnRouterAsync(
+        LocalModelOperation operation,
+        CancellationToken cancellationToken)
+    {
+        var request = BuildExactDownloadRequest(operation);
+        if (request.ModelFiles.Count == 0 || string.IsNullOrWhiteSpace(request.Alias))
+        {
+            return false;
+        }
+
+        var entries = await _adminClient.GetRouterEntriesAsync(cancellationToken).ConfigureAwait(false);
+        var entry = entries.Entries.FirstOrDefault(
+            e => string.Equals(e.Alias, request.Alias, StringComparison.Ordinal));
+        if (entry is null || !entry.HasModelFile || string.IsNullOrWhiteSpace(entry.ModelPath))
+        {
+            return false;
+        }
+
+        foreach (var modelFile in request.ModelFiles)
+        {
+            if (entry.ModelPath.IndexOf(modelFile, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+        }
+
+        if (request.MmprojFiles.Count > 0)
+        {
+            if (!entry.HasMmprojFile || string.IsNullOrWhiteSpace(entry.MmprojPath))
+            {
+                return false;
+            }
+
+            foreach (var mmprojFile in request.MmprojFiles)
+            {
+                if (entry.MmprojPath.IndexOf(mmprojFile, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private async Task BeginQueuedOperationAsync(
@@ -354,7 +459,24 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
 
             sideEffects.ProvenanceCommitted = true;
             operation.CompletedSideEffectsJson = SerializeSideEffects(sideEffects);
-            operation.Status = sideEffects.ObsoletePaths.Count > 0 ? "obsoleteCleanup" : "loadRestore";
+
+            if (string.Equals(operation.OperationKind, LocalModelOperationKinds.ChangeQuant, StringComparison.OrdinalIgnoreCase))
+            {
+                // GuideAntsApi installation provenance is the sole selection authority.
+                // Apply that selection to the router before any load-restore — do not trust
+                // download-side alias registration or leftover executor state.
+                await ApplyRouterSelectionFromChangeQuantAsync(operation, cancellationToken)
+                    .ConfigureAwait(false);
+                sideEffects.AliasRegistered = true;
+                operation.CompletedSideEffectsJson = SerializeSideEffects(sideEffects);
+                operation.Status = "loadRestore";
+            }
+            else
+            {
+                operation.Status =
+                    sideEffects.ObsoletePaths.Count > 0 ? "obsoleteCleanup" : "loadRestore";
+            }
+
             operation.CurrentStep = operation.Status;
             operation.UpdatedUtc = DateTime.UtcNow;
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -402,11 +524,43 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         installation.RouterPresetSnapshotJson = JsonSerializer.Serialize(input.RouterPreset);
         installation.UpdatedUtc = DateTime.UtcNow;
 
-        var sideEffects = ParseSideEffects(operation.CompletedSideEffectsJson);
-        sideEffects.ObsoletePaths = input.ObsoleteRepositoryPaths.ToList();
-        operation.CompletedSideEffectsJson = SerializeSideEffects(sideEffects);
-
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes the router alias model/mmproj paths from API-owned change-quant input.
+    /// Executor inventory and prior loads are not authoritative for which quant is active.
+    /// </summary>
+    private async Task ApplyRouterSelectionFromChangeQuantAsync(
+        LocalModelOperation operation,
+        CancellationToken cancellationToken)
+    {
+        var input = ChangeQuantImmutableInput.Deserialize(operation.ImmutableInputJson);
+        if (input.ModelFiles.Count == 0 || string.IsNullOrWhiteSpace(input.RouterModelId))
+        {
+            throw new InvalidOperationException(
+                "Change-quant provenance is missing model files or router alias.");
+        }
+
+        var target = input.TargetDirectory.Trim().Trim('/');
+        var modelFile = Path.GetFileName(input.ModelFiles[0].Replace('\\', '/'));
+        var modelPath = $"/models-local/llama/{target}/{modelFile}";
+        var mmprojPath = string.Empty;
+        if (input.MmprojFiles.Count > 0)
+        {
+            var mmprojFile = Path.GetFileName(input.MmprojFiles[0].Replace('\\', '/'));
+            mmprojPath = $"/models-local/llama/{target}/{mmprojFile}";
+        }
+
+        await _adminClient
+            .AddOrUpdateRouterEntryAsync(input.RouterModelId, modelPath, mmprojPath, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!await IsDownloadOutcomePresentOnRouterAsync(operation, cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException(
+                $"Router alias '{input.RouterModelId}' does not point at the API-selected quant file '{modelFile}'.");
+        }
     }
 
     private async Task CommitRepairProvenanceAsync(LocalModelOperation operation, CancellationToken cancellationToken)
@@ -477,6 +631,21 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         LifecycleSideEffects sideEffects,
         CancellationToken cancellationToken)
     {
+        // Change-quant must never delete sibling quants that are simply not active.
+        // Legacy rows may still carry status obsoleteCleanup or listed paths.
+        if (string.Equals(operation.OperationKind, LocalModelOperationKinds.ChangeQuant, StringComparison.OrdinalIgnoreCase))
+        {
+            sideEffects.ObsoletePaths = [];
+            sideEffects.ObsoleteCleanupCompleted = true;
+            operation.CompletedSideEffectsJson = SerializeSideEffects(sideEffects);
+            operation.Status = "loadRestore";
+            operation.CurrentStep = "loadRestore";
+            operation.UpdatedUtc = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await TryLoadRestoreAsync(operation, sideEffects, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (sideEffects.ObsoleteCleanupCompleted || sideEffects.ObsoletePaths.Count == 0)
         {
             operation.Status = "loadRestore";
@@ -531,6 +700,13 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         var alias = operation.RouterModelId ?? string.Empty;
         try
         {
+            if (string.Equals(operation.OperationKind, LocalModelOperationKinds.ChangeQuant, StringComparison.OrdinalIgnoreCase)
+                && !await IsDownloadOutcomePresentOnRouterAsync(operation, cancellationToken).ConfigureAwait(false))
+            {
+                await ApplyRouterSelectionFromChangeQuantAsync(operation, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             await _llamaClient.LoadModelAsync(alias, cancellationToken).ConfigureAwait(false);
             sideEffects.LoadRestored = true;
             operation.CompletedSideEffectsJson = SerializeSideEffects(sideEffects);

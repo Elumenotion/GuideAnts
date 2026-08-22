@@ -71,6 +71,15 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
                 continue;
             }
 
+            if (NotebookArtifactPathExclusions.IsExcludedRelativePath(relativePath))
+            {
+                _logger.LogDebug(
+                    "Skipping register for excluded artifact path {RelativePath} in notebook {NotebookId}",
+                    relativePath,
+                    notebookId);
+                continue;
+            }
+
             var fullPath = Path.Combine(rootPath, relativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
             if (!File.Exists(fullPath))
             {

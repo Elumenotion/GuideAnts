@@ -28,6 +28,10 @@ import { HostMountStateBadge } from '../hostMounts/HostMountStateBadge';
 import { HostMountCommandDialog } from '../hostMounts/HostMountCommandDialog';
 import { MapHostFolderDialog } from '../hostMounts/MapHostFolderDialog';
 import { isPathInsideHostMount } from '../../../utils/hostMountDisplayState';
+import {
+  graftLazyMountBranches,
+  mergeHostMountListingIntoTree,
+} from '../../../utils/hostMountTreeMerge';
 
 // Context for sharing state down the tree
 type TreeItem = 
@@ -59,6 +63,8 @@ interface NotebookFolderTreeContextType {
     isAdmin: boolean;
     getMountForPath: (path: string) => NotebookHostMountEntry | undefined;
     getEnclosingMount: (path: string) => NotebookHostMountEntry | undefined;
+    loadHostMountListing: (relativePath: string) => Promise<void>;
+    listingCompletePaths: Set<string>;
     onOpenMapHostFolderDialog: () => void;
     onCheckMappedFolders: () => void;
     onRemoveMappedFolder: (mountId: string) => void;
@@ -362,19 +368,26 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   const displaySubFolders = filteredSubFolders;
   const displayFiles = filteredFiles;
   const hasRenderableChildren = displaySubFolders.length > 0 || displayFiles.length > 0;
-  const hasChildren = hasRenderableChildren || canExpandEmptyLinkedMount;
+  const needsLazyListing = Boolean(
+    isLinkedFolder
+    && folder.relativePath
+    && context
+    && !context.listingCompletePaths.has(folder.relativePath),
+  );
+  const hasChildren = hasRenderableChildren || canExpandEmptyLinkedMount || needsLazyListing;
   const hasActiveSearch = Boolean(searchTerm?.trim());
   const expansionId = folder.relativePath || 'ROOT';
   const isExpanded = hasActiveSearch || (context?.expandedIds.has(expansionId) ?? true);
-  const requestLinkedFolderRefresh = useCallback(() => {
-    if (canExpandEmptyLinkedMount && !hasRenderableChildren) {
-      context?.refreshNotebookFiles();
-    }
-  }, [canExpandEmptyLinkedMount, hasRenderableChildren, context]);
+  const requestLinkedFolderListing = useCallback(() => {
+    if (!folder.relativePath || !context) return;
+    if (!isLinkedFolder) return;
+    if (context.listingCompletePaths.has(folder.relativePath)) return;
+    void context.loadHostMountListing(folder.relativePath);
+  }, [context, folder.relativePath, isLinkedFolder]);
   const toggleExpand = useCallback(() => {
     context?.toggleExpansion(expansionId);
-    requestLinkedFolderRefresh();
-  }, [context, expansionId, requestLinkedFolderRefresh]);
+    requestLinkedFolderListing();
+  }, [context, expansionId, requestLinkedFolderListing]);
   const paddingLeft = level === 0 ? 0 : level * 20 + 8;
   const openCreateSubfolderInput = useCallback(() => {
     if (!isExpanded) {
@@ -1530,6 +1543,48 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
 
   // Track locally-created empty folders until they appear in server tree
   const [localEmptyFolders, setLocalEmptyFolders] = useState<Set<string>>(new Set());
+  const [listingCompletePaths, setListingCompletePaths] = useState<Set<string>>(() => new Set());
+  const [workingTree, setWorkingTree] = useState<NotebookFolderTreeDto | null>(null);
+  const listingInFlightRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setListingCompletePaths(new Set());
+    setWorkingTree(null);
+    listingInFlightRef.current.clear();
+  }, [projectId, notebookId]);
+
+  useEffect(() => {
+    if (!tree) {
+      setWorkingTree(null);
+      return;
+    }
+    setWorkingTree((prev) => graftLazyMountBranches(tree, prev, listingCompletePaths));
+  }, [tree, listingCompletePaths]);
+
+  const loadHostMountListing = useCallback(async (relativePath: string) => {
+    if (!projectId || !notebookId || !relativePath) return;
+    if (listingCompletePaths.has(relativePath)) return;
+    if (listingInFlightRef.current.has(relativePath)) return;
+    listingInFlightRef.current.add(relativePath);
+    try {
+      const listing = await notebookFilesApi.listHostMountLevel(projectId, notebookId, relativePath);
+      setWorkingTree((prev) => {
+        const base = prev ?? tree;
+        if (!base) return prev;
+        return mergeHostMountListingIntoTree(base, listing);
+      });
+      setListingCompletePaths((prev) => {
+        const next = new Set(prev);
+        next.add(relativePath);
+        return next;
+      });
+    } catch (error) {
+      console.error('Failed to lazy-load host mount listing', error);
+      showToast({ type: 'error', title: 'Failed to load mapped folder contents', message: 'Please try again.' });
+    } finally {
+      listingInFlightRef.current.delete(relativePath);
+    }
+  }, [projectId, notebookId, listingCompletePaths, tree, showToast]);
   
   const addLocalEmptyFolder = useCallback((path: string) => {
     setLocalEmptyFolders(prev => new Set([...prev, path]));
@@ -1637,8 +1692,9 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
 
   // Merge local folders into tree for rendering
   const effectiveTree = useMemo(() => {
-    if (!tree) return null;
-    let merged = localEmptyFolders.size === 0 ? tree : mergeLocalFolders(tree);
+    const sourceTree = workingTree ?? tree;
+    if (!sourceTree) return null;
+    let merged = localEmptyFolders.size === 0 ? sourceTree : mergeLocalFolders(sourceTree);
     if (hostMounts.length === 0) {
       return merged;
     }
@@ -1660,7 +1716,7 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
       ...merged,
       subFolders: mountSubFolders,
     };
-  }, [tree, localEmptyFolders, mergeLocalFolders, hostMounts]);
+  }, [workingTree, tree, localEmptyFolders, mergeLocalFolders, hostMounts]);
 
   const folderHasRenderableChildren = useCallback((node: NotebookFolderTreeDto, relativePath: string): boolean | null => {
     if (node.relativePath === relativePath) {
@@ -1677,32 +1733,36 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
     return null;
   }, []);
 
-  const emptyLinkedMountRefreshKeyRef = useRef<string | null>(null);
+  // Prefetch one-level listing for empty linked mount roots (no full-tree refresh).
+  const emptyLinkedMountListingKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!effectiveTree || hostMounts.length === 0) {
-      emptyLinkedMountRefreshKeyRef.current = null;
+      emptyLinkedMountListingKeyRef.current = null;
       return;
     }
 
     const emptyLinkedMountPaths = hostMounts
       .filter((mount) => mount.displayState === 'Linked')
+      .filter((mount) => !listingCompletePaths.has(mount.relativePath))
       .filter((mount) => folderHasRenderableChildren(effectiveTree, mount.relativePath) !== true)
       .map((mount) => mount.relativePath)
       .sort();
 
     if (emptyLinkedMountPaths.length === 0) {
-      emptyLinkedMountRefreshKeyRef.current = null;
+      emptyLinkedMountListingKeyRef.current = null;
       return;
     }
 
     const key = emptyLinkedMountPaths.join('|');
-    if (emptyLinkedMountRefreshKeyRef.current === key) {
+    if (emptyLinkedMountListingKeyRef.current === key) {
       return;
     }
 
-    emptyLinkedMountRefreshKeyRef.current = key;
-    requestNotebookFilesRefresh();
-  }, [effectiveTree, hostMounts, folderHasRenderableChildren, requestNotebookFilesRefresh]);
+    emptyLinkedMountListingKeyRef.current = key;
+    for (const path of emptyLinkedMountPaths) {
+      void loadHostMountListing(path);
+    }
+  }, [effectiveTree, hostMounts, folderHasRenderableChildren, listingCompletePaths, loadHostMountListing]);
 
   const getVisibleItems = useCallback((node: NotebookFolderTreeDto): TreeItem[] => {
       let results: TreeItem[] = [];
@@ -1871,6 +1931,8 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
       isAdmin,
       getMountForPath,
       getEnclosingMount,
+      loadHostMountListing,
+      listingCompletePaths,
       onOpenMapHostFolderDialog: () => setShowMapHostFolderDialog(true),
       onCheckMappedFolders: handleCheckMappedFolders,
       onRemoveMappedFolder: handleRemoveMappedFolder,

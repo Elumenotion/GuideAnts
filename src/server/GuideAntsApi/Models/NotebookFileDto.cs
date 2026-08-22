@@ -20,6 +20,25 @@ public record NotebookFolderTreeDto(
     List<NotebookFileDto> Files
 );
 
+public record HostMountListingFolderDto(
+    string Name,
+    string RelativePath);
+
+public record HostMountListingFileDto(
+    Guid Id,
+    string FileName,
+    string RelativePath,
+    long FileSize,
+    DateTime LastModifiedUtc,
+    string FileHash,
+    bool IsLinked = true);
+
+public record HostMountListingDto(
+    string Path,
+    List<HostMountListingFolderDto> Folders,
+    List<HostMountListingFileDto> Files,
+    bool Truncated);
+
 public record RenameItemDto(string SourcePath, string NewName);
 public record MoveItemDto(string SourcePath, string DestinationPath);
 public record NotebookCreateFolderDto(string Path);

@@ -11,6 +11,7 @@ using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using GuideAntsApi.Tests.TestUtils;
 using Moq;
@@ -451,7 +452,15 @@ public sealed class LlamaNegativeContractTests
             inventory.Object,
             coordinator,
             CreateLifecycleScopeFactory(db, coordinator),
+            CreateHostApplicationLifetime(),
             NullLogger<LocalModelLifecycleService>.Instance);
+    }
+
+    private static IHostApplicationLifetime CreateHostApplicationLifetime()
+    {
+        var lifetime = new Mock<IHostApplicationLifetime>();
+        lifetime.Setup(x => x.ApplicationStopping).Returns(CancellationToken.None);
+        return lifetime.Object;
     }
 
     private static IServiceScopeFactory CreateLifecycleScopeFactory(

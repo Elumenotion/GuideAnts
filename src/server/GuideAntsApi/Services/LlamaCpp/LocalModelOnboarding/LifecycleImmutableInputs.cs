@@ -29,7 +29,6 @@ public sealed record ChangeQuantImmutableInput(
     string RouterModelId,
     string TargetDirectory,
     IReadOnlyDictionary<string, string> RouterPreset,
-    IReadOnlyList<string> ObsoleteRepositoryPaths,
     IReadOnlyList<CuratedArtifactMetadataInput>? ArtifactMetadata = null)
 {
     private static readonly JsonSerializerOptions CanonicalJsonOptions = new()

@@ -8,7 +8,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Collections.Concurrent;
 using GuideAntsApi.Services.Components.Sync;
 
 namespace GuideAntsApi.Services.Components;
@@ -18,9 +17,7 @@ public class NotebookFileService : INotebookFileService
     private const int DefaultLinkedMountTreeMaxFiles = 5000;
     private const int DefaultLinkedMountTreeMaxDepth = 3;
     private const int DefaultLinkedMountTreeScanBudgetMs = 2500;
-    private const int DefaultLinkedMountTreeCacheSeconds = 15;
-
-    private static readonly ConcurrentDictionary<string, LinkedMountCacheEntry> LinkedMountTreeCache = new(StringComparer.Ordinal);
+    private const int DefaultLinkedMountTreeCacheSeconds = 120;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _storagePath;
@@ -65,7 +62,7 @@ public class NotebookFileService : INotebookFileService
             configuration["FileStorage:LinkedMountTreeCacheSeconds"],
             DefaultLinkedMountTreeCacheSeconds,
             min: 1,
-            max: 300));
+            max: 3600));
     }
 
     // Backward-compatible overload used by tests.
@@ -143,7 +140,7 @@ using var scope2 = CreateDbScope();
             .Select(f => new NotebookFileDto(f.Id, Path.GetFileName(f.RelativePath), f.RelativePath, f.FileSize, f.LastModifiedUtc, f.FileHash, f.OriginContentFileVersionId, false, false))
             .ToList();
 
-        var linkedFileDtos = await BuildLinkedMountFileDtosAsync(context, notebookId);
+        var (linkedFileDtos, linkedDirectories) = await BuildLinkedMountOverlayAsync(context, notebookId);
         if (linkedFileDtos.Count > 0)
         {
             var existingPaths = new HashSet<string>(
@@ -159,19 +156,121 @@ using var scope2 = CreateDbScope();
             }
         }
         
-        return BuildNotebookFolderTree(fileDtos);
+        return BuildNotebookFolderTree(fileDtos, linkedDirectories);
     }
 
-    private static NotebookFolderTreeDto BuildNotebookFolderTree(List<NotebookFileDto> files)
+    public async Task<HostMountListingDto?> ListHostMountLevelAsync(
+        Guid projectId,
+        Guid notebookId,
+        string relativePath)
     {
-        // Build folder tree from database file paths only - no filesystem scanning.
-        // This is much faster than scanning the filesystem, especially for large trees.
-        // Empty folders are managed client-side until they contain files.
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+
+        using var scope = CreateDbScope();
+        var context = GetDbContext(scope);
+        var linkedMountRoots = await GetLinkedMountRootsAsync(context, notebookId);
+        if (linkedMountRoots.Count == 0)
+        {
+            return null;
+        }
+
+        var normalizedPath = NormalizeRelativePath(relativePath);
+        var mount = linkedMountRoots.FirstOrDefault(root =>
+            normalizedPath.Equals(root.LinkRelativePath, StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.StartsWith(root.LinkRelativePath + "/", StringComparison.OrdinalIgnoreCase));
+        if (mount == null)
+        {
+            return null;
+        }
+
+        var withinMount = normalizedPath.Equals(mount.LinkRelativePath, StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : normalizedPath[(mount.LinkRelativePath.Length + 1)..];
+
+        var mountKey = mount.MountId.ToString("N");
+        var cacheKey = HostMountListingCache.LevelKey(mountKey, normalizedPath);
+        HostMountDirectoryScanner.ScanResult scanResult;
+        if (HostMountListingCache.TryGet(cacheKey, out var cached))
+        {
+            _logger.LogDebug(
+                "Host mount listing cache_hit for notebook {NotebookId} path {Path}",
+                notebookId,
+                normalizedPath);
+            scanResult = cached;
+        }
+        else
+        {
+            scanResult = HostMountDirectoryScanner.ListLevel(
+                mount.LinkPhysicalPath,
+                mount.LinkRelativePath,
+                withinMount,
+                _linkedMountTreeMaxFiles,
+                _linkedMountTreeScanBudget,
+                _logger);
+            HostMountListingCache.Set(cacheKey, scanResult, _linkedMountTreeCacheTtl);
+            _logger.LogInformation(
+                "Host mount lazy_list for notebook {NotebookId} path {Path} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
+                notebookId,
+                normalizedPath,
+                scanResult.Files.Count,
+                scanResult.Directories.Count,
+                scanResult.WasTruncated);
+        }
+
+        var folders = scanResult.Directories
+            .Where(d => !IsInResourcesFolder(d.RelativePath) && !IsInGuideantsFolder(d.RelativePath))
+            .Select(d => new HostMountListingFolderDto(d.Name, d.RelativePath))
+            .ToList();
+
+        var listingFiles = scanResult.Files
+            .Where(f => !IsInResourcesFolder(f.RelativePath) && !IsInGuideantsFolder(f.RelativePath))
+            .Select(f => new HostMountListingFileDto(
+                Id: CreateLinkedVirtualFileId(f.RelativePath),
+                FileName: f.FileName,
+                RelativePath: f.RelativePath,
+                FileSize: f.FileSize,
+                LastModifiedUtc: f.LastModifiedUtc,
+                FileHash: $"{f.FileSize:x}-{f.LastModifiedUtc.Ticks:x}",
+                IsLinked: true))
+            .ToList();
+
+        return new HostMountListingDto(normalizedPath, folders, listingFiles, scanResult.WasTruncated);
+    }
+
+    private static NotebookFolderTreeDto BuildNotebookFolderTree(
+        List<NotebookFileDto> files,
+        IReadOnlyCollection<string>? linkedDirectories = null)
+    {
+        // Build folder tree from file paths plus explicit directory stubs (host mounts).
+        // Empty non-mount folders are still managed client-side until they contain files.
         
-        var folderStructure = new Dictionary<string, NotebookFolderTreeDto>();
+        var folderStructure = new Dictionary<string, NotebookFolderTreeDto>(StringComparer.OrdinalIgnoreCase);
         var rootFiles = new List<NotebookFileDto>();
 
-        // Collect all files that are in the root (no directory separators)
+        void EnsureFolderPath(string folderPath)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                return;
+            }
+
+            var pathParts = folderPath.Replace('\\', '/').Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var currentPath = "";
+            foreach (var folderName in pathParts)
+            {
+                currentPath = string.IsNullOrEmpty(currentPath) ? folderName : $"{currentPath}/{folderName}";
+                if (!folderStructure.ContainsKey(currentPath))
+                {
+                    folderStructure[currentPath] = new NotebookFolderTreeDto(
+                        folderName,
+                        currentPath,
+                        new List<NotebookFolderTreeDto>(),
+                        new List<NotebookFileDto>()
+                    );
+                }
+            }
+        }
+
         foreach (var file in files)
         {
             if (!file.RelativePath.Contains('/'))
@@ -180,13 +279,12 @@ using var scope2 = CreateDbScope();
             }
         }
 
-        // Build folder structure from files - this extracts the folder hierarchy from file paths
         foreach (var file in files.Where(f => f.RelativePath.Contains('/')))
         {
             var pathParts = file.RelativePath.Split('/');
             var currentPath = "";
 
-            for (int i = 0; i < pathParts.Length - 1; i++) // Exclude the filename
+            for (int i = 0; i < pathParts.Length - 1; i++)
             {
                 var folderName = pathParts[i];
                 currentPath = string.IsNullOrEmpty(currentPath) ? folderName : $"{currentPath}/{folderName}";
@@ -201,7 +299,6 @@ using var scope2 = CreateDbScope();
                     );
                 }
 
-                // Add the file to its parent folder if this is the last folder in the path
                 if (i == pathParts.Length - 2)
                 {
                     folderStructure[currentPath].Files.Add(file);
@@ -209,9 +306,16 @@ using var scope2 = CreateDbScope();
             }
         }
 
-        // Build the hierarchy by organizing folders into their parents
+        if (linkedDirectories != null)
+        {
+            foreach (var directory in linkedDirectories)
+            {
+                EnsureFolderPath(directory);
+            }
+        }
+
         var rootFolders = new List<NotebookFolderTreeDto>();
-        var processedFolders = new HashSet<string>();
+        var processedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var kvp in folderStructure.OrderBy(f => f.Key))
         {
@@ -223,13 +327,11 @@ using var scope2 = CreateDbScope();
             var pathParts = folderPath.Split('/');
             if (pathParts.Length == 1)
             {
-                // This is a root folder
                 AttachSubFolders(folder, folderStructure, processedFolders);
                 rootFolders.Add(folder);
             }
         }
 
-        // Create the root tree node
         return new NotebookFolderTreeDto(
             "Root",
             "",
@@ -426,6 +528,7 @@ using var scope = CreateDbScope();
                 (link, mount) => new { Link = link, Mount = mount })
             .Where(row => row.Mount.Status != HostFolderMountStatus.Removed)
             .Select(row => new LinkedMountRoot(
+                row.Mount.Id,
                 row.Link.LinkRelativePath.Replace("\\", "/").Trim('/'),
                 row.Link.LinkPhysicalPath))
             .ToListAsync(cancellationToken);
@@ -447,7 +550,9 @@ using var scope = CreateDbScope();
         return deduped.Values.ToList();
     }
 
-    private async Task<List<NotebookFileDto>> BuildLinkedMountFileDtosAsync(
+    private sealed record LinkedMountRoot(Guid MountId, string LinkRelativePath, string LinkPhysicalPath);
+
+    private async Task<(List<NotebookFileDto> Files, List<string> Directories)> BuildLinkedMountOverlayAsync(
         ApplicationDbContext context,
         Guid notebookId,
         CancellationToken cancellationToken = default)
@@ -455,60 +560,101 @@ using var scope = CreateDbScope();
         var linkedMountRoots = await GetLinkedMountRootsAsync(context, notebookId, cancellationToken);
         if (linkedMountRoots.Count == 0)
         {
-            return [];
+            return ([], []);
         }
 
-        var now = DateTimeOffset.UtcNow;
-        PruneExpiredLinkedMountCache(now);
-        var cacheKey = BuildLinkedMountCacheKey(notebookId, linkedMountRoots);
-        if (LinkedMountTreeCache.TryGetValue(cacheKey, out var cached)
-            && cached.ExpiresUtc > now)
+        var allFiles = new List<NotebookFileDto>();
+        var allDirectories = new List<string>();
+        var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var root in linkedMountRoots)
         {
-            return [.. cached.Files];
+            var mountKey = root.MountId.ToString("N");
+            var cacheKey = HostMountListingCache.ShallowKey(mountKey);
+            HostMountDirectoryScanner.ScanResult scanResult;
+            if (HostMountListingCache.TryGet(cacheKey, out var cached))
+            {
+                _logger.LogDebug(
+                    "Host mount shallow cache_hit for notebook {NotebookId} mount {MountId}",
+                    notebookId,
+                    root.MountId);
+                scanResult = cached;
+            }
+            else
+            {
+                scanResult = HostMountDirectoryScanner.Scan(
+                    [new HostMountDirectoryScanner.MountRoot(root.LinkRelativePath, root.LinkPhysicalPath)],
+                    _linkedMountTreeMaxFiles,
+                    _linkedMountTreeMaxDepth,
+                    _linkedMountTreeScanBudget,
+                    _logger);
+                HostMountListingCache.Set(cacheKey, scanResult, _linkedMountTreeCacheTtl);
+                _logger.LogInformation(
+                    "Host mount shallow_scan for notebook {NotebookId} mount {MountId} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
+                    notebookId,
+                    root.MountId,
+                    scanResult.Files.Count,
+                    scanResult.Directories.Count,
+                    scanResult.WasTruncated);
+
+                if (scanResult.WasTruncated)
+                {
+                    _logger.LogWarning(
+                        "Linked mount tree enumeration was truncated for notebook {NotebookId} mount {MountId} (maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
+                        notebookId,
+                        root.MountId,
+                        _linkedMountTreeMaxFiles,
+                        _linkedMountTreeMaxDepth,
+                        (int)_linkedMountTreeScanBudget.TotalMilliseconds);
+                }
+            }
+
+            if (seenDirs.Add(root.LinkRelativePath))
+            {
+                allDirectories.Add(root.LinkRelativePath);
+            }
+
+            foreach (var directory in scanResult.Directories)
+            {
+                if (IsInResourcesFolder(directory.RelativePath) || IsInGuideantsFolder(directory.RelativePath))
+                {
+                    continue;
+                }
+
+                if (seenDirs.Add(directory.RelativePath))
+                {
+                    allDirectories.Add(directory.RelativePath);
+                }
+            }
+
+            foreach (var file in scanResult.Files)
+            {
+                if (IsInResourcesFolder(file.RelativePath) || IsInGuideantsFolder(file.RelativePath))
+                {
+                    continue;
+                }
+
+                if (!seenFiles.Add(file.RelativePath))
+                {
+                    continue;
+                }
+
+                allFiles.Add(new NotebookFileDto(
+                    Id: CreateLinkedVirtualFileId(file.RelativePath),
+                    FileName: file.FileName,
+                    RelativePath: file.RelativePath,
+                    FileSize: file.FileSize,
+                    LastModifiedUtc: file.LastModifiedUtc,
+                    FileHash: $"{file.FileSize:x}-{file.LastModifiedUtc.Ticks:x}",
+                    OriginContentFileVersionId: null,
+                    Index: false,
+                    IsIndexed: false,
+                    IsLinked: true));
+            }
         }
 
-        var scanRoots = linkedMountRoots
-            .Select(r => new HostMountDirectoryScanner.MountRoot(r.LinkRelativePath, r.LinkPhysicalPath))
-            .ToList();
-
-        var scanResult = HostMountDirectoryScanner.Scan(
-            scanRoots,
-            _linkedMountTreeMaxFiles,
-            _linkedMountTreeMaxDepth,
-            _linkedMountTreeScanBudget,
-            _logger);
-
-        var results = scanResult.Files
-            .Where(f => !IsInResourcesFolder(f.RelativePath) && !IsInGuideantsFolder(f.RelativePath))
-            .Select(f => new NotebookFileDto(
-                Id: CreateLinkedVirtualFileId(f.RelativePath),
-                FileName: f.FileName,
-                RelativePath: f.RelativePath,
-                FileSize: f.FileSize,
-                LastModifiedUtc: f.LastModifiedUtc,
-                FileHash: $"{f.FileSize:x}-{f.LastModifiedUtc.Ticks:x}",
-                OriginContentFileVersionId: null,
-                Index: false,
-                IsIndexed: false,
-                IsLinked: true))
-            .ToList();
-
-        if (scanResult.WasTruncated)
-        {
-            _logger.LogWarning(
-                "Linked mount tree enumeration was truncated for notebook {NotebookId} (roots={RootCount}, maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
-                notebookId,
-                linkedMountRoots.Count,
-                _linkedMountTreeMaxFiles,
-                _linkedMountTreeMaxDepth,
-                (int)_linkedMountTreeScanBudget.TotalMilliseconds);
-        }
-
-        LinkedMountTreeCache[cacheKey] = new LinkedMountCacheEntry(
-            ExpiresUtc: DateTimeOffset.UtcNow + _linkedMountTreeCacheTtl,
-            Files: [.. results]);
-
-        return results;
+        return (allFiles, allDirectories);
     }
 
     private static Guid CreateLinkedVirtualFileId(string relativePath)
@@ -539,29 +685,34 @@ using var scope = CreateDbScope();
         return parsed;
     }
 
-    private static string BuildLinkedMountCacheKey(Guid notebookId, IReadOnlyCollection<LinkedMountRoot> linkedMountRoots)
+    private async Task InvalidateMountCachesForNotebookPathAsync(Guid notebookId, string relativePath)
     {
-        var parts = linkedMountRoots
-            .OrderBy(r => r.LinkRelativePath, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(r => r.LinkPhysicalPath, StringComparer.OrdinalIgnoreCase)
-            .Select(r => $"{r.LinkRelativePath}|{r.LinkPhysicalPath}");
-        return $"{notebookId:N}:{string.Join(";", parts)}";
-    }
-
-    private static void PruneExpiredLinkedMountCache(DateTimeOffset now)
-    {
-        foreach (var kvp in LinkedMountTreeCache)
+        try
         {
-            if (kvp.Value.ExpiresUtc <= now)
+            using var scope = CreateDbScope();
+            var context = GetDbContext(scope);
+            var roots = await GetLinkedMountRootsAsync(context, notebookId);
+            var normalized = NormalizeRelativePath(relativePath);
+            foreach (var root in roots)
             {
-                LinkedMountTreeCache.TryRemove(kvp.Key, out _);
+                if (normalized.Equals(root.LinkRelativePath, StringComparison.OrdinalIgnoreCase)
+                    || normalized.StartsWith(root.LinkRelativePath + "/", StringComparison.OrdinalIgnoreCase)
+                    || root.LinkRelativePath.StartsWith(normalized + "/", StringComparison.OrdinalIgnoreCase)
+                    || normalized.Length == 0)
+                {
+                    HostMountListingCache.InvalidateMount(root.MountId.ToString("N"));
+                    _logger.LogInformation(
+                        "Host mount cache_invalidated for mount {MountId} due to path {Path}",
+                        root.MountId,
+                        normalized);
+                }
             }
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to invalidate host mount listing cache for notebook {NotebookId}", notebookId);
+        }
     }
-
-    private sealed record LinkedMountCacheEntry(DateTimeOffset ExpiresUtc, IReadOnlyList<NotebookFileDto> Files);
-
-    private sealed record LinkedMountRoot(string LinkRelativePath, string LinkPhysicalPath);
 
     private async Task<(NotebookFile? file, string normalizedPath)> FindNotebookFileByRelativePathAsync(
         ApplicationDbContext context,
@@ -1880,6 +2031,7 @@ using var scope = CreateDbScope();
         await context.SaveChangesAsync();
         
         await QueueNotebookSyncBestEffortAsync(notebookId);
+        await InvalidateMountCachesForNotebookPathAsync(notebookId, relativePath);
         
         return true;
     }
@@ -1962,6 +2114,7 @@ using var scope = CreateDbScope();
         await context.SaveChangesAsync();
         
         await QueueNotebookSyncBestEffortAsync(notebookId);
+        await InvalidateMountCachesForNotebookPathAsync(notebookId, sourceRelativePath);
         
         return true;
     }
@@ -2038,6 +2191,8 @@ using var scope = CreateDbScope();
         await context.SaveChangesAsync();
         
         await QueueNotebookSyncBestEffortAsync(notebookId);
+        await InvalidateMountCachesForNotebookPathAsync(notebookId, sourceRelativePath);
+        await InvalidateMountCachesForNotebookPathAsync(notebookId, destinationRelativePath);
         
         return true;
     }

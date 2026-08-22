@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.StaticFiles;
@@ -24,11 +23,6 @@ public class ProjectFolderService : IProjectFolderService
     // aggressively to discover out-of-band changes; a couple of minutes bounds staleness
     // for the read-only host-mount overlay while cutting the scan rate dramatically.
     private const int DefaultProjectMountTreeCacheSeconds = 120;
-
-    // Shared across all instances/requests so concurrent folder-tree polls for the same
-    // mount reuse a single filesystem scan instead of re-walking the host directory
-    // (which can hit the maxFiles/maxDepth/scanBudget limits) on every poll.
-    private static readonly ConcurrentDictionary<string, MountScanCacheEntry> MountScanCache = new(StringComparer.Ordinal);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
@@ -687,11 +681,85 @@ using var scope = CreateDbScope();
         foreach (var mount in mounts)
         {
             var scanResult = GetOrScanMount(mount);
-            var mountRootNode = BuildMountFolderTree(mount, scanResult.Files);
+            var mountRootNode = BuildMountFolderTree(mount, scanResult.Files, scanResult.Directories);
             mountNodes.Add(mountRootNode);
         }
 
         return mountNodes;
+    }
+
+    public async Task<HostMountListingDto?> ListHostMountLevelAsync(Guid projectId, string relativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+
+        using var scope = CreateDbScope();
+        var context = GetDbContext(scope);
+        var mounts = await context.HostFolderMounts
+            .AsNoTracking()
+            .Where(m => m.ProjectId == projectId
+                && m.Scope == HostFolderMountScope.Project
+                && m.Status != HostFolderMountStatus.Removed
+                && m.Status != HostFolderMountStatus.PendingRemoval)
+            .ToListAsync();
+
+        var normalizedPath = relativePath.Replace('\\', '/').Trim('/');
+        var mount = mounts.FirstOrDefault(m =>
+            normalizedPath.Equals(m.LeafName, StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.StartsWith(m.LeafName + "/", StringComparison.OrdinalIgnoreCase));
+        if (mount == null)
+        {
+            return null;
+        }
+
+        var withinMount = normalizedPath.Equals(mount.LeafName, StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : normalizedPath[(mount.LeafName.Length + 1)..];
+
+        var mountKey = mount.Id.ToString("N");
+        var cacheKey = HostMountListingCache.LevelKey(mountKey, normalizedPath);
+        HostMountDirectoryScanner.ScanResult scanResult;
+        if (HostMountListingCache.TryGet(cacheKey, out var cached))
+        {
+            _logger.LogDebug(
+                "Project host mount listing cache_hit for mount {MountId} path {Path}",
+                mount.Id,
+                normalizedPath);
+            scanResult = cached;
+        }
+        else
+        {
+            scanResult = HostMountDirectoryScanner.ListLevel(
+                mount.ContainerSourcePath,
+                mount.LeafName,
+                withinMount,
+                _linkedMountTreeMaxFiles,
+                _linkedMountTreeScanBudget,
+                _logger);
+            HostMountListingCache.Set(cacheKey, scanResult, _projectMountTreeCacheTtl);
+            _logger.LogInformation(
+                "Project host mount lazy_list for mount {MountId} path {Path} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
+                mount.Id,
+                normalizedPath,
+                scanResult.Files.Count,
+                scanResult.Directories.Count,
+                scanResult.WasTruncated);
+        }
+
+        var folders = scanResult.Directories
+            .Select(d => new HostMountListingFolderDto(d.Name, d.RelativePath))
+            .ToList();
+        var files = scanResult.Files
+            .Select(f => new HostMountListingFileDto(
+                Id: CreateMountVirtualFileId(mount.Id, f.RelativePath),
+                FileName: f.FileName,
+                RelativePath: f.RelativePath,
+                FileSize: f.FileSize,
+                LastModifiedUtc: f.LastModifiedUtc,
+                FileHash: $"{f.FileSize:x}-{f.LastModifiedUtc.Ticks:x}",
+                IsLinked: true))
+            .ToList();
+
+        return new HostMountListingDto(normalizedPath, folders, files, scanResult.WasTruncated);
     }
 
     /// <summary>
@@ -701,13 +769,12 @@ using var scope = CreateDbScope();
     /// </summary>
     private HostMountDirectoryScanner.ScanResult GetOrScanMount(HostFolderMount mount)
     {
-        var now = DateTimeOffset.UtcNow;
-        PruneExpiredMountScanCache(now);
-
-        var cacheKey = BuildMountScanCacheKey(mount);
-        if (MountScanCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > now)
+        var mountKey = mount.Id.ToString("N");
+        var cacheKey = HostMountListingCache.ShallowKey(mountKey);
+        if (HostMountListingCache.TryGet(cacheKey, out var cached))
         {
-            return cached.Result;
+            _logger.LogDebug("Project host mount shallow cache_hit for mount {MountId}", mount.Id);
+            return cached;
         }
 
         var scanRoots = new List<HostMountDirectoryScanner.MountRoot>
@@ -722,6 +789,14 @@ using var scope = CreateDbScope();
             _linkedMountTreeScanBudget,
             _logger);
 
+        HostMountListingCache.Set(cacheKey, scanResult, _projectMountTreeCacheTtl);
+        _logger.LogInformation(
+            "Project host mount shallow_scan for mount {MountId} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
+            mount.Id,
+            scanResult.Files.Count,
+            scanResult.Directories.Count,
+            scanResult.WasTruncated);
+
         if (scanResult.WasTruncated)
         {
             _logger.LogWarning(
@@ -732,38 +807,24 @@ using var scope = CreateDbScope();
                 (int)_linkedMountTreeScanBudget.TotalMilliseconds);
         }
 
-        MountScanCache[cacheKey] = new MountScanCacheEntry(
-            ExpiresUtc: DateTimeOffset.UtcNow + _projectMountTreeCacheTtl,
-            Result: scanResult);
-
         return scanResult;
     }
 
-    private static string BuildMountScanCacheKey(HostFolderMount mount) =>
-        $"{mount.Id:N}|{mount.LeafName}|{mount.ContainerSourcePath}";
-
-    private static void PruneExpiredMountScanCache(DateTimeOffset now)
-    {
-        foreach (var kvp in MountScanCache)
-        {
-            if (kvp.Value.ExpiresUtc <= now)
-            {
-                MountScanCache.TryRemove(kvp.Key, out _);
-            }
-        }
-    }
-
-    private sealed record MountScanCacheEntry(DateTimeOffset ExpiresUtc, HostMountDirectoryScanner.ScanResult Result);
-
     private FolderTreeDto BuildMountFolderTree(
         HostFolderMount mount,
-        IReadOnlyList<HostMountDirectoryScanner.ScannedFile> files)
+        IReadOnlyList<HostMountDirectoryScanner.ScannedFile> files,
+        IReadOnlyList<HostMountDirectoryScanner.ScannedDirectory> directories)
     {
         var folderChildren = new Dictionary<string, List<FolderTreeDto>>(StringComparer.OrdinalIgnoreCase);
         var fileChildren = new Dictionary<string, List<ContentFileDetailsDto>>(StringComparer.OrdinalIgnoreCase);
 
         folderChildren[mount.LeafName] = [];
         fileChildren[mount.LeafName] = [];
+
+        foreach (var directory in directories)
+        {
+            EnsureFolderPath(directory.RelativePath, mount.LeafName, folderChildren, fileChildren);
+        }
 
         foreach (var file in files)
         {

@@ -32,6 +32,33 @@ public static class ProjectFolderEndpoints
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden);
 
+        group.MapGet("/host-mounts/listing", async (
+            Guid projectId,
+            string path,
+            IProjectFolderService folderService) =>
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return Results.BadRequest(new { message = "Query parameter 'path' is required." });
+            }
+
+            try
+            {
+                var listing = await folderService.ListHostMountLevelAsync(projectId, path);
+                return listing == null ? Results.NotFound() : Results.Ok(listing);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("ListProjectHostMountLevel")
+        .Produces<HostMountListingDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
         // Get all folders
         group.MapGet("/", async (Guid projectId, IProjectFolderService folderService) =>
         {

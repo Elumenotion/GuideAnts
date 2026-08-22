@@ -97,6 +97,8 @@ export function useStreamingEventHandler(
           }
           dispatch({ type: 'COMPLETE_STREAMING_TURN' });
 
+          // Fast-register completes on the server before SSE `complete`. Refresh the notebook
+          // file tree so sidebar/serving gate pick up newly registered paths without a hard reload.
           console.log('📄 [SSE complete] Triggering loadNotebookFiles');
           loadNotebookFiles().catch(error => {
             console.error('Failed to refresh notebook files after conversation turn:', error);

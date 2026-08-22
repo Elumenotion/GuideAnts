@@ -7,6 +7,7 @@ import { NotebookFolderTree } from '../NotebookFolderTree';
 import { NotebookFolderTreeDto } from '../../../../types/notebook';
 import { renderWithNotebookRoute } from '../../../../test/test-utils';
 import type { NotebookHostMountEntry } from '../../../../types/hostFolderMount';
+import { notebookFilesApi } from '../../../../services/notebookFiles';
 
 const mockHostMounts: NotebookHostMountEntry[] = [
   {
@@ -179,25 +180,31 @@ describe('NotebookFolderTree host mounts', () => {
 
   it('keeps linked mount roots expandable while scanned children are missing', async () => {
     const user = userEvent.setup();
-    const onRefreshFiles = vi.fn();
+    const listHostMountLevel = vi.fn().mockResolvedValue({
+      path: 'Shared',
+      folders: [{ name: 'inner', relativePath: 'Shared/inner' }],
+      files: [],
+      truncated: false,
+    });
+    vi.spyOn(notebookFilesApi, 'listHostMountLevel').mockImplementation(listHostMountLevel);
 
     renderTree({
       tree: emptyLinkedMountTree,
-      onRefreshFiles,
     });
 
     const expandShared = screen.getByLabelText('Expand Shared');
     expect(expandShared).toBeInTheDocument();
 
+    // Empty linked roots prefetch one-level listing (not a full tree refresh).
     await waitFor(() => {
-      expect(onRefreshFiles).toHaveBeenCalledTimes(1);
+      expect(listHostMountLevel).toHaveBeenCalledWith('proj-1', 'nb-1', 'Shared');
     });
 
-    onRefreshFiles.mockClear();
+    const callsBeforeExpand = listHostMountLevel.mock.calls.length;
     await user.click(expandShared);
-
-    expect(onRefreshFiles).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText('Collapse Shared')).toBeInTheDocument();
+    // Idempotent: already listingComplete — no extra fetch required on expand.
+    expect(listHostMountLevel.mock.calls.length).toBe(callsBeforeExpand);
   });
 
   it('shows remove mapped folder instead of delete on mount root', () => {

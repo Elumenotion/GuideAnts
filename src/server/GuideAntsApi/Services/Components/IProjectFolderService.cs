@@ -9,6 +9,7 @@ public interface IProjectFolderService
     Task<bool> DeleteFolderAsync(Guid projectId, Guid folderId);
     Task<IEnumerable<ProjectFolderDto>> GetFoldersAsync(Guid projectId);
     Task<FolderTreeDto> GetFolderTreeAsync(Guid projectId);
+    Task<HostMountListingDto?> ListHostMountLevelAsync(Guid projectId, string relativePath);
     Task<bool> MoveFolderAsync(Guid projectId, Guid folderId, Guid? newParentId);
     Task<ProjectFolderDto?> GetFolderAsync(Guid projectId, Guid folderId);
 

@@ -233,6 +233,28 @@ export interface NotebookFolderTreeDto {
   files: NotebookFileDto[];
 }
 
+export interface HostMountListingFolderDto {
+  name: string;
+  relativePath: string;
+}
+
+export interface HostMountListingFileDto {
+  id: string;
+  fileName: string;
+  relativePath: string;
+  fileSize: number;
+  lastModifiedUtc: string;
+  fileHash: string;
+  isLinked?: boolean;
+}
+
+export interface HostMountListingDto {
+  path: string;
+  folders: HostMountListingFolderDto[];
+  files: HostMountListingFileDto[];
+  truncated: boolean;
+}
+
 export interface PublishNotebookFileDto {
   notebookFileId: string;
   destinationFolderId?: string;

@@ -617,6 +617,7 @@ public sealed class DocumentServerServiceTests
 
         public Task<IEnumerable<NotebookFileDto>> ListFilesAsync(Guid projectId, Guid notebookId) => Task.FromResult<IEnumerable<NotebookFileDto>>([]);
         public Task<NotebookFolderTreeDto?> GetFolderTreeAsync(Guid projectId, Guid notebookId) => Task.FromResult<NotebookFolderTreeDto?>(null);
+        public Task<HostMountListingDto?> ListHostMountLevelAsync(Guid projectId, Guid notebookId, string relativePath) => Task.FromResult<HostMountListingDto?>(null);
         public Task<(Stream Stream, string ContentType, string FileName)?> GetFileAsync(Guid projectId, Guid notebookId, string relativePath) => Task.FromResult< (Stream, string, string)?>(null);
         public Task<(Stream stream, string contentType)> GetFileContentStreamAsync(Guid projectId, Guid notebookId, string relativePath) => throw new NotImplementedException();
         public Task<(Stream Stream, string ContentType, string FileName)?> GetFileContentStreamAsync(Guid notebookFileId, CancellationToken cancellationToken = default) => Task.FromResult<(Stream, string, string)?>(null);
