@@ -394,15 +394,21 @@ try {
         -ImageExists { param($tag) Test-DockerImageExists -ImageTag $tag } `
         -GetLabel {
             param($tag)
-            $format = '{{index .Config.Labels "' + $depsInputHashLabel + '"}}'
-            $value = docker inspect --format $format $tag 2>$null
-            if ($LASTEXITCODE -ne 0) {
+            try {
+                $raw = & docker inspect --format '{{json .Config.Labels}}' $tag 2>$null
+                if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw) -or $raw -eq 'null') {
+                    return $null
+                }
+                $labels = $raw | ConvertFrom-Json
+                $value = $labels.PSObject.Properties[$depsInputHashLabel].Value
+                if ([string]::IsNullOrWhiteSpace($value)) {
+                    return $null
+                }
+                return ([string]$value).Trim()
+            }
+            catch {
                 return $null
             }
-            if ([string]::IsNullOrWhiteSpace($value) -or $value -eq '<no value>') {
-                return $null
-            }
-            return $value.Trim()
         } `
         -CandidateTags $depsCandidateTags
     $depsExists = -not [string]::IsNullOrWhiteSpace($reusableDepsImage)

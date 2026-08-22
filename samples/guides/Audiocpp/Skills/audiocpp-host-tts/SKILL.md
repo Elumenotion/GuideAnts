@@ -1,6 +1,6 @@
 ---
 name: audiocpp-host-tts
-description: "Synthesize speech against the user's own host-native audiocpp_server build (outside the GuideAnts container) — including model families the container binary lacks, like Kokoro or Parakeet forks. TTS only. Use when the user says they run their own audio.cpp server or asks for a family the container build cannot load."
+description: "Synthesize against the user's own host-native audiocpp_server (outside Max / GuideAnts containers) — including families the Max binary lacks. TTS only. Use when the user runs their own audio.cpp build."
 metadata:
   guideants:
     enabled: true
@@ -10,10 +10,12 @@ metadata:
 
 # audio.cpp host-native engine (experimental)
 
-The sandbox can reach an `audiocpp_server` the user runs natively on the host —
-same raw API as the container engines, but with whatever models and loaders
-*their* build has (e.g. a fork compiled with Kokoro enabled). Deliverables are
-WAV files in `Output/`.
+This skill does **not** use the Max raw audiocpp gateway. It talks to an
+`audiocpp_server` the user runs on their own machine (or LAN), for loaders Max
+does not ship (e.g. Kokoro forks).
+
+For Max-hosted ASR/TTS/diarize/deferred catalog gaps, use the other audiocpp
+skills with `AUDIOCPP_SKILL_BASE_URL` instead.
 
 ## Preflight
 
@@ -21,14 +23,11 @@ WAV files in `Output/`.
 python3 Output/Skills/audiocpp-host-tts/scripts/preflight.py --for host-tts
 ```
 
-Resolution order: `AUDIOCPP_ENGINE_URL` env (set via the guide editor's
-Environment variables UI), else `http://host.docker.internal:8080`. The
-preflight also distinguishes a real audio engine from a llama-server that
-happens to answer `/health` on the same port.
+Resolution: `AUDIOCPP_ENGINE_URL`, else `http://host.docker.internal:8080`.
 
-## Synthesizing
+## Synthesize
 
-`--model` is required — there is no wrapper to auto-detect from:
+`--model` is required:
 
 ```bash
 python3 Output/Skills/audiocpp-host-tts/scripts/engine_tool.py speech "Hello" \
@@ -36,28 +35,21 @@ python3 Output/Skills/audiocpp-host-tts/scripts/engine_tool.py speech "Hello" \
   -o Output/hello.wav [--voice <id>] [--seed 42] [--language en] [--voice-ref ...]
 ```
 
-List the models the host build serves: `GET <base>/v1/models`; voices:
-`engine_tool.py voices --engine-url <base> --model <id>`.
-
-The consent rule applies to `--voice-ref` cloning here too: proceed for the
-user's own voice or a consenting speaker; decline third-party imitation.
+Consent rule applies to `--voice-ref`.
 
 ## Hard limit: TTS only
 
-The host engine's `/v1/audio/transcriptions` takes a *server-local path* in its
-JSON body — files in this sandbox are not visible to the host process, so
-transcription against the host engine cannot work from here. Use the container
-ASR (the **audiocpp-asr-extended** skill) instead.
+Host `/v1/audio/transcriptions` needs host-local paths — sandbox files are not
+visible. Use **audiocpp-asr** (Max gateway) for transcription.
 
 ## Troubleshooting
 
-| Symptom | Likely cause | What to do |
-|---|---|---|
-| Unreachable | Server not bound to `0.0.0.0`, or Windows Firewall blocking the Docker adapter | Ask the user to check both |
-| `/health` 200 but no `/v1/audio/*` | A llama-server on that port, not audiocpp | Ask which port their audio.cpp build listens on |
-| Model errors | Family/option mismatch in their build | Surface the engine's error text — it names the problem |
+| Symptom | Likely cause |
+|---|---|
+| Unreachable | Not bound to `0.0.0.0`, or firewall |
+| `/health` 200 but no `/v1/audio/*` | Wrong process (e.g. llama-server) on that port |
+| Model errors | Family/option mismatch — surface engine text |
 
 ## Reporting
 
-End by telling the user what worked and what was blocked, quoting the
-preflight/engine evidence.
+End by telling the user what worked and what was blocked, quoting preflight evidence.

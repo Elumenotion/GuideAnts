@@ -6,6 +6,9 @@ downloads (--include), gated repos (HF_TOKEN), and composite models (run once pe
 repo with different --dest). Resumable: files already present with the right size
 are skipped, so re-running after the ~5 min sandbox budget continues where it left
 off. Stdlib-only.
+
+When AUDIOCPP_SKILL_BASE_URL is set, the download runs on the Max skill gateway
+under /models-local/skill/...
 """
 import argparse
 import json
@@ -15,8 +18,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from skill_gateway_client import fail_http, gateway_request, using_skill_gateway
+
 HF_BASE = "https://huggingface.co"
 CHUNK_SIZE = 1024 * 1024
+SKILL_MODELS_PREFIX = "/models-local/skill"
 
 
 def _open(url: str, token: str | None, timeout: int = 60):
@@ -33,6 +39,19 @@ def list_repo_files(repo: str, revision: str, token: str | None) -> list[dict]:
     return [entry for entry in entries if entry.get("type") == "file"]
 
 
+def normalize_remote_dest(dest: str) -> str:
+    abs_dest = os.path.abspath(dest) if not dest.startswith("/") else dest
+    if abs_dest.startswith(SKILL_MODELS_PREFIX + "/") or abs_dest == SKILL_MODELS_PREFIX:
+        return abs_dest
+    # Map common local skill destinations onto the gateway skill tree.
+    leaf = os.path.basename(abs_dest.rstrip("/\\"))
+    if "/asr/" in abs_dest.replace("\\", "/") or dest.replace("\\", "/").startswith("/models-local/asr"):
+        return f"{SKILL_MODELS_PREFIX}/asr/{leaf}"
+    if "/tts/" in abs_dest.replace("\\", "/") or dest.replace("\\", "/").startswith("/models-local/tts"):
+        return f"{SKILL_MODELS_PREFIX}/tts/{leaf}"
+    return f"{SKILL_MODELS_PREFIX}/{leaf}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Scoped/gated/resumable HF snapshot download")
     parser.add_argument("repo", help="HF repo id, e.g. Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
@@ -44,6 +63,27 @@ def main() -> None:
     parser.add_argument("--max-gb", type=float, default=30.0, help="Refuse to download more than this in one run")
     parser.add_argument("--dry-run", action="store_true", help="List what would be downloaded and exit")
     args = parser.parse_args()
+
+    if using_skill_gateway():
+        dest = normalize_remote_dest(args.dest)
+        payload = {
+            "repo": args.repo,
+            "dest": dest,
+            "revision": args.revision,
+            "include": args.include,
+            "exclude": args.exclude,
+            "strip_prefix": args.strip_prefix,
+            "max_gb": args.max_gb,
+            "dry_run": args.dry_run,
+            "hf_token": os.environ.get("HF_TOKEN", "").strip() or None,
+        }
+        try:
+            body = gateway_request("/admin/models/fetch", payload=payload, timeout=3600)
+        except urllib.error.HTTPError as exc:
+            fail_http(exc, "/admin/models/fetch")
+            return
+        print(body.decode("utf-8", errors="replace"))
+        return
 
     token = os.environ.get("HF_TOKEN", "").strip() or None
     try:

@@ -30,6 +30,14 @@ import urllib.error
 import urllib.request
 import wave
 
+from skill_gateway_client import (
+    fail_http,
+    gateway_engine_prefix,
+    gateway_request,
+    stage_file,
+    using_skill_gateway,
+)
+
 DIAR_ENGINE_DEFAULT = "http://127.0.0.1:18099"
 ASR_ENGINE_DEFAULT = "http://127.0.0.1:18082"
 ASR_ENGINE_MODEL_ID = "qwen3-asr"
@@ -114,6 +122,16 @@ def prep_audio(input_path: str, out_base: str) -> tuple[str, bool]:
 def resolve_diar_model(engine_url: str, explicit: str | None) -> str:
     if explicit:
         return explicit
+    if using_skill_gateway():
+        try:
+            body = json.loads(gateway_request("/admin/private/status", timeout=15).decode("utf-8"))
+        except Exception as exc:
+            fail(f"Could not read private engine status from skill gateway: {exc}")
+        meta = body.get("meta") or {}
+        model_id = meta.get("modelId")
+        if not model_id:
+            fail("Private engine status has no modelId; pass --model explicitly.")
+        return model_id
     try:
         body = get_json(f"{engine_url}/v1/models")
     except Exception as exc:
@@ -127,10 +145,24 @@ def resolve_diar_model(engine_url: str, explicit: str | None) -> str:
 
 
 def request_turns(engine_url: str, model: str, audio_path: str) -> list[dict]:
-    payload = {"model": model, "request": {"audio": os.path.abspath(audio_path)}}
     try:
-        body = post_json(f"{engine_url}/v1/tasks/run", payload, timeout=max(30.0, budget_left()))
+        if using_skill_gateway():
+            staged = stage_file(audio_path, timeout=max(30.0, budget_left()))
+            payload = {"model": model, "request": {"audio": staged}}
+            prefix = gateway_engine_prefix(engine_url)
+            raw = gateway_request(
+                f"{prefix}/v1/tasks/run",
+                payload=payload,
+                timeout=max(30.0, budget_left()),
+            )
+            body = json.loads(raw.decode("utf-8", errors="replace"))
+        else:
+            payload = {"model": model, "request": {"audio": os.path.abspath(audio_path)}}
+            body = post_json(f"{engine_url}/v1/tasks/run", payload, timeout=max(30.0, budget_left()))
     except urllib.error.HTTPError as exc:
+        if using_skill_gateway():
+            fail_http(exc, "/v1/tasks/run")
+            return []
         fail(f"/v1/tasks/run failed with HTTP {exc.code}: {http_error_detail(exc)}")
     turns = body.get("speaker_turns")
     if turns is None:
@@ -180,11 +212,24 @@ def slice_wav(source: wave.Wave_read, start: float, end: float, dest_path: str) 
 def transcribe_turns(turns: list[dict], prepped: str, args: argparse.Namespace) -> dict:
     """Label turns in place; returns a status dict for the report."""
     asr_url = args.asr_engine_url.rstrip("/")
-    try:
-        get_json(f"{asr_url}/health")
-    except Exception as exc:
-        return {"labeled": False, "reason": f"ASR engine unreachable at {asr_url} ({exc}); "
-                                            "load an ASR model via GuideAnts Settings for labeled transcripts"}
+    if using_skill_gateway():
+        try:
+            health = json.loads(gateway_request("/health", timeout=10).decode("utf-8"))
+            engines = health.get("engines") or {}
+            asr_ok = (engines.get("asr") or {}).get("status") == 200
+            if not asr_ok:
+                asr_ok = ((health.get("upstream") or {}).get("asrEngine") or {}).get("status") == 200
+        except Exception as exc:
+            return {"labeled": False, "reason": f"skill gateway unreachable ({exc})"}
+        if not asr_ok:
+            return {"labeled": False, "reason": "ASR engine not reachable via skill gateway; "
+                                                "load an ASR model via GuideAnts Settings for labeled transcripts"}
+    else:
+        try:
+            get_json(f"{asr_url}/health")
+        except Exception as exc:
+            return {"labeled": False, "reason": f"ASR engine unreachable at {asr_url} ({exc}); "
+                                                "load an ASR model via GuideAnts Settings for labeled transcripts"}
     tmp_dir = tempfile.mkdtemp(prefix="diarize-", dir=STATE_DIR)
     labeled = 0
     partial = False
@@ -198,12 +243,28 @@ def transcribe_turns(turns: list[dict], prepped: str, args: argparse.Namespace) 
                 segment_path = os.path.join(tmp_dir, f"turn-{index:04d}.wav")
                 slice_wav(source, max(0.0, turn["start"] - args.pad_seconds),
                           min(duration, turn["end"] + args.pad_seconds), segment_path)
-                payload = {"model": args.asr_model, "audio": os.path.abspath(segment_path)}
-                if args.language:
-                    payload["language"] = args.language
                 try:
-                    body = post_json(f"{asr_url}/v1/audio/transcriptions", payload,
-                                     timeout=min(60.0, max(10.0, budget_left())))
+                    payload = {"model": args.asr_model}
+                    if args.language:
+                        payload["language"] = args.language
+                    if using_skill_gateway():
+                        payload["audio"] = stage_file(
+                            segment_path,
+                            timeout=min(60.0, max(10.0, budget_left())),
+                        )
+                        raw = gateway_request(
+                            f"{gateway_engine_prefix(asr_url)}/v1/audio/transcriptions",
+                            payload=payload,
+                            timeout=min(60.0, max(10.0, budget_left())),
+                        )
+                        body = json.loads(raw.decode("utf-8", errors="replace"))
+                    else:
+                        payload["audio"] = os.path.abspath(segment_path)
+                        body = post_json(
+                            f"{asr_url}/v1/audio/transcriptions",
+                            payload,
+                            timeout=min(60.0, max(10.0, budget_left())),
+                        )
                     turn["text"] = (body.get("text") or "").strip()
                     labeled += 1
                 except urllib.error.HTTPError as exc:

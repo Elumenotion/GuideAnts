@@ -243,8 +243,9 @@ COPY start-asr.sh /app/start-asr.sh
 COPY start-tts.sh /app/start-tts.sh
 COPY start-emb.sh /app/start-emb.sh
 COPY start-media.sh /app/start-media.sh
+COPY start-audiocpp-skill.sh /app/start-audiocpp-skill.sh
 COPY router-models.seed.ini /opt/seed/router-models.ini
-RUN chmod +x /entrypoint.sh /opt/guideants/script-agent-admin/reconcile.sh /app/start-llama.sh /app/start-ga-admin.sh /app/start-sd.sh /app/start-asr.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
+RUN chmod +x /entrypoint.sh /opt/guideants/script-agent-admin/reconcile.sh /app/start-llama.sh /app/start-ga-admin.sh /app/start-sd.sh /app/start-asr.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh /app/start-audiocpp-skill.sh
 
 ENV PYTHONPATH=/app/lib
 
@@ -260,6 +261,7 @@ COPY sd-service/ /app/sd-service/
 COPY tts-service/ /app/tts-service/
 COPY emb-service/ /app/emb-service/
 COPY media-service/ /app/media-service/
+COPY audiocpp-skill-gateway/ /app/audiocpp-skill-gateway/
 
 EXPOSE 80
 

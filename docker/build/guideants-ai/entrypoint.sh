@@ -397,6 +397,9 @@ EMB_PID=$!
 /app/start-media.sh &
 MEDIA_PID=$!
 
+/app/start-audiocpp-skill.sh &
+AUDIOCPP_SKILL_PID=$!
+
 nginx -g 'daemon off;' &
 NGINX_PID=$!
 
@@ -438,7 +441,7 @@ if [ "${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
 fi
 
 shutdown_all() {
-    kill "$LLAMA_PID" "$SD_PID" "$GA_ADMIN_PID" "$AGENT_PID" "$ASR_PID" "$TTS_PID" "$EMB_PID" "$MEDIA_PID" "$NGINX_PID" 2>/dev/null || true
+    kill "$LLAMA_PID" "$SD_PID" "$GA_ADMIN_PID" "$AGENT_PID" "$ASR_PID" "$TTS_PID" "$EMB_PID" "$MEDIA_PID" "$AUDIOCPP_SKILL_PID" "$NGINX_PID" 2>/dev/null || true
 }
 
 trap "shutdown_all; exit" SIGTERM SIGINT
@@ -451,6 +454,7 @@ ASR_REPORTED_EXIT=0
 TTS_REPORTED_EXIT=0
 EMB_REPORTED_EXIT=0
 MEDIA_REPORTED_EXIT=0
+AUDIOCPP_SKILL_REPORTED_EXIT=0
 
 while true; do
     if [ -n "${LLAMA_PID:-}" ] && ! kill -0 "$LLAMA_PID" 2>/dev/null; then
@@ -528,6 +532,13 @@ while true; do
             MEDIA_REPORTED_EXIT=1
         fi
         MEDIA_PID=""
+    fi
+    if [ -n "${AUDIOCPP_SKILL_PID:-}" ] && ! kill -0 "$AUDIOCPP_SKILL_PID" 2>/dev/null; then
+        if [ "$AUDIOCPP_SKILL_REPORTED_EXIT" = "0" ]; then
+            echo "audiocpp skill gateway (PID $AUDIOCPP_SKILL_PID) exited; continuing with remaining services" >&2
+            AUDIOCPP_SKILL_REPORTED_EXIT=1
+        fi
+        AUDIOCPP_SKILL_PID=""
     fi
     if ! kill -0 "$NGINX_PID" 2>/dev/null; then
         echo "nginx (PID $NGINX_PID) exited; shutting down container" >&2

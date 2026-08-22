@@ -4,7 +4,8 @@
 Writes an engine config mirroring what the GuideAnts wrapper services generate,
 launches the container's audiocpp_server binary detached on a private port, and
 tracks it via a state dir in the workspace so later script calls can poll or stop
-it. Stdlib-only.
+it. When AUDIOCPP_SKILL_BASE_URL is set, lifecycle is delegated to the Max skill
+gateway. Stdlib-only.
 
 Subcommands:
   start  --path <model dir> --family <loader family> [--task tts] [--port 18099] ...
@@ -20,12 +21,16 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
+
+from skill_gateway_client import fail_http, gateway_request, using_skill_gateway
 
 DEFAULT_PORT = 18099
 STATE_DIR = os.path.join(os.getcwd(), ".audiocpp-extended")
 SERVER_BINARY_CANDIDATES = ["/usr/local/bin/audiocpp_server"]
 START_POLL_SECONDS = 120  # stay well under the ~5 min script budget; use `status` after
+SKILL_MODELS_PREFIX = "/models-local/skill"
 
 
 def state_paths(port: int) -> dict:
@@ -86,7 +91,67 @@ def parse_kv(pairs: list[str]) -> dict:
     return options
 
 
+def normalize_remote_path(path: str) -> str:
+    abs_path = os.path.abspath(path) if not path.startswith("/") else path
+    if abs_path.startswith(SKILL_MODELS_PREFIX + "/") or abs_path == SKILL_MODELS_PREFIX:
+        return abs_path
+    leaf = os.path.basename(abs_path.rstrip("/\\"))
+    if "/asr/" in abs_path.replace("\\", "/") or path.replace("\\", "/").startswith("/models-local/asr"):
+        return f"{SKILL_MODELS_PREFIX}/asr/{leaf}"
+    if "/tts/" in abs_path.replace("\\", "/") or path.replace("\\", "/").startswith("/models-local/tts"):
+        return f"{SKILL_MODELS_PREFIX}/tts/{leaf}"
+    return f"{SKILL_MODELS_PREFIX}/{leaf}"
+
+
+def parse_extra_model(raw: str) -> dict:
+    """Parse path=...;family=...;task=...;id=... into a PrivateModelSpec dict."""
+    parts = {}
+    for piece in raw.split(";"):
+        piece = piece.strip()
+        if not piece:
+            continue
+        if "=" not in piece:
+            sys.stderr.write(f"--extra expects path=...;family=...;task=... got: {raw}\n")
+            sys.exit(1)
+        key, value = piece.split("=", 1)
+        parts[key.strip()] = value.strip()
+    if "path" not in parts or "family" not in parts:
+        sys.stderr.write(f"--extra requires path and family: {raw}\n")
+        sys.exit(1)
+    return {
+        "path": normalize_remote_path(parts["path"]) if using_skill_gateway() else parts["path"],
+        "family": parts["family"],
+        "task": parts.get("task", "tts"),
+        "model_id": parts.get("id") or parts.get("model_id"),
+        "options": {},
+    }
+
+
 def cmd_start(args: argparse.Namespace) -> None:
+    extras = [parse_extra_model(item) for item in (args.extra or [])]
+    if using_skill_gateway():
+        options = parse_kv(args.option or [])
+        payload = {
+            "path": normalize_remote_path(args.path),
+            "family": args.family,
+            "task": args.task,
+            "model_id": args.model_id,
+            "port": args.port,
+            "backend": args.backend,
+            "device": args.device,
+            "threads": args.threads,
+            "options": options,
+            "models": extras,
+            "wait_seconds": min(args.wait, START_POLL_SECONDS),
+        }
+        try:
+            body = gateway_request("/admin/private/start", payload=payload, timeout=max(30, args.wait + 30))
+        except urllib.error.HTTPError as exc:
+            fail_http(exc, "/admin/private/start")
+            return
+        print(body.decode("utf-8", errors="replace"))
+        return
+
     model_path = os.path.abspath(args.path)
     if not os.path.isdir(model_path):
         sys.stderr.write(f"Model directory not found: {model_path}\n")
@@ -101,16 +166,28 @@ def cmd_start(args: argparse.Namespace) -> None:
     binary = resolve_binary()
     model_id = args.model_id or os.path.basename(model_path.rstrip("/"))
     options = parse_kv(args.option or [])
-    model_config: dict = {
+    model_configs = [{
         "id": model_id,
         "family": args.family,
         "path": model_path,
         "task": args.task,
         "mode": "offline",
-    }
+    }]
     if options:
-        model_config["load_options"] = dict(options)
-        model_config["session_options"] = dict(options)
+        model_configs[0]["load_options"] = dict(options)
+        model_configs[0]["session_options"] = dict(options)
+    for extra in extras:
+        entry = {
+            "id": extra.get("model_id") or os.path.basename(str(extra["path"]).rstrip("/\\")),
+            "family": extra["family"],
+            "path": os.path.abspath(extra["path"]),
+            "task": extra.get("task") or "tts",
+            "mode": "offline",
+        }
+        if not os.path.isdir(entry["path"]):
+            sys.stderr.write(f"Extra model directory not found: {entry['path']}\n")
+            sys.exit(1)
+        model_configs.append(entry)
     config = {
         "host": "127.0.0.1",
         "port": args.port,
@@ -118,7 +195,7 @@ def cmd_start(args: argparse.Namespace) -> None:
         "device": args.device,
         "threads": args.threads,
         "lazy_load": False,
-        "models": [model_config],
+        "models": model_configs,
     }
     os.makedirs(STATE_DIR, exist_ok=True)
     with open(paths["config"], "w", encoding="utf-8") as handle:
@@ -138,8 +215,14 @@ def cmd_start(args: argparse.Namespace) -> None:
     with open(paths["pid"], "w", encoding="utf-8") as handle:
         handle.write(str(process.pid))
     with open(paths["meta"], "w", encoding="utf-8") as handle:
-        json.dump({"command": command, "modelId": model_id, "family": args.family,
-                   "task": args.task, "startedAtEpoch": time.time()}, handle, indent=2)
+        json.dump({
+            "command": command,
+            "modelId": model_id,
+            "modelIds": [entry["id"] for entry in model_configs],
+            "family": args.family,
+            "task": args.task,
+            "startedAtEpoch": time.time(),
+        }, handle, indent=2)
 
     deadline = time.monotonic() + min(args.wait, START_POLL_SECONDS)
     while time.monotonic() < deadline:
@@ -149,12 +232,19 @@ def cmd_start(args: argparse.Namespace) -> None:
                               "logTail": log_tail, "port": args.port}))
             sys.exit(1)
         if health_ok(args.port):
-            print(json.dumps({"state": "ready", "pid": process.pid, "port": args.port,
-                              "model": model_id, "engineUrl": f"http://127.0.0.1:{args.port}"}))
+            print(json.dumps({
+                "state": "ready",
+                "pid": process.pid,
+                "port": args.port,
+                "model": model_id,
+                "models": [entry["id"] for entry in model_configs],
+                "engineUrl": f"http://127.0.0.1:{args.port}",
+            }))
             return
         time.sleep(3)
     print(json.dumps({
         "state": "starting", "pid": process.pid, "port": args.port,
+        "models": [entry["id"] for entry in model_configs],
         "note": "engine left running; poll with `spawn_engine.py status` in a follow-up script call",
     }))
 
@@ -168,6 +258,17 @@ def tail_log(paths: dict, lines: int) -> list[str]:
 
 
 def cmd_status(args: argparse.Namespace) -> None:
+    if using_skill_gateway():
+        try:
+            body = gateway_request("/admin/private/status", timeout=15)
+        except urllib.error.HTTPError as exc:
+            fail_http(exc, "/admin/private/status")
+            return
+        print(body.decode("utf-8", errors="replace"))
+        parsed = json.loads(body.decode("utf-8", errors="replace"))
+        if parsed.get("state") == "dead":
+            sys.exit(1)
+        return
     paths = state_paths(args.port)
     pid = read_pid(paths)
     alive = bool(pid and pid_alive(pid))
@@ -184,6 +285,14 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
+    if using_skill_gateway():
+        try:
+            body = gateway_request("/admin/private/stop", payload={}, timeout=30)
+        except urllib.error.HTTPError as exc:
+            fail_http(exc, "/admin/private/stop")
+            return
+        print(body.decode("utf-8", errors="replace"))
+        return
     paths = state_paths(args.port)
     pid = read_pid(paths)
     if not pid or not pid_alive(pid):
@@ -204,6 +313,16 @@ def cmd_stop(args: argparse.Namespace) -> None:
 
 
 def cmd_logs(args: argparse.Namespace) -> None:
+    if using_skill_gateway():
+        try:
+            body = gateway_request("/admin/private/status", timeout=15)
+        except urllib.error.HTTPError as exc:
+            fail_http(exc, "/admin/private/status")
+            return
+        parsed = json.loads(body.decode("utf-8", errors="replace"))
+        for line in parsed.get("logTail") or []:
+            sys.stdout.write(line if line.endswith("\n") else line + "\n")
+        return
     paths = state_paths(args.port)
     sys.stdout.writelines(tail_log(paths, args.tail))
 
@@ -218,10 +337,22 @@ def main() -> None:
     p_start.add_argument("--task", default="tts", help="tts | clon | vdes | asr | diar | vad (see references/engine-api.md)")
     p_start.add_argument("--model-id", default=None, help="Engine model id for requests (default: dir leaf name)")
     p_start.add_argument("--port", type=int, default=DEFAULT_PORT)
-    p_start.add_argument("--backend", default="cuda")
+    p_start.add_argument(
+        "--backend",
+        default=os.environ.get("GA_ASR_BACKEND")
+        or os.environ.get("GA_TTS_BACKEND")
+        or "cuda",
+        help="Engine backend (Max ROCm stacks: rocm). Defaults to GA_ASR_BACKEND/GA_TTS_BACKEND or cuda.",
+    )
     p_start.add_argument("--device", type=int, default=0)
     p_start.add_argument("--threads", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     p_start.add_argument("--option", action="append", default=[], help="load/session option key=value (repeatable), e.g. language=english")
+    p_start.add_argument(
+        "--extra",
+        action="append",
+        default=[],
+        help="Additional model path=...;family=...;task=...;id=... (repeatable; Gate M multi-model)",
+    )
     p_start.add_argument("--wait", type=int, default=START_POLL_SECONDS, help="Seconds to poll for readiness before detaching")
 
     for name in ("status", "stop"):

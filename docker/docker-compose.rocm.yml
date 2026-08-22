@@ -51,6 +51,7 @@ services:
       - HF_TOKEN=${HF_TOKEN:-}
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - GA_AUDIOCPP_SKILL_TOKEN=${GA_AUDIOCPP_SKILL_TOKEN:-}
       - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
       - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
