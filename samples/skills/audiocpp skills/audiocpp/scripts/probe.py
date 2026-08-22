@@ -6,6 +6,7 @@ Answers, with evidence, which escalation routes are open in this deployment:
   route2: sideload a bare ASR model dir through the ASR wrapper
   route3: spawn a private audiocpp_server for a non-catalog model
   route4: the user's host-native audiocpp_server
+  route5: remote Max skill gateway (AUDIOCPP_SKILL_BASE_URL) for PC sandboxes
 plus scenario checks (e.g. sortformer diarization) that ride on those routes.
 
 Stdlib-only. Prints one JSON report to stdout.
@@ -20,6 +21,8 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+
+from skill_gateway_client import probe_gateway, skill_base_url, skill_token
 
 WRAPPER_ASR = "http://127.0.0.1:8082"
 WRAPPER_TTS = "http://127.0.0.1:8084"
@@ -72,6 +75,7 @@ def check_binary_features(binary: dict) -> dict:
         "sortformerDiarLoader": b"sortformer_diar",
         "tasksRunEndpoint": b"/v1/tasks/run",
         "sileroVadLoader": b"silero_vad",
+        "qwen3ForcedAlignerLoader": b"qwen3_forced_aligner",
     }
     if not binary.get("present"):
         return {"scanned": False}
@@ -209,7 +213,10 @@ def main() -> None:
         "env": {
             "HF_TOKEN": "set" if os.environ.get("HF_TOKEN") else "missing",
             "AUDIOCPP_ENGINE_URL": os.environ.get("AUDIOCPP_ENGINE_URL", "") or "missing",
+            "AUDIOCPP_SKILL_BASE_URL": skill_base_url() or "missing",
+            "AUDIOCPP_SKILL_TOKEN": "set" if skill_token() else "missing",
         },
+        "skillGateway": probe_gateway(),
     }
 
     host_candidates = [os.environ["AUDIOCPP_ENGINE_URL"]] if os.environ.get("AUDIOCPP_ENGINE_URL") else HOST_ENGINE_CANDIDATES
@@ -251,13 +258,35 @@ def main() -> None:
             and report["hostEngine"].get("isAudioEngine", False),
             "note": "a llama-server on the same port answers /health but is not an audio engine",
         },
+        "route5_remote_skill_gateway": {
+            "open": bool(report["skillGateway"].get("open")),
+            "note": "PC sandbox -> Max /audiocpp-skill with AUDIOCPP_SKILL_BASE_URL + AUDIOCPP_SKILL_TOKEN",
+            "evidence": report["skillGateway"],
+        },
     }
     report["routes"]["scenario_diarization"] = {
-        "open": report["routes"]["route3_private_engine"]["open"]
-        and report["binaryFeatures"].get("sortformerDiarLoader", False)
-        and report["binaryFeatures"].get("tasksRunEndpoint", False),
-        "note": "Route 3 with family sortformer_diar / task diar; ffmpeg needed for non-16kHz-mono "
-        "inputs, ASR engine (route1) needed for speaker-labeled transcripts — see diarize.py",
+        "open": (
+            report["routes"]["route5_remote_skill_gateway"]["open"]
+            or (
+                report["routes"]["route3_private_engine"]["open"]
+                and report["binaryFeatures"].get("sortformerDiarLoader", False)
+                and report["binaryFeatures"].get("tasksRunEndpoint", False)
+            )
+        ),
+        "note": "Route 5 (remote gateway) or Route 3 with family sortformer_diar / task diar; "
+        "ffmpeg needed for non-16kHz-mono inputs, ASR engine needed for speaker-labeled transcripts",
+    }
+    report["routes"]["scenario_timed_transcript"] = {
+        "open": (
+            report["routes"]["route5_remote_skill_gateway"]["open"]
+            or (
+                report["routes"]["route3_private_engine"]["open"]
+                and report["binaryFeatures"].get("qwen3ForcedAlignerLoader", False)
+                and report["binaryFeatures"].get("tasksRunEndpoint", False)
+            )
+        ),
+        "note": "Route 5 or Route 3 with qwen3_forced_aligner / align + product ASR; "
+        "Max ROCm: spawn --backend rocm; timings via /v1/tasks/run not /v1/audio/transcriptions",
     }
     print(json.dumps(report, indent=2))
 

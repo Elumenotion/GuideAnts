@@ -4,7 +4,8 @@
 Writes an engine config mirroring what the GuideAnts wrapper services generate,
 launches the container's audiocpp_server binary detached on a private port, and
 tracks it via a state dir in the workspace so later script calls can poll or stop
-it. Stdlib-only.
+it. When AUDIOCPP_SKILL_BASE_URL is set, lifecycle is delegated to the Max skill
+gateway. Stdlib-only.
 
 Subcommands:
   start  --path <model dir> --family <loader family> [--task tts] [--port 18099] ...
@@ -20,12 +21,16 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
+
+from skill_gateway_client import fail_http, gateway_request, using_skill_gateway
 
 DEFAULT_PORT = 18099
 STATE_DIR = os.path.join(os.getcwd(), ".audiocpp-extended")
 SERVER_BINARY_CANDIDATES = ["/usr/local/bin/audiocpp_server"]
 START_POLL_SECONDS = 120  # stay well under the ~5 min script budget; use `status` after
+SKILL_MODELS_PREFIX = "/models-local/skill"
 
 
 def state_paths(port: int) -> dict:
@@ -86,7 +91,41 @@ def parse_kv(pairs: list[str]) -> dict:
     return options
 
 
+def normalize_remote_path(path: str) -> str:
+    abs_path = os.path.abspath(path) if not path.startswith("/") else path
+    if abs_path.startswith(SKILL_MODELS_PREFIX + "/") or abs_path == SKILL_MODELS_PREFIX:
+        return abs_path
+    leaf = os.path.basename(abs_path.rstrip("/\\"))
+    if "/asr/" in abs_path.replace("\\", "/") or path.replace("\\", "/").startswith("/models-local/asr"):
+        return f"{SKILL_MODELS_PREFIX}/asr/{leaf}"
+    if "/tts/" in abs_path.replace("\\", "/") or path.replace("\\", "/").startswith("/models-local/tts"):
+        return f"{SKILL_MODELS_PREFIX}/tts/{leaf}"
+    return f"{SKILL_MODELS_PREFIX}/{leaf}"
+
+
 def cmd_start(args: argparse.Namespace) -> None:
+    if using_skill_gateway():
+        options = parse_kv(args.option or [])
+        payload = {
+            "path": normalize_remote_path(args.path),
+            "family": args.family,
+            "task": args.task,
+            "model_id": args.model_id,
+            "port": args.port,
+            "backend": args.backend,
+            "device": args.device,
+            "threads": args.threads,
+            "options": options,
+            "wait_seconds": min(args.wait, START_POLL_SECONDS),
+        }
+        try:
+            body = gateway_request("/admin/private/start", payload=payload, timeout=max(30, args.wait + 30))
+        except urllib.error.HTTPError as exc:
+            fail_http(exc, "/admin/private/start")
+            return
+        print(body.decode("utf-8", errors="replace"))
+        return
+
     model_path = os.path.abspath(args.path)
     if not os.path.isdir(model_path):
         sys.stderr.write(f"Model directory not found: {model_path}\n")
@@ -168,6 +207,17 @@ def tail_log(paths: dict, lines: int) -> list[str]:
 
 
 def cmd_status(args: argparse.Namespace) -> None:
+    if using_skill_gateway():
+        try:
+            body = gateway_request("/admin/private/status", timeout=15)
+        except urllib.error.HTTPError as exc:
+            fail_http(exc, "/admin/private/status")
+            return
+        print(body.decode("utf-8", errors="replace"))
+        parsed = json.loads(body.decode("utf-8", errors="replace"))
+        if parsed.get("state") == "dead":
+            sys.exit(1)
+        return
     paths = state_paths(args.port)
     pid = read_pid(paths)
     alive = bool(pid and pid_alive(pid))
@@ -184,6 +234,14 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
+    if using_skill_gateway():
+        try:
+            body = gateway_request("/admin/private/stop", payload={}, timeout=30)
+        except urllib.error.HTTPError as exc:
+            fail_http(exc, "/admin/private/stop")
+            return
+        print(body.decode("utf-8", errors="replace"))
+        return
     paths = state_paths(args.port)
     pid = read_pid(paths)
     if not pid or not pid_alive(pid):
@@ -204,6 +262,16 @@ def cmd_stop(args: argparse.Namespace) -> None:
 
 
 def cmd_logs(args: argparse.Namespace) -> None:
+    if using_skill_gateway():
+        try:
+            body = gateway_request("/admin/private/status", timeout=15)
+        except urllib.error.HTTPError as exc:
+            fail_http(exc, "/admin/private/status")
+            return
+        parsed = json.loads(body.decode("utf-8", errors="replace"))
+        for line in parsed.get("logTail") or []:
+            sys.stdout.write(line if line.endswith("\n") else line + "\n")
+        return
     paths = state_paths(args.port)
     sys.stdout.writelines(tail_log(paths, args.tail))
 

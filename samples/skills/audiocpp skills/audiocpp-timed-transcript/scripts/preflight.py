@@ -12,7 +12,7 @@ tell the user what `blockers` says. `warnings` are soft gaps (a degraded but
 workable path exists). Trust this report over any skill documentation.
 Stdlib-only.
 
-Scenarios: voice-clone | tts-controls | asr-extended | diarize | deferred-tts | host-tts
+Scenarios: voice-clone | tts-controls | asr-extended | diarize | timed-transcript | deferred-tts | host-tts
 """
 import argparse
 import json
@@ -211,23 +211,32 @@ def run_scenario(scenario: str) -> dict:
         "tts-controls",
         "asr-extended",
         "diarize",
+        "timed-transcript",
         "deferred-tts",
     ):
         gateway = probe_gateway()
         evidence["skillGateway"] = gateway
         if gateway.get("open"):
-            upstream = ((gateway.get("body") or {}).get("upstream") or {})
+            # Prefer engines map from api_version 2 health; fall back to legacy upstream.
+            body = gateway.get("body") or {}
+            engines = body.get("engines") or {}
+            upstream = body.get("upstream") or {}
             if scenario in ("voice-clone", "tts-controls"):
-                tts = upstream.get("ttsEngine") or {}
+                tts = engines.get("tts") or upstream.get("ttsEngine") or {}
                 if tts.get("status") != 200:
                     blockers.append(
                         "skillGateway: TTS engine not ready on Max — load a TTS model via GuideAnts Settings"
                     )
-            elif scenario == "asr-extended":
-                asr = upstream.get("asrEngine") or {}
+            elif scenario in ("asr-extended", "timed-transcript"):
+                asr = engines.get("asr") or upstream.get("asrEngine") or {}
                 if asr.get("status") != 200:
                     blockers.append(
                         "skillGateway: ASR engine not ready on Max — load an ASR model via GuideAnts Settings"
+                    )
+                if scenario == "timed-transcript":
+                    warnings.append(
+                        "skillGateway: spawn qwen3_forced_aligner with --backend rocm on Max "
+                        "(/models-local/skill) before timed_transcribe.py"
                     )
             else:
                 warnings.append(
@@ -289,6 +298,28 @@ def run_scenario(scenario: str) -> dict:
                  "turns will not get text labels — ask the user to load an ASR model, or run --turns-only")
         optional("gpu", check_gpu(), "GPU state unknown")
 
+    elif scenario == "timed-transcript":
+        binary = check_binary()
+        required("binary", binary, "no audiocpp_server binary to spawn")
+        required(
+            "binaryFeatures",
+            check_binary_features(
+                binary,
+                {
+                    "qwen3ForcedAlignerLoader": b"qwen3_forced_aligner",
+                    "tasksRunEndpoint": b"/v1/tasks/run",
+                },
+            ),
+            "this build lacks the qwen3_forced_aligner loader or /v1/tasks/run",
+        )
+        required("privatePort", check_private_port(), "cannot host a private engine")
+        required("detachedSpawn", check_detach(), "cannot leave an engine running")
+        required("engineAsr", check_url(f"{ENGINE_ASR}/health"),
+                 "no ASR engine — load an ASR model via GuideAnts Settings")
+        optional("ffmpeg", check_ffmpeg(), "only 16 kHz mono PCM16 WAV inputs will work (no conversion)")
+        optional("downloads", check_downloads_possible(), "cannot fetch ForcedAligner GGUF if missing")
+        optional("gpu", check_gpu(), "GPU state unknown")
+
     elif scenario == "deferred-tts":
         required("binary", check_binary(), "no audiocpp_server binary to spawn")
         required("privatePort", check_private_port(), "cannot host a private engine")
@@ -317,8 +348,20 @@ def run_scenario(scenario: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Scoped preflight for one audiocpp task skill")
-    parser.add_argument("--for", dest="scenario", required=True,
-                        choices=["voice-clone", "tts-controls", "asr-extended", "diarize", "deferred-tts", "host-tts"])
+    parser.add_argument(
+        "--for",
+        dest="scenario",
+        required=True,
+        choices=[
+            "voice-clone",
+            "tts-controls",
+            "asr-extended",
+            "diarize",
+            "timed-transcript",
+            "deferred-tts",
+            "host-tts",
+        ],
+    )
     args = parser.parse_args()
     print(json.dumps(run_scenario(args.scenario), indent=2))
 

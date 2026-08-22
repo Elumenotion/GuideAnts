@@ -1,6 +1,6 @@
 ---
 name: audiocpp-tts-controls
-description: "Advanced synthesis controls on the loaded audio.cpp TTS model: deterministic output via seed, forcing the spoken language, voice-design from a text description (instructions), and enumerating builtin speaker ids — none of which the built-in GuideAnts audio tools expose. Use when the user wants reproducible audio, a specific language, a described voice, or a list of available speakers."
+description: "Advanced synthesis on the loaded Max TTS model via the raw audiocpp gateway (/tts): seed, language, voice-design instructions, builtin/voice-pack speakers, and multi-speaker dialogue with overlapping interruptions. None of which the built-in GuideAnts audio tools expose."
 metadata:
   guideants:
     enabled: true
@@ -10,9 +10,19 @@ metadata:
 
 # audio.cpp synthesis controls (experimental)
 
-The GuideAnts TTS wrapper contract is `{text, voice, speed}`. The raw engine
-underneath (`127.0.0.1:18084`) accepts more. This skill calls it directly;
-deliverables are WAV files in `Output/`, the live voice path is untouched.
+Product TTS is `{text, voice, speed}`. This skill calls raw
+`/tts/v1/audio/speech` on Max. Deliverables are WAVs in `Output/`.
+
+## Environment (required for PC → Max)
+
+```text
+AUDIOCPP_SKILL_BASE_URL=http://<max-lan-ip>:8112/audiocpp-skill
+AUDIOCPP_SKILL_TOKEN=<same as Max GA_AUDIOCPP_SKILL_TOKEN>
+```
+
+A TTS model must already be loaded on Max via GuideAnts Settings. Chatterbox
+(`ResembleAI/chatterbox`) is the known-good catalog entry for cloning /
+voice-pack presets.
 
 ## Preflight
 
@@ -20,49 +30,105 @@ deliverables are WAV files in `Output/`, the live voice path is untouched.
 python3 Output/Skills/audiocpp-tts-controls/scripts/preflight.py --for tts-controls
 ```
 
-Trust its verdict over this document. `open: false` usually means no TTS model
-is loaded — ask the user to load one via GuideAnts Settings → Local models.
-
-## The controls
-
-All via one script (engine model id auto-detected from the wrapper's health):
+## Controls
 
 ```bash
 python3 Output/Skills/audiocpp-tts-controls/scripts/engine_tool.py speech "Hello there" \
   -o Output/out.wav \
-  [--seed 42]                       # deterministic, reproducible synthesis
-  [--language de]                   # force spoken language (family-specific values)
-  [--instructions "a calm, deep narrator voice"]   # voice design — vdes-task models only
-  [--voice Vivian]                  # builtin speaker id
+  [--seed 42] \
+  [--language de] \
+  [--instructions "a calm, deep narrator voice"] \
+  [--voice Vivian]
 ```
 
-Notes:
-- `--instructions` only works on a model loaded with the `vdes` task (the
-  VoiceDesign catalog entry). Other families reject it — the engine errors
-  loudly; surface that text.
-- `--language` values are family-specific (name or code); the error text names
-  what the family accepts.
-- Same text + same seed + same model ⇒ same audio. Useful for A/B-ing one
-  parameter at a time.
+- `--instructions` only on `vdes`-task models (VoiceDesign catalog entry).
+- `--language` values are family-specific; engine errors name what is valid.
+- Same text + seed + model ⇒ same audio.
 
-## Listing available voices
+## Voices
 
 ```bash
-python3 Output/Skills/audiocpp-tts-controls/scripts/engine_tool.py voices   # engine's cached/builtin ids
-curl -s http://127.0.0.1:8084/admin/voice-pack   # wrapper's preset voice packs
-curl -s http://127.0.0.1:8084/admin/voices       # wrapper's builtin speaker list
+python3 Output/Skills/audiocpp-tts-controls/scripts/engine_tool.py voices
 ```
 
-Known gap: some families (e.g. Qwen3 CustomVoice) keep builtin speakers in the
-model's own config, invisible to `/v1/audio/voices` — if the list comes back
-empty, the model dir's `config.json`/`generation_config.json` has the truth.
+Voice ids come from the **voice-pack** baked into the Max AI image at
+`/opt/guideants/voice-pack/` (or a custom mount at
+`/opt/guideants/custom-voice-pack`). The engine resolves a `--voice` id to a
+reference clip **server-side** — you do NOT stage the clip for pack voices.
+A custom user voice (e.g. a cloned reference added to the pack's
+`manifest.json`) works the same way: pass its `voiceId` as `--voice`.
 
-## Related
+### Choosing a voice for a script (important)
 
-Voice cloning from a reference clip is the **audiocpp-voice-clone** skill;
-running model families GuideAnts doesn't ship is **audiocpp-deferred-tts**.
+The voice-pack `manifest.json` records each voice's `language` and `gender`.
+**Match the voice's `language` to the script's language.** Chatterbox is an
+English model: an in-distribution pair (English reference + English text)
+locks onto one stable voice. An out-of-distribution pair (e.g. a French-
+reference `ff_*` voice speaking English) produces an **unstable, text-
+sensitive accent** — the same speaker drifts into different accents across
+lines, and **a seed cannot fix this** (a seed only controls sampling noise on
+top of a stable distribution). If a voice sounds like a different person on
+each line, check its `language` in the manifest first, then swap for a
+matching-language voice.
+
+## Multi-speaker dialogue (overlap / interruptions)
+
+```bash
+python3 Output/Skills/audiocpp-tts-controls/scripts/multi_speaker.py \
+  Output/scene.json -o Output/scene.wav \
+  [--model chatterbox] \
+  [--seed-map '{"doug":1001,"alice":3003}']
+```
+
+`scene.json` is an array of lines:
+
+```json
+[
+  {"voice": "doug",      "text": "What's the air speed velocity of an unladen swallow?"},
+  {"voice": "bm_george", "text": "African or European?", "overlap_ms": 400},
+  {"voice": "bf_alice",  "text": "Oh no, you two are doing the swallow thing again.", "overlap_ms": 600}
+]
+```
+
+- `voice` / `text` — required.
+- `overlap_ms` — how many ms this line **starts before the previous line
+  ends**. `0` (default) = clean turn-taking; `>0` = the new speaker talks
+  over / interrupts. For a realistic interruption the overlap should be
+  **~1s+** so real words from both speakers are audible at once; 200–300 ms
+  only overlaps a trailing consonant and does NOT read as an interruption.
+- `seed` — per-line override. Omit to use an auto per-speaker seed.
+
+### How the mix works (do not change these)
+
+1. **Two tracks on one timeline.** Each line is placed at its computed start
+   offset on a shared buffer and **additively mixed** where they overlap.
+   No crossfade, no truncation — both voices are genuinely audible together.
+2. **Preserve the native sample rate.** The TTS engine emits **24 kHz** mono.
+   Writing the output at a different rate (e.g. 48 kHz) plays the audio at
+   the wrong speed and mangles it. Always pass the source `framerate` through.
+3. **One seed per speaker.** Chatterbox is non-deterministic per call. Assign
+   each speaker a **fixed seed** (the script auto-derives one from the voice
+   name by default) so a speaker sounds consistent across all their lines.
+   This only works for in-distribution (matching-language) voices — see above.
+
+### Realistic interruption beats
+
+To make interruptions sound natural, write the **interrupted** speaker's line
+as a full flowing sentence that is still going when the other person cuts in
+(so the overlap zone contains real words from both), rather than a truncated
+fragment. A short `overlap_ms` on a clean turn is fine for pacing, but the
+"talk-over" moments should have `overlap_ms` ≥ ~1000.
+
+## When this isn't enough
+
+- Loaded model rejects a `voice` preset id → confirm the pack is mounted and
+  the id is in `manifest.json`; for a brand-new custom voice add it to the
+  pack and rebuild/remount, or stage a clip and use **audiocpp-voice-clone**
+  (`--voice-ref`).
+- No TTS loaded on Max → blocked; say so.
 
 ## Reporting
 
-End by telling the user what worked and what was blocked, quoting the
-preflight/engine evidence.
+End by telling the user what worked and what was blocked, quoting preflight
+evidence. For multi-speaker output, state the total duration, per-speaker
+seeds, and which lines carry `overlap_ms`.

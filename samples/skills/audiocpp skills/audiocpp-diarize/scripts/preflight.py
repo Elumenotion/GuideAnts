@@ -25,6 +25,8 @@ import tempfile
 import urllib.error
 import urllib.request
 
+from skill_gateway_client import probe_gateway, using_skill_gateway
+
 WRAPPER_ASR = "http://127.0.0.1:8082"
 WRAPPER_TTS = "http://127.0.0.1:8084"
 ENGINE_ASR = "http://127.0.0.1:18082"
@@ -203,6 +205,54 @@ def run_scenario(scenario: str) -> dict:
         evidence[name] = result
         if not result.get("ok"):
             warnings.append(f"{name}: {hint}")
+
+    if using_skill_gateway() and scenario in (
+        "voice-clone",
+        "tts-controls",
+        "asr-extended",
+        "diarize",
+        "deferred-tts",
+    ):
+        gateway = probe_gateway()
+        evidence["skillGateway"] = gateway
+        if gateway.get("open"):
+            upstream = ((gateway.get("body") or {}).get("upstream") or {})
+            if scenario in ("voice-clone", "tts-controls"):
+                tts = upstream.get("ttsEngine") or {}
+                if tts.get("status") != 200:
+                    blockers.append(
+                        "skillGateway: TTS engine not ready on Max — load a TTS model via GuideAnts Settings"
+                    )
+            elif scenario == "asr-extended":
+                asr = upstream.get("asrEngine") or {}
+                if asr.get("status") != 200:
+                    blockers.append(
+                        "skillGateway: ASR engine not ready on Max — load an ASR model via GuideAnts Settings"
+                    )
+            else:
+                warnings.append(
+                    "skillGateway: private engine start/fetch run on Max under /models-local/skill"
+                )
+            return {
+                "scenario": scenario,
+                "open": not blockers,
+                "blockers": blockers,
+                "warnings": warnings,
+                "evidence": evidence,
+                "route": "route5_remote_skill_gateway",
+            }
+        blockers.append(
+            "skillGateway: AUDIOCPP_SKILL_BASE_URL set but gateway not open — "
+            f"{gateway.get('error') or gateway.get('status') or gateway}"
+        )
+        return {
+            "scenario": scenario,
+            "open": False,
+            "blockers": blockers,
+            "warnings": warnings,
+            "evidence": evidence,
+            "route": "route5_remote_skill_gateway",
+        }
 
     if scenario in ("voice-clone", "tts-controls"):
         required("engineTts", check_url(f"{ENGINE_TTS}/health"),
