@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""Scoped capability preflight for Qwen Image task skills.
+
+Prints one JSON verdict:
+
+  {"scenario": ..., "open": bool, "blockers": [...], "warnings": [...], "evidence": {...}}
+
+Scenarios: generate-bf16 | edit-bf16 | inpaint-bf16 | probe
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from skill_gateway_client import (
+    fetch_capabilities,
+    gateway_env_missing_blocker,
+    probe_gateway,
+    require_gateway,
+    using_skill_gateway,
+)
+
+SCENARIO_FLAGS = {
+    "generate-bf16": ("image_generate_bf16_ready", "qwen-image-bf16-v1"),
+    "edit-bf16": ("image_edit_bf16_ready", "qwen-image-edit-bf16-v1"),
+    "inpaint-bf16": ("image_edit_bf16_inpaint_ready", "qwen-image-edit-bf16-inpaint-v1"),
+}
+
+
+def missing_from_capabilities(caps: dict, flag: str) -> list[str]:
+    if caps.get(flag) is True:
+        return []
+    blockers = [f"{flag} is false"]
+    details_key = flag.replace("_ready", "_details")
+    details = caps.get(details_key)
+    if isinstance(details, dict) and details.get("missing"):
+        blockers.extend(str(item) for item in details["missing"])
+    return blockers
+
+
+def run_preflight(scenario: str) -> dict:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    evidence: dict = {}
+
+    if not using_skill_gateway():
+        blockers.append(gateway_env_missing_blocker())
+        return {
+            "scenario": scenario,
+            "open": False,
+            "blockers": blockers,
+            "warnings": warnings,
+            "evidence": evidence,
+            "route": "route_remote_skill_gateway",
+        }
+
+    gateway = probe_gateway()
+    evidence["gateway"] = gateway
+    if not gateway.get("open"):
+        blockers.append(
+            "skillGateway: QWEN_IMAGE_SKILL_BASE_URL set but gateway not open — "
+            f"{gateway.get('error') or gateway.get('status') or gateway}"
+        )
+        return {
+            "scenario": scenario,
+            "open": False,
+            "blockers": blockers,
+            "warnings": warnings,
+            "evidence": evidence,
+            "route": "route_remote_skill_gateway",
+        }
+
+    try:
+        caps = fetch_capabilities()
+    except Exception as exc:
+        blockers.append(f"capabilities request failed: {type(exc).__name__}: {exc}")
+        return {
+            "scenario": scenario,
+            "open": False,
+            "blockers": blockers,
+            "warnings": warnings,
+            "evidence": evidence,
+        }
+
+    evidence["capabilities"] = {
+        "image_generate_bf16_ready": caps.get("image_generate_bf16_ready"),
+        "image_edit_bf16_ready": caps.get("image_edit_bf16_ready"),
+        "image_edit_bf16_inpaint_ready": caps.get("image_edit_bf16_inpaint_ready"),
+        "workflow_versions": caps.get("workflow_versions"),
+    }
+
+    if scenario == "probe":
+        for name, (flag, _workflow) in SCENARIO_FLAGS.items():
+            if caps.get(flag) is not True:
+                blockers.extend(missing_from_capabilities(caps, flag))
+        open_ok = not blockers
+    else:
+        flag, workflow = SCENARIO_FLAGS[scenario]
+        evidence["workflow"] = workflow
+        blockers.extend(missing_from_capabilities(caps, flag))
+        open_ok = not blockers
+
+    return {
+        "scenario": scenario,
+        "open": open_ok,
+        "blockers": blockers,
+        "warnings": warnings,
+        "evidence": evidence,
+        "route": "route_remote_skill_gateway",
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Qwen Image scoped preflight")
+    parser.add_argument(
+        "--for",
+        dest="scenario",
+        required=True,
+        choices=["generate-bf16", "edit-bf16", "inpaint-bf16", "probe"],
+    )
+    args = parser.parse_args()
+    if using_skill_gateway():
+        require_gateway()
+    report = run_preflight(args.scenario)
+    print(json.dumps(report, separators=(",", ":")))
+    if not report["open"]:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

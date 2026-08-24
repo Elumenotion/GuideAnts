@@ -1,0 +1,18 @@
+{
+  "name": "QwenImage",
+  "description": "BF16 Qwen Image generate, edit, and inpaint via Max ComfyUI-video skill gateway — beyond product SD notebook tools.",
+  "defaultModel": null,
+  "defaultAssistant": null,
+  "tools": [
+    {
+      "type": "run_python"
+    },
+    {
+      "type": "search_notebook"
+    },
+    {
+      "type": "search_project"
+    }
+  ],
+  "crew": []
+}

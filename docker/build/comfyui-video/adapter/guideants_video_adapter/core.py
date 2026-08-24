@@ -24,7 +24,9 @@ from .comfy_telemetry import (
     log_job_progress,
     merge_progress,
     queue_state_for_prompt,
+    should_log_progress,
 )
+from .composite import CompositeError, composite_ready, run_corridorkey_composite
 
 API_VERSION = "v1"
 WORKFLOW_VERSION = "infinitetalk-i2v-v1"
@@ -147,12 +149,18 @@ def validate_identifier(value: str, kind: str) -> str:
     return value
 
 
-def safe_output_filename(value: str) -> str:
-    """Accept a basename lossless MKV only, never a path."""
+def safe_output_filename(value: str, *, allow_mp4: bool = False) -> str:
+    """Accept a basename video filename only, never a path.
+
+    Delivery jobs (avatar+audio+background) use .mp4. Green-only/legacy use .mkv.
+    """
     if not value or Path(value).name != value or value in {".", ".."}:
         raise AdapterError("output_filename must be a filename, not a path", 422)
-    if Path(value).suffix.lower() != ".mkv":
-        raise AdapterError("output_filename must end in .mkv", 422)
+    suffix = Path(value).suffix.lower()
+    allowed = {".mkv", ".mp4"} if allow_mp4 else {".mkv"}
+    if suffix not in allowed:
+        expected = " or ".join(sorted(allowed))
+        raise AdapterError(f"output_filename must end in {expected}", 422)
     if any(char in value for char in ("/", "\\", "\0")):
         raise AdapterError("output_filename contains an invalid character", 422)
     return value
@@ -350,12 +358,16 @@ class Job:
     error: str | None = None
     cancel_requested: bool = False
     progress: dict[str, Any] = field(default_factory=initial_progress)
+    seed: int | None = None
+    workflow_version: str | None = None
+    green_filename: str | None = None
 
     def public(self) -> dict[str, Any]:
         data = asdict(self)
         data["jobId"] = data.pop("id")
         data.pop("output_path")
         data.pop("cancel_requested")
+        data.pop("green_filename")
         data["result_available"] = self.state == "completed"
         data["progress"] = dict(self.progress)
         return data
@@ -594,9 +606,12 @@ class AdapterService:
 
     def _update_job_progress(self, job: Job, *, log: bool = True, **updates: Any) -> None:
         with self._lock:
+            previous = dict(job.progress)
+            if job.seed is not None and "seed" not in updates:
+                updates = {**updates, "seed": job.seed}
             job.progress = merge_progress(job.progress, **updates)
             job.updated_at = job.progress["updated_at"]
-            if log:
+            if log and should_log_progress(previous, job.progress):
                 log_job_progress(job.id, job.progress)
 
     def health(self) -> dict[str, Any]:
@@ -721,6 +736,7 @@ class AdapterService:
         )
         image_generate_ready, image_generate_details = self.image_generate_readiness()
         v2v_ready, v2v_details = self.v2v_readiness()
+        composite_ok, composite_missing = composite_ready()
         device = (
             details.get("device")
             or image_details.get("device")
@@ -752,11 +768,13 @@ class AdapterService:
             "precision": os.getenv("VIDEO_PRECISION", "bfloat16"),
             "ready": ready,
             "v2v_ready": v2v_ready,
+            "composite_ready": composite_ok,
             "image_ready": image_ready,
             "image_edit_20_ready": image_edit_20_ready,
             "image_edit_bf16_ready": image_edit_bf16_ready,
             "image_edit_bf16_inpaint_ready": image_edit_bf16_inpaint_ready,
             "image_generate_ready": image_generate_ready,
+            "composite_missing": composite_missing,
         }
 
     def _manifest(self) -> dict[str, Any]:
@@ -871,15 +889,41 @@ class AdapterService:
         parameters: dict[str, Any],
         positive_prompt: str | None = None,
         negative_prompt: str | None = None,
+        background: bytes | None = None,
+        background_type: str | None = None,
     ) -> Job:
         if workflow_version == WORKFLOW_VERSION:
             if source_type not in ALLOWED_INPUT_TYPES or not source_type.startswith("image/"):
                 raise AdapterError("unsupported source media type", 415)
             ready, details = self.readiness()
+            if not background or not background_type:
+                raise AdapterError(
+                    "background plate is required for talking-head i2v (avatar+audio+background)",
+                    422,
+                )
+            if background_type not in ALLOWED_INPUT_TYPES or not background_type.startswith("image/"):
+                raise AdapterError("unsupported background media type", 415)
+            if len(background) > MAX_SOURCE_BYTES:
+                raise AdapterError(f"background exceeds the {MAX_SOURCE_BYTES}-byte limit", 413)
+            composite_ok, composite_missing = composite_ready()
+            if not composite_ok:
+                raise AdapterError(
+                    f"composite backend is not ready: {composite_missing}",
+                    503,
+                )
+            output_filename = safe_output_filename(output_filename, allow_mp4=True)
+            if Path(output_filename).suffix.lower() != ".mp4":
+                raise AdapterError(
+                    "output_filename must end in .mp4 when background composite is enabled",
+                    422,
+                )
         elif workflow_version == V2V_WORKFLOW_VERSION:
             if source_type not in ALLOWED_INPUT_TYPES or not source_type.startswith("video/"):
                 raise AdapterError("unsupported source media type", 415)
             ready, details = self.v2v_readiness()
+            if background is not None:
+                raise AdapterError("background is not supported for v2v workflow", 422)
+            output_filename = safe_output_filename(output_filename, allow_mp4=False)
         else:
             raise AdapterError(f"unsupported workflow_version: {workflow_version}", 422)
         if audio_type not in ALLOWED_INPUT_TYPES or not audio_type.startswith("audio/"):
@@ -890,20 +934,34 @@ class AdapterService:
             raise AdapterError(f"source exceeds the {MAX_SOURCE_BYTES}-byte limit", 413)
         if len(audio) > MAX_AUDIO_BYTES:
             raise AdapterError(f"audio exceeds the {MAX_AUDIO_BYTES}-byte limit", 413)
-        output_filename = safe_output_filename(output_filename)
         parameters = resolve_workflow_parameters(parameters, audio, audio_type)
         positive_prompt, negative_prompt = validate_talking_head_prompts(
             positive_prompt, negative_prompt
         )
         if not ready:
             raise AdapterError(f"video backend is not ready: {details['missing']}", 503)
-        job = Job(id=uuid.uuid4().hex, output_filename=output_filename)
+        seed = int(parameters["seed"])
+        job = Job(
+            id=uuid.uuid4().hex,
+            output_filename=output_filename,
+            seed=seed,
+            workflow_version=workflow_version,
+            green_filename="green.mkv" if workflow_version == WORKFLOW_VERSION else None,
+        )
         job_dir = self.jobs_root / job.id
         job_dir.mkdir(mode=0o700)
         (job_dir / f"source{ALLOWED_INPUT_TYPES[source_type]}").write_bytes(source)
         (job_dir / f"audio{ALLOWED_INPUT_TYPES[audio_type]}").write_bytes(audio)
+        if background is not None and background_type is not None:
+            (job_dir / f"background{ALLOWED_INPUT_TYPES[background_type]}").write_bytes(background)
         with self._lock:
             self.jobs[job.id] = job
+        self._update_job_progress(
+            job,
+            phase="queued",
+            message=f"accepted seed={seed} workflow={workflow_version}",
+            seed=seed,
+        )
         threading.Thread(
             target=self._job_worker,
             args=(
@@ -916,6 +974,8 @@ class AdapterService:
                 positive_prompt,
                 negative_prompt,
                 workflow_version,
+                background,
+                background_type,
             ),
             daemon=True,
         ).start()
@@ -932,11 +992,13 @@ class AdapterService:
         positive_prompt: str,
         negative_prompt: str,
         workflow_version: str,
+        background: bytes | None = None,
+        background_type: str | None = None,
     ) -> None:
         is_v2v = workflow_version == V2V_WORKFLOW_VERSION
         workflow_path = self.v2v_workflow_path if is_v2v else self.workflow_path
         job.state = "running"
-        self._update_job_progress(job, phase="running", message="starting job")
+        self._update_job_progress(job, phase="generating", message="starting InfiniteTalk i2v")
         listener: ComfyProgressListener | None = None
         try:
             source_label = "source video" if is_v2v else "source image"
@@ -985,20 +1047,57 @@ class AdapterService:
                 try:
                     queue_updates = queue_state_for_prompt(self.comfy.queue(), job.prompt_id)
                     if queue_updates:
-                        self._update_job_progress(job, log=False, **queue_updates)
+                        self._update_job_progress(job, log=True, **queue_updates)
                 except AdapterError:
                     pass
                 descriptor = find_video_output(self.comfy.history(job.prompt_id), job.prompt_id)
                 if descriptor is not None:
-                    self._update_job_progress(job, phase="encoding", message="downloading ComfyUI output")
+                    self._update_job_progress(
+                        job, phase="encoding", message="downloading ComfyUI green output"
+                    )
                     output = self.comfy.download_output(descriptor)
                     if not output:
                         raise AdapterError("ComfyUI returned an empty video")
-                    output_path = self.jobs_root / job.id / job.output_filename
+                    job_dir = self.jobs_root / job.id
+                    if background is not None and background_type is not None and job.green_filename:
+                        green_path = job_dir / job.green_filename
+                        green_path.write_bytes(output)
+                        plate_path = job_dir / f"background{ALLOWED_INPUT_TYPES[background_type]}"
+                        delivery_path = job_dir / job.output_filename
+                        master_path = job_dir / f"{Path(job.output_filename).stem}-master.mkv"
+                        if listener is not None:
+                            listener.stop()
+                            listener = None
+                        self._update_job_progress(
+                            job,
+                            phase="compositing",
+                            message="CorridorKey composite with background plate",
+                        )
+                        try:
+                            run_corridorkey_composite(
+                                source=green_path,
+                                plate=plate_path,
+                                output=delivery_path,
+                                master_output=master_path,
+                            )
+                        except CompositeError as exc:
+                            raise AdapterError(str(exc), exc.status_code) from exc
+                        job.output_path = str(delivery_path)
+                        job.state = "completed"
+                        self._update_job_progress(
+                            job,
+                            phase="completed",
+                            message="delivery ready",
+                            percent=100.0,
+                        )
+                        return
+                    output_path = job_dir / job.output_filename
                     output_path.write_bytes(output)
                     job.output_path = str(output_path)
                     job.state = "completed"
-                    self._update_job_progress(job, phase="completed", message="video ready", percent=100.0)
+                    self._update_job_progress(
+                        job, phase="completed", message="video ready", percent=100.0
+                    )
                     return
                 time.sleep(self.poll_interval)
         except Exception as exc:  # worker boundary records an explicit terminal failure

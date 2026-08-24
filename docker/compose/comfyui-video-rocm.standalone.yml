@@ -19,7 +19,8 @@ services:
       IMAGE_EDIT_20_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-20-v1.json
       IMAGE_EDIT_BF16_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
       IMAGE_EDIT_BF16_INPAINT_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
-      IMAGE_GENERATE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-v1.json
+      IMAGE_GENERATE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-bf16-v1.json
+      GA_QWEN_IMAGE_SKILL_TOKEN: ${GA_QWEN_IMAGE_SKILL_TOKEN:-local-qwen-image-skill-token}
       HIP_VISIBLE_DEVICES: ${GA_COMFYUI_VIDEO_HIP_VISIBLE_DEVICES:-0}
       HSA_ENABLE_DXG_DETECTION: "1"
       HSA_ENABLE_SDMA: "0"
@@ -91,8 +92,12 @@ services:
         target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
         read_only: true
       - type: bind
-        source: ../build/comfyui-video/workflows/qwen-image-v1.json
-        target: /opt/guideants/comfyui-video/workflows/qwen-image-v1.json
+        source: ../build/comfyui-video/workflows/qwen-image-bf16-v1.json
+        target: /opt/guideants/comfyui-video/workflows/qwen-image-bf16-v1.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/qwen-image-skill-gateway
+        target: /opt/guideants/comfyui-video/qwen-image-skill-gateway
         read_only: true
       - type: bind
         source: ../build/comfyui-video/catalog/manifest.json

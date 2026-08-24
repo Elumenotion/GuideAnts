@@ -28,8 +28,10 @@ services:
       VIDEO_JOB_TIMEOUT_SECONDS: ${GA_COMFYUI_VIDEO_JOB_TIMEOUT_SECONDS:-3600}
       VIDEO_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1.json
       VIDEO_V2V_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/infinitetalk-v2v-v1.json
-      IMAGE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-v1.json
-      IMAGE_GENERATE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-v1.json
+      IMAGE_EDIT_BF16_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
+      IMAGE_EDIT_BF16_INPAINT_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
+      IMAGE_GENERATE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-bf16-v1.json
+      GA_QWEN_IMAGE_SKILL_TOKEN: ${GA_QWEN_IMAGE_SKILL_TOKEN:-local-qwen-image-skill-token}
     volumes:
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:?Set GA_CONTENT_FILES_HOST_PATH}
@@ -51,8 +53,16 @@ services:
         target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
         read_only: true
       - type: bind
-        source: ../build/comfyui-video/workflows/qwen-image-v1.json
-        target: /opt/guideants/comfyui-video/workflows/qwen-image-v1.json
+        source: ../build/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
+        target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/workflows/qwen-image-bf16-v1.json
+        target: /opt/guideants/comfyui-video/workflows/qwen-image-bf16-v1.json
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/qwen-image-skill-gateway
+        target: /opt/guideants/comfyui-video/qwen-image-skill-gateway
         read_only: true
       - type: bind
         source: ../build/comfyui-video/nginx.conf

@@ -73,6 +73,7 @@ deps_hash="$(
   sha256sum \
     "$dockerfile" \
     "$context/constraints/common.txt" \
+    "$context/constraints/corridorkey-composite.txt" \
     "$context/constraints/cuda13.txt" \
     "$lock" |
     sha256sum |

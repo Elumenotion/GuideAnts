@@ -151,6 +151,7 @@ def _multipart(
 def submit_talking_head(
     image_path: str | os.PathLike[str],
     audio_path: str | os.PathLike[str],
+    background_path: str | os.PathLike[str],
     output_filename: str,
     *,
     workflow: str = WORKFLOW_VERSION,
@@ -160,15 +161,19 @@ def submit_talking_head(
     negative_prompt: str | None = None,
     base_url: str | None = None,
 ) -> dict[str, Any]:
-    """Upload notebook-scoped inputs and submit the fixed I2V workflow."""
+    """Upload notebook-scoped avatar+audio+background and submit i2v + composite job."""
     if workflow != WORKFLOW_VERSION:
         raise VideoClientError(f"unsupported workflow: {workflow}")
     source = resolve_notebook_path(image_path, working_directory, must_exist=True)
     audio = resolve_notebook_path(audio_path, working_directory, must_exist=True)
-    if not source.is_file() or not audio.is_file():
-        raise VideoClientError("image_path and audio_path must identify files")
+    background = resolve_notebook_path(background_path, working_directory, must_exist=True)
+    if not source.is_file() or not audio.is_file() or not background.is_file():
+        raise VideoClientError("image_path, audio_path, and background_path must identify files")
+    if Path(output_filename).suffix.lower() != ".mp4":
+        raise VideoClientError("output_filename must end in .mp4 for delivery composite")
     source_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
     audio_type = mimetypes.guess_type(audio.name)[0] or "application/octet-stream"
+    background_type = mimetypes.guess_type(background.name)[0] or "application/octet-stream"
     if audio_type == "audio/x-wav":
         audio_type = "audio/wav"
     if positive_prompt is not None and not positive_prompt.strip():
@@ -189,6 +194,7 @@ def submit_talking_head(
         {
             "source": (source.name, source.read_bytes(), source_type),
             "audio": (audio.name, audio.read_bytes(), audio_type),
+            "background": (background.name, background.read_bytes(), background_type),
         },
     )
     return _request(
@@ -283,8 +289,8 @@ def materialize_talking_head_result(
     """Atomically write a completed result inside the notebook scope."""
     job_id = _job_id(job_id)
     destination = resolve_notebook_path(output_path, working_directory, must_exist=False)
-    if destination.suffix.lower() != ".mkv":
-        raise VideoClientError("output_path must end in .mkv")
+    if destination.suffix.lower() not in {".mkv", ".mp4"}:
+        raise VideoClientError("output_path must end in .mkv or .mp4")
     if not destination.parent.is_dir():
         raise VideoClientError("output directory does not exist")
     handle, temporary_name = tempfile.mkstemp(
@@ -315,7 +321,7 @@ IMAGE_WORKFLOW_VERSION = "qwen-image-edit-v1"
 IMAGE_EDIT_20_WORKFLOW_VERSION = "qwen-image-edit-20-v1"
 IMAGE_EDIT_BF16_WORKFLOW_VERSION = "qwen-image-edit-bf16-v1"
 IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION = "qwen-image-edit-bf16-inpaint-v1"
-IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-v1"
+IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-bf16-v1"
 IMAGE_EDIT_WORKFLOW_VERSIONS = frozenset(
     {
         IMAGE_WORKFLOW_VERSION,

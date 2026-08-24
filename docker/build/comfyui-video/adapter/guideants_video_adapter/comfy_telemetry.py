@@ -66,7 +66,31 @@ def format_progress(progress: dict[str, Any]) -> str:
     queue_remaining = progress.get("queue_remaining")
     if isinstance(queue_remaining, int):
         parts.append(f"queue_remaining={queue_remaining}")
+    seed = progress.get("seed")
+    if seed is not None:
+        parts.append(f"seed={seed}")
     return " | ".join(parts)
+
+
+def progress_log_key(progress: dict[str, Any]) -> tuple[Any, ...]:
+    """Fields that warrant a console line. Routing/status noise is excluded."""
+    return (
+        progress.get("phase"),
+        progress.get("message"),
+        progress.get("node_class"),
+        progress.get("step"),
+        progress.get("max_steps"),
+        progress.get("queue_position"),
+        progress.get("seed"),
+    )
+
+
+def should_log_progress(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:
+    """Log only meaningful workflow progress, not every websocket/status tick."""
+    if previous is None:
+        return True
+    # Pure queue_remaining / last_event / updated_at churn is routing noise.
+    return progress_log_key(previous) != progress_log_key(current)
 
 
 def log_job_progress(job_id: str, progress: dict[str, Any]) -> None:

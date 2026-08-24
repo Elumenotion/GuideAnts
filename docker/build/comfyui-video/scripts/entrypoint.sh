@@ -52,12 +52,19 @@ esac
 install -d -o "$RUN_USER" -g "$RUN_GROUP" \
   /app/ContentFiles /cache /models /run/nginx \
   /var/lib/guideants/script-agent-admin /var/lib/guideants/script-agent-admin/scopes \
-  /var/lib/guideants/comfyui-video /var/lib/guideants/comfyui-video/jobs
+  /var/lib/guideants/comfyui-video /var/lib/guideants/comfyui-video/jobs \
+  /var/lib/guideants/qwen-image-skill/staging \
+  /var/lib/guideants/talking-head-skill/staging \
+  /opt/ComfyUI/user/default/workflows/guideants \
+  /opt/ComfyUI/user/default/workflows/guideants-jobs
 chown "$RUN_USER:$RUN_GROUP" /cache /models /var/lib/guideants/comfyui-video \
   /var/lib/guideants/comfyui-video/jobs
 
 rm -rf /opt/ComfyUI/models
 ln -s /models /opt/ComfyUI/models
+
+# Expose GuideAnts workflow templates in ComfyUI's Workflows browser (Load).
+# API-format JSON loads blank; publish UI-format after ComfyUI is up (below).
 
 gosu "$RUN_USER:$RUN_GROUP" python /opt/guideants/comfyui-video/scripts/verify-install.py
 
@@ -84,6 +91,9 @@ done
 curl --fail --silent http://127.0.0.1:8188/object_info >/dev/null \
   || die "ComfyUI did not become healthy on loopback"
 
+python /opt/guideants/comfyui-video/scripts/publish-comfy-workflow-templates.py
+chown -R "$RUN_USER:$RUN_GROUP" /opt/ComfyUI/user/default/workflows
+
 gosu "$RUN_USER:$RUN_GROUP" \
   python /opt/guideants/comfyui-video/scripts/smoke-workflow.py
 
@@ -92,6 +102,11 @@ gosu "$RUN_USER:$RUN_GROUP" \
   uvicorn guideants_video_adapter.app:APP \
     --app-dir /app/adapter --host 127.0.0.1 --port 8190 \
     --log-level warning --no-access-log &
+children+=("$!")
+
+bash /opt/guideants/comfyui-video/scripts/start-qwen-image-skill.sh &
+children+=("$!")
+bash /opt/guideants/comfyui-video/scripts/start-talking-head-skill.sh &
 children+=("$!")
 
 # Health checks hit /sandbox/health every 30s; default ASP.NET request logging

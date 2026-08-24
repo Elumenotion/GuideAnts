@@ -65,6 +65,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
          -r /opt/ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt \
          -r /opt/ComfyUI/custom_nodes/ComfyUI-MelBandRoFormer/requirements.txt \
          -r /tmp/adapter-requirements.txt \
+    && python -m pip uninstall -y opencv-python-headless opencv-python opencv-contrib-python \
+    && python -m pip install -c /tmp/constraints/common.txt \
+         -r /tmp/constraints/corridorkey-composite.txt \
+    && OPENCV_IO_ENABLE_OPENEXR=1 python -c "import os; os.environ['OPENCV_IO_ENABLE_OPENEXR']='1'; import timm; import cv2; import numpy as np; assert cv2.imwrite('/tmp/t.exr', np.zeros((4,4,3), np.float32))" \
     && python -m pip check
 
 FROM ${CUDA_BASE_IMAGE} AS deps-cuda13
@@ -110,7 +114,8 @@ ENV FILE_STORAGE_ROOT=/app/ContentFiles \
     VIDEO_V2V_WORKFLOW_PATH=/opt/guideants/comfyui-video/workflows/infinitetalk-v2v-v1.json \
     VIDEO_MODEL_MANIFEST=/opt/guideants/comfyui-video/catalog/manifest.json \
     VIDEO_MAX_CONCURRENT_JOBS=1 \
-    VIDEO_JOB_TIMEOUT_SECONDS=3600
+    VIDEO_JOB_TIMEOUT_SECONDS=3600 \
+    OPENCV_IO_ENABLE_OPENEXR=1
 RUN groupadd --gid 10001 guideants \
     && useradd --uid 10001 --gid guideants --create-home --shell /bin/bash guideants \
     && rm -f /etc/nginx/sites-enabled/default
@@ -122,9 +127,11 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY catalog/ /opt/guideants/comfyui-video/catalog/
 COPY workflows/ /opt/guideants/comfyui-video/workflows/
 COPY scripts/ /opt/guideants/comfyui-video/scripts/
+COPY qwen-image-skill-gateway/ /opt/guideants/comfyui-video/qwen-image-skill-gateway/
 COPY source-lock.json /opt/guideants/comfyui-video/source-lock.json
 RUN chmod 0755 /usr/local/bin/ga-script-exec /opt/guideants/comfyui-video/scripts/*.py \
       /opt/guideants/comfyui-video/scripts/entrypoint.sh \
+      /opt/guideants/comfyui-video/scripts/start-qwen-image-skill.sh \
     && chown -R guideants:guideants /app /opt/ComfyUI /opt/guideants/comfyui-video \
     && python /opt/guideants/comfyui-video/scripts/verify-install.py --build
 VOLUME ["/models", "/cache", "/var/lib/guideants/script-agent-admin", "/app/ContentFiles"]

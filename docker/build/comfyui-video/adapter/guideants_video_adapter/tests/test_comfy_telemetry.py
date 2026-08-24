@@ -50,6 +50,32 @@ def test_queue_state_for_prompt_reports_running_and_pending_positions() -> None:
     }
 
 
+def test_should_log_progress_skips_routing_noise() -> None:
+    from guideants_video_adapter.comfy_telemetry import should_log_progress
+
+    base = {
+        "phase": "sampling",
+        "message": "sampling 5/20",
+        "node_class": "WanVideoSampler",
+        "step": 5,
+        "max_steps": 20,
+        "queue_position": 0,
+        "queue_remaining": 1,
+        "last_event": "progress",
+        "seed": 42,
+    }
+    assert should_log_progress(None, base) is True
+    noisy = dict(base)
+    noisy["queue_remaining"] = 0
+    noisy["last_event"] = "status"
+    noisy["updated_at"] = 999.0
+    assert should_log_progress(base, noisy) is False
+    stepped = dict(base)
+    stepped["step"] = 6
+    stepped["message"] = "sampling 6/20"
+    assert should_log_progress(base, stepped) is True
+
+
 def test_listener_maps_progress_events() -> None:
     updates: list[dict] = []
     listener = ComfyProgressListener(

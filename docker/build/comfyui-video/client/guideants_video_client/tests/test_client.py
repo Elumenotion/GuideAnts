@@ -59,20 +59,22 @@ def test_submit_streams_scoped_files(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     _notebook, input_dir, output_dir = make_notebook(tmp_path)
     (input_dir / "avatar.png").write_bytes(b"png")
     (input_dir / "voice.wav").write_bytes(b"wav")
+    (input_dir / "plate.png").write_bytes(b"plate")
     captured: dict = {}
 
     def fake_request(method: str, path: str, **kwargs: object) -> dict:
         captured.update({"method": method, "path": path, **kwargs})
-        return {"jobId": JOB_ID, "state": "queued"}
+        return {"jobId": JOB_ID, "state": "queued", "seed": 0}
 
     monkeypatch.setattr(client_module, "_request", fake_request)
     result = submit_talking_head(
         image_path="../Input/avatar.png",
         audio_path="../Input/voice.wav",
-        output_filename="output.mkv",
+        background_path="../Input/plate.png",
+        output_filename="output.mp4",
         workflow="infinitetalk-i2v-v1",
         working_directory=output_dir,
-        parameters={"fps": 25},
+        parameters={"fps": 25, "seed": 42},
         positive_prompt="A man teaching | A man talking",
         negative_prompt="head bobbing",
     )
@@ -80,7 +82,11 @@ def test_submit_streams_scoped_files(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert captured["path"] == "/v1/talking-head/jobs"
     body = captured["body"]
     assert isinstance(body, bytes)
-    assert b'infinitetalk-i2v-v1' in body
+    assert b'name="background"' in body
+    assert b"plate.png" in body
+    assert b"output.mp4" in body
+    assert b'"seed":42' in body
+    assert b"infinitetalk-i2v-v1" in body
     assert b'"fps":25' in body
     assert b"A man teaching | A man talking" in body
     assert b"head bobbing" in body
@@ -158,9 +164,15 @@ def test_materialize_is_atomic_and_scoped(
     assert result_path.read_bytes() == b"mkv-data"
     assert list(output_dir.glob("*.part")) == []
 
-    with pytest.raises(VideoClientError, match=r"end in \.mkv"):
+    mp4_result = materialize_talking_head_result(
+        JOB_ID, "delivery.mp4", working_directory=output_dir
+    )
+    assert mp4_result["bytes"] == 8
+    assert (output_dir / "delivery.mp4").is_file()
+
+    with pytest.raises(VideoClientError, match=r"end in \.mkv or \.mp4"):
         materialize_talking_head_result(
-            JOB_ID, "lossy.mp4", working_directory=output_dir
+            JOB_ID, "lossy.avi", working_directory=output_dir
         )
     with pytest.raises(VideoClientError, match="escapes"):
         materialize_talking_head_result(
@@ -304,7 +316,7 @@ def test_submit_image_generate_posts_form_without_source(
     assert captured["path"] == "/v1/image/generate/jobs"
     body = captured["body"]
     assert isinstance(body, bytes)
-    assert b"qwen-image-v1" in body
+    assert b"qwen-image-bf16-v1" in body
     assert b"a futuristic CPU on a motherboard" in body
     assert b'"steps":4' in body
     assert b'filename="' not in body

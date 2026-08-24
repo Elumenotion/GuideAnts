@@ -73,8 +73,9 @@ class FakeComfy:
         assert content_type
         return f"uploaded/{filename}"
 
-    def submit(self, workflow: dict, client_id: str) -> str:
+    def submit(self, workflow: dict, client_id: str, **kwargs: object) -> str:
         self.submitted = workflow
+        self.submit_kwargs = kwargs
         return self.prompt_id
 
     def history(self, prompt_id: str) -> dict:
@@ -98,7 +99,9 @@ class FakeComfy:
 
 
 @pytest.fixture
-def service(tmp_path: Path) -> tuple[AdapterService, FakeComfy]:
+def service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[AdapterService, FakeComfy]:
     models = tmp_path / "models"
     artifact = models / "infinitetalk" / "model.bin"
     artifact.parent.mkdir(parents=True)
@@ -140,6 +143,30 @@ def service(tmp_path: Path) -> tuple[AdapterService, FakeComfy]:
         ),
         encoding="utf-8",
     )
+    corridor_root = tmp_path / "CorridorKey"
+    checkpoint = corridor_root / "CorridorKeyModule" / "checkpoints"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "CorridorKey_v1.0.safetensors").write_bytes(b"ckpt")
+    composite_script = tmp_path / "run-corridorkey-composite.py"
+    composite_script.write_text("# stub\n", encoding="utf-8")
+    monkeypatch.setenv("VIDEO_CORRIDORKEY_ROOT", str(corridor_root))
+    monkeypatch.setenv("VIDEO_COMPOSITE_SCRIPT", str(composite_script))
+
+    def fake_composite(
+        *,
+        source: Path,
+        plate: Path,
+        output: Path,
+        master_output: Path | None = None,
+        **_kwargs: object,
+    ) -> None:
+        assert source.is_file()
+        assert plate.is_file()
+        output.write_bytes(b"fake-mp4")
+        if master_output is not None:
+            master_output.write_bytes(b"fake-master")
+
+    monkeypatch.setattr(core, "run_corridorkey_composite", fake_composite)
     comfy = FakeComfy()
     return (
         AdapterService(
@@ -159,6 +186,7 @@ def test_rejects_paths_and_unknown_parameters() -> None:
         safe_output_filename("../outside.mkv")
     with pytest.raises(AdapterError, match=r"end in \.mkv"):
         safe_output_filename("lossy.mp4")
+    assert safe_output_filename("delivery.mp4", allow_mp4=True) == "delivery.mp4"
     with pytest.raises(AdapterError, match="unsupported workflow parameters"):
         validate_parameters({"custom_node": "anything"})
 
@@ -189,9 +217,11 @@ def test_rejects_oversized_payload(
             "image/png",
             b"x" * (MAX_AUDIO_BYTES + 1),
             "audio/wav",
-            "answer.mkv",
+            "answer.mp4",
             WORKFLOW_VERSION,
             {},
+            background=b"plate",
+            background_type="image/png",
         )
 
 
@@ -238,16 +268,18 @@ def test_v1_rejects_video_and_reports_image_only(
     service: tuple[AdapterService, FakeComfy],
 ) -> None:
     adapter, _comfy = service
-    assert adapter.capabilities()["input_kinds"] == ["image"]
+    assert "image" in adapter.capabilities()["input_kinds"]
     with pytest.raises(AdapterError, match="unsupported source media type"):
         adapter.submit_job(
             b"video",
             "video/mp4",
             make_wav(1.0),
             "audio/wav",
-            "answer.mkv",
+            "answer.mp4",
             WORKFLOW_VERSION,
             {},
+            background=b"plate",
+            background_type="image/png",
         )
 
 
@@ -311,11 +343,13 @@ def test_job_substitutes_caller_prompts(
         "image/png",
         audio,
         "audio/wav",
-        "answer.mkv",
+        "answer.mp4",
         WORKFLOW_VERSION,
         {"fps": 25, "frames": 25},
         positive_prompt="A man teaching | A man answering a question",
         negative_prompt="head bobbing, overacting",
+        background=b"plate",
+        background_type="image/png",
     )
     comfy.history_ready.set()
     for _ in range(1000):
@@ -346,9 +380,11 @@ def test_job_uses_private_directory_and_materializes_result(
         "image/png",
         audio,
         "audio/wav",
-        "answer.mkv",
+        "answer.mp4",
         WORKFLOW_VERSION,
         {"fps": 30},
+        background=b"plate",
+        background_type="image/png",
     )
     comfy.history_ready.set()
     for _ in range(1000):
@@ -359,9 +395,11 @@ def test_job_uses_private_directory_and_materializes_result(
     assert completed.state == "completed"
     assert completed.progress["phase"] == "completed"
     result, filename = adapter.open_result(job.id)
-    assert filename == "answer.mkv"
+    assert filename == "answer.mp4"
     assert result.parent == adapter.jobs_root / job.id
-    assert result.read_bytes() == b"fake-mkv"
+    assert result.read_bytes() == b"fake-mp4"
+    assert completed.seed == 0
+    assert completed.progress.get("phase") == "completed"
     assert comfy.submitted is not None
     assert comfy.submitted["2"]["inputs"]["width"] == 832
     assert comfy.submitted["2"]["inputs"]["frames"] == 150
@@ -541,7 +579,7 @@ def test_image_edit_bf16_rejects_unknown_workflow() -> None:
 
 
 def test_image_generate_defaults_include_square_canvas() -> None:
-    params = validate_image_parameters({}, workflow_version="qwen-image-v1")
+    params = validate_image_parameters({}, workflow_version="qwen-image-bf16-v1")
     assert params["width"] == 1328
     assert params["height"] == 1328
     assert params["steps"] == 4
@@ -550,7 +588,7 @@ def test_image_generate_defaults_include_square_canvas() -> None:
 def test_image_generate_accepts_width_and_height() -> None:
     params = validate_image_parameters(
         {"width": 1664, "height": 928},
-        workflow_version="qwen-image-v1",
+        workflow_version="qwen-image-bf16-v1",
     )
     assert params["width"] == 1664
     assert params["height"] == 928
@@ -558,15 +596,15 @@ def test_image_generate_accepts_width_and_height() -> None:
 
 def test_image_generate_rejects_non_multiple_of_eight_canvas() -> None:
     with pytest.raises(AdapterError, match="width must be a multiple of 8"):
-        validate_image_parameters({"width": 1329}, workflow_version="qwen-image-v1")
+        validate_image_parameters({"width": 1329}, workflow_version="qwen-image-bf16-v1")
     with pytest.raises(AdapterError, match="height must be a multiple of 8"):
-        validate_image_parameters({"height": 930}, workflow_version="qwen-image-v1")
+        validate_image_parameters({"height": 930}, workflow_version="qwen-image-bf16-v1")
 
 
 def test_image_edit_rejects_width_and_height() -> None:
-    with pytest.raises(AdapterError, match="width only valid for qwen-image-v1"):
+    with pytest.raises(AdapterError, match="width only valid for qwen-image-bf16-v1"):
         validate_image_parameters({"width": 1664}, workflow_version="qwen-image-edit-v1")
-    with pytest.raises(AdapterError, match="height only valid for qwen-image-v1"):
+    with pytest.raises(AdapterError, match="height only valid for qwen-image-bf16-v1"):
         validate_image_parameters({"height": 928}, workflow_version="qwen-image-edit-20-v1")
 
 
@@ -598,7 +636,7 @@ def test_image_generate_job_materializes_png(
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_bytes(b"qwen")
     manifest = json.loads(adapter.manifest_path.read_text(encoding="utf-8"))
-    manifest["bundles"]["qwen-image-v1"] = {
+    manifest["bundles"]["qwen-image-bf16-v1"] = {
         "artifacts": [
             {
                 "path": "diffusion_models/qwen_image.safetensors",
@@ -626,7 +664,7 @@ def test_image_generate_job_materializes_png(
     job = adapter.submit_image_generate_job(
         "a futuristic CPU on a motherboard",
         "generated.png",
-        "qwen-image-v1",
+        "qwen-image-bf16-v1",
         {"steps": 4, "cfg": 1.0},
     )
     comfy.history_ready.set()

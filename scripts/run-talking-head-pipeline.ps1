@@ -9,6 +9,8 @@ param(
     [int]$Steps = 14,
     [double]$Cfg = 1.0,
     [int]$Fps = 25,
+    # -1 = pick a random seed before submit (adapter rejects negative seeds)
+    [long]$Seed = -1,
     [string]$PositivePrompt = "A professional presenter speaks naturally to camera, relaxed head movement, subtle head turns, expressive eyes, small posture shifts, warm restrained smile",
     [string]$NegativePrompt = "blur, distortion, extra limbs, deformed face, subtitles, low quality, dramatic gestures, overacting, wild motion",
     [string]$VideoHost = "http://127.0.0.1:8189",
@@ -142,11 +144,21 @@ if ($SkipGenerate -and -not [string]::IsNullOrWhiteSpace($SourceVideoPath)) {
     $GenHost = Resolve-RepoPath $SourceVideoPath
 }
 
+$SeedRequested = $Seed
+if ($Seed -lt 0) {
+    $Seed = [long](Get-Random -Minimum 0 -Maximum ([int]::MaxValue))
+}
 "Starting talking-head pipeline at $(Get-Date -Format o)" | Tee-Object -FilePath $LogPath
 if ($OutputStem -ne $RequestedOutputStem) {
     "requested_output_stem=$RequestedOutputStem" | Tee-Object -FilePath $LogPath -Append
 }
 "output_stem=$OutputStem" | Tee-Object -FilePath $LogPath -Append
+"seed=$Seed" | Tee-Object -FilePath $LogPath -Append
+if ($SeedRequested -lt 0) {
+    "seed_mode=random (requested=$SeedRequested)" | Tee-Object -FilePath $LogPath -Append
+} else {
+    "seed_mode=explicit" | Tee-Object -FilePath $LogPath -Append
+}
 "audio_lead_in_seconds=$AudioLeadInSeconds" | Tee-Object -FilePath $LogPath -Append
 
 $size = Get-VideoSize $Avatar
@@ -174,6 +186,7 @@ if ($preparedSize.Width -ne $Width -or $preparedSize.Height -ne $Height) {
     throw "Prepared avatar is $($preparedSize.Width)x$($preparedSize.Height), expected ${Width}x${Height}"
 }
 
+$jobId = ""
 if (-not $SkipGenerate) {
     $common = @{
         scriptType = "Python"
@@ -194,16 +207,16 @@ result = submit_talking_head(
     audio_path='../Input/$AudioName',
     workflow='infinitetalk-i2v-v1',
     output_filename='$GenName',
-    parameters={'width': $Width, 'height': $Height, 'steps': $Steps, 'cfg': $Cfg, 'fps': $Fps},
+    parameters={'width': $Width, 'height': $Height, 'steps': $Steps, 'cfg': $Cfg, 'fps': $Fps, 'seed': $Seed},
     positive_prompt=$promptLiteral,
     negative_prompt=$negativeLiteral,
 )
 print(json.dumps(result, separators=(',', ':')))
 "@
-    "2. generate ${Width}x${Height} from $(Split-Path -Leaf $GenerationAudio)" | Tee-Object -FilePath $LogPath -Append
+    "2. generate ${Width}x${Height} from $(Split-Path -Leaf $GenerationAudio) seed=$Seed" | Tee-Object -FilePath $LogPath -Append
     $submit = Invoke-SandboxExecute "submit" $submitPayload (Join-Path $ArtifactDir "$OutputStem-submit.json")
     $jobId = [string]$submit.jobId
-    "jobId=$jobId" | Tee-Object -FilePath $LogPath -Append
+    "jobId=$jobId seed=$Seed" | Tee-Object -FilePath $LogPath -Append
     $deadline = (Get-Date).AddSeconds($JobTimeoutSeconds)
     do {
         $statusPayload = $common.Clone()
@@ -271,9 +284,27 @@ $finalDur = [double](& ffprobe.exe -v error -show_entries format=duration -of de
 $masterDur = [double](& ffprobe.exe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 $MasterHost)
 $finalSize = Get-VideoSize $FinalHost
 $masterSize = Get-VideoSize $MasterHost
+"seed=$Seed" | Tee-Object -FilePath $LogPath -Append
 "audio_duration_seconds=$audioDur" | Tee-Object -FilePath $LogPath -Append
 "final_duration_seconds=$finalDur" | Tee-Object -FilePath $LogPath -Append
 "final_size=$($finalSize.Width)x$($finalSize.Height)" | Tee-Object -FilePath $LogPath -Append
 "master_duration_seconds=$masterDur" | Tee-Object -FilePath $LogPath -Append
 "master_size=$($masterSize.Width)x$($masterSize.Height)" | Tee-Object -FilePath $LogPath -Append
-"Completed. delivery=$FinalHost master=$MasterHost" | Tee-Object -FilePath $LogPath -Append
+"Completed. delivery=$FinalHost master=$MasterHost seed=$Seed" | Tee-Object -FilePath $LogPath -Append
+$meta = [ordered]@{
+    outputStem = $OutputStem
+    jobId = $jobId
+    seed = $Seed
+    seedRequested = $SeedRequested
+    seedMode = $(if ($SeedRequested -lt 0) { "random" } else { "explicit" })
+    width = $Width
+    height = $Height
+    steps = $Steps
+    cfg = $Cfg
+    fps = $Fps
+    delivery = $FinalHost
+    master = $MasterHost
+    log = $LogPath
+}
+($meta | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath (Join-Path $ArtifactDir "$OutputStem-run-meta.json") -Encoding utf8
+"run_meta=$(Join-Path $ArtifactDir "$OutputStem-run-meta.json")" | Tee-Object -FilePath $LogPath -Append

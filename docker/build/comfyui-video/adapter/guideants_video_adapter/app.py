@@ -58,7 +58,7 @@ def build_service() -> AdapterService:
         ),
         image_generate_workflow_path=_path_env(
             "IMAGE_GENERATE_WORKFLOW_PATH",
-            "/opt/guideants/comfyui-video/workflows/qwen-image-v1.json",
+            "/opt/guideants/comfyui-video/workflows/qwen-image-bf16-v1.json",
         ),
         v2v_workflow_path=_path_env(
             "VIDEO_V2V_WORKFLOW_PATH",
@@ -145,6 +145,7 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
         source: Annotated[UploadFile, File()],
         audio: Annotated[UploadFile, File()],
         output_filename: Annotated[str, Form()],
+        background: Annotated[UploadFile | None, File()] = None,
         workflow_version: Annotated[str, Form()] = WORKFLOW_VERSION,
         parameters: Annotated[str, Form()] = "{}",
         positive_prompt: Annotated[str, Form()] = DEFAULT_POSITIVE_PROMPT,
@@ -160,6 +161,11 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
         audio_type = (audio.content_type or "").split(";", 1)[0].lower()
         source_bytes = await source.read()
         audio_bytes = await audio.read()
+        background_bytes: bytes | None = None
+        background_type: str | None = None
+        if background is not None:
+            background_type = (background.content_type or "").split(";", 1)[0].lower()
+            background_bytes = await background.read()
         job = await run_in_threadpool(
             get_service().submit_job,
             source_bytes,
@@ -171,6 +177,8 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
             parsed_parameters,
             positive_prompt,
             negative_prompt,
+            background_bytes,
+            background_type,
         )
         return job.public()
 
@@ -188,7 +196,9 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
     def job_result(job_id: str) -> FileResponse:
         validate_identifier(job_id, "job")
         path, filename = get_service().open_result(job_id)
-        return FileResponse(path, media_type="video/mp4", filename=filename)
+        suffix = Path(filename).suffix.lower()
+        media_type = "video/mp4" if suffix == ".mp4" else "video/x-matroska"
+        return FileResponse(path, media_type=media_type, filename=filename)
 
     @app.post("/v1/image/jobs", status_code=202)
     async def submit_image_job(

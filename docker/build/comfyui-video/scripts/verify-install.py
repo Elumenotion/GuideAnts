@@ -126,10 +126,23 @@ def main() -> int:
     import uvicorn
 
     if args.build:
+        validate_corridorkey_composite_deps()
         print("immutable install validation passed")
         return 0
 
     return validate_runtime(backend, lock)
+
+
+def validate_corridorkey_composite_deps() -> None:
+    """CorridorKey composite runs in /opt/venv with bind-mounted CorridorKey at runtime."""
+    os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
+    import numpy as np
+
+    import timm  # noqa: F401
+    import cv2
+
+    if not cv2.imwrite("/tmp/verify-corridorkey.exr", np.zeros((4, 4, 3), dtype=np.float32)):
+        fail("opencv-contrib EXR write probe failed; CorridorKey composite deps are incomplete")
 
 
 def validate_workflow_graph(workflow_path: Path, backend: str, label: str) -> None:

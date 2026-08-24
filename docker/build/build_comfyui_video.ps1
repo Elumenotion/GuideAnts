@@ -75,6 +75,7 @@ try {
     $hashFiles = @(
         $dockerfile,
         (Join-Path $context 'constraints\common.txt'),
+        (Join-Path $context 'constraints\corridorkey-composite.txt'),
         (Join-Path $context $backendConfig.Constraints),
         $lockPath
     )
