@@ -12,7 +12,7 @@ public interface IConversationService
     Task RenameConversationAsync(Guid conversationId, string title);
     Task DeleteConversationAsync(Guid conversationId);
     
-    IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, CancellationToken cancellationToken = default, Guid? resolvedAssistantId = null);
 
     IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsUserAsync(
         Guid conversationId,

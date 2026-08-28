@@ -103,10 +103,11 @@ public class ConversationService : IConversationService
     public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(
         Guid conversationId,
         SendMessageRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        Guid? resolvedAssistantId = null)
     {
         var user = await _streamPolicy.ResolveUserIdentityAsync(internalUserId: null, externalUserIdentity: null, CancellationToken.None);
-        await foreach (var ev in SendMessageStreamCoreAsync(conversationId, request, user, cancellationToken))
+        await foreach (var ev in SendMessageStreamCoreAsync(conversationId, request, user, cancellationToken, resolvedAssistantId))
         {
             yield return ev;
         }
@@ -169,7 +170,8 @@ public class ConversationService : IConversationService
         Guid conversationId,
         SendMessageRequest request,
         StreamUserIdentity user,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Guid? resolvedAssistantId = null)
     {
         var preflight = System.Diagnostics.Stopwatch.StartNew();
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, CancellationToken.None);
@@ -182,7 +184,7 @@ public class ConversationService : IConversationService
         try
         {
             var setupCt = CancellationToken.None;
-            var loaded = await LoadStreamMetadataAsync(conversationId, request, user, setupCt);
+            var loaded = await LoadStreamMetadataAsync(conversationId, request, user, setupCt, resolvedAssistantId);
             loadMs = preflight.ElapsedMilliseconds;
 
             await CreateTurnAndUserMessageAsync(loaded, setupCt);
@@ -271,7 +273,8 @@ public class ConversationService : IConversationService
         Guid conversationId,
         SendMessageRequest request,
         StreamUserIdentity user,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? resolvedAssistantId = null)
     {
         if (string.IsNullOrWhiteSpace(request.Instructions) && (request.Attachments == null || request.Attachments.Count == 0))
         {
@@ -282,6 +285,8 @@ public class ConversationService : IConversationService
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         var conv = await db.NotebookConversations
+            .AsNoTracking()
+            .AsSplitQuery()
             .Include(c => c.Messages)
                 .ThenInclude(m => m.EditHistory)
             .Include(c => c.Notebook)
@@ -314,11 +319,8 @@ public class ConversationService : IConversationService
             LogValueSanitizer.Sanitize(resolvedModel.ExecutionPolicy.Authority),
             LogValueSanitizer.Sanitize(string.Join(", ", resolvedModel.ExecutionPolicy.Parameters.Keys)));
 
-        var assistantId = await db.Assistants
-            .Where(a => a.Name == assistantName && a.IsActive)
-            .OrderBy(a => a.IsGlobal)
-            .Select(a => (Guid?)a.Id)
-            .FirstOrDefaultAsync(ct);
+        var assistantId = resolvedAssistantId
+            ?? await AssistantResolution.ResolveActiveAssistantIdAsync(db, assistantName, ct);
 
         return new StreamSendContext
         {
