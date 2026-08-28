@@ -167,14 +167,12 @@ export function useConversationActions(
 
       dispatch({ type: 'START_STREAMING_TURN' });
 
-      try {
-        const convoSnapshot = await api.projects.notebooks.conversations.get(projectId, notebookId, conversationId);
-        if (convoSnapshot.activeTurn?.turnId) {
-          setActiveStreamTurnId(convoSnapshot.activeTurn.turnId);
-        }
-      } catch (snapshotError) {
-        console.warn('Failed to load active turn id before streaming:', snapshotError);
-      }
+      // activeStreamTurnId is assigned from the SSE `turnId` event once the
+      // stream opens (see useStreamingEventHandler); no need to pre-fetch
+      // the conversation snapshot just to learn it a few hundred ms early.
+      // A Stop click that races ahead of that event is queued via
+      // pendingStopRef/onTurnIdAssigned and re-issued once the id lands
+      // (pre-existing behavior, unchanged by this removal).
 
       const userMessage: MessageDto = {
         id: `tmp-${Date.now()}`,

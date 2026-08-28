@@ -176,6 +176,53 @@ describe('useConversationActions', () => {
       expect(deps.setCurrentStreamController).toHaveBeenCalled();
     });
 
+    it('does not pre-fetch the conversation snapshot before streaming', async () => {
+      const { actions } = mountActions();
+
+      await act(async () => {
+        await actions.sendMessage('hello world');
+      });
+
+      expect(api.projects.notebooks.conversations.get).not.toHaveBeenCalled();
+      expect(api.projects.notebooks.conversations.sendMessageStream).toHaveBeenCalled();
+    });
+
+    it('does not block the streaming POST on the conversation snapshot round-trip', async () => {
+      const conversations = api.projects.notebooks.conversations as Record<string, unknown>;
+      const SNAPSHOT_LATENCY_MS = 300;
+      let snapshotSettled = false;
+      conversations.get = vi.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, SNAPSHOT_LATENCY_MS));
+        snapshotSettled = true;
+        return { messages: [], activeTurn: { turnId: 'turn-1' } };
+      });
+
+      let postElapsedMs: number | null = null;
+      conversations.sendMessageStream = vi.fn(async () => {
+        postElapsedMs = performance.now() - startedAt;
+      });
+
+      const { actions } = mountActions();
+
+      const startedAt = performance.now();
+      let sendPromise!: Promise<void>;
+      await act(async () => {
+        sendPromise = actions.sendMessage('hello world');
+        // One macrotask boundary flushes every await in the send path that is
+        // NOT gated on the snapshot request. Anything still pending after this
+        // is waiting on the 300ms snapshot round-trip.
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(snapshotSettled).toBe(false);
+      expect(conversations.sendMessageStream).toHaveBeenCalled();
+      expect(postElapsedMs).toBeLessThan(SNAPSHOT_LATENCY_MS);
+
+      await act(async () => {
+        await sendPromise;
+      });
+    });
+
     it('returns when runtime check is deduplicated (null)', async () => {
       vi.mocked(checkRuntimeStatus).mockResolvedValue(null);
       const { actions } = mountActions();
