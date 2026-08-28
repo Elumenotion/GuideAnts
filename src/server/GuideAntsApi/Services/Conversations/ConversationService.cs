@@ -20,6 +20,16 @@ namespace GuideAntsApi.Services.Conversations;
 
 public class ConversationService : IConversationService
 {
+    /// <summary>
+    /// Matches <c>ConversationStreamEngine</c>'s serializer options so every SSE payload this
+    /// service emits - including the preflight <c>error</c> event - reaches the client in the
+    /// same shape the engine's own events use.
+    /// </summary>
+    private static readonly JsonSerializerOptions StreamJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConversationPersistence _persistence;
     private readonly IChatModelResolver _chatModelResolver;
@@ -177,14 +187,14 @@ public class ConversationService : IConversationService
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, CancellationToken.None);
         var lockMs = preflight.ElapsedMilliseconds;
 
-        ConversationStreamRunContext runContext;
+        StreamSendContext loaded;
         CancellationTokenSource? workerCts = null;
         var registeredTurnId = Guid.Empty;
-        long loadMs = 0, turnMs = 0, historyMs = 0, attachmentsMs = 0;
+        long loadMs = 0, turnMs = 0;
         try
         {
             var setupCt = CancellationToken.None;
-            var loaded = await LoadStreamMetadataAsync(conversationId, request, user, setupCt, resolvedAssistantId);
+            loaded = await LoadStreamMetadataAsync(conversationId, request, user, setupCt, resolvedAssistantId);
             loadMs = preflight.ElapsedMilliseconds;
 
             await CreateTurnAndUserMessageAsync(loaded, setupCt);
@@ -202,16 +212,11 @@ public class ConversationService : IConversationService
                     loaded.AssistantName,
                     user),
                 setupCt);
-
-            await PopulateStreamHistoryAsync(loaded, setupCt);
-            historyMs = preflight.ElapsedMilliseconds;
-            await ProcessAttachmentsAsync(loaded, setupCt);
-            attachmentsMs = preflight.ElapsedMilliseconds;
-
-            runContext = BuildRunContext(_streamPolicy, loaded, user);
         }
         catch
         {
+            // Nothing has been yielded yet, so the SSE response has not started: the endpoint can
+            // still turn this into a clean HTTP error. Release what we took and rethrow.
             if (workerCts != null)
             {
                 _streamRunRegistry.Unregister(registeredTurnId);
@@ -219,6 +224,86 @@ public class ConversationService : IConversationService
 
             await lockHandle.ReleaseAsync(CancellationToken.None);
             throw;
+        }
+
+        // The client arms Stop on this event; emit it before history/attachment setup so Stop is
+        // available while the server is still assembling context. Failures from here on can no
+        // longer become HTTP errors (the response has started) - they are surfaced as an SSE error
+        // event below.
+        yield return new StreamingEvent(
+            StreamingEventTypes.TurnCreated,
+            JsonSerializer.Serialize(new { turnId = registeredTurnId }, StreamJsonOptions));
+
+        ConversationStreamRunContext? runContext = null;
+        StreamingEvent? preflightFailure = null;
+        long historyMs = 0, attachmentsMs = 0;
+        try
+        {
+            var setupCt = CancellationToken.None;
+            await PopulateStreamHistoryAsync(loaded, setupCt);
+            historyMs = preflight.ElapsedMilliseconds;
+
+            await ProcessAttachmentsAsync(loaded, setupCt);
+            attachmentsMs = preflight.ElapsedMilliseconds;
+
+            runContext = BuildRunContext(_streamPolicy, loaded, user);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Preflight failed after turnCreated for conversation {ConversationId} turn {TurnId}",
+                conversationId,
+                registeredTurnId);
+
+            // The turn row is already "streaming"; without this it would survive as a zombie.
+            try
+            {
+                await _persistence.TerminalizeTurnAsync(
+                    new TerminalizeTurnRequest(
+                        registeredTurnId,
+                        conversationId,
+                        loaded.TurnIndex,
+                        "failed",
+                        TerminationCode: "preflight_failed",
+                        TerminationDetail: ex.Message,
+                        ExecutionId: loaded.DbTurn!.ExecutionId),
+                    CancellationToken.None);
+            }
+            catch (Exception terminalizeEx)
+            {
+                _logger.LogError(
+                    terminalizeEx,
+                    "Failed to terminalize turn {TurnId} after preflight failure",
+                    registeredTurnId);
+            }
+
+            _streamRunRegistry.Unregister(registeredTurnId);
+
+            // Mirrors ConversationStreamEngine's release path: only broadcast the unlock if this
+            // handle broadcast the lock and actually released it.
+            var distributedLockReleased = await lockHandle.ReleaseAsync(CancellationToken.None);
+            if (lockHandle.ConversationLockEventSent && distributedLockReleased)
+            {
+                try
+                {
+                    await _streamPolicy.OnUnlockAsync(conversationId, CancellationToken.None);
+                }
+                catch (Exception unlockEx)
+                {
+                    _logger.LogWarning(unlockEx, "Failed to broadcast conversation unlock for {ConversationId}", conversationId);
+                }
+            }
+
+            preflightFailure = new StreamingEvent(
+                StreamingEventTypes.Error,
+                JsonSerializer.Serialize(StreamingErrorEnvelope.Build(ex), StreamJsonOptions));
+        }
+
+        if (preflightFailure != null)
+        {
+            yield return preflightFailure;
+            yield break;
         }
 
         preflight.Stop();
@@ -232,20 +317,13 @@ public class ConversationService : IConversationService
             attachmentsMs - historyMs,
             preflight.ElapsedMilliseconds);
 
-        yield return new StreamingEvent(
-            StreamingEventTypes.TurnCreated,
-            JsonSerializer.Serialize(new { turnId = registeredTurnId }, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            }));
-
         Action onWorkerCompleted = () => _streamRunRegistry.Unregister(registeredTurnId);
 
         await foreach (var ev in _streamEngine.RunStreamAsync(
-            runContext,
+            runContext!,
             lockHandle,
             cancellationToken,
-            workerCts.Token,
+            workerCts!.Token,
             onWorkerCompleted))
         {
             yield return ev;

@@ -244,4 +244,39 @@ public sealed class ConversationServicePreflightTests
         {
         }
     }
+
+    [TestMethod]
+    public async Task SendMessageStream_HistoryFailureAfterTurnCreated_EmitsErrorAndTerminalizesTurn()
+    {
+        var lockMock = new Mock<IDistributedConversationLock>();
+        var registry = new ConversationStreamRunRegistry();
+        var failingHistory = new Mock<IConversationHistoryBuilder>();
+        failingHistory
+            .Setup(h => h.PrepareMessagesForAssistantAsync(It.IsAny<NotebookConversation>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("history exploded"));
+        var service = CreateFixture(historyBuilderOverride: failingHistory.Object, registry: registry, lockMock: lockMock);
+
+        var events = await RunStreamAsync(service);
+
+        events.Should().HaveCount(2);
+        events[0].EventType.Should().Be(StreamingEventTypes.TurnCreated);
+        events[1].EventType.Should().Be(StreamingEventTypes.Error);
+
+        var turn = _dbContext.ConversationTurns.AsNoTracking().Single(t => t.NotebookConversationId == _conversationId);
+        turn.Status.Should().Be("failed");
+
+        registry.RequestCancel(turn.Id).Should().BeFalse("the worker registration must be cleaned up");
+        lockMock.Verify(l => l.ReleaseLockAsync(_conversationId, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_HappyPath_StillCompletesAfterEarlyYieldRestructure()
+    {
+        var service = CreateFixture();
+
+        var events = await RunStreamAsync(service);
+
+        events[0].EventType.Should().Be(StreamingEventTypes.TurnCreated);
+        events.Select(e => e.EventType).Should().Contain(StreamingEventTypes.Complete);
+    }
 }
