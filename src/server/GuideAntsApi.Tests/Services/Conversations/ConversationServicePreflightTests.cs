@@ -221,10 +221,27 @@ public sealed class ConversationServicePreflightTests
     {
         var service = CreateFixture();
 
-        var events = await RunStreamAsync(service);
+        // Manually step the stream instead of draining it via RunStreamAsync: the mock chat client
+        // resolves the whole turn synchronously, so a fully-drained stream would already show the
+        // turn's terminal "completed" status by the time any assertion ran. Stopping right after the
+        // first MoveNextAsync captures the DB state at the actual moment turn_created is observable,
+        // which is the invariant this test protects.
+        await using var enumerator = service.SendMessageStreamToConversationAsUserAsync(
+            _conversationId,
+            new SendMessageRequest { Instructions = "Hi", AssistantName = "Claude" },
+            _userId).GetAsyncEnumerator();
 
-        events[0].EventType.Should().Be(StreamingEventTypes.TurnCreated);
+        (await enumerator.MoveNextAsync()).Should().BeTrue();
+        enumerator.Current.EventType.Should().Be(StreamingEventTypes.TurnCreated);
+
         var turn = _dbContext.ConversationTurns.AsNoTracking().Single(t => t.NotebookConversationId == _conversationId);
         turn.ExecutionId.Should().NotBeNull();
+        turn.Status.Should().Be("streaming");
+
+        // Drain the remainder so the mocked run completes and releases its lock/registry entries
+        // deterministically before the test ends, matching how the other tests in this class finish.
+        while (await enumerator.MoveNextAsync())
+        {
+        }
     }
 }
