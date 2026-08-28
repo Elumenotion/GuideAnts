@@ -23,6 +23,7 @@ using ChatRole = AntRunner.Chat.Abstractions.ChatRole;
 namespace GuideAntsApi.Tests.Services.Conversations;
 
 [TestClass]
+[DoNotParallelize]
 public sealed class ConversationServicePreflightTests
 {
     private ApplicationDbContext _dbContext = null!;
