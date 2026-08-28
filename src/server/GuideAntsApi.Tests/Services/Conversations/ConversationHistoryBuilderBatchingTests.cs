@@ -148,6 +148,97 @@ public sealed class ConversationHistoryBuilderBatchingTests
         cache[assistantName] = entry;
     }
 
+    private NotebookFile NewNotebookFile(string relativePath, string hash)
+    {
+        var file = new NotebookFile { Id = Guid.NewGuid(), NotebookId = _notebookId, RelativePath = relativePath, FileHash = hash };
+        file.GenerateDocumentId(_notebookId);
+        return file;
+    }
+
+    /// <summary>
+    /// Appends one more message to the already-seeded conversation with two attachments, inserted in
+    /// reverse OrderIndex order (OrderIndex 1 saved before OrderIndex 0) so a test asserting output order
+    /// actually proves ordering comes from OrderIndex, not row-insertion sequence.
+    /// </summary>
+    private (NotebookFile FileA, NotebookFile FileB) AddAttachmentBearingMessage(
+        int turnIndex, DataModelChatRole role, string? assistantName, string content)
+    {
+        var messageId = Guid.NewGuid();
+        _dbContext.NotebookConversationMessages.Add(new NotebookConversationMessage
+        {
+            Id = messageId,
+            NotebookConversationId = _conversationId,
+            TurnIndex = turnIndex,
+            MessageSequence = 1,
+            Role = role,
+            Content = content,
+            AssistantName = assistantName,
+            Created = DateTime.UtcNow.AddMinutes(turnIndex)
+        });
+
+        var fileA = NewNotebookFile("a.txt", "hA");
+        var fileB = NewNotebookFile("b.txt", "hB");
+        _dbContext.NotebookFiles.AddRange(fileA, fileB);
+
+        _dbContext.MessageAttachments.Add(new MessageAttachment
+        {
+            Id = Guid.NewGuid(), MessageId = messageId, NotebookFileId = fileB.Id, OrderIndex = 1, Created = DateTime.UtcNow
+        });
+        _dbContext.MessageAttachments.Add(new MessageAttachment
+        {
+            Id = Guid.NewGuid(), MessageId = messageId, NotebookFileId = fileA.Id, OrderIndex = 0, Created = DateTime.UtcNow
+        });
+
+        _dbContext.SaveChanges();
+        return (fileA, fileB);
+    }
+
+    /// <summary>
+    /// Appends an orphan tool-call message (no assistant message declares this ToolCallId, so both
+    /// BuildOpenAiMessagesAsync and ApplyAssistantSwitchLogicAsync filter it via `continue`) that also
+    /// carries an attachment, proving a filtered message's attachment never leaks into the batch lookup's
+    /// output even though the batch query fetches attachments for every message id up front.
+    /// </summary>
+    private void AddOrphanToolMessageWithAttachment(int turnIndex, string toolCallId)
+    {
+        var messageId = Guid.NewGuid();
+        _dbContext.NotebookConversationMessages.Add(new NotebookConversationMessage
+        {
+            Id = messageId,
+            NotebookConversationId = _conversationId,
+            TurnIndex = turnIndex,
+            MessageSequence = 1,
+            Role = DataModelChatRole.Tool,
+            ToolCallId = toolCallId,
+            FunctionName = "whatever",
+            Content = "tool output",
+            Created = DateTime.UtcNow.AddMinutes(turnIndex)
+        });
+
+        var fileC = NewNotebookFile("c.txt", "hC");
+        _dbContext.NotebookFiles.Add(fileC);
+        _dbContext.MessageAttachments.Add(new MessageAttachment
+        {
+            Id = Guid.NewGuid(), MessageId = messageId, NotebookFileId = fileC.Id, OrderIndex = 0, Created = DateTime.UtcNow
+        });
+
+        _dbContext.SaveChanges();
+    }
+
+    private static Mock<IAttachmentContentService> CreateStrictAttachmentMockForFiles(NotebookFile fileA, NotebookFile fileB)
+    {
+        var mock = new Mock<IAttachmentContentService>(MockBehavior.Strict);
+        mock.Setup(s => s.CreateOpenAiContentFromLoadedFileAsync(
+                It.Is<NotebookFile>(nf => nf.Id == fileA.Id), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ChatContent> { new("FILE_A") });
+        mock.Setup(s => s.CreateOpenAiContentFromLoadedFileAsync(
+                It.Is<NotebookFile>(nf => nf.Id == fileB.Id), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ChatContent> { new("FILE_B") });
+        // CreateOpenAiContentFromNotebookFileAsync(Guid, ...) is intentionally left unstubbed: this strict
+        // mock throws if the id-based fallback is ever invoked, proving the loaded-file fast path is taken.
+        return mock;
+    }
+
     [TestMethod]
     public async Task BuildOpenAiMessages_UsesExactlyOneScopeForAttachments_RegardlessOfMessageCount()
     {
@@ -202,5 +293,76 @@ public sealed class ConversationHistoryBuilderBatchingTests
             "user message 3", "assistant message 3");
         messages[6].Role.Should().Be(ChatMessageRole.System);
         messages[6].GetText().Should().Contain("previous messages between the user and assistant");
+    }
+
+    [TestMethod]
+    public async Task BuildOpenAiMessages_PreservesMultiAttachmentOrderingAndUsesLoadedFileFastPath()
+    {
+        var (fileA, fileB) = AddAttachmentBearingMessage(
+            turnIndex: 4, role: DataModelChatRole.Assistant, assistantName: "Claude", content: "assistant text with files");
+        AddOrphanToolMessageWithAttachment(turnIndex: 5, toolCallId: "orphan_call_task4");
+
+        var mockAttachments = CreateStrictAttachmentMockForFiles(fileA, fileB);
+        var builder = new ConversationHistoryBuilder(
+            _countingFactory,
+            Mock.Of<IContextOptionsService>(),
+            mockAttachments.Object,
+            Mock.Of<ILogger<ConversationHistoryBuilder>>());
+
+        var conv = LoadConversation();
+        _countingFactory.CreateScopeCount = 0;
+
+        var messages = await builder.BuildOpenAiMessagesAsync(conv, "Claude");
+
+        // One scope for the whole call, even with attachments and a filtered message present.
+        _countingFactory.CreateScopeCount.Should().Be(1);
+
+        // 6 baseline messages + the attachment-bearing message; the orphan tool message never surfaces.
+        messages.Should().HaveCount(7);
+        var attachmentMessage = messages[6];
+        attachmentMessage.Content.Select(c => c.Text).Should().ContainInOrder(
+            "assistant text with files", "FILE_A", "FILE_B");
+
+        mockAttachments.Verify(
+            s => s.CreateOpenAiContentFromLoadedFileAsync(It.IsAny<NotebookFile>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        mockAttachments.Verify(
+            s => s.CreateOpenAiContentFromNotebookFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [TestMethod]
+    public async Task ApplyAssistantSwitchLogic_PreservesMultiAttachmentOrderingAndUsesLoadedFileFastPath()
+    {
+        SeedAssistantCache(SwitchAssistantName);
+        var (fileA, fileB) = AddAttachmentBearingMessage(
+            turnIndex: 4, role: DataModelChatRole.Assistant, assistantName: SwitchAssistantName, content: "switch text with files");
+
+        var mockAttachments = CreateStrictAttachmentMockForFiles(fileA, fileB);
+        var builder = new ConversationHistoryBuilder(
+            _countingFactory,
+            Mock.Of<IContextOptionsService>(),
+            mockAttachments.Object,
+            Mock.Of<ILogger<ConversationHistoryBuilder>>());
+
+        var conv = LoadConversation();
+        _countingFactory.CreateScopeCount = 0;
+
+        var messages = await builder.ApplyAssistantSwitchLogicAsync(conv, SwitchAssistantName);
+
+        _countingFactory.CreateScopeCount.Should().Be(1);
+
+        // 6 baseline messages + the attachment-bearing message + the trailing handoff system message.
+        messages.Should().HaveCount(8);
+        var attachmentMessage = messages[6];
+        attachmentMessage.Content.Select(c => c.Text).Should().ContainInOrder(
+            "switch text with files", "FILE_A", "FILE_B");
+
+        mockAttachments.Verify(
+            s => s.CreateOpenAiContentFromLoadedFileAsync(It.IsAny<NotebookFile>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        mockAttachments.Verify(
+            s => s.CreateOpenAiContentFromNotebookFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

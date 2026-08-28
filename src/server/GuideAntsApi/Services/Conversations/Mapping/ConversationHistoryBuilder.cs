@@ -206,21 +206,8 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             .ThenBy(m => m.MessageSequence)
             .ToList();
 
-        var messageIds = orderedMessages.Select(m => m.Id).ToList();
-        Dictionary<Guid, List<MessageAttachment>> attachmentsByMessageId;
-        using (var attachmentScope = _scopeFactory.CreateScope())
-        {
-            var attachmentDb = attachmentScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            attachmentsByMessageId = (await attachmentDb.MessageAttachments
-                    .AsNoTracking()
-                    .Include(ma => ma.NotebookFile)
-                        .ThenInclude(nf => nf.Notebook)
-                    .Where(ma => messageIds.Contains(ma.MessageId))
-                    .OrderBy(ma => ma.OrderIndex)
-                    .ToListAsync(cancellationToken))
-                .GroupBy(ma => ma.MessageId)
-                .ToDictionary(g => g.Key, g => g.ToList());
-        }
+        var attachmentsByMessageId = await LoadAttachmentsByMessageIdAsync(
+            orderedMessages.Select(m => m.Id).ToList(), cancellationToken);
 
         var filteredMessages = new List<ChatMessage>();
         foreach (var m in orderedMessages)
@@ -340,21 +327,8 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             .ThenBy(m => m.MessageSequence)
             .ToList();
 
-        var messageIds = orderedMessages.Select(m => m.Id).ToList();
-        Dictionary<Guid, List<MessageAttachment>> attachmentsByMessageId;
-        using (var attachmentScope = _scopeFactory.CreateScope())
-        {
-            var attachmentDb = attachmentScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            attachmentsByMessageId = (await attachmentDb.MessageAttachments
-                    .AsNoTracking()
-                    .Include(ma => ma.NotebookFile)
-                        .ThenInclude(nf => nf.Notebook)
-                    .Where(ma => messageIds.Contains(ma.MessageId))
-                    .OrderBy(ma => ma.OrderIndex)
-                    .ToListAsync(cancellationToken))
-                .GroupBy(ma => ma.MessageId)
-                .ToDictionary(g => g.Key, g => g.ToList());
-        }
+        var attachmentsByMessageId = await LoadAttachmentsByMessageIdAsync(
+            orderedMessages.Select(m => m.Id).ToList(), cancellationToken);
 
         foreach (var dbMsg in orderedMessages)
         {
@@ -671,6 +645,29 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         }
 
         return validToolCallIds;
+    }
+
+    /// <summary>
+    /// Batch-loads message attachments for a set of message ids in a single scope/query, replacing what
+    /// used to be a per-message scope+query inside the BuildOpenAiMessagesAsync/ApplyAssistantSwitchLogicAsync
+    /// loops. NotebookFile (and its Notebook) is eagerly included so callers can render attachment content
+    /// from the already-loaded entity via CreateOpenAiContentFromLoadedFileAsync instead of re-querying per file.
+    /// </summary>
+    private async Task<Dictionary<Guid, List<MessageAttachment>>> LoadAttachmentsByMessageIdAsync(
+        List<Guid> messageIds,
+        CancellationToken cancellationToken)
+    {
+        using var attachmentScope = _scopeFactory.CreateScope();
+        var attachmentDb = attachmentScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        return (await attachmentDb.MessageAttachments
+                .AsNoTracking()
+                .Include(ma => ma.NotebookFile)
+                    .ThenInclude(nf => nf.Notebook)
+                .Where(ma => messageIds.Contains(ma.MessageId))
+                .OrderBy(ma => ma.OrderIndex)
+                .ToListAsync(cancellationToken))
+            .GroupBy(ma => ma.MessageId)
+            .ToDictionary(g => g.Key, g => g.ToList());
     }
 
     private static void AddSkillsDiscoveryMessage(
