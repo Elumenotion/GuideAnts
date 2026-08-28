@@ -171,15 +171,19 @@ public class ConversationService : IConversationService
         StreamUserIdentity user,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        var preflight = System.Diagnostics.Stopwatch.StartNew();
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, CancellationToken.None);
+        var lockMs = preflight.ElapsedMilliseconds;
 
         ConversationStreamRunContext runContext;
         CancellationTokenSource? workerCts = null;
         var registeredTurnId = Guid.Empty;
+        long loadMs = 0, turnMs = 0, historyMs = 0, attachmentsMs = 0;
         try
         {
             var setupCt = CancellationToken.None;
             var loaded = await LoadStreamMetadataAsync(conversationId, request, user, setupCt);
+            loadMs = preflight.ElapsedMilliseconds;
 
             await CreateTurnAndUserMessageAsync(loaded, setupCt);
             if (!await _persistence.SetTurnStatusAsync(loaded.DbTurn!.Id, "streaming", ct: setupCt))
@@ -189,6 +193,7 @@ public class ConversationService : IConversationService
                     loaded.DbTurn.Id,
                     conversationId);
             }
+            turnMs = preflight.ElapsedMilliseconds;
 
             registeredTurnId = loaded.DbTurn.Id;
             workerCts = _streamRunRegistry.Register(registeredTurnId);
@@ -204,7 +209,9 @@ public class ConversationService : IConversationService
                 setupCt);
 
             await PopulateStreamHistoryAsync(loaded, setupCt);
+            historyMs = preflight.ElapsedMilliseconds;
             await ProcessAttachmentsAsync(loaded, setupCt);
+            attachmentsMs = preflight.ElapsedMilliseconds;
 
             runContext = BuildRunContext(_streamPolicy, loaded, user);
         }
@@ -218,6 +225,17 @@ public class ConversationService : IConversationService
             await lockHandle.ReleaseAsync(CancellationToken.None);
             throw;
         }
+
+        preflight.Stop();
+        _logger.LogDebug(
+            "Preflight timings for {ConversationId}: lock={LockMs}ms load={LoadMs}ms turn={TurnMs}ms history={HistoryMs}ms attachments={AttachmentsMs}ms total={TotalMs}ms",
+            conversationId,
+            lockMs,
+            loadMs - lockMs,
+            turnMs - loadMs,
+            historyMs - turnMs,
+            attachmentsMs - historyMs,
+            preflight.ElapsedMilliseconds);
 
         yield return new StreamingEvent(
             StreamingEventTypes.TurnCreated,

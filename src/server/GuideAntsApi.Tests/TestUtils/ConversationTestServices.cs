@@ -83,7 +83,8 @@ internal static class ConversationTestServices
         IConversationBroadcastHub? broadcastHub = null,
         INotebookFileSyncService? notebookFileSyncService = null,
         IToolOAuthService? toolOAuthService = null,
-        ILogger<ConversationService>? logger = null)
+        ILogger<ConversationService>? logger = null,
+        ConversationStreamRunRegistry? streamRunRegistry = null)
     {
         var lockService = distributedLock ?? Mock.Of<IDistributedConversationLock>();
         var hub = broadcastHub ?? Mock.Of<IConversationBroadcastHub>();
@@ -101,7 +102,7 @@ internal static class ConversationTestServices
             scopeFactory,
             Mock.Of<ILogger<ConversationStreamEngine>>(),
             notebookFileSyncService);
-        var streamRunRegistry = new ConversationStreamRunRegistry();
+        streamRunRegistry ??= new ConversationStreamRunRegistry();
         var undoService = new ConversationUndoService(
             lockService,
             hub,
