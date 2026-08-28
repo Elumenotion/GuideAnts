@@ -276,6 +276,62 @@ describe('useConversationActions', () => {
       }));
     });
 
+    it('renders the user message optimistically before the runtime check resolves', async () => {
+      let resolveCheck!: (v: unknown) => void;
+      vi.mocked(checkRuntimeStatus).mockImplementation(
+        () => new Promise((res) => { resolveCheck = res; }) as any,
+      );
+      const { actions, dispatch } = mountActions();
+
+      let sendPromise!: Promise<void>;
+      act(() => {
+        sendPromise = actions.sendMessage('hello');
+      });
+
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+          type: 'ADD_MESSAGE',
+          payload: expect.objectContaining({ role: 'user', content: 'hello' }),
+        }));
+      });
+      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveCheck({ state: 'ready' });
+        await sendPromise;
+      });
+    });
+
+    it('rolls back the optimistic messages when the runtime check reports not ready', async () => {
+      vi.mocked(checkRuntimeStatus).mockResolvedValue({ state: 'failed' } as any);
+      const { actions, dispatch } = mountActions();
+
+      await act(async () => {
+        await actions.sendMessage('hello');
+      });
+
+      const types = dispatch.mock.calls.map((c) => c[0].type);
+      expect(types).toContain('ADD_MESSAGE');
+      expect(types).toContain('REMOVE_LAST_TURN');
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'hello' });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_STREAMING_MODE', payload: { mode: 'at-rest' } });
+      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+    });
+
+    it('rolls back when the runtime check throws', async () => {
+      vi.mocked(checkRuntimeStatus).mockRejectedValue(Object.assign(new Error('boom'), { status: 500 }));
+      const { actions, dispatch, deps } = mountActions();
+
+      await act(async () => {
+        await actions.sendMessage('hello');
+      });
+
+      const types = dispatch.mock.calls.map((c) => c[0].type);
+      expect(types).toContain('REMOVE_LAST_TURN');
+      expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Runtime Error' }));
+      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+    });
+
     it('handles 409 ROUTING_MODEL_NOT_READY', async () => {
       const error = Object.assign(new Error('conflict'), {
         status: 409,
