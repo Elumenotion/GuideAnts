@@ -1,4 +1,6 @@
+using AntRunner.Chat;
 using AntRunner.Chat.Abstractions;
+using AntRunner.ToolCalling.AssistantDefinitions;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -12,13 +14,24 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using System.Collections;
+using System.Reflection;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
+using ChatMessageRole = AntRunner.Chat.Abstractions.ChatRole;
 
 namespace GuideAntsApi.Tests.Services.Conversations;
 
 [TestClass]
+[DoNotParallelize]
 public sealed class ConversationHistoryBuilderBatchingTests
 {
+    // AssistantUtility caches assistant definitions in a static, process-wide dictionary (see
+    // AssistantUtilityCacheTests.cs for the established seeding pattern this mirrors). ApplyAssistantSwitchLogicAsync
+    // resolves the switch-target assistant through that same static cache, so tests exercising it must seed and
+    // clear a name distinctive enough not to collide with any other suite's usage - hence [DoNotParallelize] plus
+    // this dedicated constant instead of reusing "Claude".
+    private const string SwitchAssistantName = "Task4BatchingSwitchTestAssistant";
+
     private sealed class CountingScopeFactory : IServiceScopeFactory
     {
         private readonly TestServiceScopeFactory _inner;
@@ -64,7 +77,11 @@ public sealed class ConversationHistoryBuilderBatchingTests
     }
 
     [TestCleanup]
-    public void TestCleanup() => _dbContext.Dispose();
+    public void TestCleanup()
+    {
+        _dbContext.Dispose();
+        AssistantUtility.ClearCache(SwitchAssistantName);
+    }
 
     private void SeedConversation()
     {
@@ -116,6 +133,21 @@ public sealed class ConversationHistoryBuilderBatchingTests
             .AsNoTracking()
             .Single(c => c.Id == _conversationId);
 
+    /// <summary>
+    /// Seeds AssistantUtility's static cache directly (bypassing the DB-backed lookup
+    /// ApplyAssistantSwitchLogicAsync would otherwise perform) so the assistant-switch branch that carries
+    /// the attachment batching can run hermetically. Mirrors AssistantUtilityCacheTests.SeedCache.
+    /// </summary>
+    private static void SeedAssistantCache(string assistantName)
+    {
+        var cacheType = typeof(AssistantUtility).GetNestedType("CachedAssistant", BindingFlags.NonPublic)!;
+        var entry = Activator.CreateInstance(cacheType, new AssistantDefinition { Name = assistantName })!;
+        var cache = (IDictionary)typeof(AssistantUtility)
+            .GetField("AssistantDefinitionCache", BindingFlags.Static | BindingFlags.NonPublic)!
+            .GetValue(null)!;
+        cache[assistantName] = entry;
+    }
+
     [TestMethod]
     public async Task BuildOpenAiMessages_UsesExactlyOneScopeForAttachments_RegardlessOfMessageCount()
     {
@@ -139,5 +171,36 @@ public sealed class ConversationHistoryBuilderBatchingTests
             "user message 1", "assistant message 1",
             "user message 2", "assistant message 2",
             "user message 3", "assistant message 3");
+    }
+
+    [TestMethod]
+    public async Task ApplyAssistantSwitchLogic_UsesExactlyOneScopeForAttachments_RegardlessOfMessageCount()
+    {
+        SeedAssistantCache(SwitchAssistantName);
+        var conv = LoadConversation();
+        _countingFactory.CreateScopeCount = 0;
+
+        await _builder.ApplyAssistantSwitchLogicAsync(conv, SwitchAssistantName);
+
+        _countingFactory.CreateScopeCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task ApplyAssistantSwitchLogic_ProducesSameMessageListShape()
+    {
+        SeedAssistantCache(SwitchAssistantName);
+        var conv = LoadConversation();
+
+        var messages = await _builder.ApplyAssistantSwitchLogicAsync(conv, SwitchAssistantName);
+
+        // 6 carried-over conversation messages (no attachments -> plain ToChatMessage path) plus the
+        // handoff system message ApplyAssistantSwitchLogicAsync appends whenever the conversation had messages.
+        messages.Should().HaveCount(7);
+        messages.Take(6).Select(m => m.GetText()).Should().ContainInOrder(
+            "user message 1", "assistant message 1",
+            "user message 2", "assistant message 2",
+            "user message 3", "assistant message 3");
+        messages[6].Role.Should().Be(ChatMessageRole.System);
+        messages[6].GetText().Should().Contain("previous messages between the user and assistant");
     }
 }

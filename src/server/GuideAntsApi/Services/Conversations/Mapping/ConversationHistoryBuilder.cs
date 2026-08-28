@@ -201,8 +201,29 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             }
         }
 
+        var orderedMessages = dedupedMessages
+            .OrderBy(m => m.TurnIndex)
+            .ThenBy(m => m.MessageSequence)
+            .ToList();
+
+        var messageIds = orderedMessages.Select(m => m.Id).ToList();
+        Dictionary<Guid, List<MessageAttachment>> attachmentsByMessageId;
+        using (var attachmentScope = _scopeFactory.CreateScope())
+        {
+            var attachmentDb = attachmentScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            attachmentsByMessageId = (await attachmentDb.MessageAttachments
+                    .AsNoTracking()
+                    .Include(ma => ma.NotebookFile)
+                        .ThenInclude(nf => nf.Notebook)
+                    .Where(ma => messageIds.Contains(ma.MessageId))
+                    .OrderBy(ma => ma.OrderIndex)
+                    .ToListAsync(cancellationToken))
+                .GroupBy(ma => ma.MessageId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+        }
+
         var filteredMessages = new List<ChatMessage>();
-        foreach (var m in dedupedMessages.OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence))
+        foreach (var m in orderedMessages)
         {
             if (m.Role == DataModelChatRole.Tool)
             {
@@ -223,16 +244,9 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                 continue;
             }
 
-            List<MessageAttachment> attachments;
-            using (var attachmentScope = _scopeFactory.CreateScope())
-            {
-                var attachmentDb = attachmentScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                attachments = await attachmentDb.MessageAttachments
-                    .Include(ma => ma.NotebookFile)
-                    .Where(ma => ma.MessageId == m.Id)
-                    .OrderBy(ma => ma.OrderIndex)
-                    .ToListAsync(cancellationToken);
-            }
+            var attachments = attachmentsByMessageId.TryGetValue(m.Id, out var msgAttachments)
+                ? msgAttachments
+                : [];
 
             if (attachments.Count > 0)
             {
@@ -245,8 +259,9 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
 
                 foreach (var attachment in attachments)
                 {
-                    var fileContents = await _attachmentContentService.CreateOpenAiContentFromNotebookFileAsync(
-                        attachment.NotebookFileId, cancellationToken);
+                    var fileContents = attachment.NotebookFile != null
+                        ? await _attachmentContentService.CreateOpenAiContentFromLoadedFileAsync(attachment.NotebookFile, cancellationToken)
+                        : await _attachmentContentService.CreateOpenAiContentFromNotebookFileAsync(attachment.NotebookFileId, cancellationToken);
                     contents.AddRange(fileContents);
                 }
 
