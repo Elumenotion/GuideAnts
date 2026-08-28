@@ -215,4 +215,16 @@ public sealed class ConversationServicePreflightTests
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
     }
+
+    [TestMethod]
+    public async Task SendMessageStream_TurnIsStreamingWithExecutionIdWhenTurnCreatedEmitted()
+    {
+        var service = CreateFixture();
+
+        var events = await RunStreamAsync(service);
+
+        events[0].EventType.Should().Be(StreamingEventTypes.TurnCreated);
+        var turn = _dbContext.ConversationTurns.AsNoTracking().Single(t => t.NotebookConversationId == _conversationId);
+        turn.ExecutionId.Should().NotBeNull();
+    }
 }

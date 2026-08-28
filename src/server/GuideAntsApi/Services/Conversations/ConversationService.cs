@@ -186,16 +186,9 @@ public class ConversationService : IConversationService
             loadMs = preflight.ElapsedMilliseconds;
 
             await CreateTurnAndUserMessageAsync(loaded, setupCt);
-            if (!await _persistence.SetTurnStatusAsync(loaded.DbTurn!.Id, "streaming", ct: setupCt))
-            {
-                _logger.LogWarning(
-                    "Turn {TurnId} disappeared before streaming status update in conversation {ConversationId}",
-                    loaded.DbTurn.Id,
-                    conversationId);
-            }
             turnMs = preflight.ElapsedMilliseconds;
 
-            registeredTurnId = loaded.DbTurn.Id;
+            registeredTurnId = loaded.DbTurn!.Id;
             workerCts = _streamRunRegistry.Register(registeredTurnId);
 
             await _streamPolicy.OnTurnCreatedAsync(
@@ -367,7 +360,8 @@ public class ConversationService : IConversationService
                 ctx.ConversationId,
                 ctx.AssistantName,
                 ctx.ModelDeploymentId,
-                ctx.Request.Instructions),
+                ctx.Request.Instructions,
+                InitialStatus: "streaming"),
             ct);
 
         var userResult = await _persistence.CreateUserMessageAsync(
