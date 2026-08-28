@@ -184,4 +184,33 @@ public class AttachmentContentService : IAttachmentContentService
             return contents;
         }
     }
+
+    public async Task<List<ChatContent>> CreateOpenAiContentFromLoadedFileAsync(
+        NotebookFile notebookFile,
+        CancellationToken cancellationToken = default)
+    {
+        var contents = new List<ChatContent>();
+        if (_notebookFileService == null) return contents;
+
+        try
+        {
+            return await AttachmentMessageBuilder.CreateContentFromNotebookFileAsync(
+                notebookFile,
+                _notebookFileService,
+                _markdownExtractionService,
+                _storagePath,
+                cancellationToken,
+                _markdownAttachmentOptions.Value.MaxInlineCharacters,
+                _logger);
+        }
+        catch (GuideAntsApi.Exceptions.AttachmentNotReadyException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error creating OpenAI content for file {NotebookFileId}", notebookFile.Id);
+            return contents;
+        }
+    }
 }
