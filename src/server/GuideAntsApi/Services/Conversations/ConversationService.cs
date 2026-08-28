@@ -280,6 +280,24 @@ public class ConversationService : IConversationService
 
             _streamRunRegistry.Unregister(registeredTurnId);
 
+            var errorEvent = new StreamingEvent(
+                StreamingEventTypes.Error,
+                JsonSerializer.Serialize(StreamingErrorEnvelope.Build(ex), StreamJsonOptions));
+
+            // Observers attached via ObserveConversationEventsAsync saw turn_created for this turn
+            // and would otherwise never see a terminal event for it. The engine fans every event out
+            // to the hub as well as the SSE channel (ConversationStreamEngine's TryWrite), and it
+            // broadcasts the error before releasing the lock, so observers get error then
+            // conversation_unlocked in that order - mirror both the fan-out and the ordering here.
+            try
+            {
+                await _streamPolicy.BroadcastEventAsync(conversationId, errorEvent, CancellationToken.None);
+            }
+            catch (Exception broadcastEx)
+            {
+                _logger.LogWarning(broadcastEx, "Failed to broadcast preflight error for {ConversationId}", conversationId);
+            }
+
             // Mirrors ConversationStreamEngine's release path: only broadcast the unlock if this
             // handle broadcast the lock and actually released it.
             var distributedLockReleased = await lockHandle.ReleaseAsync(CancellationToken.None);
@@ -295,9 +313,7 @@ public class ConversationService : IConversationService
                 }
             }
 
-            preflightFailure = new StreamingEvent(
-                StreamingEventTypes.Error,
-                JsonSerializer.Serialize(StreamingErrorEnvelope.Build(ex), StreamJsonOptions));
+            preflightFailure = errorEvent;
         }
 
         if (preflightFailure != null)

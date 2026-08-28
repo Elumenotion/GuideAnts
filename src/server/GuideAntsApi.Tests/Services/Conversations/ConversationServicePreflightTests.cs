@@ -84,7 +84,8 @@ public sealed class ConversationServicePreflightTests
         IConversationHistoryBuilder? historyBuilderOverride = null,
         ConversationStreamRunRegistry? registry = null,
         Mock<IDistributedConversationLock>? lockMock = null,
-        ILogger<ConversationService>? logger = null)
+        ILogger<ConversationService>? logger = null,
+        Mock<IConversationBroadcastHub>? hubMock = null)
     {
         var scopeFactory = new TestServiceScopeFactory(_dbContext);
 
@@ -161,6 +162,7 @@ public sealed class ConversationServicePreflightTests
             usageReporter,
             chatClientFactory.Object,
             lockMock.Object,
+            broadcastHub: hubMock?.Object,
             logger: logger,
             streamRunRegistry: registry);
     }
@@ -250,11 +252,21 @@ public sealed class ConversationServicePreflightTests
     {
         var lockMock = new Mock<IDistributedConversationLock>();
         var registry = new ConversationStreamRunRegistry();
+        var hubMock = new Mock<IConversationBroadcastHub>();
+        var broadcasts = new List<StreamingEvent>();
+        hubMock
+            .Setup(h => h.BroadcastToConversationAsync(It.IsAny<Guid>(), It.IsAny<StreamingEvent>()))
+            .Callback((Guid _, StreamingEvent ev) => broadcasts.Add(ev))
+            .Returns(Task.CompletedTask);
         var failingHistory = new Mock<IConversationHistoryBuilder>();
         failingHistory
             .Setup(h => h.PrepareMessagesForAssistantAsync(It.IsAny<NotebookConversation>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("history exploded"));
-        var service = CreateFixture(historyBuilderOverride: failingHistory.Object, registry: registry, lockMock: lockMock);
+        var service = CreateFixture(
+            historyBuilderOverride: failingHistory.Object,
+            registry: registry,
+            lockMock: lockMock,
+            hubMock: hubMock);
 
         var events = await RunStreamAsync(service);
 
@@ -267,6 +279,16 @@ public sealed class ConversationServicePreflightTests
 
         registry.RequestCancel(turn.Id).Should().BeFalse("the worker registration must be cleaned up");
         lockMock.Verify(l => l.ReleaseLockAsync(_conversationId, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+
+        // Observers attached via ObserveConversationEventsAsync must receive the same terminal error
+        // the requesting client got - they have no handler for conversation_unlocked, so without this
+        // broadcast they stay stuck showing a mid-stream turn.
+        hubMock.Verify(
+            h => h.BroadcastToConversationAsync(_conversationId, It.Is<StreamingEvent>(ev => ev.EventType == StreamingEventTypes.Error)),
+            Times.Once);
+        broadcasts.Select(b => b.EventType).Should().ContainInOrder(
+            StreamingEventTypes.Error,
+            StreamingEventTypes.ConversationUnlocked);
     }
 
     [TestMethod]
