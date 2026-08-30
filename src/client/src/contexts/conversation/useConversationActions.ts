@@ -153,6 +153,20 @@ export function useConversationActions(
         streaming: true,
       } as MessageDto;
 
+      // Reset stream-cancellation state BEFORE the optimistic dispatches flip
+      // isStreaming to true. The Stop button renders on isStreaming alone (no
+      // currentTurn guard), so it's clickable for the entire runtime-preflight
+      // window below; if that reset ran after the preflight (as it used to),
+      // a Stop click during the preflight would queue pendingStopRef, and this
+      // clearPendingStop() would then wipe it out before onTurnIdAssigned ever
+      // saw it — silently discarding the stop. Also clear any stale turn id
+      // from a previous send here so an early Stop on this new send can't
+      // target the wrong turn (see stale-active-stream-turn-id.md).
+      dispatch({ type: 'SET_CANCELLING', payload: false });
+      dispatch({ type: 'SET_STREAMING_ERROR', payload: undefined });
+      clearPendingStop();
+      setActiveStreamTurnId?.(null);
+
       dispatch({ type: 'SET_STREAMING_MODE', payload: { mode: 'sending' } });
       dispatch({ type: 'SET_DRAFT', payload: '' });
       dispatch({ type: 'ADD_MESSAGE', payload: userMessage });
@@ -164,6 +178,10 @@ export function useConversationActions(
         dispatch({ type: 'REMOVE_LAST_TURN' });
         dispatch({ type: 'SET_DRAFT', payload: content });
         dispatch({ type: 'SET_STREAMING_MODE', payload: { mode: 'at-rest' } });
+        // A Stop click during the runtime preflight (window between the
+        // optimistic dispatches above and this rollback) sets _isCancelling
+        // true; undo that here so it can't leak into the next send attempt.
+        dispatch({ type: 'SET_CANCELLING', payload: false });
       };
 
       if (assistant?.id) {
@@ -195,10 +213,6 @@ export function useConversationActions(
           return;
         }
       }
-
-      dispatch({ type: 'SET_CANCELLING', payload: false });
-      dispatch({ type: 'SET_STREAMING_ERROR', payload: undefined });
-      clearPendingStop();
 
       // Send exclusively owns token appends for this turn.
       abortObserverStream();
