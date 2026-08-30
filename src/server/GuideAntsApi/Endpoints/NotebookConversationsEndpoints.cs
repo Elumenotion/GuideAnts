@@ -160,13 +160,8 @@ public static class NotebookConversationsEndpoints
             Guid? targetAssistantId = null;
             if (!string.IsNullOrEmpty(request.AssistantName))
             {
-                var assistant = await dbContext.Assistants
-                    .Where(a => a.Name == request.AssistantName)
-                    .FirstOrDefaultAsync(CancellationToken.None);
-                if (assistant != null)
-                {
-                    targetAssistantId = assistant.Id;
-                }
+                targetAssistantId = await GuideAntsApi.Services.Conversations.AssistantResolution
+                    .ResolveActiveAssistantIdAsync(dbContext, request.AssistantName, CancellationToken.None);
             }
 
             // Preflight local runtime readiness (do not link to client disconnect; streaming setup must still run)
@@ -228,7 +223,7 @@ public static class NotebookConversationsEndpoints
             try
             {
                 await ctx.Response.WriteSseStreamWithKeepAliveAsync(
-                    service.SendMessageStreamToConversationAsync(convoId, request, ctx.RequestAborted),
+                    service.SendMessageStreamToConversationAsync(convoId, request, ctx.RequestAborted, targetAssistantId),
                     ctx.RequestAborted);
             }
             catch (UnauthorizedAccessException)

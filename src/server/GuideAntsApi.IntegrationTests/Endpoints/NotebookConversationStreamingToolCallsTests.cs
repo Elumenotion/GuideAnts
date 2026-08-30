@@ -52,7 +52,7 @@ public class NotebookConversationStreamingToolCallsTests
             yield break;
         }
 
-        public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default, Guid? resolvedAssistantId = null)
         {
             // Simulate the complete flow with tool calls
             
@@ -355,7 +355,7 @@ public class NotebookConversationStreamingToolCallsTests
             ));
         }
         
-        public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default, Guid? resolvedAssistantId = null)
         {
             // Simple assistant without tools
             yield return new StreamingEvent(StreamingEventTypes.Token, JsonSerializer.Serialize(new { role = "assistant", contentDelta = "Hello " }));

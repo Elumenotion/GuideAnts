@@ -124,57 +124,9 @@ export function useConversationActions(
       const assistantName = state.selectedAssistant || (() => { throw new Error('No assistant selected when sending message'); })();
       const assistant = (state.assistants || []).find((candidate: any) => candidate?.name === assistantName);
 
-      if (assistant?.id) {
-        try {
-          const runtimeStatus = await checkRuntimeStatus(projectId, notebookId, assistant.id, inflightRuntimeChecksRef.current, runtimeReadyCacheRef.current);
-          if (!runtimeStatus) {
-            return;
-          }
-          if (runtimeStatus.state !== 'ready') {
-            if (runtimeStatus.state === 'failed' || runtimeStatus.state === 'invalid') {
-              showToast({
-                type: 'error',
-                title: runtimeStatus.state === 'invalid' ? 'Incompatible Local Models' : 'Local Runtime Error',
-                message: getRuntimeBlockingMessage(runtimeStatus)
-              });
-            }
-            return;
-          }
-        } catch (error: any) {
-          console.error('Failed to check local runtime status:', error);
-          showToast({
-            type: 'error',
-            title: 'Runtime Error',
-            message: `Failed to check model runtime status: ${error.message}`
-          });
-          return;
-        }
-      }
-
-      dispatch({ type: 'SET_STREAMING_MODE', payload: { mode: 'sending' } });
-      dispatch({ type: 'SET_CANCELLING', payload: false });
-      dispatch({ type: 'SET_STREAMING_ERROR', payload: undefined });
-      dispatch({ type: 'SET_DRAFT', payload: '' });
-      clearPendingStop();
-
-      // Send exclusively owns token appends for this turn.
-      abortObserverStream();
-
-      const controller = new AbortController();
-      adoptSendStream(controller);
-
+      // Optimistic render: paint the user's message and the placeholder immediately,
+      // before the runtime preflight. Every early-return below must roll this back.
       const attList = (attachments && attachments.length > 0) ? attachments : (state.pendingAttachments ?? []);
-
-      dispatch({ type: 'START_STREAMING_TURN' });
-
-      try {
-        const convoSnapshot = await api.projects.notebooks.conversations.get(projectId, notebookId, conversationId);
-        if (convoSnapshot.activeTurn?.turnId) {
-          setActiveStreamTurnId(convoSnapshot.activeTurn.turnId);
-        }
-      } catch (snapshotError) {
-        console.warn('Failed to load active turn id before streaming:', snapshotError);
-      }
 
       const userMessage: MessageDto = {
         id: `tmp-${Date.now()}`,
@@ -190,7 +142,6 @@ export function useConversationActions(
           type: 'Referenced' as const
         }))
       } as MessageDto;
-      dispatch({ type: 'ADD_MESSAGE', payload: userMessage });
 
       const placeholderAssistant: MessageDto = {
         id: `streaming-${Date.now()}`,
@@ -201,7 +152,82 @@ export function useConversationActions(
         assistantName: state.selectedAssistant || undefined,
         streaming: true,
       } as MessageDto;
+
+      // Reset stream-cancellation state BEFORE the optimistic dispatches flip
+      // isStreaming to true. The Stop button renders on isStreaming alone (no
+      // currentTurn guard), so it's clickable for the entire runtime-preflight
+      // window below; if that reset ran after the preflight (as it used to),
+      // a Stop click during the preflight would queue pendingStopRef, and this
+      // clearPendingStop() would then wipe it out before onTurnIdAssigned ever
+      // saw it — silently discarding the stop. Also clear any stale turn id
+      // from a previous send here so an early Stop on this new send can't
+      // target the wrong turn (see stale-active-stream-turn-id.md).
+      dispatch({ type: 'SET_CANCELLING', payload: false });
+      dispatch({ type: 'SET_STREAMING_ERROR', payload: undefined });
+      clearPendingStop();
+      setActiveStreamTurnId?.(null);
+
+      dispatch({ type: 'SET_STREAMING_MODE', payload: { mode: 'sending' } });
+      dispatch({ type: 'SET_DRAFT', payload: '' });
+      dispatch({ type: 'ADD_MESSAGE', payload: userMessage });
       dispatch({ type: 'ADD_MESSAGE', payload: placeholderAssistant });
+
+      const rollbackOptimisticSend = () => {
+        // REMOVE_LAST_TURN pops trailing messages through the last user message —
+        // exactly the placeholder + user message added above.
+        dispatch({ type: 'REMOVE_LAST_TURN' });
+        dispatch({ type: 'SET_DRAFT', payload: content });
+        dispatch({ type: 'SET_STREAMING_MODE', payload: { mode: 'at-rest' } });
+        // A Stop click during the runtime preflight (window between the
+        // optimistic dispatches above and this rollback) sets _isCancelling
+        // true; undo that here so it can't leak into the next send attempt.
+        dispatch({ type: 'SET_CANCELLING', payload: false });
+      };
+
+      if (assistant?.id) {
+        try {
+          const runtimeStatus = await checkRuntimeStatus(projectId, notebookId, assistant.id, inflightRuntimeChecksRef.current, runtimeReadyCacheRef.current);
+          if (!runtimeStatus) {
+            rollbackOptimisticSend();
+            return;
+          }
+          if (runtimeStatus.state !== 'ready') {
+            if (runtimeStatus.state === 'failed' || runtimeStatus.state === 'invalid') {
+              showToast({
+                type: 'error',
+                title: runtimeStatus.state === 'invalid' ? 'Incompatible Local Models' : 'Local Runtime Error',
+                message: getRuntimeBlockingMessage(runtimeStatus)
+              });
+            }
+            rollbackOptimisticSend();
+            return;
+          }
+        } catch (error: any) {
+          console.error('Failed to check local runtime status:', error);
+          showToast({
+            type: 'error',
+            title: 'Runtime Error',
+            message: `Failed to check model runtime status: ${error.message}`
+          });
+          rollbackOptimisticSend();
+          return;
+        }
+      }
+
+      // Send exclusively owns token appends for this turn.
+      abortObserverStream();
+
+      const controller = new AbortController();
+      adoptSendStream(controller);
+
+      dispatch({ type: 'START_STREAMING_TURN' });
+
+      // activeStreamTurnId is assigned from the SSE `turnId` event once the
+      // stream opens (see useStreamingEventHandler); no need to pre-fetch
+      // the conversation snapshot just to learn it a few hundred ms early.
+      // A Stop click that races ahead of that event is queued via
+      // pendingStopRef/onTurnIdAssigned and re-issued once the id lands
+      // (pre-existing behavior, unchanged by this removal).
 
       try {
         await api.projects.notebooks.conversations.sendMessageStream(

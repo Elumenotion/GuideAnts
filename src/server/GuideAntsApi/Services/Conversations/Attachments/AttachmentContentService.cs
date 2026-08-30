@@ -19,6 +19,7 @@ public class AttachmentContentService : IAttachmentContentService
     private readonly IConfiguration? _configuration;
     private readonly string _storagePath;
     private readonly IOptions<MarkdownAttachmentOptions> _markdownAttachmentOptions;
+    private readonly IAttachmentRenderCache? _renderCache;
 
     public AttachmentContentService(
         IServiceScopeFactory scopeFactory,
@@ -26,7 +27,8 @@ public class AttachmentContentService : IAttachmentContentService
         INotebookFileService? notebookFileService = null,
         IMarkdownExtractionService? markdownExtractionService = null,
         ILogger<AttachmentContentService>? logger = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        IAttachmentRenderCache? renderCache = null)
     {
         _scopeFactory = scopeFactory;
         _markdownAttachmentOptions = markdownAttachmentOptions ?? throw new ArgumentNullException(nameof(markdownAttachmentOptions));
@@ -35,6 +37,7 @@ public class AttachmentContentService : IAttachmentContentService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration;
         _storagePath = configuration?["FileStorage:Path"] ?? string.Empty;
+        _renderCache = renderCache;
     }
 
     public async Task AddAttachmentsToUserMessageAsync(
@@ -165,7 +168,12 @@ public class AttachmentContentService : IAttachmentContentService
                 .FirstOrDefaultAsync(nf => nf.Id == notebookFileId, cancellationToken);
             if (notebookFile == null) return contents;
 
-            return await AttachmentMessageBuilder.CreateContentFromNotebookFileAsync(
+            if (_renderCache != null && _renderCache.TryGet(notebookFile.Id, notebookFile.LastModifiedUtc.Ticks, out var cached))
+            {
+                return cached;
+            }
+
+            var rendered = await AttachmentMessageBuilder.CreateContentFromNotebookFileAsync(
                 notebookFile,
                 _notebookFileService,
                 _markdownExtractionService,
@@ -173,6 +181,9 @@ public class AttachmentContentService : IAttachmentContentService
                 cancellationToken,
                 _markdownAttachmentOptions.Value.MaxInlineCharacters,
                 _logger);
+
+            _renderCache?.Set(notebookFile.Id, notebookFile.LastModifiedUtc.Ticks, rendered);
+            return rendered;
         }
         catch (GuideAntsApi.Exceptions.AttachmentNotReadyException)
         {
@@ -181,6 +192,43 @@ public class AttachmentContentService : IAttachmentContentService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error creating OpenAI content for file {NotebookFileId}", notebookFileId);
+            return contents;
+        }
+    }
+
+    public async Task<List<ChatContent>> CreateOpenAiContentFromLoadedFileAsync(
+        NotebookFile notebookFile,
+        CancellationToken cancellationToken = default)
+    {
+        var contents = new List<ChatContent>();
+        if (_notebookFileService == null) return contents;
+
+        try
+        {
+            if (_renderCache != null && _renderCache.TryGet(notebookFile.Id, notebookFile.LastModifiedUtc.Ticks, out var cached))
+            {
+                return cached;
+            }
+
+            var rendered = await AttachmentMessageBuilder.CreateContentFromNotebookFileAsync(
+                notebookFile,
+                _notebookFileService,
+                _markdownExtractionService,
+                _storagePath,
+                cancellationToken,
+                _markdownAttachmentOptions.Value.MaxInlineCharacters,
+                _logger);
+
+            _renderCache?.Set(notebookFile.Id, notebookFile.LastModifiedUtc.Ticks, rendered);
+            return rendered;
+        }
+        catch (GuideAntsApi.Exceptions.AttachmentNotReadyException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error creating OpenAI content for file {NotebookFileId}", notebookFile.Id);
             return contents;
         }
     }

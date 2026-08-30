@@ -76,9 +76,10 @@ public class NotebookConversationAssistantSwitchingTests
         }
 
         public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(
-            Guid conversationId, 
-            SendMessageRequest request, 
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            Guid conversationId,
+            SendMessageRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default,
+            Guid? resolvedAssistantId = null)
         {
             // Simulate assistant switching logic
             var isAssistantSwitch = IsAssistantSwitch(conversationId, request.AssistantName);

@@ -176,6 +176,53 @@ describe('useConversationActions', () => {
       expect(deps.setCurrentStreamController).toHaveBeenCalled();
     });
 
+    it('does not pre-fetch the conversation snapshot before streaming', async () => {
+      const { actions } = mountActions();
+
+      await act(async () => {
+        await actions.sendMessage('hello world');
+      });
+
+      expect(api.projects.notebooks.conversations.get).not.toHaveBeenCalled();
+      expect(api.projects.notebooks.conversations.sendMessageStream).toHaveBeenCalled();
+    });
+
+    it('does not block the streaming POST on the conversation snapshot round-trip', async () => {
+      const conversations = api.projects.notebooks.conversations as Record<string, unknown>;
+      const SNAPSHOT_LATENCY_MS = 300;
+      let snapshotSettled = false;
+      conversations.get = vi.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, SNAPSHOT_LATENCY_MS));
+        snapshotSettled = true;
+        return { messages: [], activeTurn: { turnId: 'turn-1' } };
+      });
+
+      let postElapsedMs: number | null = null;
+      conversations.sendMessageStream = vi.fn(async () => {
+        postElapsedMs = performance.now() - startedAt;
+      });
+
+      const { actions } = mountActions();
+
+      const startedAt = performance.now();
+      let sendPromise!: Promise<void>;
+      await act(async () => {
+        sendPromise = actions.sendMessage('hello world');
+        // One macrotask boundary flushes every await in the send path that is
+        // NOT gated on the snapshot request. Anything still pending after this
+        // is waiting on the 300ms snapshot round-trip.
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(snapshotSettled).toBe(false);
+      expect(conversations.sendMessageStream).toHaveBeenCalled();
+      expect(postElapsedMs).toBeLessThan(SNAPSHOT_LATENCY_MS);
+
+      await act(async () => {
+        await sendPromise;
+      });
+    });
+
     it('returns when runtime check is deduplicated (null)', async () => {
       vi.mocked(checkRuntimeStatus).mockResolvedValue(null);
       const { actions } = mountActions();
@@ -227,6 +274,154 @@ describe('useConversationActions', () => {
         title: 'Runtime Error',
         message: expect.stringContaining('check failed'),
       }));
+    });
+
+    it('renders the user message optimistically before the runtime check resolves', async () => {
+      let resolveCheck!: (v: unknown) => void;
+      vi.mocked(checkRuntimeStatus).mockImplementation(
+        () => new Promise((res) => { resolveCheck = res; }) as any,
+      );
+      const { actions, dispatch } = mountActions();
+
+      let sendPromise!: Promise<void>;
+      act(() => {
+        sendPromise = actions.sendMessage('hello');
+      });
+
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+          type: 'ADD_MESSAGE',
+          payload: expect.objectContaining({ role: 'user', content: 'hello' }),
+        }));
+      });
+      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveCheck({ state: 'ready' });
+        await sendPromise;
+      });
+    });
+
+    it('does not discard a Stop click that lands during the runtime preflight window', async () => {
+      // Regression test: SET_STREAMING_MODE (which drives isStreaming, and
+      // therefore the Stop button's visibility) fires before checkRuntimeStatus
+      // resolves. If the SET_CANCELLING/clearPendingStop reset still ran AFTER
+      // the runtime check (the old ordering), a Stop click issued in that window
+      // would be silently wiped before the turn id ever arrived.
+      let resolveCheck!: (v: unknown) => void;
+      vi.mocked(checkRuntimeStatus).mockImplementation(
+        () => new Promise((res) => { resolveCheck = res; }) as any,
+      );
+      const { actions, dispatch } = mountActions();
+
+      let sendPromise!: Promise<void>;
+      act(() => {
+        sendPromise = actions.sendMessage('hello');
+      });
+
+      // Optimistic dispatches (and isStreaming flipping true) have landed;
+      // checkRuntimeStatus is still pending.
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_MESSAGE' }));
+      });
+      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+
+      // User clicks Stop while the preflight is still in flight. No real turn
+      // id exists yet (getActiveStreamTurnId/activeStreamTurnId are both
+      // null), so this only queues pendingStopRef via SET_CANCELLING.
+      act(() => {
+        actions.cancelStream();
+      });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+      expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveCheck({ state: 'ready' });
+        await sendPromise;
+      });
+
+      // The real turn id arrives later via the turn_created SSE event.
+      act(() => {
+        actions.onTurnIdAssigned('turn-real');
+      });
+
+      // If clearPendingStop() had run after the (now-resolved) runtime check,
+      // as it used to, pendingStopRef would already be false here and this
+      // would never fire.
+      expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+        PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-real',
+      );
+    });
+
+    it('rolls back the optimistic messages when the runtime check reports not ready', async () => {
+      vi.mocked(checkRuntimeStatus).mockResolvedValue({ state: 'failed' } as any);
+      const { actions, dispatch } = mountActions();
+
+      await act(async () => {
+        await actions.sendMessage('hello');
+      });
+
+      const types = dispatch.mock.calls.map((c) => c[0].type);
+      expect(types).toContain('ADD_MESSAGE');
+      expect(types).toContain('REMOVE_LAST_TURN');
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'hello' });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_STREAMING_MODE', payload: { mode: 'at-rest' } });
+      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+    });
+
+    it('resets SET_CANCELLING on rollback so a Stop-then-not-ready sequence cannot leak into the next send', async () => {
+      // A Stop click can flip _isCancelling true while the runtime check is
+      // still pending (see the preflight-window test above). If the check
+      // then reports not-ready, rollbackOptimisticSend must reset
+      // SET_CANCELLING back to false itself rather than leaving it for a
+      // future send to clean up.
+      let resolveCheck!: (v: unknown) => void;
+      vi.mocked(checkRuntimeStatus).mockImplementation(
+        () => new Promise((res) => { resolveCheck = res; }) as any,
+      );
+      const { actions, dispatch } = mountActions();
+
+      let sendPromise!: Promise<void>;
+      act(() => {
+        sendPromise = actions.sendMessage('hello');
+      });
+
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_MESSAGE' }));
+      });
+
+      act(() => {
+        actions.cancelStream();
+      });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+
+      const cancellingTrueIndex = dispatch.mock.calls.findIndex(
+        (c) => c[0].type === 'SET_CANCELLING' && c[0].payload === true,
+      );
+
+      await act(async () => {
+        resolveCheck({ state: 'failed' });
+        await sendPromise;
+      });
+
+      const cancellingFalseAfterRollback = dispatch.mock.calls
+        .slice(cancellingTrueIndex + 1)
+        .some((c) => c[0].type === 'SET_CANCELLING' && c[0].payload === false);
+      expect(cancellingFalseAfterRollback).toBe(true);
+    });
+
+    it('rolls back when the runtime check throws', async () => {
+      vi.mocked(checkRuntimeStatus).mockRejectedValue(Object.assign(new Error('boom'), { status: 500 }));
+      const { actions, dispatch, deps } = mountActions();
+
+      await act(async () => {
+        await actions.sendMessage('hello');
+      });
+
+      const types = dispatch.mock.calls.map((c) => c[0].type);
+      expect(types).toContain('REMOVE_LAST_TURN');
+      expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Runtime Error' }));
+      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
     });
 
     it('handles 409 ROUTING_MODEL_NOT_READY', async () => {

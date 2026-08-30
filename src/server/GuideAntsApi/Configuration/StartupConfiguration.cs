@@ -149,6 +149,7 @@ public static class StartupConfiguration
         services.AddScoped<IConversationQueryService, ConversationQueryService>();
         services.AddScoped<IConversationCommandService, ConversationCommandService>();
         services.AddScoped<IAttachmentContentService, AttachmentContentService>();
+        services.AddSingleton<IAttachmentRenderCache, AttachmentRenderCache>();
         services.AddScoped<IConversationHistoryBuilder, ConversationHistoryBuilder>();
         services.AddScoped<IConversationPersistence, ConversationPersistence>();
         services.AddScoped<IConversationUsageReporter, ConversationUsageReporter>();
@@ -800,6 +801,7 @@ public static class StartupConfiguration
         services.Configure<VideoAudioExtractionOptions>(configuration.GetSection(VideoAudioExtractionOptions.SectionName));
         services.Configure<MarkdownExtractionOptions>(configuration.GetSection(MarkdownExtractionOptions.SectionName));
         services.Configure<MarkdownAttachmentOptions>(configuration.GetSection(MarkdownAttachmentOptions.SectionName));
+        services.Configure<AttachmentRenderCacheOptions>(configuration.GetSection(AttachmentRenderCacheOptions.SectionName));
         services.Configure<SearXngSearchOptions>(configuration.GetSection(SearXngSearchOptions.SectionName));
         services.Configure<BrowserRenderingOptions>(configuration.GetSection(BrowserRenderingOptions.SectionName));
         services.Configure<GoogleGeminiApiOptions>(configuration.GetSection(GoogleGeminiApiOptions.SectionName));
