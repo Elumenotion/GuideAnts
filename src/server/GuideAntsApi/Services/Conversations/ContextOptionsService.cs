@@ -66,7 +66,7 @@ public class ContextOptionsService : IContextOptionsService
                             value = currentUser?.Email ?? string.Empty;
                             break;
                         case "files":
-                            value = await ResolveFilesAsync(projectId, notebookId, conversationId, ct);
+                            value = await ResolveFilesAsync(projectId, notebookId, conversationId, isPublished: false, ct);
                             break;
                         default:
                             // Unknown command – keep placeholder for now
@@ -107,7 +107,11 @@ public class ContextOptionsService : IContextOptionsService
         return JsonSerializer.Serialize(wrapper);
     }
 
-    public string? BuildPublishedContextMessage(AssistantDefinition assistant, Guid projectId, Guid notebookId)
+    public async Task<string?> BuildPublishedContextMessageAsync(
+        AssistantDefinition assistant,
+        Guid projectId,
+        Guid notebookId,
+        CancellationToken ct = default)
     {
         var resolved = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -128,7 +132,7 @@ public class ContextOptionsService : IContextOptionsService
                             value = DateTime.UtcNow.ToString("yyyy-MM-dd");
                             break;
                         case "files":
-                            value = ResolveFilesForPublished(projectId, notebookId);
+                            value = await ResolveFilesAsync(projectId, notebookId, Guid.Empty, isPublished: true, ct);
                             break;
                         case "userName":
                         case "userEmail":
@@ -158,7 +162,12 @@ public class ContextOptionsService : IContextOptionsService
         return JsonSerializer.Serialize(wrapper);
     }
 
-    private async Task<string> ResolveFilesAsync(Guid projectId, Guid notebookId, Guid conversationId, CancellationToken ct = default)
+    private async Task<string> ResolveFilesAsync(
+        Guid projectId,
+        Guid notebookId,
+        Guid conversationId,
+        bool isPublished = false,
+        CancellationToken ct = default)
     {
         try
         {
@@ -167,25 +176,8 @@ public class ContextOptionsService : IContextOptionsService
                 _pathResolver,
                 projectId,
                 notebookId,
-                isPublished: false,
+                isPublished: isPublished,
                 ct);
-
-            return ContextOptionFilesFormatter.FormatConsole(relativePaths);
-        }
-        catch
-        {
-            return JsonSerializer.Serialize(new { files = Array.Empty<string>() });
-        }
-    }
-
-    private string ResolveFilesForPublished(Guid projectId, Guid notebookId)
-    {
-        try
-        {
-            var relativePaths = ContextOptionFilesResolver
-                .ResolvePathsAsync(_db, _pathResolver, projectId, notebookId, isPublished: true, CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
 
             return ContextOptionFilesFormatter.FormatConsole(relativePaths);
         }

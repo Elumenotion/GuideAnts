@@ -6,6 +6,7 @@ using GuideAntsApi.Endpoints;
 using GuideAntsApi.Endpoints.Settings;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Diagnostics;
 using AntRunner.Chat;
 using AntRunner.ToolCalling;
@@ -153,6 +154,17 @@ public class Program
         // Configure all services using StartupConfiguration
         LogPhaseStart("ConfigureServices");
         StartupConfiguration.ConfigureServices(builder, LogPhase);
+        if (StartupPipelineHelpers.ShouldUseForwardedHeaders(builder.Configuration))
+        {
+            builder.Services.Configure<ForwardedHeadersOptions>(options =>
+            {
+                options.ForwardedHeaders = ForwardedHeaders.XForwardedFor
+                    | ForwardedHeaders.XForwardedProto
+                    | ForwardedHeaders.XForwardedHost;
+                options.KnownNetworks.Clear();
+                options.KnownProxies.Clear();
+            });
+        }
         startupTimingLogger.LogInformation(
             "Startup DI service descriptors registered: {DescriptorCount}",
             builder.Services.Count);
@@ -318,7 +330,15 @@ public class Program
             });
         }
 
-        app.UseHttpsRedirection();
+        if (StartupPipelineHelpers.ShouldUseForwardedHeaders(configuration))
+        {
+            app.UseForwardedHeaders();
+        }
+
+        if (StartupPipelineHelpers.ShouldUseHttpsRedirection(configuration))
+        {
+            app.UseHttpsRedirection();
+        }
         app.UseCors("RestrictedOrigins");
         app.UseWebSockets();
         

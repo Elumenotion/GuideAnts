@@ -22,7 +22,9 @@ public static class AssistantToolWrappers
         string instructions,
 
         [Parameter(Description = "Invocation context", Hidden = true)]
-        InvocationContext? context = null)
+        InvocationContext? context = null,
+
+        CancellationToken cancellationToken = default)
     {
         if (!TryCreateHttpUri(url, out _))
         {
@@ -50,7 +52,7 @@ public static class AssistantToolWrappers
         }
 
         var prompt = $"{instructions.Trim()}\n\n{url.Trim()}";
-        var result = await Agent.Invoke("Read Web", prompt, context!);
+        var result = await Agent.Invoke("Read Web", prompt, context!, cancellationToken);
         return result;
     }
 

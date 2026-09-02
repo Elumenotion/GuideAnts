@@ -107,7 +107,11 @@ public sealed class AnthropicChatClient : IChatCompletionClient
                 throw new InvalidOperationException("Anthropic requires a model identifier.");
             }
 
-            var thinkingEnabled = !string.IsNullOrWhiteSpace(request.ReasoningEffort);
+            // "none" is a first-class catalog choice meaning "disable thinking" (see
+            // GuidesService.NormalizeReasoningEffort); treat it as thinking-off rather than
+            // falling into the budget lookup, which would throw for it.
+            var thinkingEnabled = !string.IsNullOrWhiteSpace(request.ReasoningEffort)
+                && !string.Equals(request.ReasoningEffort.Trim(), "none", StringComparison.OrdinalIgnoreCase);
             var messageParams = MapMessages(request.Messages, thinkingEnabled, out var systemMessages);
 
             var toolDefinitions = request.Tools?.Count > 0

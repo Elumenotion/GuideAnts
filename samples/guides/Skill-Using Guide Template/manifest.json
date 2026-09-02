@@ -1,0 +1,21 @@
+{
+  "name": "Skill-Using Guide Template",
+  "description": "A generic workspace assistant that orchestrates packaged Skills and the sandbox. Import, rename, attach skills from samples/skills/, and customize the instructions.",
+  "defaultModel": null,
+  "defaultAssistant": null,
+  "tools": [
+    {
+      "type": "run_python"
+    },
+    {
+      "type": "run_bash"
+    },
+    {
+      "type": "search_notebook"
+    },
+    {
+      "type": "search_project"
+    }
+  ],
+  "crew": []
+}

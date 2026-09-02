@@ -18,6 +18,10 @@ namespace GuideAntsApi.Services.Conversations
         /// Resolves placeholders like [@currentDate] but skips user-specific ones.
         /// Unresolved placeholders result in the entire key-value pair being omitted.
         /// </summary>
-        string? BuildPublishedContextMessage(AntRunner.ToolCalling.AssistantDefinitions.AssistantDefinition assistant, Guid projectId, Guid notebookId);
+        Task<string?> BuildPublishedContextMessageAsync(
+            AntRunner.ToolCalling.AssistantDefinitions.AssistantDefinition assistant,
+            Guid projectId,
+            Guid notebookId,
+            CancellationToken ct = default);
     }
 }

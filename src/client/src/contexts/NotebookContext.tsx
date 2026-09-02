@@ -274,9 +274,10 @@ export function NotebookProvider({ children, notebookId, projectId }: NotebookPr
         
         dispatch({ type: 'SET_FILES_LOADING', payload: true });
         try {
-            // Note: No longer stores in context state - use useNotebookFilesPolling hook instead
-            // Just trigger a sync to ensure backend is up-to-date
+            // Folder trees live in useNotebookFilesPolling instances (sidebar + NotebookDetails).
+            // Fetch once to warm/validate the API, then broadcast so every listener refreshes.
             await api.projects.notebooks.getNotebookFolderTree(projectId, notebookId);
+            try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch { /* ignore */ }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Failed to load notebook files';
             dispatch({ type: 'SET_FILES_ERROR', payload: errorMessage });

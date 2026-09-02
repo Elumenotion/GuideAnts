@@ -72,7 +72,8 @@ public sealed class SandboxToolServiceTests
                 It.Is<string>(s => s.Contains("importlib") && s.Contains("run")),
                 "guideants-ai",
                 ScriptType.Python,
-                It.IsAny<InvocationContext>()))
+                It.IsAny<InvocationContext>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ScriptExecutionResult { StandardOutput = "{\"ok\":true}" });
 
         var service = CreateService(docker.Object, pathResolver.Object);

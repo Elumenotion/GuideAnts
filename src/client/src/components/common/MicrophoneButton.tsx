@@ -4,6 +4,7 @@ interface MicrophoneButtonProps {
   duration: number;
   isSupported: boolean;
   disabled?: boolean;
+  error?: string | null;
   onStartRecording: () => void;
   onStopRecording: () => void;
   className?: string;
@@ -28,6 +29,7 @@ export default function MicrophoneButton({
   duration,
   isSupported,
   disabled = false,
+  error = null,
   onStartRecording,
   onStopRecording,
   className = '',
@@ -89,28 +91,34 @@ export default function MicrophoneButton({
     );
   }
 
-  // Idle state - show microphone button
+  // Idle state - show microphone button (and any prior transcription error)
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={disabled}
-      className={`p-1.5 rounded hover:bg-gray-100 text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
-      title="Start voice input"
-      aria-label="Start voice input"
-    >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-        className="w-5 h-5"
+    <div className={`flex items-center gap-2 ${className}`}>
+      {error ? (
+        <span className="max-w-[14rem] truncate text-sm text-red-600" title={error} role="alert">
+          {error}
+        </span>
+      ) : null}
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={disabled}
+        className="p-1.5 rounded hover:bg-gray-100 text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        title="Start voice input"
+        aria-label="Start voice input"
       >
-        <path d="M12 1a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4z" />
-        <path d="M19 10v1a7 7 0 0 1-14 0v-1a1 1 0 0 1 2 0v1a5 5 0 0 0 10 0v-1a1 1 0 0 1 2 0z" />
-        <path d="M12 19a1 1 0 0 0-1 1v2a1 1 0 0 0 2 0v-2a1 1 0 0 0-1-1z" />
-        <path d="M8 23h8a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2z" />
-      </svg>
-    </button>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          className="w-5 h-5"
+        >
+          <path d="M12 1a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4z" />
+          <path d="M19 10v1a7 7 0 0 1-14 0v-1a1 1 0 0 1 2 0v1a5 5 0 0 0 10 0v-1a1 1 0 0 1 2 0z" />
+          <path d="M12 19a1 1 0 0 0-1 1v2a1 1 0 0 0 2 0v-2a1 1 0 0 0-1-1z" />
+          <path d="M8 23h8a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2z" />
+        </svg>
+      </button>
+    </div>
   );
 }
-

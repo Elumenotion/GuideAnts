@@ -11,6 +11,8 @@ public sealed class ReconcileResult
     public int Updated { get; init; }
     public int Removed { get; init; }
     public int IndexJobsEnqueued { get; init; }
+    public bool Skipped { get; init; }
+    public string? SkipReason { get; init; }
 }
 
 /// <summary>

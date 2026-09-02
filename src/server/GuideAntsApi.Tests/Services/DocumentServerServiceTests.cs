@@ -106,6 +106,50 @@ public sealed class DocumentServerServiceTests
     }
 
     [TestMethod]
+    public async Task BuildEditorConfigAsync_ForTxtFile_ThrowsNotSupported()
+    {
+        await using var db = CreateDbContext();
+        var service = CreateService(
+            db,
+            new StubContentFileService(
+                details: new ContentFileDetailsDto(
+                    Id: Guid.NewGuid(),
+                    FileName: "notes.txt",
+                    Path: string.Empty,
+                    RelativePath: "notes.txt",
+                    ContentType: "text/plain",
+                    Index: false,
+                    DocumentId: "doc-txt",
+                    Created: DateTime.UtcNow,
+                    FileSize: 12,
+                    FolderId: null,
+                    FolderPath: null,
+                    LatestVersion: 1,
+                    IsSnapshot: false,
+                    HasMarkdownShadow: false,
+                    MarkdownStatus: null,
+                    MarkdownProcessedAt: null)),
+            enabled: true);
+
+        var httpContext = CreateHttpContext();
+
+        var action = async () => await service.BuildEditorConfigAsync(
+            httpContext,
+            new DocumentServerEditorConfigRequest(
+                Scope: "project",
+                ProjectId: Guid.NewGuid(),
+                FileId: Guid.NewGuid(),
+                NotebookId: null,
+                CanEdit: true,
+                UserId: "user-1",
+                UserName: "Test User"),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not supported*notes.txt*");
+    }
+
+    [TestMethod]
     public async Task GetDownloadAsync_InvalidToken_Throws()
     {
         await using var db = CreateDbContext();

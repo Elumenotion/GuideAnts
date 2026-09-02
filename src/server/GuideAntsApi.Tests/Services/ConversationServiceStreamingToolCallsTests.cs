@@ -229,13 +229,15 @@ public class ConversationServiceStreamingToolCallsTests
             1,
             "tool_call",
             new DateTime(2026, 6, 16, 15, 42, 10, DateTimeKind.Utc));
+        var turnId = Guid.NewGuid();
 
-        var streamEvent = StreamingEvents.BuildToolActivityProgress(activity);
+        var streamEvent = StreamingEvents.BuildToolActivityProgress(activity, turnId);
 
         streamEvent.EventType.Should().Be(StreamingEventTypes.StreamingProgress);
         streamEvent.EventType.Should().NotBe(StreamingEventTypes.Usage);
 
         using var payload = JsonDocument.Parse(streamEvent.Payload);
+        payload.RootElement.GetProperty("turnId").GetGuid().Should().Be(turnId);
         var toolActivity = payload.RootElement.GetProperty("toolActivity");
         toolActivity.GetProperty("name").GetString().Should().Be("ReadWeb");
         toolActivity.GetProperty("status").GetString().Should().Be("running");

@@ -13,6 +13,7 @@ public class ConversationLockGateOptions
 
     public HashSet<string> GatedJobTypes { get; set; } = new(StringComparer.Ordinal)
     {
+        "SyncNotebook",
         "ExtractContentVersionMarkdown",
         "ExtractNotebookFileMarkdown",
         "ExtractAssistantFileMarkdown",

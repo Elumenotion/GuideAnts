@@ -5,6 +5,8 @@ namespace GuideAntsApi.BackgroundJobs.Jobs;
 
 public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
 {
+    public const string LockNotAcquiredSkipReason = "LockNotAcquired";
+
     private readonly INotebookFileReconciler _reconciler;
 
     public SyncNotebookHandler(
@@ -18,7 +20,13 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
 
     public override async Task<JobExecutionResult> HandleAsync(SyncNotebookJob payload, CancellationToken cancellationToken)
     {
-        await _reconciler.ReconcileNotebookAsync(payload.NotebookId, ReconcileMode.Full, cancellationToken);
+        var result = await _reconciler.ReconcileNotebookAsync(payload.NotebookId, ReconcileMode.Full, cancellationToken);
+        if (result.Skipped && result.SkipReason == LockNotAcquiredSkipReason)
+        {
+            return JobExecutionResult.RetryableTransient(
+                "Notebook reconcile skipped because another sync holds the lock");
+        }
+
         return JobExecutionResult.Success();
     }
 }

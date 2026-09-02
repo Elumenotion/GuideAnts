@@ -54,9 +54,9 @@ public sealed class ApplicationSettingsConfigurationProvider(
 
     private readonly SettingsSecretsOptions _settingsSecrets = CloneSecretsOptions(settingsSecrets);
 
-    private readonly Microsoft.AspNetCore.DataProtection.IDataProtector _legacyProtector =
+    private readonly Lazy<Microsoft.AspNetCore.DataProtection.IDataProtector> _legacyProtector = new(
 
-        ApplicationSettingsJson.CreateLegacyProtector(contentRootPath);
+        () => ApplicationSettingsJson.CreateLegacyProtector(contentRootPath));
 
 
 
@@ -124,6 +124,18 @@ public sealed class ApplicationSettingsConfigurationProvider(
 
                 {
 
+                    Microsoft.AspNetCore.DataProtection.IDataProtector? legacyProtector = null;
+
+                    if (SectionUsesLegacyEncryption(definition, jsonObject))
+
+                    {
+
+                        legacyProtector = _legacyProtector.Value;
+
+                    }
+
+
+
                     jsonObject = ApplicationSettingsJson.DecryptSecrets(
 
                         definition,
@@ -132,7 +144,7 @@ public sealed class ApplicationSettingsConfigurationProvider(
 
                         _settingsSecrets,
 
-                        _legacyProtector);
+                        legacyProtector);
 
                     EnsureSecretsDecrypted(sectionName, definition, jsonObject);
 
@@ -452,6 +464,44 @@ public sealed class ApplicationSettingsConfigurationProvider(
             }
 
         }
+
+    }
+
+
+
+    private static bool SectionUsesLegacyEncryption(SettingsSectionDefinition definition, JsonObject payload)
+
+    {
+
+        foreach (var secret in definition.Properties.Where(p => p.IsSecret))
+
+        {
+
+            if (!payload.TryGetPropertyValue(secret.Name, out var node) || node is null)
+
+            {
+
+                continue;
+
+            }
+
+
+
+            var value = ApplicationSettingsJson.NodeToString(node);
+
+            if (value.StartsWith(ApplicationSettingsJson.LegacySecretCipherPrefix, StringComparison.Ordinal))
+
+            {
+
+                return true;
+
+            }
+
+        }
+
+
+
+        return false;
 
     }
 

@@ -937,6 +937,9 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid>("LeaseId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("LockedAt")
                         .HasColumnType("datetime2");
 
@@ -1528,6 +1531,11 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("Status", "LeaseUntil")
                         .HasDatabaseName("IX_JobQueue_LeaseCleanup");
 
+                    b.HasIndex("CorrelationId", "JobType", "Status")
+                        .IsUnique()
+                        .HasDatabaseName("IX_JobQueue_CorrelationDedup")
+                        .HasFilter("[CorrelationId] IS NOT NULL AND [Status] IN (0, 2)");
+
                     b.HasIndex("Status", "AvailableAt", "Priority", "Created")
                         .HasDatabaseName("IX_JobQueue_Claiming");
 
@@ -1748,13 +1756,19 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<Guid>("MessageId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("NotebookFileId")
+                    b.Property<Guid?>("NotebookFileId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("OrderIndex")
                         .HasColumnType("int");
 
+                    b.Property<string>("RelativePath")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("UploadType")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
@@ -1762,7 +1776,8 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("NotebookFileId");
 
                     b.HasIndex("MessageId", "NotebookFileId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[NotebookFileId] IS NOT NULL");
 
                     b.HasIndex("MessageId", "OrderIndex")
                         .IsUnique();
@@ -3672,8 +3687,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasOne("GuideAntsApi.DataModel.Models.NotebookFile", "NotebookFile")
                         .WithMany()
                         .HasForeignKey("NotebookFileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Message");
 

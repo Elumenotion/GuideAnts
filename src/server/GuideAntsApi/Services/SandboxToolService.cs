@@ -22,6 +22,7 @@ public interface ISandboxToolService
     /// <param name="initializationScriptFilename">The initialization script filename (e.g., "init.py").</param>
     /// <param name="assistantName">The name of the assistant that owns this tool.</param>
     /// <param name="context">The invocation context containing project/notebook info.</param>
+    /// <param name="cancellationToken">Cancellation token for the sandbox tool execution request.</param>
     /// <returns>Script execution result containing stdout, stderr, and file changes.</returns>
     Task<ScriptExecutionResult> ExecuteSandboxToolAsync(
         string toolName,
@@ -29,7 +30,8 @@ public interface ISandboxToolService
         Dictionary<string, object> parameters,
         string initializationScriptFilename,
         string assistantName,
-        InvocationContext? context = null);
+        InvocationContext? context = null,
+        CancellationToken cancellationToken = default);
 }
 
 public class SandboxToolService : ISandboxToolService
@@ -57,11 +59,14 @@ public class SandboxToolService : ISandboxToolService
         Dictionary<string, object> parameters,
         string initializationScriptFilename,
         string assistantName,
-        InvocationContext? context = null)
+        InvocationContext? context = null,
+        CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
             "Executing sandbox tool {ToolName} (function: {FunctionName}) with init script {InitScript} for assistant {AssistantName}",
             toolName, functionName, initializationScriptFilename, assistantName);
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (context == null)
         {
@@ -94,7 +99,8 @@ public class SandboxToolService : ISandboxToolService
             combinedScript,
             "guideants-ai",
             ScriptType.Python,
-            context);
+            context,
+            cancellationToken);
 
         return result;
     }
@@ -296,7 +302,8 @@ public class SandboxToolService : ISandboxToolService
         Dictionary<string, object> parameters,
         string initializationScriptFilename,
         string assistantName,
-        InvocationContext? context = null)
+        InvocationContext? context = null,
+        CancellationToken cancellationToken = default)
     {
         if (_staticServiceProvider == null)
         {
@@ -313,7 +320,8 @@ public class SandboxToolService : ISandboxToolService
             parameters,
             initializationScriptFilename,
             assistantName,
-            context);
+            context,
+            cancellationToken);
     }
 }
 

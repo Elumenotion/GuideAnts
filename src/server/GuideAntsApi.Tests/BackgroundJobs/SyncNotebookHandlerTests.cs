@@ -1,6 +1,8 @@
 using FluentAssertions;
 using GuideAnts.Usage;
+using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
+using GuideAntsApi.BackgroundJobs.Sync;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Services;
 using GuideAntsApi.Services.Components;
@@ -58,6 +60,28 @@ public sealed class SyncNotebookHandlerTests
                 Directory.Delete(storageRoot, recursive: true);
             }
         }
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_Returns_retryable_transient_when_lock_not_acquired()
+    {
+        var reconciler = new Mock<INotebookFileReconciler>();
+        reconciler
+            .Setup(r => r.ReconcileNotebookAsync(It.IsAny<Guid>(), ReconcileMode.Full, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReconcileResult
+            {
+                Skipped = true,
+                SkipReason = SyncNotebookHandler.LockNotAcquiredSkipReason,
+            });
+
+        var handler = new SyncNotebookHandler(
+            NullLogger<SyncNotebookHandler>.Instance,
+            reconciler.Object);
+
+        var result = await handler.HandleAsync(new SyncNotebookJob(Guid.NewGuid()), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.FailureClass.Should().Be(JobFailureClass.RetryableTransient);
     }
 
     [TestMethod]

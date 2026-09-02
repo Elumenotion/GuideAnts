@@ -91,6 +91,66 @@ public sealed class ToolLimitIntegrationTests : BaseEndpointTest
     }
 
     [TestMethod]
+    public async Task SendMessageStream_RepeatedToolRounds_Persists_each_assistant_tool_call_message()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Repeated tool rounds");
+            await SetAssistantToolLimitAsync(db, "assistant", maxToolCallsPerTurn: 2);
+        }
+
+        var behavior = FakeChatCompletionBehavior.Instance;
+        behavior.Scenario = FakeChatScenario.RepeatedToolCalls;
+
+        var events = await SendConversationStreamToCompletionAsync(
+            projectId,
+            notebookId,
+            conversationId,
+            new { instructions = "Use several tools", assistantName = "assistant" });
+
+        events.Should().Contain(e => e.EventType == StreamingEventTypes.Complete);
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var assistantMessages = await db2.NotebookConversationMessages
+            .Where(m =>
+                m.NotebookConversationId == conversationId
+                && m.Role == DataModelChatRole.Assistant)
+            .OrderBy(m => m.MessageSequence)
+            .ToListAsync();
+        var assistantToolCallMessages = await db2.NotebookConversationMessages
+            .Where(m =>
+                m.NotebookConversationId == conversationId
+                && m.Role == DataModelChatRole.Assistant
+                && m.ToolCalls != null)
+            .OrderBy(m => m.MessageSequence)
+            .ToListAsync();
+
+        assistantMessages.Should().OnlyContain(
+            m => m.IsStreaming != true,
+            "no assistant row may remain as an unfinalized queue orphan");
+        assistantToolCallMessages.Should().HaveCount(behavior.RepeatedToolCallCount);
+        assistantToolCallMessages.Should().OnlyContain(
+            m => m.IsStreaming != true,
+            "every assistant tool-call segment must be finalized before the run completes");
+        for (var index = 0; index < behavior.RepeatedToolCallCount; index++)
+        {
+            assistantToolCallMessages[index].ToolCalls.Should().Contain(
+                $"{behavior.ToolCallId}_{index + 1}",
+                "each model tool-call segment must remain durable in order");
+        }
+        assistantToolCallMessages
+            .Select(m => m.MessageSequence)
+            .Should()
+            .OnlyHaveUniqueItems("each assistant tool-call message must occupy its own sequence");
+    }
+
+    [TestMethod]
     public async Task SendMessageStream_ToolLimit_CompletedTurn_RehydratesOnGetReload_T13()
     {
         Guid projectId;

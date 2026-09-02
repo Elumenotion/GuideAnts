@@ -1,4 +1,6 @@
+using System.Data;
 using System.Text.Json;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -8,6 +10,31 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 
 namespace GuideAntsApi.BackgroundJobs;
+
+internal static class JobQueueClaimSql
+{
+    // EF Core ExecuteSqlRawAsync binds positional {n} placeholders, not named @parameters.
+    internal const string Claim = """
+        WITH Candidate AS (
+            SELECT TOP (1) j.Id
+            FROM JobQueue j
+            WHERE j.Status = {0}
+              AND j.AvailableAt <= {1}
+              AND j.ClaimToken = {2}
+              AND ({3} IS NULL OR j.JobType = {3})
+            ORDER BY j.Priority DESC, j.Created ASC
+        )
+        UPDATE j
+        SET j.Status = {4},
+            j.ClaimToken = {5},
+            j.LeaseUntil = {6},
+            j.UpdatedUtc = {1}
+        FROM JobQueue j
+        INNER JOIN Candidate c ON j.Id = c.Id
+        WHERE j.Status = {0}
+          AND j.ClaimToken = {2}
+        """;
+}
 
 public class JobQueueService : IJobQueueService
 {
@@ -57,40 +84,63 @@ public class JobQueueService : IJobQueueService
 
         var now = DateTime.UtcNow;
         var claimToken = Guid.NewGuid();
+        var leaseUntil = now.AddSeconds(leaseSeconds);
+        var emptyClaimToken = Guid.Empty;
 
-        // Build query for available jobs
-        var query = context.JobQueue
-            .Where(j => j.Status == JobStatus.Pending 
-                       && j.AvailableAt <= now 
-                       && j.ClaimToken == Guid.Empty); // Unclaimed jobs only
-                       
-        if (!string.IsNullOrEmpty(jobType))
-            query = query.Where(j => j.JobType == jobType);
-
-        // Atomic claim operation - only one worker can succeed due to optimistic concurrency
-        var affected = await query
-            .OrderByDescending(j => j.Priority)
-            .ThenBy(j => j.Created)
-            .Take(1) // Critical: only claim one job
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(j => j.Status, JobStatus.Processing)
-                .SetProperty(j => j.ClaimToken, claimToken)
-                .SetProperty(j => j.LeaseUntil, now.AddSeconds(leaseSeconds))
-                .SetProperty(j => j.UpdatedUtc, now), ct);
-
-        if (affected == 0) return null; // No available jobs or lost race
-
-        // Retrieve the claimed job
-        var claimedJob = await context.JobQueue
-            .AsNoTracking() // Read-only
-            .FirstOrDefaultAsync(j => j.ClaimToken == claimToken && j.Status == JobStatus.Processing, ct);
-
-        if (claimedJob != null)
+        if (!context.Database.IsRelational())
         {
-            _logger.LogDebug("Claimed job {JobType} with ID {JobId}", claimedJob.JobType, claimedJob.Id);
+            return await TryClaimNonRelationalAsync(
+                context,
+                jobType,
+                claimToken,
+                leaseUntil,
+                now,
+                emptyClaimToken,
+                ct).ConfigureAwait(false);
         }
 
-        return claimedJob;
+        const string claimSql = JobQueueClaimSql.Claim;
+
+        try
+        {
+            var affected = await context.Database.ExecuteSqlRawAsync(
+                claimSql,
+                [
+                    (byte)JobStatus.Pending,
+                    now,
+                    emptyClaimToken,
+                    (object?)jobType ?? DBNull.Value,
+                    (byte)JobStatus.Processing,
+                    claimToken,
+                    leaseUntil,
+                ],
+                ct);
+
+            if (affected == 0)
+            {
+                return null;
+            }
+
+            var claimedJob = await context.JobQueue
+                .AsNoTracking()
+                .FirstOrDefaultAsync(j => j.ClaimToken == claimToken && j.Status == JobStatus.Processing, ct);
+
+            if (claimedJob != null)
+            {
+                _logger.LogDebug("Claimed job {JobType} with ID {JobId}", claimedJob.JobType, claimedJob.Id);
+            }
+
+            return claimedJob;
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Job claim failed with SqlException Number={SqlNumber} State={SqlState}",
+                ex.Number,
+                ex.State);
+            return null;
+        }
     }
 
     public async Task<bool> CompleteAsync(Guid id, Guid claimToken, CancellationToken ct = default)
@@ -102,6 +152,8 @@ public class JobQueueService : IJobQueueService
             .Where(j => j.Id == id && j.ClaimToken == claimToken && j.Status == JobStatus.Processing)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.Status, JobStatus.Completed)
+                .SetProperty(j => j.ClaimToken, Guid.Empty)
+                .SetProperty(j => j.LeaseUntil, (DateTime?)null)
                 .SetProperty(j => j.UpdatedUtc, now), ct);
 
         var success = affected > 0;
@@ -128,8 +180,31 @@ public class JobQueueService : IJobQueueService
 
         if (meta == null) return false;
 
-        var attemptsNext = meta.Attempts + 1;
         var now = DateTime.UtcNow;
+
+        if (failureClass == JobFailureClass.ShutdownCancellation)
+        {
+            var released = await context.JobQueue
+                .Where(j => j.Id == id && j.ClaimToken == claimToken && j.Status == JobStatus.Processing)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, JobStatus.Pending)
+                    .SetProperty(j => j.ClaimToken, Guid.Empty)
+                    .SetProperty(j => j.LeaseUntil, (DateTime?)null)
+                    .SetProperty(j => j.AvailableAt, now)
+                    .SetProperty(j => j.UpdatedUtc, now), ct);
+
+            if (released > 0)
+            {
+                _logger.LogInformation(
+                    "Released job {JobId} back to pending after shutdown cancellation without burning attempt budget",
+                    id);
+            }
+
+            return released > 0;
+        }
+
+        var burnsAttemptBudget = JobRetryPolicy.BurnsAttemptBudget(failureClass);
+        var attemptsNext = burnsAttemptBudget ? meta.Attempts + 1 : meta.Attempts;
         var plan = _retryPolicy.PlanFailure(failureClass, meta.Attempts, meta.MaxAttempts, meta.Created, now);
         var willRetry = plan.WillRetry;
         var nextAvailable = plan.NextAvailableAt;
@@ -137,9 +212,12 @@ public class JobQueueService : IJobQueueService
         int affected;
         if (willRetry)
         {
-            affected = await context.JobQueue
-                .Where(j => j.Id == id && j.ClaimToken == claimToken && j.Status == JobStatus.Processing)
-                .ExecuteUpdateAsync(s => s
+            var update = context.JobQueue
+                .Where(j => j.Id == id && j.ClaimToken == claimToken && j.Status == JobStatus.Processing);
+
+            if (burnsAttemptBudget)
+            {
+                affected = await update.ExecuteUpdateAsync(s => s
                     .SetProperty(j => j.Attempts, j => j.Attempts + 1)
                     .SetProperty(j => j.ErrorMessage, error)
                     .SetProperty(j => j.UpdatedUtc, now)
@@ -147,16 +225,42 @@ public class JobQueueService : IJobQueueService
                     .SetProperty(j => j.AvailableAt, nextAvailable!.Value)
                     .SetProperty(j => j.ClaimToken, Guid.Empty)
                     .SetProperty(j => j.LeaseUntil, (DateTime?)null), ct);
+            }
+            else
+            {
+                affected = await update.ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.ErrorMessage, error)
+                    .SetProperty(j => j.UpdatedUtc, now)
+                    .SetProperty(j => j.Status, JobStatus.Pending)
+                    .SetProperty(j => j.AvailableAt, nextAvailable!.Value)
+                    .SetProperty(j => j.ClaimToken, Guid.Empty)
+                    .SetProperty(j => j.LeaseUntil, (DateTime?)null), ct);
+            }
         }
         else
         {
-            affected = await context.JobQueue
-                .Where(j => j.Id == id && j.ClaimToken == claimToken && j.Status == JobStatus.Processing)
-                .ExecuteUpdateAsync(s => s
+            var update = context.JobQueue
+                .Where(j => j.Id == id && j.ClaimToken == claimToken && j.Status == JobStatus.Processing);
+
+            if (burnsAttemptBudget)
+            {
+                affected = await update.ExecuteUpdateAsync(s => s
                     .SetProperty(j => j.Attempts, j => j.Attempts + 1)
                     .SetProperty(j => j.ErrorMessage, error)
                     .SetProperty(j => j.UpdatedUtc, now)
-                    .SetProperty(j => j.Status, JobStatus.Failed), ct);
+                    .SetProperty(j => j.Status, JobStatus.Failed)
+                    .SetProperty(j => j.ClaimToken, Guid.Empty)
+                    .SetProperty(j => j.LeaseUntil, (DateTime?)null), ct);
+            }
+            else
+            {
+                affected = await update.ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.ErrorMessage, error)
+                    .SetProperty(j => j.UpdatedUtc, now)
+                    .SetProperty(j => j.Status, JobStatus.Failed)
+                    .SetProperty(j => j.ClaimToken, Guid.Empty)
+                    .SetProperty(j => j.LeaseUntil, (DateTime?)null), ct);
+            }
         }
 
         var success = affected > 0;
@@ -209,14 +313,12 @@ public class JobQueueService : IJobQueueService
         var requeued = 0;
         var failed = 0;
 
-        // Expired lease counts as an attempt so long-running jobs cannot churn forever.
         foreach (var candidate in reclaimable)
         {
-            var attemptsNext = candidate.Attempts + 1;
             var delay = _retryPolicy.ComputeDelay(candidate.Attempts);
             var canRetry = _retryPolicy.CanRetry(
-                JobFailureClass.RetryableTransient,
-                attemptsNext,
+                JobFailureClass.LeaseOwnershipLost,
+                candidate.Attempts,
                 candidate.MaxAttempts,
                 candidate.Created,
                 now,
@@ -227,7 +329,6 @@ public class JobQueueService : IJobQueueService
                 failed += await context.JobQueue
                     .Where(j => j.Id == candidate.Id && j.ClaimToken == candidate.ClaimToken && j.Status == JobStatus.Processing)
                     .ExecuteUpdateAsync(s => s
-                        .SetProperty(j => j.Attempts, j => j.Attempts + 1)
                         .SetProperty(j => j.Status, JobStatus.Failed)
                         .SetProperty(j => j.ErrorMessage, j => $"Job lease expired and max attempts reached at {now:O}")
                         .SetProperty(j => j.ClaimToken, Guid.Empty)
@@ -240,10 +341,9 @@ public class JobQueueService : IJobQueueService
                 requeued += await context.JobQueue
                     .Where(j => j.Id == candidate.Id && j.ClaimToken == candidate.ClaimToken && j.Status == JobStatus.Processing)
                     .ExecuteUpdateAsync(s => s
-                        .SetProperty(j => j.Attempts, j => j.Attempts + 1)
-                        .SetProperty(j => j.ErrorMessage, j => $"Job lease expired at {now:O}; requeued for retry")
+                        .SetProperty(j => j.ErrorMessage, j => $"Job lease expired at {now:O}; requeued for retry (lease ownership lost)")
                         .SetProperty(j => j.Status, JobStatus.Pending)
-                        .SetProperty(j => j.ClaimToken, Guid.Empty) // Reset to unclaimed
+                        .SetProperty(j => j.ClaimToken, Guid.Empty)
                         .SetProperty(j => j.LeaseUntil, (DateTime?)null)
                         .SetProperty(j => j.AvailableAt, nextAvailable)
                         .SetProperty(j => j.UpdatedUtc, now), ct);
@@ -254,7 +354,7 @@ public class JobQueueService : IJobQueueService
 
         if (requeued > 0)
         {
-            _logger.LogInformation("Requeued {Count} expired jobs", requeued);
+            _logger.LogInformation("Requeued {Count} expired jobs due to lease ownership loss", requeued);
         }
 
         if (failed > 0)
@@ -298,7 +398,7 @@ public class JobQueueService : IJobQueueService
             .Where(j => j.Status == JobStatus.Processing)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.Status, JobStatus.Pending)
-                .SetProperty(j => j.ClaimToken, Guid.Empty) // Reset to unclaimed
+                .SetProperty(j => j.ClaimToken, Guid.Empty)
                 .SetProperty(j => j.LeaseUntil, (DateTime?)null)
                 .SetProperty(j => j.UpdatedUtc, now), ct);
 
@@ -331,5 +431,57 @@ public class JobQueueService : IJobQueueService
         }
 
         return success;
+    }
+
+    private static async Task<JobQueue?> TryClaimNonRelationalAsync(
+        ApplicationDbContext context,
+        string? jobType,
+        Guid claimToken,
+        DateTime leaseUntil,
+        DateTime now,
+        Guid emptyClaimToken,
+        CancellationToken ct)
+    {
+        var candidate = await context.JobQueue
+            .Where(j =>
+                j.Status == JobStatus.Pending
+                && j.AvailableAt <= now
+                && j.ClaimToken == emptyClaimToken
+                && (jobType == null || j.JobType == jobType))
+            .OrderByDescending(j => j.Priority)
+            .ThenBy(j => j.Created)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (candidate == null)
+        {
+            return null;
+        }
+
+        var affected = await context.JobQueue
+            .Where(j =>
+                j.Id == candidate.Id
+                && j.Status == JobStatus.Pending
+                && j.ClaimToken == emptyClaimToken)
+            .ExecuteUpdateAsync(
+                s => s
+                    .SetProperty(j => j.Status, JobStatus.Processing)
+                    .SetProperty(j => j.ClaimToken, claimToken)
+                    .SetProperty(j => j.LeaseUntil, leaseUntil)
+                    .SetProperty(j => j.UpdatedUtc, now),
+                ct)
+            .ConfigureAwait(false);
+
+        if (affected == 0)
+        {
+            return null;
+        }
+
+        return await context.JobQueue
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                j => j.ClaimToken == claimToken && j.Status == JobStatus.Processing,
+                ct)
+            .ConfigureAwait(false);
     }
 }

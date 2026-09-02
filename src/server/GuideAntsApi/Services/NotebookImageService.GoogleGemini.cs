@@ -7,8 +7,15 @@ namespace GuideAntsApi.Services
 {
     public partial class NotebookImageService
     {
-        private async Task<byte[]?> GenerateImageViaGoogleGemini(string prompt, string size, int n, string outputFormat, string? modelId)
+        private async Task<byte[]?> GenerateImageViaGoogleGemini(
+            string prompt,
+            string size,
+            int n,
+            string outputFormat,
+            string? modelId,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _ = outputFormat;
             var apiKey = _configuration["GoogleGeminiApi:ApiKey"];
             if (string.IsNullOrWhiteSpace(apiKey))
@@ -50,13 +57,14 @@ namespace GuideAntsApi.Services
                 Content = new StringContent(JsonSerializer.Serialize(requestBody, ProviderPayloadJson), Encoding.UTF8, "application/json")
             };
             request.Headers.Add("x-goog-api-key", apiKey);
-            using var response = await client.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException($"Google Gemini image generation failed: {(int)response.StatusCode} {responseBody}");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             return await SaveResponseAndReturnBytes(responseBody);
         }
 
@@ -68,8 +76,10 @@ namespace GuideAntsApi.Services
             byte[] imageBytes,
             string? imageContentType,
             string? imageFileName,
-            string? modelId)
+            string? modelId,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _ = outputFormat;
             var model = RequireImageModelId(
                 GoogleGeminiProviderSection,
@@ -113,13 +123,14 @@ namespace GuideAntsApi.Services
             };
             request.Headers.Add("x-goog-api-key", apiKey);
 
-            using var response = await client.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException($"Google Gemini image edit failed: {(int)response.StatusCode} {responseBody}");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             return await SaveResponseAndReturnBytes(responseBody);
         }
 

@@ -6,6 +6,7 @@ namespace GuideAntsApi.Services.Conversations.Streaming;
 
 public abstract class ConversationStreamPolicyBase : IConversationStreamPolicy
 {
+    private static readonly TimeSpan LockCleanupAttemptTimeout = TimeSpan.FromSeconds(1);
     private readonly ConversationStreamLockCoordinator _lockCoordinator;
     private readonly ILogger _logger;
 
@@ -69,9 +70,18 @@ public abstract class ConversationStreamPolicyBase : IConversationStreamPolicy
         }
         catch
         {
+            LocalGateAcquisitionResolved(conversationId);
             ReleaseLocalGate(localGate, conversationId);
             throw;
         }
+
+        LocalGateAcquisitionResolved(conversationId);
+        // The distributed lease, rather than this process-local semaphore, owns the lifetime of
+        // the stream. Releasing the local admission gate immediately is required for a Stop
+        // handled by another API instance: that instance can remove the distributed lease, and a
+        // replacement request on this instance must not wait for the old provider worker to exit.
+        ReleaseLocalGate(localGate, conversationId);
+        localGate = null;
 
         try
         {
@@ -79,14 +89,11 @@ public abstract class ConversationStreamPolicyBase : IConversationStreamPolicy
         }
         catch
         {
-            await distributedHandle.ReleaseAsync(CancellationToken.None);
-            ReleaseLocalGate(localGate, conversationId);
+            await ReleaseDistributedLockUntilConfirmedAsync(distributedHandle, conversationId);
             throw;
         }
 
-        return localGate is null
-            ? distributedHandle
-            : new LocalGateStreamLockHandle(localGate, distributedHandle, _logger, conversationId);
+        return distributedHandle;
     }
 
     public virtual Task OnTurnCreatedAsync(Guid conversationId, StreamTurnCreatedInfo info, CancellationToken ct) =>
@@ -98,12 +105,13 @@ public abstract class ConversationStreamPolicyBase : IConversationStreamPolicy
     public virtual Task OnUnlockAsync(Guid conversationId, CancellationToken ct) =>
         Task.CompletedTask;
 
-    public virtual Task OnCompleteAsync(Guid conversationId, CancellationToken ct) =>
+    public virtual Task OnCompleteAsync(Guid conversationId, Guid turnId, CancellationToken ct) =>
         Task.CompletedTask;
 
     public virtual Task BroadcastStreamingProgressAsync(
         Guid conversationId,
         StreamUserIdentity user,
+        Guid turnId,
         int contentLength,
         int tokensProcessed,
         CancellationToken ct) =>
@@ -120,6 +128,15 @@ public abstract class ConversationStreamPolicyBase : IConversationStreamPolicy
     protected virtual Task OnLockAcquiredAsync(Guid conversationId, StreamUserIdentity user, CancellationToken ct) =>
         Task.CompletedTask;
 
+    /// <summary>
+    /// Signals that distributed lock acquisition has resolved for a locally gated stream.
+    /// Policies with an orphan-gate repair path can use this to close the acquisition race
+    /// without treating a request that is still waiting for the distributed lock as orphaned.
+    /// </summary>
+    protected virtual void LocalGateAcquisitionResolved(Guid conversationId)
+    {
+    }
+
     private void ReleaseLocalGate(SemaphoreSlim? localGate, Guid conversationId)
     {
         if (localGate is null)
@@ -131,9 +148,71 @@ public abstract class ConversationStreamPolicyBase : IConversationStreamPolicy
         {
             localGate.Release();
         }
+        catch (SemaphoreFullException)
+        {
+            // The gate is already available; cleanup is idempotent.
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to release local semaphore for {ConversationId}", conversationId);
+        }
+    }
+
+    private async Task ReleaseDistributedLockUntilConfirmedAsync(
+        IStreamLockHandle lockHandle,
+        Guid conversationId)
+    {
+        for (var releaseAttempt = 1; releaseAttempt <= 4; releaseAttempt++)
+        {
+            Task<bool>? releaseTask = null;
+            try
+            {
+                releaseTask = lockHandle.ReleaseAsync(CancellationToken.None);
+                if (await releaseTask.WaitAsync(LockCleanupAttemptTimeout).ConfigureAwait(false))
+                {
+                    return;
+                }
+            }
+            catch (TimeoutException)
+            {
+                if (releaseTask != null)
+                {
+                    _ = ObserveReleaseTaskAsync(releaseTask);
+                }
+
+                _logger.LogWarning(
+                    "Timed out releasing conversation lock for {ConversationId}; the lease will expire",
+                    conversationId);
+                return;
+            }
+            catch (Exception ex)
+            {
+                if (releaseAttempt == 1 || releaseAttempt == 4)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Conversation lock cleanup attempt {Attempt} failed for {ConversationId}; retrying",
+                        releaseAttempt,
+                        conversationId);
+                }
+            }
+
+            if (releaseAttempt < 4)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
+            }
+        }
+    }
+
+    private static async Task ObserveReleaseTaskAsync(Task<bool> releaseTask)
+    {
+        try
+        {
+            await releaseTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The bounded cleanup attempt already returned; observe late release failures.
         }
     }
 
@@ -143,7 +222,9 @@ public abstract class ConversationStreamPolicyBase : IConversationStreamPolicy
         private readonly IStreamLockHandle _inner;
         private readonly ILogger _logger;
         private readonly Guid _conversationId;
-        private bool _released;
+        private readonly SemaphoreSlim _releaseGate = new(1, 1);
+        private int _localReleaseCompleted;
+        private int _releaseCompleted;
 
         public LocalGateStreamLockHandle(
             SemaphoreSlim semaphore,
@@ -159,24 +240,54 @@ public abstract class ConversationStreamPolicyBase : IConversationStreamPolicy
 
         public bool ConversationLockEventSent => _inner.ConversationLockEventSent;
 
+        public Guid LeaseId => _inner.LeaseId;
+
+        public CancellationToken LeaseLostToken => _inner.LeaseLostToken;
+
+        public void BeginStreamingRenewal() => _inner.BeginStreamingRenewal();
+
         public async Task<bool> ReleaseAsync(CancellationToken ct)
         {
-            if (_released)
-            {
-                return false;
-            }
-
-            _released = true;
+            await _releaseGate.WaitAsync(ct);
             try
             {
-                _semaphore.Release();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to release local semaphore for {ConversationId}", _conversationId);
-            }
+                if (Volatile.Read(ref _releaseCompleted) == 1)
+                {
+                    return false;
+                }
 
-            return await _inner.ReleaseAsync(ct);
+                if (Volatile.Read(ref _localReleaseCompleted) == 0)
+                {
+                    try
+                    {
+                        _semaphore.Release();
+                        Interlocked.Exchange(ref _localReleaseCompleted, 1);
+                    }
+                    catch (SemaphoreFullException)
+                    {
+                        // The gate is already available. Treat this as an idempotent release so
+                        // a distributed-release retry cannot strand the local gate.
+                        Interlocked.Exchange(ref _localReleaseCompleted, 1);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to release local semaphore for {ConversationId}", _conversationId);
+                        return false;
+                    }
+                }
+
+                if (!await _inner.ReleaseAsync(ct))
+                {
+                    return false;
+                }
+
+                Interlocked.Exchange(ref _releaseCompleted, 1);
+                return true;
+            }
+            finally
+            {
+                _releaseGate.Release();
+            }
         }
     }
 }

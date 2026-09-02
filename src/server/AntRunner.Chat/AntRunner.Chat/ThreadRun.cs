@@ -34,6 +34,7 @@ namespace AntRunner.Chat
         };
 
         private static readonly ConcurrentDictionary<string, Dictionary<string, ToolCaller>> RequestBuilderCache = new();
+        private static readonly ConcurrentDictionary<string, long> RequestBuilderCacheGenerations = new();
 
         // Tracks which files have already been announced in a conversation to avoid duplicates
         private static readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> ConversationFileAnnouncements = new();
@@ -283,6 +284,7 @@ namespace AntRunner.Chat
         {
             var cacheKey = GenerateRequestBuilderCacheKey(assistantName);
             RequestBuilderCache.TryRemove(cacheKey, out _);
+            RequestBuilderCacheGenerations.AddOrUpdate(cacheKey, 1, static (_, generation) => generation + 1);
         }
 
         /// <summary>
@@ -292,6 +294,10 @@ namespace AntRunner.Chat
         public static void ClearAllRequestBuilderCache()
         {
             RequestBuilderCache.Clear();
+            foreach (var cacheKey in RequestBuilderCacheGenerations.Keys)
+            {
+                RequestBuilderCacheGenerations.AddOrUpdate(cacheKey, 1, static (_, generation) => generation + 1);
+            }
         }
 
         /// <summary>
@@ -1557,7 +1563,6 @@ namespace AntRunner.Chat
 
             if (ctx == null) throw new ArgumentNullException(nameof(ctx), "InvocationContext is required for tool calls");
             var invocationContext = ctx;
-            cancellationToken.ThrowIfCancellationRequested();
 
             await EnsureRequestBuilderCache(assistantName);
 
@@ -1620,7 +1625,11 @@ namespace AntRunner.Chat
 
                     var task = Task.Run(async () =>
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            return CreateCancelledToolOutput(requiredOutput.Id);
+                        }
+
                         TryReportToolActivity(ctx, toolName, toolCallId);
 
                         string output;
@@ -1641,7 +1650,7 @@ namespace AntRunner.Chat
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                             {
-                                throw;
+                                return CreateCancelledToolOutput(requiredOutput.Id);
                             }
                             catch (AntRunner.ToolCalling.Functions.ToolCaller.MissingAssistantAuthException)
                             {
@@ -1704,7 +1713,7 @@ namespace AntRunner.Chat
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                             {
-                                throw;
+                                return CreateCancelledToolOutput(requiredOutput.Id);
                             }
                             catch (Exception ex)
                             {
@@ -1727,7 +1736,7 @@ namespace AntRunner.Chat
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                             {
-                                throw;
+                                return CreateCancelledToolOutput(requiredOutput.Id);
                             }
                             catch (Exception ex)
                             {
@@ -1767,13 +1776,14 @@ namespace AntRunner.Chat
                                     builder.Params,
                                     initScriptFilename,
                                     assistantDef.Name!,
-                                    isolatedCtx);
+                                    isolatedCtx,
+                                    cancellationToken);
                                 
                                 output = SerializeToolResult(sandboxResult);
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                             {
-                                throw;
+                                return CreateCancelledToolOutput(requiredOutput.Id);
                             }
                             catch (Exception ex)
                             {
@@ -1796,7 +1806,7 @@ namespace AntRunner.Chat
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                             {
-                                throw;
+                                return CreateCancelledToolOutput(requiredOutput.Id);
                             }
                             catch (Exception ex) when (IsFatalChatRunException(ex))
                             {
@@ -1904,15 +1914,38 @@ namespace AntRunner.Chat
 
             if (toolCallTasks.Count > 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var toolOutputs = await Task.WhenAll(toolCallTasks);
+                ToolOutput[] toolOutputs;
+                var allToolOutputsTask = Task.WhenAll(toolCallTasks);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    toolOutputs = await CollectToolOutputsAfterCancelAsync(toolCallTasks, executableToolCalls);
+                }
+                else
+                {
+                    var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    var completedTask = await Task.WhenAny(allToolOutputsTask, cancellationTask);
+                    if (completedTask == allToolOutputsTask && !cancellationToken.IsCancellationRequested)
+                    {
+                        toolOutputs = await allToolOutputsTask;
+                    }
+                    else
+                    {
+                        // Do not wait for a tool that ignored cancellation. Individual tool tasks
+                        // are given a bounded drain window and unresolved calls become explicit
+                        // cancellation ERROR results before the turn is terminalized.
+                        toolOutputs = await CollectToolOutputsAfterCancelAsync(toolCallTasks, executableToolCalls);
+                    }
+                }
 
                 foreach (var toolCall in executableToolCalls)
                 {
                     if (!toolCall.IsFunction) continue;
                     var id = toolCall.Id;
-                    var toolOutput = toolOutputs.FirstOrDefault(to => to.ToolCallId == id) ?? throw new Exception("No match");
-                    var truncation = ToolOutputTruncator.Truncate(toolOutput.Output);
+                    var toolOutput = toolOutputs.FirstOrDefault(to => to.ToolCallId == id)
+                        ?? CreateCancelledToolOutput(id);
+                    var truncation = ToolOutputTruncator.Truncate(
+                        toolOutput.Output,
+                        toolCall.Function.Name);
                     if (truncation.WasTruncated)
                     {
                         Logger.LogWarning(
@@ -1965,9 +1998,67 @@ namespace AntRunner.Chat
                     }
                     catch { /* non-fatal */ }
                 }
+
+                // After tool results (including cancel ERROR outputs) are persisted into the run,
+                // surface cancellation so the turn terminals instead of continuing to the next LLM round.
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
             return (allNewFiles.ToList(), allModifiedFiles.ToList());
+        }
+
+        private static ToolOutput CreateCancelledToolOutput(string toolCallId) =>
+            new()
+            {
+                Output = "ERROR: Operation was cancelled",
+                ToolCallId = toolCallId
+            };
+
+        private static readonly TimeSpan CancelledToolOutputTimeout = TimeSpan.FromSeconds(1);
+
+        private static async Task<ToolOutput[]> CollectToolOutputsAfterCancelAsync(
+            List<Task<ToolOutput>> toolCallTasks,
+            List<ChatToolCall> executableToolCalls)
+        {
+            var outputTasks = toolCallTasks.Select((task, index) =>
+                CollectToolOutputAfterCancelAsync(task, executableToolCalls[index]));
+            return await Task.WhenAll(outputTasks);
+        }
+
+        private static async Task<ToolOutput> CollectToolOutputAfterCancelAsync(
+            Task<ToolOutput> task,
+            ChatToolCall toolCall)
+        {
+            try
+            {
+                return await task.WaitAsync(CancelledToolOutputTimeout);
+            }
+            catch (TimeoutException)
+            {
+                Logger.LogWarning(
+                    "Tool did not produce a cancellation result within {Timeout}; synthesizing a cancelled result. ToolCallId={ToolCallId}",
+                    CancelledToolOutputTimeout,
+                    toolCall.Id);
+                ObserveToolTaskFault(task);
+                return CreateCancelledToolOutput(toolCall.Id);
+            }
+            catch (OperationCanceledException)
+            {
+                return CreateCancelledToolOutput(toolCall.Id);
+            }
+            catch (Exception)
+            {
+                return CreateCancelledToolOutput(toolCall.Id);
+            }
+        }
+
+        private static void ObserveToolTaskFault(Task<ToolOutput> task)
+        {
+            _ = task.ContinueWith(
+                completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
 
         private static string? ResolveOAuthAccessTokenForTool(
@@ -2042,6 +2133,7 @@ namespace AntRunner.Chat
                 return;
             }
 
+            var cacheGeneration = RequestBuilderCacheGenerations.GetOrAdd(cacheKey, 0);
             Dictionary<string, ToolCaller> assistantRequestBuilders = [];
 
             // Try to get OpenAPI schemas from database first
@@ -2156,7 +2248,11 @@ namespace AntRunner.Chat
                 }
             }
 
-            RequestBuilderCache[cacheKey] = assistantRequestBuilders;
+            if (RequestBuilderCacheGenerations.TryGetValue(cacheKey, out var currentGeneration)
+                && currentGeneration == cacheGeneration)
+            {
+                RequestBuilderCache[cacheKey] = assistantRequestBuilders;
+            }
         }
 
         /// <summary>
@@ -2283,7 +2379,8 @@ namespace AntRunner.Chat
             Dictionary<string, object> parameters,
             string initializationScriptFilename,
             string assistantName,
-            InvocationContext context)
+            InvocationContext context,
+            CancellationToken cancellationToken = default)
         {
             // Remove the injected context from parameters before passing to sandbox
             // (the sandbox service will use it internally, not pass to Python)
@@ -2303,8 +2400,21 @@ namespace AntRunner.Chat
                 };
             }
 
-            var method = serviceType.GetMethod("ExecuteSandboxTool", 
-                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            var method = serviceType.GetMethod(
+                "ExecuteSandboxTool",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                binder: null,
+                types:
+                [
+                    typeof(string),
+                    typeof(string),
+                    typeof(Dictionary<string, object>),
+                    typeof(string),
+                    typeof(string),
+                    typeof(InvocationContext),
+                    typeof(CancellationToken)
+                ],
+                modifiers: null);
             if (method == null)
             {
                 return new ScriptExecutionResult
@@ -2316,7 +2426,9 @@ namespace AntRunner.Chat
 
             try
             {
-                if (method.Invoke(null, [toolName, functionName, paramsForPython, initializationScriptFilename, assistantName, context])
+                if (method.Invoke(
+                        null,
+                        [toolName, functionName, paramsForPython, initializationScriptFilename, assistantName, context, cancellationToken])
                     is not Task<ScriptExecutionResult> task)
                 {
                     return new ScriptExecutionResult
@@ -2328,8 +2440,22 @@ namespace AntRunner.Chat
 
                 return await task;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (System.Reflection.TargetInvocationException ex)
+                when (ex.InnerException is OperationCanceledException && cancellationToken.IsCancellationRequested)
+            {
+                throw ex.InnerException;
+            }
             catch (Exception ex)
             {
+                if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+
                 return new ScriptExecutionResult
                 {
                     StandardOutput = string.Empty,

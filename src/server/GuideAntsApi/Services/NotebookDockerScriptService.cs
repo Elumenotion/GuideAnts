@@ -8,6 +8,7 @@ using GuideAntsApi.Options;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.EnvironmentVariables;
 using GuideAntsApi.Services.SandboxWireApi;
+using GuideAntsApi.Services.Conversations.Persistence;
 using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -20,7 +21,8 @@ namespace GuideAntsApi.Services
             string script,
             string containerName,
             ScriptType scriptType,
-            InvocationContext? context = null);
+            InvocationContext? context = null,
+            CancellationToken cancellationToken = default);
     }
 
     public class NotebookDockerScriptService : INotebookDockerScriptService
@@ -56,14 +58,22 @@ namespace GuideAntsApi.Services
         /// <param name="containerName">The target Docker container (matches OpenAPI)</param>
         /// <param name="scriptType">The type of script (Python, Bash, etc.)</param>
         /// <param name="context">The invocation context containing project, notebook, user, and conversation IDs</param>
+        /// <param name="cancellationToken">Cancellation token for the script execution request.</param>
         /// <returns>Script execution result</returns>
-        public async Task<ScriptExecutionResult> ExecuteDockerScriptAsync(string script, string containerName, ScriptType scriptType, InvocationContext? context = null)
+        public async Task<ScriptExecutionResult> ExecuteDockerScriptAsync(
+            string script,
+            string containerName,
+            ScriptType scriptType,
+            InvocationContext? context = null,
+            CancellationToken cancellationToken = default)
         {
             var stdOutBuffer = new StringBuilder();
             var stdErrBuffer = new StringBuilder();
             Exception? executionException = null;
 
             _logger.LogInformation("ExecuteDockerScript invoked. ScriptType={ScriptType}, Project={ProjectId}, Notebook={NotebookId}, Container={Container}, Conversation={ConversationId}", scriptType, context?.ProjectId, context?.NotebookId, LogValueSanitizer.Sanitize(containerName), context?.ConversationId);
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (string.IsNullOrWhiteSpace(script))
             {
@@ -91,6 +101,7 @@ namespace GuideAntsApi.Services
             }
 
             script = script.Replace("\r\n", "\n").Replace("\r", "\n");
+            await EnsureTurnExecutionCanPublishAsync(context, cancellationToken);
 
             var notebookDirectory = NotebookPathHelper.GetWorkingDirectory(context!);
             Directory.CreateDirectory(notebookDirectory);
@@ -114,8 +125,8 @@ namespace GuideAntsApi.Services
             try
             {
                 // Execute script via HTTP
-                var guideScopeId = await ResolveGuideScopeIdAsync(context);
-                var executionEnvironment = await ResolveExecutionEnvironmentAsync(context, guideScopeId);
+                var guideScopeId = await ResolveGuideScopeIdAsync(context, cancellationToken);
+                var executionEnvironment = await ResolveExecutionEnvironmentAsync(context, guideScopeId, cancellationToken);
                 var result = await ExecuteScriptViaHttp(
                     script,
                     scriptType,
@@ -124,12 +135,14 @@ namespace GuideAntsApi.Services
                     context.ProjectId.ToString(),
                     context.NotebookId.ToString(),
                     guideScopeId.ToString("D"),
-                    executionEnvironment);
+                    executionEnvironment,
+                    cancellationToken);
 
                 _logger.LogInformation("Script execution via agent returned {HasResult}. StdOutLength={OutLen}, StdErrLength={ErrLen}", result != null, result?.StandardOutput?.Length ?? 0, result?.StandardError?.Length ?? 0);
 
                 if (result != null)
                 {
+                    await EnsureTurnExecutionCanPublishAsync(context, cancellationToken);
                     _logger.LogDebug("Agent STDOUT: {StdOut}", LogValueSanitizer.Sanitize(result.StandardOutput));
                     _logger.LogDebug("Agent STDERR: {StdErr}", LogValueSanitizer.Sanitize(result.StandardError));
                     stdOutBuffer.Append(result.StandardOutput);
@@ -149,8 +162,11 @@ namespace GuideAntsApi.Services
                             _serviceProvider,
                             storagePath,
                             context!,
-                            _logger);
+                            _logger,
+                            cancellationToken);
                     }
+
+                    await EnsureTurnExecutionCanPublishAsync(context, cancellationToken);
 
                     // Queue reconciliation so chat/tool turns never block on a full notebook walk.
                     if (_serviceProvider != null)
@@ -161,8 +177,8 @@ namespace GuideAntsApi.Services
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
 
                             // Register known paths then queue full reconcile.
-                            var dbPaths = detectedNewFiles
-                                .Concat(detectedModifiedFiles)
+                            var dbPaths = (detectedNewFiles ?? [])
+                                .Concat(detectedModifiedFiles ?? [])
                                 .Select(p => GuideAntsApi.Services.Components.Sync.NotebookPathResolver.ToDbRelative(
                                     p,
                                     context!.IsPublished,
@@ -173,11 +189,16 @@ namespace GuideAntsApi.Services
 
                             if (dbPaths.Count > 0)
                             {
-                                await syncService.RegisterFilesAsync(context.NotebookId, dbPaths);
+                                await syncService.RegisterFilesAsync(context.NotebookId, dbPaths, cancellationToken);
                             }
 
-                            await syncService.QueueReconcileAsync(context.NotebookId);
+                            await EnsureTurnExecutionCanPublishAsync(context, cancellationToken);
+                            await syncService.QueueReconcileAsync(context.NotebookId, cancellationToken);
                             _logger.LogInformation("Registered and queued notebook sync for {NotebookId} after script execution", context.NotebookId);
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            throw;
                         }
                         catch (Exception syncEx)
                         {
@@ -192,6 +213,14 @@ namespace GuideAntsApi.Services
                     _logger.LogWarning("Script execution via HTTP failed - no result returned from {ScriptExecutionBaseUrl}", LogValueSanitizer.Sanitize(scriptExecutionBaseUrl));
                     _logger.LogWarning("StdErr so far: {Err}", LogValueSanitizer.Sanitize(stdErrBuffer.ToString()));
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (ConversationTurnExecutionFencedException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -259,9 +288,38 @@ namespace GuideAntsApi.Services
             };
 
             var jsonResult = JsonSerializer.Serialize(logObject, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(resultPath, jsonResult);
+            await File.WriteAllTextAsync(resultPath, jsonResult, cancellationToken);
 
             return scriptExecutionResult;
+        }
+
+        private async Task EnsureTurnExecutionCanPublishAsync(
+            InvocationContext context,
+            CancellationToken cancellationToken)
+        {
+            if (!context.ExecutionId.HasValue)
+            {
+                return;
+            }
+
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var turn = await db.ConversationTurns
+                .AsNoTracking()
+                .Where(t =>
+                    t.NotebookConversationId == context.ConversationId
+                    && t.TurnIndex == context.TurnIndex)
+                .OrderByDescending(t => t.Id)
+                .Select(t => new { t.Id, t.Status, t.ExecutionId })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (turn == null
+                || (!string.Equals(turn.Status, "streaming", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(turn.Status, "pending_client_tool", StringComparison.OrdinalIgnoreCase))
+                || turn.ExecutionId != context.ExecutionId)
+            {
+                throw new ConversationTurnExecutionFencedException(turn?.Id ?? Guid.Empty);
+            }
         }
 
 
@@ -276,7 +334,8 @@ namespace GuideAntsApi.Services
             string projectId,
             string? notebookId = null,
             string? guideId = null,
-            IReadOnlyDictionary<string, string>? environment = null)
+            IReadOnlyDictionary<string, string>? environment = null,
+            CancellationToken cancellationToken = default)
         {
             try
             {
@@ -294,6 +353,8 @@ namespace GuideAntsApi.Services
                 {
                     throw new InvalidOperationException("GuideId must be a non-empty GUID for script execution.");
                 }
+
+                cancellationToken.ThrowIfCancellationRequested();
 
                 var request = new
                 {
@@ -320,13 +381,13 @@ namespace GuideAntsApi.Services
 
                 _logger.LogInformation("Sending HTTP POST to {ExecuteUrl} with script length {ScriptLength} and type {ScriptType}", LogValueSanitizer.Sanitize(executeUri.ToString()), script.Length, scriptType);
 
-                var response = await httpClient.PostAsync(executeUri, content);
+                var response = await httpClient.PostAsync(executeUri, content, cancellationToken);
 
                 _logger.LogInformation("Agent response status {StatusCode} from {ExecuteUrl}", response.StatusCode, LogValueSanitizer.Sanitize(executeUri.ToString()));
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var responseContent = await response.Content.ReadAsStringAsync();
+                    var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
                     var result = JsonSerializer.Deserialize<ScriptExecutionResult>(responseContent, new JsonSerializerOptions
                     {
                         PropertyNameCaseInsensitive = true
@@ -339,9 +400,13 @@ namespace GuideAntsApi.Services
                     }
                 }
 
-                var errorContent = await response.Content.ReadAsStringAsync();
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogError("HTTP script execution failed with status {StatusCode}: {Error}", response.StatusCode, LogValueSanitizer.Sanitize(errorContent));
                 return null;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -353,7 +418,9 @@ namespace GuideAntsApi.Services
             }
         }
 
-        private async Task<Guid> ResolveGuideScopeIdAsync(InvocationContext context)
+        private async Task<Guid> ResolveGuideScopeIdAsync(
+            InvocationContext context,
+            CancellationToken cancellationToken)
         {
             try
             {
@@ -365,13 +432,17 @@ namespace GuideAntsApi.Services
                         .AsNoTracking()
                         .Where(n => n.Id == context.NotebookId && n.ProjectId == context.ProjectId)
                         .Select(n => n.GuideId ?? n.NotebookTemplateId)
-                        .FirstOrDefaultAsync();
+                        .FirstOrDefaultAsync(cancellationToken);
 
                     if (guideId.HasValue && guideId.Value != Guid.Empty)
                     {
                         return guideId.Value;
                     }
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -398,7 +469,8 @@ namespace GuideAntsApi.Services
 
         private async Task<IReadOnlyDictionary<string, string>?> ResolveExecutionEnvironmentAsync(
             InvocationContext context,
-            Guid guideScopeId)
+            Guid guideScopeId,
+            CancellationToken cancellationToken)
         {
             // Credential persistence is intentionally owned by the API tier. The script
             // agent receives only per-run environment values and never reads a credential store.
@@ -415,7 +487,7 @@ namespace GuideAntsApi.Services
                 .OrderBy(member => member.DisplayOrder ?? int.MaxValue)
                 .ThenBy(member => member.Assistant.Name)
                 .Select(member => member.AssistantId)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
             guideAndCrewIds.Insert(0, guideScopeId);
 
@@ -428,7 +500,7 @@ namespace GuideAntsApi.Services
                     environment.AssistantId,
                     environment.EnvironmentConfigJson
                 })
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
             var manifestByAssistantId = environmentManifests
                 .ToDictionary(environment => environment.AssistantId, environment => environment.EnvironmentConfigJson);
@@ -460,7 +532,7 @@ namespace GuideAntsApi.Services
                         JobDailyLimitUsd: overrides?.DailyLimitUsd,
                         JobMonthlyLimitUsd: overrides?.MonthlyLimitUsd,
                         ForceEnabled: overrides?.ForceEnabled ?? false),
-                    CancellationToken.None);
+                    cancellationToken);
                 environment = SandboxWireEnvironmentMergeExtensions.MergeSandboxWireEnvironment(
                     environment,
                     sandboxEnvironment);
@@ -573,7 +645,8 @@ namespace GuideAntsApi.Services
             string script,
             string containerName,
             ScriptType scriptType,
-            InvocationContext? context = null)
+            InvocationContext? context = null,
+            CancellationToken cancellationToken = default)
         {
             if (_staticServiceProvider == null)
             {
@@ -583,7 +656,7 @@ namespace GuideAntsApi.Services
             using var scope = _staticServiceProvider.CreateScope();
             var scriptService = scope.ServiceProvider.GetRequiredService<INotebookDockerScriptService>();
             
-            return await scriptService.ExecuteDockerScriptAsync(script, containerName, scriptType, context);
+            return await scriptService.ExecuteDockerScriptAsync(script, containerName, scriptType, context, cancellationToken);
         }
     }
 }

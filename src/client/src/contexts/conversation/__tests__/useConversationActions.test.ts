@@ -132,6 +132,16 @@ describe('useConversationActions', () => {
       expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
     });
 
+    it('does not submit while the conversation is still streaming', async () => {
+      const { actions } = mountActions({ isStreaming: true });
+
+      await act(async () => {
+        await actions.sendMessage('hello');
+      });
+
+      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+    });
+
     it('shows auth toast and returns when tokens are missing', async () => {
       vi.mocked(ensureValidTokensForTemplate).mockResolvedValue({
         needsAuth: true,
@@ -167,13 +177,68 @@ describe('useConversationActions', () => {
         NOTEBOOK_ID,
         CONVERSATION_ID,
         expect.objectContaining({ instructions: 'hello world', assistantName: 'Claude' }),
-        deps.handleStreamingEvent,
+        expect.any(Function),
         expect.any(Function),
         expect.any(Function),
         expect.any(AbortSignal),
         expect.objectContaining({ requestServerCancel: expect.any(Function) }),
       );
       expect(deps.setCurrentStreamController).toHaveBeenCalled();
+    });
+
+    it('round-trips attachment metadata with normalized paths and PascalCase upload types', async () => {
+      const pendingAttachments = [
+        {
+          notebookFileId: 'path:Data/photo.png',
+          relativePath: '\\Data\\photo.png',
+          fileName: 'photo.png',
+          uploadType: 'image' as const,
+        },
+        {
+          notebookFileId: 'folder-id',
+          fileName: 'pack',
+          uploadType: 'folder' as const,
+        },
+      ];
+      const { actions, dispatch } = mountActions({ pendingAttachments });
+
+      await act(async () => {
+        await actions.sendMessage('with files');
+      });
+
+      const sendCall = vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mock.calls[0];
+      expect(sendCall?.[3]).toEqual(expect.objectContaining({
+        attachments: [
+          {
+            notebookFileId: null,
+            relativePath: 'Data/photo.png',
+            uploadType: 'ImageFile',
+          },
+          {
+            notebookFileId: 'folder-id',
+            relativePath: null,
+            uploadType: 'Folder',
+          },
+        ],
+      }));
+      expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'ADD_MESSAGE',
+        payload: expect.objectContaining({
+          attachments: expect.arrayContaining([
+            expect.objectContaining({
+              notebookFileId: 'path:Data/photo.png',
+              relativePath: 'Data/photo.png',
+              uploadType: 'ImageFile',
+              fileType: 'image',
+            }),
+            expect.objectContaining({
+              notebookFileId: 'folder-id',
+              uploadType: 'Folder',
+              fileType: 'folder',
+            }),
+          ]),
+        }),
+      }));
     });
 
     it('does not pre-fetch the conversation snapshot before streaming', async () => {
@@ -573,16 +638,103 @@ describe('useConversationActions', () => {
         ));
       });
 
-      expect(dispatch).toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
-      expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
-      expect(dispatch).toHaveBeenCalledWith({
-        type: 'SET_STREAMING_ERROR',
-        payload: 'The conversation stream stopped sending data. The server is no longer answering this request.',
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+        expect(dispatch).toHaveBeenCalledWith({
+          type: 'SET_STREAMING_ERROR',
+          payload: 'The conversation stream stopped sending data. The server is no longer answering this request.',
+        });
       });
       expect(deps.refreshConversation).not.toHaveBeenCalled();
       expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
         title: 'Chat Request Failed',
       }));
+    });
+
+    it('does not unlock locally when idle-timeout cancellation is still pending', async () => {
+      let onError: ((err: Error) => void) | undefined;
+      let requestServerCancel: (() => Promise<void>) | undefined;
+      vi.mocked(api.projects.notebooks.conversations.cancelTurn).mockReturnValueOnce(
+        new Promise<void>(() => {}),
+      );
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
+        async (...args: any[]) => {
+          onError = args[5];
+          requestServerCancel = args[8]?.requestServerCancel;
+        },
+      );
+
+      const { actions, dispatch, deps } = mountActions(
+        {},
+        {
+          activeStreamTurnId: 'turn-idle-timeout',
+          getActiveStreamTurnId: vi.fn(() => 'turn-idle-timeout'),
+        },
+      );
+
+      await act(async () => {
+        await actions.sendMessage('hello');
+      });
+      await act(async () => {
+        await requestServerCancel?.();
+      });
+
+      act(() => {
+        onError?.(Object.assign(
+          new Error('The conversation stream stopped sending data. The server is no longer answering this request.'),
+          { name: 'StreamIdleTimeoutError' },
+        ));
+      });
+
+      expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+        PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-idle-timeout',
+      );
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
+        type: 'SET_STREAMING',
+        payload: false,
+      }));
+      expect(deps.showToast).not.toHaveBeenCalled();
+    });
+
+    it('requests server Stop when idle timeout occurs after turn_created', async () => {
+      let onEvent: ((event: { type: string; data: any }) => void) | undefined;
+      let onError: ((err: Error) => void) | undefined;
+      vi.mocked(api.projects.notebooks.conversations.cancelTurn).mockReturnValueOnce(
+        new Promise<void>(() => {}),
+      );
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
+        async (...args: any[]) => {
+          onEvent = args[4];
+          onError = args[5];
+        },
+      );
+
+      const { actions, dispatch } = mountActions();
+
+      await act(async () => {
+        await actions.sendMessage('hello');
+      });
+
+      act(() => {
+        onEvent?.({ type: 'turn_created', data: { turnId: 'turn-idle-timeout' } });
+        onError?.(Object.assign(
+          new Error('The conversation stream stopped sending data.'),
+          { name: 'StreamIdleTimeoutError' },
+        ));
+      });
+
+      expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+        PROJECT_ID,
+        NOTEBOOK_ID,
+        CONVERSATION_ID,
+        'turn-idle-timeout',
+      );
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_STREAMING', payload: false });
     });
 
     it('handles stream onError generic failure', async () => {
@@ -603,37 +755,231 @@ describe('useConversationActions', () => {
         onError?.(new Error('stream broke'));
       });
 
-      expect(dispatch).toHaveBeenCalledWith({
-        type: 'SET_STREAMING_ERROR',
-        payload: 'stream broke',
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith({
+          type: 'SET_STREAMING_ERROR',
+          payload: 'stream broke',
+        });
       });
       expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
         title: 'Chat Request Failed',
       }));
-      expect(deps.refreshConversation).toHaveBeenCalledWith({ force: true });
+      expect(deps.refreshConversation).not.toHaveBeenCalled();
     });
 
-    it('invokes onComplete callback to clear attachments and refresh files', async () => {
-      let onComplete: (() => void) | undefined;
+    it('restores the draft and chips when the send fails before turn_created', async () => {
+      const pendingAttachments = [{
+        notebookFileId: 'file-1',
+        fileName: 'notes.md',
+        uploadType: 'text' as const,
+      }];
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockRejectedValue(
+        new Error('network down'),
+      );
+
+      const { actions, dispatch } = mountActions({
+        draftUserContent: 'draft to restore',
+        pendingAttachments,
+      });
+
+      await act(async () => {
+        await actions.sendMessage('draft to restore');
+      });
+
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith({
+          type: 'SET_DRAFT',
+          payload: 'draft to restore',
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+          type: 'SET_ATTACHMENTS',
+          payload: pendingAttachments,
+        });
+      });
+    });
+
+    it('keeps stopping state when lost-send reconciliation cannot reach the server', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(api.projects.notebooks.conversations.sendMessageStream)
+          .mockRejectedValueOnce(new Error('network down'));
+        vi.mocked(api.projects.notebooks.conversations.get)
+          .mockRejectedValueOnce(new Error('server unavailable'))
+          .mockResolvedValueOnce({ messages: [] });
+
+        const { actions, dispatch, deps } = mountActions();
+
+        await act(async () => {
+          await actions.sendMessage('hello');
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+        expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_STREAMING', payload: false });
+        expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
+          title: 'Stop Not Confirmed',
+        }));
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(250);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(api.projects.notebooks.conversations.get).toHaveBeenCalledTimes(2);
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SET_STREAMING', payload: false });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('clears chips and keeps the draft empty when a persisted turn later errors', async () => {
+      let onEvent: ((event: { type: string; data: any }) => void) | undefined;
+      let onError: ((error: Error) => void) | undefined;
+      const pendingAttachments = [{
+        notebookFileId: 'file-1',
+        fileName: 'notes.md',
+        uploadType: 'text' as const,
+      }];
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
+        async (...args: any[]) => {
+          onEvent = args[4];
+          onError = args[5];
+        },
+      );
+
+      const { actions, dispatch } = mountActions({
+        draftUserContent: 'draft to restore',
+        pendingAttachments,
+      });
+
+      await act(async () => {
+        await actions.sendMessage('draft to restore');
+      });
+
+      act(() => {
+        onEvent?.({ type: 'turn_created', data: { turnId: 'turn-1' } });
+        onError?.(new Error('stream broke'));
+      });
+
+      await vi.waitFor(() => {
+        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+          PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-1',
+        );
+        // Persisted input (turnId known) is consumed into the transcript: Rule 1 says the
+        // draft stays empty -- only undo restores a draft. Chips are cleared with it.
+        expect(dispatch).not.toHaveBeenCalledWith({
+          type: 'SET_DRAFT',
+          payload: 'draft to restore',
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'CLEAR_ATTACHMENTS' });
+        expect(dispatch).not.toHaveBeenCalledWith({
+          type: 'SET_ATTACHMENTS',
+          payload: pendingAttachments,
+        });
+      });
+    });
+
+    it('onComplete routes composer state by terminal outcome (single owner)', async () => {
+      // P2: onComplete(terminalEventType) is the single composer owner for transport-delivered
+      // terminals. The action layer reads only the snapshot + turnId, never render-captured
+      // state, so a stale handler closure cannot freeze the composer.
+      let onComplete: ((terminalEventType?: string) => void) | undefined;
+      let onEvent: ((event: { type: string; data: any }) => void) | undefined;
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
+        async (_p, _n, _c, _payload, ev, _onError, completeCb) => {
+          onEvent = ev;
+          onComplete = completeCb;
+        },
+      );
+
+      const pendingAttachments = [{
+        notebookFileId: 'file-1',
+        fileName: 'notes.md',
+        uploadType: 'text' as const,
+      }];
+      const { actions, dispatch } = mountActions({
+        draftUserContent: 'my draft',
+        pendingAttachments,
+      });
+
+      await act(async () => {
+        await actions.sendMessage('my draft');
+      });
+      // Snapshot turnId is null until turn_created arrives.
+      act(() => { onEvent?.({ type: 'turn_created', data: { turnId: 'turn-x' } }); });
+
+      // Success: clear attachments (the snapshot already cleared the draft at send time).
+      await act(async () => { onComplete?.('complete'); });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'CLEAR_ATTACHMENTS' });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_ATTACHMENTS', payload: pendingAttachments });
+    });
+
+    it('onComplete restores the composer when a turn-less cancel/error arrives', async () => {
+      let onComplete: ((terminalEventType?: string) => void) | undefined;
       vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
         async (_p, _n, _c, _payload, _onEvent, _onError, completeCb) => {
           onComplete = completeCb;
         },
       );
 
-      const { actions, dispatch, deps } = mountActions();
-
-      await act(async () => {
-        await actions.sendMessage('hello');
+      const pendingAttachments = [{
+        notebookFileId: 'file-1',
+        fileName: 'notes.md',
+        uploadType: 'text' as const,
+      }];
+      const { actions, dispatch } = mountActions({
+        draftUserContent: 'my draft',
+        pendingAttachments,
       });
 
       await act(async () => {
-        onComplete?.();
+        await actions.sendMessage('my draft');
       });
 
-      expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      // No turn_created → no turnId → the message was not persisted → the terminal owner
+      // restores the snapshot (the send-time CLEAR_ATTACHMENTS at the start of sendMessage is
+      // expected and separate from this restore).
+      await act(async () => { onComplete?.('cancelled'); });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'my draft' });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_ATTACHMENTS', payload: pendingAttachments });
+    });
+
+    it('onComplete clears (not restores) when a persisted turn later cancels', async () => {
+      let onComplete: ((terminalEventType?: string) => void) | undefined;
+      let onEvent: ((event: { type: string; data: any }) => void) | undefined;
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
+        async (_p, _n, _c, _payload, ev, _onError, completeCb) => {
+          onEvent = ev;
+          onComplete = completeCb;
+        },
+      );
+
+      const pendingAttachments = [{
+        notebookFileId: 'file-1',
+        fileName: 'notes.md',
+        uploadType: 'text' as const,
+      }];
+      const { actions, dispatch } = mountActions({
+        draftUserContent: 'my draft',
+        pendingAttachments,
+      });
+
+      await act(async () => {
+        await actions.sendMessage('my draft');
+      });
+      act(() => { onEvent?.({ type: 'turn_created', data: { turnId: 'turn-x' } }); });
+
+      // turnId present → the message WAS persisted → the input is consumed into the
+      // transcript. Rule 1: an end-of-turn with persisted output leaves the draft EMPTY
+      // (undo is the only restore path), and the chips are cleared with it. This is the
+      // stop/cancelled defect fix: the previous message must not reappear in the composer.
+      await act(async () => { onComplete?.('cancelled'); });
       expect(dispatch).toHaveBeenCalledWith({ type: 'CLEAR_ATTACHMENTS' });
-      expect(deps.loadNotebookFiles).toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_ATTACHMENTS', payload: pendingAttachments });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'my draft' });
     });
   });
 
@@ -716,13 +1062,14 @@ describe('useConversationActions', () => {
   });
 
   describe('cancelStream', () => {
-    it('calls cancelTurn and does not abort the send SSE controller', () => {
+    it('confirms cancelTurn, aborts the old send SSE, and completes the local workflow', async () => {
       const controller = new AbortController();
       const abortSpy = vi.spyOn(controller, 'abort');
-      const { actions, dispatch } = mountActions(
+      const { actions, dispatch, deps } = mountActions(
         { isStreaming: true },
         {
           currentStreamController: controller,
+          sendStreamRef: { current: controller },
           activeStreamTurnId: 'turn-1',
           getActiveStreamTurnId: vi.fn(() => 'turn-1'),
         },
@@ -732,20 +1079,29 @@ describe('useConversationActions', () => {
         actions.cancelStream();
       });
 
-      expect(abortSpy).not.toHaveBeenCalled();
       expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
         PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-1',
       );
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+        expect(abortSpy).toHaveBeenCalled();
+      });
+      expect(deps.setActiveStreamTurnId).toHaveBeenCalledWith(null);
+      expect(deps.refreshConversation).toHaveBeenCalledWith({ force: true });
     });
 
-    it('calls cancelTurn without aborting when only observing', () => {
+    it('confirms cancelTurn and aborts the old observer SSE', async () => {
       const observerController = new AbortController();
       const abortSpy = vi.spyOn(observerController, 'abort');
-      const { actions, dispatch } = mountActions(
+      const { actions, dispatch, deps } = mountActions(
         { isStreaming: true, streamingMode: 'observing' },
         {
           observerStreamController: observerController,
+          observerStreamRef: { current: observerController },
           activeStreamTurnId: 'turn-2',
           getActiveStreamTurnId: vi.fn(() => 'turn-2'),
         },
@@ -758,11 +1114,16 @@ describe('useConversationActions', () => {
       expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
         PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-2',
       );
-      expect(abortSpy).not.toHaveBeenCalled();
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+        expect(abortSpy).toHaveBeenCalled();
+      });
+      expect(deps.setActiveStreamTurnId).toHaveBeenCalledWith(null);
     });
 
-    it('posts cancelTurn when Stop is clicked before turn_created then the turn id arrives', () => {
+    it('posts cancelTurn when Stop is clicked before turn_created then the turn id arrives', async () => {
       const controller = new AbortController();
       const abortSpy = vi.spyOn(controller, 'abort');
       const { actions, dispatch } = mountActions(
@@ -781,6 +1142,7 @@ describe('useConversationActions', () => {
       expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
       expect(abortSpy).not.toHaveBeenCalled();
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
 
       act(() => {
         actions.onTurnIdAssigned('turn-late');
@@ -790,6 +1152,245 @@ describe('useConversationActions', () => {
         PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-late',
       );
       expect(abortSpy).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      });
+    });
+
+    it('reconciles the server turn when Stop is clicked before turn_created', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(api.projects.notebooks.conversations.get).mockResolvedValue({
+          messages: [],
+          activeTurn: { turnId: 'turn-recovered', status: 'streaming' },
+        } as any);
+
+        const { actions } = mountActions({ isStreaming: true });
+
+        act(() => {
+          actions.cancelStream();
+        });
+
+        expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(250);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+          PROJECT_ID,
+          NOTEBOOK_ID,
+          CONVERSATION_ID,
+          'turn-recovered',
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the workflow active when the server rejects cancellation', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(api.projects.notebooks.conversations.cancelTurn)
+          .mockRejectedValueOnce(new Error('server unavailable'))
+          .mockResolvedValueOnce(undefined);
+        const { actions, dispatch, deps } = mountActions(
+          { isStreaming: true },
+          {
+            activeStreamTurnId: 'turn-failed',
+            getActiveStreamTurnId: vi.fn(() => 'turn-failed'),
+          },
+        );
+
+        act(() => {
+          actions.cancelStream();
+        });
+
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
+          title: 'Stop Failed',
+        }));
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+        expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(250);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledTimes(2);
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+        expect(deps.refreshConversation).toHaveBeenCalledWith({ force: true });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps stopping state and retries when the server reports stop is still in progress', async () => {
+      vi.useFakeTimers();
+      try {
+        const stopInProgress = Object.assign(new Error('Stop is still in progress'), {
+          status: 409,
+          body: { code: 'STOP_IN_PROGRESS' },
+        });
+        vi.mocked(api.projects.notebooks.conversations.cancelTurn)
+          .mockRejectedValueOnce(stopInProgress)
+          .mockResolvedValueOnce(undefined);
+
+        const { actions, dispatch } = mountActions(
+          { isStreaming: true },
+          {
+            activeStreamTurnId: 'turn-retry',
+            getActiveStreamTurnId: vi.fn(() => 'turn-retry'),
+          },
+        );
+
+        act(() => {
+          actions.cancelStream();
+        });
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(250);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledTimes(2);
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('abandons a stale stop retry when a newer turn becomes active', async () => {
+      vi.useFakeTimers();
+      try {
+        let activeTurnId: string | null = 'turn-old';
+        const stopInProgress = Object.assign(new Error('Stop is still in progress'), {
+          status: 409,
+          body: { code: 'STOP_IN_PROGRESS' },
+        });
+        vi.mocked(api.projects.notebooks.conversations.cancelTurn)
+          .mockRejectedValueOnce(stopInProgress)
+          .mockResolvedValueOnce(undefined);
+
+        const { actions, dispatch } = mountActions(
+          { isStreaming: true },
+          {
+            activeStreamTurnId: 'turn-old',
+            getActiveStreamTurnId: vi.fn(() => activeTurnId),
+          },
+        );
+
+        act(() => {
+          actions.cancelStream();
+        });
+        activeTurnId = 'turn-new';
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(250);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledTimes(1);
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: false });
+        expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not finalize a newer turn when an older cancel request resolves late', async () => {
+      let resolveCancel!: () => void;
+      let currentTurnId: string | null = 'turn-old';
+      vi.mocked(api.projects.notebooks.conversations.cancelTurn).mockReturnValueOnce(
+        new Promise<void>(resolve => {
+          resolveCancel = resolve;
+        }),
+      );
+
+      const { actions, dispatch, deps } = mountActions(
+        { isStreaming: true },
+        {
+          activeStreamTurnId: 'turn-old',
+          getActiveStreamTurnId: vi.fn(() => currentTurnId),
+        },
+      );
+
+      act(() => {
+        actions.cancelStream();
+      });
+
+      currentTurnId = 'turn-new';
+      await act(async () => {
+        resolveCancel();
+        await Promise.resolve();
+      });
+
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+      expect(deps.refreshConversation).not.toHaveBeenCalled();
+    });
+
+    it('does not retarget pending Stop at a newer turn announced by the observer', async () => {
+      vi.useFakeTimers();
+      try {
+        const stopInProgress = Object.assign(new Error('Stop is still in progress'), {
+          status: 409,
+        });
+        vi.mocked(api.projects.notebooks.conversations.cancelTurn)
+          .mockRejectedValueOnce(stopInProgress)
+          .mockResolvedValueOnce(undefined);
+
+        const { actions } = mountActions(
+          { isStreaming: true },
+          { activeStreamTurnId: 'turn-old' },
+        );
+
+        act(() => {
+          actions.cancelStream();
+        });
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        act(() => {
+          actions.onTurnIdAssigned('turn-new');
+        });
+
+        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledTimes(1);
+        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+          PROJECT_ID,
+          NOTEBOOK_ID,
+          CONVERSATION_ID,
+          'turn-old',
+        );
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(250);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -886,6 +1487,20 @@ describe('useConversationActions', () => {
       expect(api.projects.notebooks.conversations.undoLast).not.toHaveBeenCalled();
     });
 
+    it('returns early while Stop is still waiting for the server worker', async () => {
+      const { actions } = mountActions({
+        isStreaming: true,
+        _isCancelling: true,
+        messages: [createMockMessage()],
+      });
+
+      await act(async () => {
+        await actions.undoLastTurn();
+      });
+
+      expect(api.projects.notebooks.conversations.undoLast).not.toHaveBeenCalled();
+    });
+
     it('returns early when no user messages exist', async () => {
       const { actions } = mountActions({ messages: [createMockAssistantMessage()] });
 
@@ -913,12 +1528,85 @@ describe('useConversationActions', () => {
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_UNDOING', payload: false });
     });
 
+    it('restores attachment chips on undo with server upload types and legacy inference', async () => {
+      const userMsg = createMockMessage({
+        id: 'u1',
+        content: 'undo with attachments',
+        attachments: [
+          {
+            notebookFileId: 'file-image',
+            fileName: 'photo.png',
+            fileType: 'image',
+            fileSize: 10,
+            type: 'Referenced',
+            uploadType: 'ImageFile',
+          },
+          {
+            relativePath: 'Folders\\assets',
+            fileName: 'assets',
+            fileType: 'folder',
+            fileSize: 0,
+            type: 'Referenced',
+            uploadType: 'Folder',
+          },
+          {
+            notebookFileId: 'file-legacy',
+            fileName: 'legacy.mp3',
+            fileType: 'other',
+            fileSize: 10,
+            type: 'Referenced',
+            uploadType: null,
+          },
+        ],
+      });
+      const { actions, dispatch } = mountActions({
+        messages: [userMsg, createMockAssistantMessage()],
+      });
+
+      await act(async () => {
+        await actions.undoLastTurn();
+      });
+
+      expect(dispatch).toHaveBeenCalledWith({
+        type: 'SET_ATTACHMENTS',
+        payload: [
+          {
+            notebookFileId: 'file-image',
+            relativePath: undefined,
+            fileName: 'photo.png',
+            uploadType: 'image',
+          },
+          {
+            notebookFileId: 'path:Folders/assets',
+            relativePath: 'Folders/assets',
+            fileName: 'assets',
+            uploadType: 'folder',
+          },
+          {
+            notebookFileId: 'file-legacy',
+            relativePath: undefined,
+            fileName: 'legacy.mp3',
+            uploadType: 'audio',
+          },
+        ],
+      });
+    });
+
     it('restores messages on undo failure with 409 message', async () => {
       const userMsg = createMockMessage({ content: 'keep' });
       const messages = [userMsg, createMockAssistantMessage()];
+      const previousAttachments = [{
+        notebookFileId: 'pending-file',
+        fileName: 'pending.txt',
+        uploadType: 'text' as const,
+      }];
       vi.mocked(api.projects.notebooks.conversations.undoLast).mockRejectedValue({ status: 409 });
 
-      const { actions, dispatch, deps } = mountActions({ messages, draftUserContent: 'draft' });
+      const { actions, dispatch, deps } = mountActions({
+        messages,
+        draftUserContent: 'draft',
+        pendingAttachments: previousAttachments,
+      });
 
       await act(async () => {
         await actions.undoLastTurn();
@@ -926,6 +1614,10 @@ describe('useConversationActions', () => {
 
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_MESSAGES', payload: messages });
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'draft' });
+      expect(dispatch).toHaveBeenCalledWith({
+        type: 'SET_ATTACHMENTS',
+        payload: previousAttachments,
+      });
       expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
         title: 'Undo Failed',
         message: expect.stringContaining('busy'),

@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.Options;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Routing;
 using AntRunner.Chat.OpenRouter;
 using Microsoft.CognitiveServices.Speech;
@@ -43,6 +44,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
     private readonly IServiceModeResolver _serviceModeResolver;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SpeechSynthesisService> _logger;
+    private readonly ILocalAiStartupWarmupService? _localSpeechEngineRecovery;
 
     public SpeechSynthesisService(
         HttpClient httpClient,
@@ -51,7 +53,8 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         IOptionsMonitor<LocalServiceHostsOptions> localServiceHostsOptionsMonitor,
         IServiceModeResolver serviceModeResolver,
         IConfiguration configuration,
-        ILogger<SpeechSynthesisService> logger)
+        ILogger<SpeechSynthesisService> logger,
+        ILocalAiStartupWarmupService? localSpeechEngineRecovery = null)
     {
         _httpClient = httpClient;
         _azureOptionsMonitor = azureOptionsMonitor;
@@ -60,6 +63,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         _serviceModeResolver = serviceModeResolver;
         _configuration = configuration;
         _logger = logger;
+        _localSpeechEngineRecovery = localSpeechEngineRecovery;
     }
 
     public async Task<ISpeechSynthesisService.SpeechSynthesisResult> SynthesizeToWavAsync(
@@ -665,7 +669,8 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         string outputPath,
         string requestId,
         ServiceMode mode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowRecycle = true)
     {
         try
         {
@@ -722,8 +727,32 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
                 string.IsNullOrWhiteSpace(voiceName) ? "(engine-default)" : voiceName,
                 speed);
 
-            using var response = await _httpClient.SendAsync(request, timeoutCts.Token);
-            var latencyMs = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+            HttpResponseMessage? response = null;
+            int latencyMs;
+            try
+            {
+                response = await _httpClient.SendAsync(request, timeoutCts.Token);
+                latencyMs = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+            }
+            catch (Exception ex) when (
+                allowRecycle
+                && _localSpeechEngineRecovery is not null
+                && !cancellationToken.IsCancellationRequested
+                && ex is not ArgumentException)
+            {
+                _logger.LogError(
+                    ex,
+                    "tts_api_engine_failed provider={Provider} requestId={RequestId} errorType={ErrorType}",
+                    LocalProviderSection,
+                    requestId,
+                    ex.GetType().Name);
+                await _localSpeechEngineRecovery
+                    .RecycleSharedSpeechEnginesAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                return await SynthesizeViaLocalTtsAsync(
+                    ssml, outputPath, requestId, mode, cancellationToken, allowRecycle: false)
+                    .ConfigureAwait(false);
+            }
 
             if (!response.IsSuccessStatusCode)
             {
@@ -735,6 +764,23 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
                     (int)response.StatusCode,
                     latencyMs,
                     errorBody);
+                if (allowRecycle
+                    && _localSpeechEngineRecovery is not null
+                    && IsLocalTtsEngineFailureStatus(response.StatusCode))
+                {
+                    _logger.LogError(
+                        "tts_api_engine_failed provider={Provider} requestId={RequestId} statusCode={StatusCode}",
+                        LocalProviderSection,
+                        requestId,
+                        (int)response.StatusCode);
+                    await _localSpeechEngineRecovery
+                        .RecycleSharedSpeechEnginesAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return await SynthesizeViaLocalTtsAsync(
+                        ssml, outputPath, requestId, mode, cancellationToken, allowRecycle: false)
+                        .ConfigureAwait(false);
+                }
+
                 return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, $"Local TTS API failed: {response.StatusCode} - {errorBody}");
             }
 
@@ -780,6 +826,12 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         }
 
         return speechConfig;
+    }
+
+    private static bool IsLocalTtsEngineFailureStatus(HttpStatusCode statusCode)
+    {
+        var code = (int)statusCode;
+        return code == 408 || code >= 500;
     }
 
     private static bool IsRetryableSynthesisFailure(SpeechSynthesisCancellationDetails details)

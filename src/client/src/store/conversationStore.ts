@@ -125,8 +125,10 @@ function groupMessagesByTurns(messages: MessageDto[]): ConversationTurn[] {
     // NEW: Handle multiple attachments per message
     if (msg.attachments && msg.attachments.length > 0) {
       const attachedFiles: AttachedFile[] = msg.attachments.map(att => ({
-        id: `${msg.id}-${att.notebookFileId}`,
-        notebookFileId: att.notebookFileId,
+        id: `${msg.id}-${att.notebookFileId ?? att.relativePath ?? att.fileName}`,
+        notebookFileId: att.notebookFileId ?? `path:${att.relativePath ?? att.fileName}`,
+        relativePath: att.relativePath,
+        uploadType: att.uploadType,
         fileName: att.fileName,
         fileType: att.fileType,
         fileSize: att.fileSize,

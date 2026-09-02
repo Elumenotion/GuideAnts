@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import type { ExtendedConversationState } from '../conversation/types';
+import type { MutableRefObject } from 'react';
+import type { ExtendedConversationState, SendStreamState } from '../conversation/types';
 import { useStreamingEventHandler } from '../conversation/useStreamingEventHandler';
-
-const mockGenerateTitle = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../services/api', () => ({
   api: {
@@ -12,7 +11,6 @@ vi.mock('../../services/api', () => ({
         conversations: {
           refreshMessages: vi.fn(),
           pollLlamaRuntimeOperation: vi.fn(),
-          generateTitle: (...args: unknown[]) => mockGenerateTitle(...args),
         },
       },
     },
@@ -31,11 +29,21 @@ function createState(overrides: Partial<ExtendedConversationState> = {}): Extend
   };
 }
 
-function mountHandler(stateOverrides: Partial<ExtendedConversationState> = {}) {
+function mountHandler(
+  stateOverrides: Partial<ExtendedConversationState> = {},
+  depOverrides: {
+    refreshConversation?: ReturnType<typeof vi.fn>;
+    getActiveStreamTurnId?: () => string | null;
+    sendStreamStateRef?: MutableRefObject<SendStreamState | null>;
+    pendingStopRef?: MutableRefObject<boolean>;
+  } = {},
+) {
   const dispatch = vi.fn();
   const showToast = vi.fn();
   const setCurrentStreamController = vi.fn();
+  const setActiveStreamTurnId = vi.fn();
   const loadNotebookFiles = vi.fn().mockResolvedValue(undefined);
+  const refreshConversation = depOverrides.refreshConversation ?? vi.fn().mockResolvedValue(undefined);
   const state = createState(stateOverrides);
 
   const { result } = renderHook(() => useStreamingEventHandler(
@@ -48,10 +56,24 @@ function mountHandler(stateOverrides: Partial<ExtendedConversationState> = {}) {
       notebookId: 'n1',
       conversationId: 'c1',
       setCurrentStreamController,
+      setActiveStreamTurnId,
+      refreshConversation,
+      getActiveStreamTurnId: depOverrides.getActiveStreamTurnId,
+      sendStreamStateRef: depOverrides.sendStreamStateRef,
+      pendingStopRef: depOverrides.pendingStopRef,
     },
   ));
 
-  return { handler: result.current, dispatch, showToast, setCurrentStreamController, loadNotebookFiles, state };
+  return {
+    handler: result.current,
+    dispatch,
+    showToast,
+    setCurrentStreamController,
+    setActiveStreamTurnId,
+    loadNotebookFiles,
+    refreshConversation,
+    state,
+  };
 }
 
 describe('useStreamingEventHandler error branch', () => {
@@ -230,46 +252,156 @@ describe('useStreamingEventHandler streaming branches', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it('handles complete event and refreshes notebook files', async () => {
-    const { handler, dispatch, loadNotebookFiles } = mountHandler({
+  it('does not let an observer turn_created replace the local sending turn', () => {
+    const sendStreamStateRef = {
+      current: {
+        snapshot: { draft: 'hello', pendingAttachments: [] },
+        turnId: 'local-turn',
+      },
+    } as MutableRefObject<SendStreamState | null>;
+    const { handler, setActiveStreamTurnId } = mountHandler({}, { sendStreamStateRef });
+
+    handler({ type: 'turn_created', data: { turnId: 'remote-turn' } }, 'observer');
+
+    expect(setActiveStreamTurnId).not.toHaveBeenCalled();
+  });
+
+  it('accepts turn_created from the local sending stream', () => {
+    const sendStreamStateRef = {
+      current: {
+        snapshot: { draft: 'hello', pendingAttachments: [] },
+        turnId: null,
+      },
+    } as MutableRefObject<SendStreamState | null>;
+    const { handler, setActiveStreamTurnId } = mountHandler({}, { sendStreamStateRef });
+
+    handler({ type: 'turn_created', data: { turnId: 'local-turn' } }, 'send');
+
+    expect(setActiveStreamTurnId).toHaveBeenCalledWith('local-turn');
+  });
+
+  it('handles complete event; the send-side owner refreshes files, the handler only for observers', async () => {
+    // File-tree refresh split (turn-terminal ownership): the send-side owner
+    // (useConversationActions onComplete) refreshes the tree for every local terminal, so the
+    // handler must NOT double-refresh on a local (send / no-source) complete…
+    const { handler, dispatch, loadNotebookFiles, setActiveStreamTurnId } = mountHandler({
       messages: [{ id: 'streaming-1', role: 'assistant', content: 'partial', created: '', isEdited: false } as any],
     });
 
     handler({ type: 'complete', data: {} });
 
     expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
-    expect(loadNotebookFiles).toHaveBeenCalled();
-    expect(dispatchEventSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'refresh-notebook-files' }));
+    expect(setActiveStreamTurnId).toHaveBeenCalledWith(null);
+    expect(loadNotebookFiles).not.toHaveBeenCalled();
+
+    // …but an observer (other-client) complete has no send-side owner, so the handler
+    // refreshes the tree then (loadNotebookFiles emits refresh-notebook-files itself).
+    const { handler: obsHandler, loadNotebookFiles: obsLoad } = mountHandler();
+    obsHandler({ type: 'complete', data: {} }, 'observer');
+    expect(obsLoad).toHaveBeenCalled();
   });
 
-  it('auto-generates title on first completed assistant turn', async () => {
+  it('complete never dispatches composer state — the action layer owns it', () => {
+    // Regression for the stale-closure freeze: the handler used to gate CLEAR_ATTACHMENTS on
+    // render-captured state.streamingMode === 'sending', which was always false for a
+    // locally-sent turn. P2 moves composer terminal state to the action layer's onComplete,
+    // so the handler must not touch draft/attachments/snapshot — for sending OR observing
+    // mounts, regardless of what closure state it was captured with.
+    const sendStreamStateRef = {
+      current: {
+        snapshot: {
+          draft: 'draft',
+          pendingAttachments: [{
+            notebookFileId: 'file-1',
+            fileName: 'notes.md',
+            uploadType: 'text',
+          }],
+        },
+        turnId: 'turn-1',
+      },
+    } as MutableRefObject<SendStreamState | null>;
+    const local = mountHandler({}, { sendStreamStateRef });
+
+    local.handler({ type: 'complete', data: {} });
+
+    expect(local.dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+    expect(local.dispatch).not.toHaveBeenCalledWith({ type: 'CLEAR_ATTACHMENTS' });
+    expect(local.dispatch).not.toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'draft' });
+    expect(local.dispatch).not.toHaveBeenCalledWith({ type: 'SET_ATTACHMENTS', payload: expect.anything() });
+    // The snapshot is intact for the action-layer owner to consume.
+    expect(sendStreamStateRef.current).not.toBeNull();
+
+    // Same guarantee for an observing mount (other client's complete broadcast).
+    const observer = mountHandler({ streamingMode: 'observing' }, { sendStreamStateRef });
+    observer.handler({ type: 'complete', data: {} });
+    expect(observer.dispatch).not.toHaveBeenCalledWith({ type: 'CLEAR_ATTACHMENTS' });
+    expect(observer.dispatch).not.toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: expect.anything() });
+  });
+
+  it('does not unlock on a terminal SSE event while Stop is pending', () => {
+    const pendingStopRef = { current: true } as MutableRefObject<boolean>;
+    const { handler, dispatch, setActiveStreamTurnId } = mountHandler(
+      {},
+      { pendingStopRef },
+    );
+
+    handler({ type: 'cancelled', data: {} });
+
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_STREAMING', payload: false });
+    expect(setActiveStreamTurnId).not.toHaveBeenCalledWith(null);
+    expect(pendingStopRef.current).toBe(true);
+  });
+
+  it('finalizes conversation state at pending_client_tool without touching the composer', () => {
+    // The pending_client_tool composer policy (default: restore draft + chips, re-enable at
+    // rest) is applied by the action layer's onComplete('pending_client_tool'). The handler
+    // only finalizes the streamed cell / turn — so the snapshot survives for the owner and no
+    // draft/attachment dispatch happens here. This is the D2 fix: the draft is no longer
+    // silently dropped by a stale closure, and the policy is swappable (see P4).
+    const sendStreamStateRef = {
+      current: {
+        snapshot: {
+          draft: 'follow-up text',
+          pendingAttachments: [{
+            notebookFileId: 'file-1',
+            fileName: 'notes.md',
+            uploadType: 'text',
+          }],
+        },
+        turnId: 'turn-1',
+      },
+    } as MutableRefObject<SendStreamState | null>;
+    const { handler, dispatch } = mountHandler({}, { sendStreamStateRef });
+
+    handler({ type: 'pending_client_tool', data: {} });
+
+    expect(dispatch).toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
+    expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: expect.anything() });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'CLEAR_ATTACHMENTS' });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_ATTACHMENTS', payload: expect.anything() });
+    expect(sendStreamStateRef.current).not.toBeNull();
+  });
+
+  it('refreshes conversations on complete so sidebar picks up server-set title', () => {
     const { handler } = mountHandler({ messages: [] });
 
     handler({ type: 'complete', data: {} });
 
-    await vi.waitFor(() => {
-      expect(mockGenerateTitle).toHaveBeenCalledWith('p1', 'n1', 'c1');
-    });
-  });
-
-  it('skips title generation when prior assistant messages exist', async () => {
-    const { handler } = mountHandler({
-      messages: [{ id: 'msg-1', role: 'assistant', content: 'prior', created: '', isEdited: false } as any],
-    });
-
-    handler({ type: 'complete', data: {} });
-
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mockGenerateTitle).not.toHaveBeenCalled();
+    expect(dispatchEventSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'refresh-conversations' }));
   });
 
   it('handles cancelled event', () => {
-    const { handler, dispatch } = mountHandler();
+    const refreshConversation = vi.fn().mockResolvedValue(undefined);
+    const { handler, dispatch, setActiveStreamTurnId } = mountHandler({}, { refreshConversation });
 
     handler({ type: 'cancelled', data: {} });
 
     expect(dispatch).toHaveBeenCalledWith({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
     expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
+    expect(setActiveStreamTurnId).toHaveBeenCalledWith(null);
+    expect(refreshConversation).toHaveBeenCalledWith({ force: true });
   });
 
   it('processes tool_result with tool call and result', () => {
@@ -292,7 +424,29 @@ describe('useStreamingEventHandler streaming branches', () => {
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: 'ADD_TOOL_RESULT',
-      payload: expect.objectContaining({ toolCallId: 'tc-1', content: 'results' }),
+      payload: expect.objectContaining({ toolCallId: 'tc-1', content: 'results', isError: false }),
+    });
+  });
+
+  it('marks ERROR tool_result as isError', () => {
+    const { handler, dispatch } = mountHandler();
+
+    handler({
+      type: 'tool_result',
+      data: {
+        toolCallId: 'tc-cancel',
+        functionName: 'sandbox_tool',
+        content: 'ERROR: Operation was cancelled',
+      },
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'ADD_TOOL_RESULT',
+      payload: expect.objectContaining({
+        toolCallId: 'tc-cancel',
+        content: 'ERROR: Operation was cancelled',
+        isError: true,
+      }),
     });
   });
 
@@ -421,5 +575,104 @@ describe('useStreamingEventHandler streaming branches', () => {
       type: 'APPEND_TOKEN',
       payload: { contentDelta: 'chunk' },
     });
+  });
+
+  it('ignores error events for a non-active turn', () => {
+    const { handler, dispatch, showToast } = mountHandler(
+      {},
+      { getActiveStreamTurnId: () => 'turn-live' },
+    );
+
+    handler({
+      type: 'error',
+      data: {
+        turnId: 'turn-orphan',
+        message: 'An error occurred while saving the entity changes.',
+        type: 'DbUpdateException',
+      },
+    });
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('ignores assistant_message deltas for a non-active turn', () => {
+    const { handler, dispatch } = mountHandler(
+      {},
+      { getActiveStreamTurnId: () => 'turn-live' },
+    );
+
+    handler({
+      type: 'assistant_message',
+      data: { turnId: 'turn-other', contentDelta: 'Nope' },
+    });
+
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('ignores tool results for a non-active turn', () => {
+    const { handler, dispatch } = mountHandler(
+      {},
+      { getActiveStreamTurnId: () => 'turn-live' },
+    );
+
+    handler({
+      type: 'tool_result',
+      data: {
+        turnId: 'turn-other',
+        toolCallId: 'tc-old',
+        functionName: 'ReadWeb',
+        content: 'late result',
+      },
+    });
+
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('ignores completion for a non-active turn', () => {
+    const { handler, dispatch, setActiveStreamTurnId } = mountHandler(
+      {},
+      { getActiveStreamTurnId: () => 'turn-live' },
+    );
+
+    handler({ type: 'complete', data: { turnId: 'turn-other' } });
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(setActiveStreamTurnId).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the streaming error for the active turn without aborting or touching the composer', () => {
+    // The transport-driven action owner finalizes the composer; the handler only raises the
+    // visible error and finalizes conversation state. It no longer aborts the stream (the
+    // transport owns that lifecycle) and no longer restores draft/attachments (the action
+    // layer's onComplete('error') does, via the turnId persistence oracle).
+    const sendStreamStateRef = {
+      current: {
+        snapshot: { draft: 'kept', pendingAttachments: [] },
+        turnId: 'turn-live',
+      },
+    } as MutableRefObject<SendStreamState | null>;
+    const { handler, dispatch } = mountHandler(
+      {},
+      { getActiveStreamTurnId: () => 'turn-live', sendStreamStateRef },
+    );
+
+    handler({
+      type: 'error',
+      data: {
+        turnId: 'turn-live',
+        message: 'real failure',
+        code: null,
+      },
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'SET_STREAMING_ERROR',
+      payload: 'real failure',
+    });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: expect.anything() });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'CLEAR_ATTACHMENTS' });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_ATTACHMENTS', payload: expect.anything() });
+    expect(sendStreamStateRef.current).not.toBeNull();
   });
 });

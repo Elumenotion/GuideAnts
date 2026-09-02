@@ -9,11 +9,12 @@ namespace GuideAntsApi.Tests.Services.Conversations;
 public sealed class ConversationStreamEventWriterTests
 {
     [TestMethod]
-    public void IsTerminal_RecognizesErrorCancelledAndPendingClientTool()
+    public void IsTerminal_RecognizesAllTerminalEvents()
     {
         ConversationStreamEventWriter.IsTerminal(StreamingEventTypes.Error).Should().BeTrue();
         ConversationStreamEventWriter.IsTerminal(StreamingEventTypes.Cancelled).Should().BeTrue();
         ConversationStreamEventWriter.IsTerminal(StreamingEventTypes.PendingClientTool).Should().BeTrue();
+        ConversationStreamEventWriter.IsTerminal(StreamingEventTypes.Complete).Should().BeTrue();
         ConversationStreamEventWriter.IsTerminal(StreamingEventTypes.AssistantMessage).Should().BeFalse();
         ConversationStreamEventWriter.IsTerminal(StreamingEventTypes.Token).Should().BeFalse();
     }

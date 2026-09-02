@@ -248,7 +248,7 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                 {
                     var fileContents = attachment.NotebookFile != null
                         ? await _attachmentContentService.CreateOpenAiContentFromLoadedFileAsync(attachment.NotebookFile, cancellationToken)
-                        : await _attachmentContentService.CreateOpenAiContentFromNotebookFileAsync(attachment.NotebookFileId, cancellationToken);
+                        : await _attachmentContentService.ExpandAttachmentToChatContentsAsync(attachment, cancellationToken);
                     contents.AddRange(fileContents);
                 }
 
@@ -365,7 +365,7 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                 {
                     var fileContents = attachment.NotebookFile != null
                         ? await _attachmentContentService.CreateOpenAiContentFromLoadedFileAsync(attachment.NotebookFile, cancellationToken)
-                        : await _attachmentContentService.CreateOpenAiContentFromNotebookFileAsync(attachment.NotebookFileId, cancellationToken);
+                        : await _attachmentContentService.ExpandAttachmentToChatContentsAsync(attachment, cancellationToken);
                     contents.AddRange(fileContents);
                 }
 
@@ -461,8 +461,10 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                     if (!string.IsNullOrEmpty(m.Content)) contents.Add(new ChatContent(m.Content));
                     foreach (var a in attachments)
                     {
-                        var fileContents = await _attachmentContentService.CreateOpenAiContentFromNotebookFileAsync(
-                            db, a.NotebookFileId, cancellationToken);
+                        var fileContents = await _attachmentContentService.ExpandAttachmentToChatContentsAsync(
+                            db,
+                            a,
+                            cancellationToken);
                         contents.AddRange(fileContents);
                     }
                     var role = m.Role switch
@@ -556,10 +558,11 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
 
         if (assistantDef != null)
         {
-            var serverContextMsg = _contextOptionsService.BuildPublishedContextMessage(
+            var serverContextMsg = await _contextOptionsService.BuildPublishedContextMessageAsync(
                 assistantDef,
                 conv.Notebook?.ProjectId ?? Guid.Empty,
-                conv.Notebook?.Id ?? Guid.Empty);
+                conv.Notebook?.Id ?? Guid.Empty,
+                cancellationToken);
             if (!string.IsNullOrWhiteSpace(serverContextMsg))
             {
                 list.Add(new ChatMessage(ChatMessageRole.System, serverContextMsg));
@@ -662,7 +665,7 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         return (await attachmentDb.MessageAttachments
                 .AsNoTracking()
                 .Include(ma => ma.NotebookFile)
-                    .ThenInclude(nf => nf.Notebook)
+                    .ThenInclude(nf => nf!.Notebook)
                 .Where(ma => messageIds.Contains(ma.MessageId))
                 .OrderBy(ma => ma.OrderIndex)
                 .ToListAsync(cancellationToken))

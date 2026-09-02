@@ -47,6 +47,14 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
             return JobExecutionResult.PermanentMissingInput("Shadow not found for ContentFileVersion");
         }
 
+        if (shadow.Status == MarkdownExtractionStatus.Completed)
+        {
+            Logger.LogDebug(
+                "Content shadow already completed for {Id}; skipping transcription",
+                payload.ContentFileVersionId);
+            return JobExecutionResult.Success();
+        }
+
         var version = shadow.OriginalVersion;
         if (version == null || string.IsNullOrEmpty(version.StoragePath) ||
             !StoragePathCompatibility.TryResolveExistingFilePath(version.StoragePath, _storageRoot, out var sourcePath))
@@ -126,12 +134,26 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
         }
         catch (Exception ex)
         {
+            var result = TranscriptionJobFailureClassifier.Classify(ex, cancellationToken);
+            if (result.FailureClass == JobFailureClass.ShutdownCancellation)
+            {
+                Logger.LogInformation(
+                    "Transcription cancelled for ContentFileVersion {Id}: {Message}",
+                    payload.ContentFileVersionId,
+                    ex.Message);
+                return result;
+            }
+
             Logger.LogError(ex, "Transcription failed for ContentFileVersion {Id}", payload.ContentFileVersionId);
-            shadow.Status = MarkdownExtractionStatus.Failed;
-            shadow.ErrorMessage = ex.Message;
-            shadow.ProcessedAt = DateTime.UtcNow;
-            try { await context.SaveChangesAsync(cancellationToken); } catch { }
-            return JobExecutionResult.RetryableTransient(ex.Message);
+            if (result.FailureClass == JobFailureClass.PermanentMissingInput)
+            {
+                shadow.Status = MarkdownExtractionStatus.Failed;
+                shadow.ErrorMessage = ex.Message;
+                shadow.ProcessedAt = DateTime.UtcNow;
+                try { await context.SaveChangesAsync(cancellationToken); } catch { }
+            }
+
+            return result;
         }
     }
 

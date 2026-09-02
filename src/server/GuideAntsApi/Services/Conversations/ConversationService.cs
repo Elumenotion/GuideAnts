@@ -6,6 +6,7 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.Conversations.Attachments;
@@ -18,8 +19,16 @@ using GuideAntsApi.Services.Components;
 
 namespace GuideAntsApi.Services.Conversations;
 
+public sealed class ConversationStopInProgressException(Guid turnId)
+    : InvalidOperationException($"Stop is still in progress for turn {turnId}.")
+{
+    public Guid TurnId { get; } = turnId;
+}
+
 public class ConversationService : IConversationService
 {
+    private static readonly TimeSpan StopDatabaseTimeout = TimeSpan.FromMilliseconds(1800);
+
     /// <summary>
     /// Matches <c>ConversationStreamEngine</c>'s serializer options so every SSE payload this
     /// service emits - including the preflight <c>error</c> event - reaches the client in the
@@ -42,6 +51,7 @@ public class ConversationService : IConversationService
     private readonly PrivateConversationStreamPolicy _streamPolicy;
     private readonly IConversationStreamEngine _streamEngine;
     private readonly ConversationStreamRunRegistry _streamRunRegistry;
+    private readonly IDistributedConversationLock _distributedLock;
     private readonly IConversationBroadcastHub _broadcastHub;
     private readonly IToolOAuthService? _toolOAuthService;
     private readonly ILogger<ConversationService> _logger;
@@ -59,6 +69,7 @@ public class ConversationService : IConversationService
         PrivateConversationStreamPolicy streamPolicy,
         IConversationStreamEngine streamEngine,
         ConversationStreamRunRegistry streamRunRegistry,
+        IDistributedConversationLock distributedLock,
         IConversationBroadcastHub broadcastHub,
         ILogger<ConversationService> logger,
         IToolOAuthService? toolOAuthService = null)
@@ -75,6 +86,7 @@ public class ConversationService : IConversationService
         _streamPolicy = streamPolicy;
         _streamEngine = streamEngine;
         _streamRunRegistry = streamRunRegistry;
+        _distributedLock = distributedLock;
         _broadcastHub = broadcastHub;
         _logger = logger;
         _toolOAuthService = toolOAuthService;
@@ -152,10 +164,270 @@ public class ConversationService : IConversationService
         return new StreamUserIdentity(user.Id, userName, null);
     }
 
-    public Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId) =>
-        _streamRunRegistry.RequestCancel(turnId)
-            ? Task.FromResult(true)
-            : Task.FromResult(false);
+    public async Task<bool> CancelTurnStreamAsync(Guid conversationId, Guid turnId)
+    {
+        // Signal a local worker, but do not wait for provider or tool termination. The durable
+        // fence below is the authority that decides whether this Stop succeeded.
+        var localCancellationSignalled = _streamRunRegistry.RequestHardStop(turnId, conversationId);
+        _logger.LogInformation(
+            "Stop cancellation signal sent for turn {TurnId} in conversation {ConversationId}: localWorker={LocalWorker}; registryActive={RegistryActive}",
+            turnId,
+            conversationId,
+            localCancellationSignalled,
+            _streamRunRegistry.IsActive(turnId));
+        var fence = await RunStopDatabaseOperationAsync(
+            turnId,
+            ct => _persistence.FenceTurnCancellationAsync(
+                conversationId,
+                turnId,
+                expectedExecutionId: null,
+                ct: ct));
+        if (!fence.Found)
+        {
+            return false;
+        }
+
+        if (fence.ConflictingLeasePresent)
+        {
+            // The target turn is not the owner of the visible lease. Do not detach a worker or
+            // open a local gate when the authoritative fence refused this Stop.
+            throw new ConversationStopInProgressException(turnId);
+        }
+
+        // Once the database fence commits, this worker is no longer a logical owner even if its
+        // provider ignores cancellation. Remove it from admission tracking before opening the
+        // local gate so a replacement Submit/Undo cannot be held behind the old worker.
+        if (_streamRunRegistry.IsActive(turnId))
+        {
+            _streamRunRegistry.Detach(turnId);
+        }
+
+        if (!_streamRunRegistry.IsAnyActiveForConversation(conversationId))
+        {
+            _streamPolicy.TryReleaseFencedConversationGate(conversationId);
+        }
+
+        // FenceTurnCancellationAsync removes the old lease in the same serializable transaction
+        // as the turn transition. This final check is only defensive: if an old lease is still
+        // visible, Stop must fail closed rather than tell the client it is safe to proceed.
+        _logger.LogInformation(
+            "Stop confirmed for turn {TurnId} in conversation {ConversationId}; wasStreaming={WasStreaming}, oldWorkerDetached={OldWorkerDetached}, oldLeaseReleased={OldLeaseReleased}",
+            turnId,
+            conversationId,
+            fence.WasStreaming,
+            !_streamRunRegistry.IsActive(turnId),
+            fence.PreviousLeaseWasReleased);
+        return true;
+    }
+
+    private static async Task<T> RunStopDatabaseOperationAsync<T>(
+        Guid turnId,
+        Func<CancellationToken, Task<T>> operation)
+    {
+        var timeout = new CancellationTokenSource();
+        Task<T>? operationTask = null;
+        try
+        {
+            operationTask = operation(timeout.Token);
+            var result = await operationTask.WaitAsync(StopDatabaseTimeout).ConfigureAwait(false);
+            timeout.Dispose();
+            return result;
+        }
+        catch (TimeoutException)
+        {
+            var cancellationTask = timeout.CancelAsync();
+            if (operationTask != null)
+            {
+                _ = ObserveStopDatabaseOperationAsync(operationTask, timeout, cancellationTask);
+            }
+            else
+            {
+                timeout.Dispose();
+            }
+            throw new ConversationStopInProgressException(turnId);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            timeout.Dispose();
+            throw new ConversationStopInProgressException(turnId);
+        }
+        catch
+        {
+            timeout.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task ObserveStopDatabaseOperationAsync<T>(
+        Task<T> operationTask,
+        CancellationTokenSource timeout,
+        Task cancellationTask)
+    {
+        try
+        {
+            await operationTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The bounded Stop request already returned its lifecycle result. Observe any
+            // eventual provider completion so a late database failure is not unobserved.
+        }
+        finally
+        {
+            try
+            {
+                await cancellationTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                // Cancellation callbacks are best-effort after the Stop request is bounded.
+            }
+
+            timeout.Dispose();
+        }
+    }
+
+    private static async Task ObserveStopTaskAsync<T>(Task<T> operationTask)
+    {
+        try
+        {
+            await operationTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The lifecycle boundary was already confirmed by the worker. A late marker failure
+            // must be observed without changing the completed Stop response.
+        }
+    }
+
+    private async Task ReleaseStreamLockUntilConfirmedAsync(
+        IStreamLockHandle lockHandle,
+        Guid conversationId)
+    {
+        for (var releaseAttempt = 1; releaseAttempt <= 4; releaseAttempt++)
+        {
+            Task<bool>? releaseTask = null;
+            try
+            {
+                releaseTask = lockHandle.ReleaseAsync(CancellationToken.None);
+                if (await releaseTask.WaitAsync(StopDatabaseTimeout).ConfigureAwait(false))
+                {
+                    if (lockHandle.ConversationLockEventSent)
+                    {
+                        try
+                        {
+                            await _streamPolicy.OnUnlockAsync(conversationId, CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to broadcast conversation unlock for {ConversationId}", conversationId);
+                        }
+                    }
+
+                    return;
+                }
+            }
+            catch (TimeoutException)
+            {
+                if (releaseTask != null)
+                {
+                    _ = ObserveReleaseTaskAsync(releaseTask);
+                }
+
+                _logger.LogWarning(
+                    "Timed out releasing conversation lock for {ConversationId}; the lease will expire",
+                    conversationId);
+                return;
+            }
+            catch (Exception ex)
+            {
+                if (releaseAttempt == 1 || releaseAttempt == 4)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Conversation lock release attempt {Attempt} failed for {ConversationId}",
+                        releaseAttempt,
+                        conversationId);
+                }
+            }
+
+            if (releaseAttempt < 4)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
+            }
+        }
+
+        _logger.LogWarning(
+            "Conversation lock release is not confirmed for {ConversationId}; the lease will expire",
+            conversationId);
+    }
+
+    private static async Task ObserveReleaseTaskAsync(Task<bool> releaseTask)
+    {
+        try
+        {
+            await releaseTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The bounded cleanup attempt already returned; observe late release failures.
+        }
+    }
+
+    private async Task TerminalizeTurnUntilConfirmedAsync(TerminalizeTurnRequest request)
+    {
+        for (var attempt = 1; attempt <= 4; attempt++)
+        {
+            Task<bool>? operationTask = null;
+            try
+            {
+                operationTask = _persistence.TerminalizeTurnAsync(request, CancellationToken.None);
+                if (await operationTask.WaitAsync(StopDatabaseTimeout).ConfigureAwait(false))
+                {
+                    return;
+                }
+
+                if (request.ExecutionId.HasValue)
+                {
+                    // A different execution fence has terminalized or reclaimed the turn.
+                    return;
+                }
+
+                throw new InvalidOperationException(
+                    $"Turn {request.TurnId} was not found while terminalizing conversation {request.ConversationId}.");
+            }
+            catch (TimeoutException)
+            {
+                if (operationTask != null)
+                {
+                    _ = ObserveReleaseTaskAsync(operationTask);
+                }
+
+                _logger.LogError(
+                    "Timed out terminalizing turn {TurnId} for {ConversationId}; recovery will finish cleanup",
+                    request.TurnId,
+                    request.ConversationId);
+                return;
+            }
+            catch (Exception ex)
+            {
+                if (attempt == 1 || attempt == 4)
+                {
+                    _logger.LogError(
+                        ex,
+                        "Turn terminalization attempt {Attempt} failed for {ConversationId} turn {TurnId}; retrying",
+                        attempt,
+                        request.ConversationId,
+                        request.TurnId);
+                }
+
+                if (attempt < 4)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
+                }
+            }
+        }
+    }
 
     public async IAsyncEnumerable<StreamingEvent> ObserveConversationEventsAsync(
         Guid conversationId,
@@ -187,21 +459,33 @@ public class ConversationService : IConversationService
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, CancellationToken.None);
         var lockMs = preflight.ElapsedMilliseconds;
 
-        StreamSendContext loaded;
+        ConversationStreamRunContext? runContext = null;
         CancellationTokenSource? workerCts = null;
         var registeredTurnId = Guid.Empty;
+        var setupCancelled = false;
+        StreamSendContext? loaded = null;
         long loadMs = 0, turnMs = 0;
+
+        // Lightweight create + register first so Stop has a turn id and a cancel token.
+        // History/attachments after turn_created must honor that token (not CancellationToken.None).
         try
         {
-            var setupCt = CancellationToken.None;
-            loaded = await LoadStreamMetadataAsync(conversationId, request, user, setupCt, resolvedAssistantId);
+            loaded = await LoadStreamMetadataAsync(
+                conversationId,
+                request,
+                user,
+                CancellationToken.None,
+                resolvedAssistantId);
             loadMs = preflight.ElapsedMilliseconds;
 
-            await CreateTurnAndUserMessageAsync(loaded, setupCt);
+            await CreateTurnAndUserMessageAsync(loaded, lockHandle.LeaseId, CancellationToken.None);
             turnMs = preflight.ElapsedMilliseconds;
-
             registeredTurnId = loaded.DbTurn!.Id;
-            workerCts = _streamRunRegistry.Register(registeredTurnId);
+
+            // Register the worker before setup completes so Stop can cancel setup as well as
+            // inference. The worker is not considered stopped until its setup cleanup has
+            // released the lock and unregistered the turn.
+            workerCts = _streamRunRegistry.Register(registeredTurnId, conversationId);
 
             await _streamPolicy.OnTurnCreatedAsync(
                 conversationId,
@@ -211,42 +495,104 @@ public class ConversationService : IConversationService
                     request.Instructions,
                     loaded.AssistantName,
                     user),
-                setupCt);
+                workerCts.Token);
         }
         catch
         {
             // Nothing has been yielded yet, so the SSE response has not started: the endpoint can
             // still turn this into a clean HTTP error. Release what we took and rethrow.
-            if (workerCts != null)
+            try
             {
-                _streamRunRegistry.Unregister(registeredTurnId);
-            }
+                if (loaded?.DbTurn != null && registeredTurnId != Guid.Empty)
+                {
+                    await TerminalizeTurnUntilConfirmedAsync(
+                        new TerminalizeTurnRequest(
+                            registeredTurnId,
+                            conversationId,
+                            loaded.TurnIndex,
+                            "failed",
+                            TerminationCode: "stream_setup_failed",
+                            TerminationDetail: "Conversation stream setup failed.",
+                            ExecutionId: loaded.DbTurn.ExecutionId));
+                }
 
-            await lockHandle.ReleaseAsync(CancellationToken.None);
+                await ReleaseStreamLockUntilConfirmedAsync(lockHandle, conversationId);
+            }
+            finally
+            {
+                if (workerCts != null && registeredTurnId != Guid.Empty)
+                {
+                    _streamRunRegistry.Unregister(registeredTurnId);
+                }
+            }
             throw;
         }
 
-        // The client arms Stop on this event; emit it before history/attachment setup so Stop is
-        // available while the server is still assembling context. Failures from here on can no
-        // longer become HTTP errors (the response has started) - they are surfaced as an SSE error
-        // event below.
-        yield return new StreamingEvent(
-            StreamingEventTypes.TurnCreated,
-            JsonSerializer.Serialize(new { turnId = registeredTurnId }, StreamJsonOptions));
+        var setupCt = workerCts!.Token;
 
-        ConversationStreamRunContext? runContext = null;
+        var resumedAfterTurnCreated = false;
+        try
+        {
+            // The client arms Stop on this event; emit it before history/attachment setup so Stop
+            // is available while the server is still assembling context.
+            yield return new StreamingEvent(
+                StreamingEventTypes.TurnCreated,
+                JsonSerializer.Serialize(new { turnId = registeredTurnId }, StreamJsonOptions));
+            resumedAfterTurnCreated = true;
+        }
+        finally
+        {
+            if (!resumedAfterTurnCreated)
+            {
+                _ = ContinueDetachedStreamAfterTurnCreatedAsync(
+                    loaded!,
+                    lockHandle,
+                    workerCts.Token,
+                    registeredTurnId);
+            }
+        }
+
+        if (!resumedAfterTurnCreated)
+        {
+            yield break;
+        }
+
         StreamingEvent? preflightFailure = null;
         long historyMs = 0, attachmentsMs = 0;
         try
         {
-            var setupCt = CancellationToken.None;
-            await PopulateStreamHistoryAsync(loaded, setupCt);
+            await PopulateStreamHistoryAsync(loaded!, setupCt);
             historyMs = preflight.ElapsedMilliseconds;
 
-            await ProcessAttachmentsAsync(loaded, setupCt);
+            await ProcessAttachmentsAsync(loaded!, setupCt);
             attachmentsMs = preflight.ElapsedMilliseconds;
 
-            runContext = BuildRunContext(_streamPolicy, loaded, user);
+            runContext = BuildRunContext(_streamPolicy, loaded!, user);
+        }
+        catch (OperationCanceledException) when (workerCts.IsCancellationRequested)
+        {
+            setupCancelled = true;
+            if (!_streamRunRegistry.IsHardStopRequested(registeredTurnId))
+            {
+                await TerminalizeTurnUntilConfirmedAsync(
+                    new TerminalizeTurnRequest(
+                        registeredTurnId,
+                        conversationId,
+                        loaded.TurnIndex,
+                        "cancelled",
+                        TerminationCode: "cancelled",
+                        TerminationDetail: "Stream was cancelled by user",
+                        ExecutionId: loaded.DbTurn?.ExecutionId));
+            }
+
+            try
+            {
+                await ReleaseStreamLockUntilConfirmedAsync(lockHandle, conversationId);
+            }
+            finally
+            {
+                _streamRunRegistry.Unregister(registeredTurnId);
+            }
         }
         catch (Exception ex)
         {
@@ -257,63 +603,51 @@ public class ConversationService : IConversationService
                 registeredTurnId);
 
             // The turn row is already "streaming"; without this it would survive as a zombie.
-            try
-            {
-                await _persistence.TerminalizeTurnAsync(
-                    new TerminalizeTurnRequest(
-                        registeredTurnId,
-                        conversationId,
-                        loaded.TurnIndex,
-                        "failed",
-                        TerminationCode: "preflight_failed",
-                        TerminationDetail: ex.Message,
-                        ExecutionId: loaded.DbTurn!.ExecutionId),
-                    CancellationToken.None);
-            }
-            catch (Exception terminalizeEx)
-            {
-                _logger.LogError(
-                    terminalizeEx,
-                    "Failed to terminalize turn {TurnId} after preflight failure",
-                    registeredTurnId);
-            }
-
-            _streamRunRegistry.Unregister(registeredTurnId);
+            await TerminalizeTurnUntilConfirmedAsync(
+                new TerminalizeTurnRequest(
+                    registeredTurnId,
+                    conversationId,
+                    loaded.TurnIndex,
+                    "failed",
+                    TerminationCode: "preflight_failed",
+                    TerminationDetail: ex.Message,
+                    ExecutionId: loaded.DbTurn?.ExecutionId));
 
             var errorEvent = new StreamingEvent(
                 StreamingEventTypes.Error,
                 JsonSerializer.Serialize(StreamingErrorEnvelope.Build(ex), StreamJsonOptions));
 
-            // Observers attached via ObserveConversationEventsAsync saw turn_created for this turn
-            // and would otherwise never see a terminal event for it. The engine fans every event out
-            // to the hub as well as the SSE channel (ConversationStreamEngine's TryWrite), and it
-            // broadcasts the error before releasing the lock, so observers get error then
-            // conversation_unlocked in that order - mirror both the fan-out and the ordering here.
+            // Observers saw turn_created and must receive the terminal error before the unlock.
             try
             {
                 await _streamPolicy.BroadcastEventAsync(conversationId, errorEvent, CancellationToken.None);
             }
             catch (Exception broadcastEx)
             {
-                _logger.LogWarning(broadcastEx, "Failed to broadcast preflight error for {ConversationId}", conversationId);
+                _logger.LogWarning(
+                    broadcastEx,
+                    "Failed to broadcast preflight error for {ConversationId}",
+                    conversationId);
             }
 
-            // Mirrors ConversationStreamEngine's release path: only broadcast the unlock if this
-            // handle broadcast the lock and actually released it.
-            var distributedLockReleased = await lockHandle.ReleaseAsync(CancellationToken.None);
-            if (lockHandle.ConversationLockEventSent && distributedLockReleased)
+            try
             {
-                try
-                {
-                    await _streamPolicy.OnUnlockAsync(conversationId, CancellationToken.None);
-                }
-                catch (Exception unlockEx)
-                {
-                    _logger.LogWarning(unlockEx, "Failed to broadcast conversation unlock for {ConversationId}", conversationId);
-                }
+                await ReleaseStreamLockUntilConfirmedAsync(lockHandle, conversationId);
+            }
+            finally
+            {
+                _streamRunRegistry.Unregister(registeredTurnId);
             }
 
             preflightFailure = errorEvent;
+        }
+
+        if (setupCancelled)
+        {
+            yield return new StreamingEvent(
+                StreamingEventTypes.Cancelled,
+                JsonSerializer.Serialize(new { turnId = registeredTurnId }, StreamJsonOptions));
+            yield break;
         }
 
         if (preflightFailure != null)
@@ -343,6 +677,90 @@ public class ConversationService : IConversationService
             onWorkerCompleted))
         {
             yield return ev;
+        }
+    }
+
+    private async Task ContinueDetachedStreamAfterTurnCreatedAsync(
+        StreamSendContext loaded,
+        IStreamLockHandle lockHandle,
+        CancellationToken workerCt,
+        Guid registeredTurnId)
+    {
+        var engineStarted = false;
+        try
+        {
+            await PopulateStreamHistoryAsync(loaded, workerCt);
+            await ProcessAttachmentsAsync(loaded, workerCt);
+            var runContext = BuildRunContext(_streamPolicy, loaded, loaded.User);
+            var onWorkerCompleted = () => _streamRunRegistry.Unregister(registeredTurnId);
+
+            engineStarted = true;
+            await foreach (var _ in _streamEngine.RunStreamAsync(
+                runContext,
+                lockHandle,
+                CancellationToken.None,
+                workerCt,
+                onWorkerCompleted))
+            {
+            }
+        }
+        catch (OperationCanceledException) when (!engineStarted && workerCt.IsCancellationRequested)
+        {
+            if (!_streamRunRegistry.IsHardStopRequested(registeredTurnId))
+            {
+                await TerminalizeTurnUntilConfirmedAsync(
+                    new TerminalizeTurnRequest(
+                        registeredTurnId,
+                        loaded.ConversationId,
+                        loaded.TurnIndex,
+                        "cancelled",
+                        TerminationCode: "cancelled",
+                        TerminationDetail: "Stream was cancelled by user",
+                        ExecutionId: loaded.DbTurn?.ExecutionId));
+            }
+
+            try
+            {
+                await ReleaseStreamLockUntilConfirmedAsync(lockHandle, loaded.ConversationId);
+            }
+            finally
+            {
+                _streamRunRegistry.Unregister(registeredTurnId);
+            }
+        }
+        catch (Exception ex) when (!engineStarted)
+        {
+            _logger.LogError(
+                ex,
+                "Detached conversation stream setup failed for {ConversationId} turn {TurnId}",
+                loaded.ConversationId,
+                registeredTurnId);
+
+            try
+            {
+                await TerminalizeTurnUntilConfirmedAsync(
+                    new TerminalizeTurnRequest(
+                        registeredTurnId,
+                        loaded.ConversationId,
+                        loaded.TurnIndex,
+                        "failed",
+                        TerminationCode: "stream_setup_failed",
+                        TerminationDetail: "Conversation stream setup failed.",
+                        ExecutionId: loaded.DbTurn?.ExecutionId));
+                await ReleaseStreamLockUntilConfirmedAsync(lockHandle, loaded.ConversationId);
+            }
+            finally
+            {
+                _streamRunRegistry.Unregister(registeredTurnId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Detached conversation stream failed for {ConversationId} turn {TurnId}",
+                loaded.ConversationId,
+                registeredTurnId);
         }
     }
 
@@ -390,6 +808,16 @@ public class ConversationService : IConversationService
             .Include(c => c.Turns)
             .FirstOrDefaultAsync(c => c.Id == conversationId, ct)
             ?? throw new KeyNotFoundException("Conversation not found");
+
+        var activeTurn = conv.Turns
+            .Where(t => string.Equals(t.Status, "streaming", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(t => t.TurnIndex)
+            .FirstOrDefault();
+        if (activeTurn != null)
+        {
+            throw new InvalidOperationException(
+                $"Conversation already has streaming turn {activeTurn.Id}.");
+        }
 
         var assistantName = string.IsNullOrWhiteSpace(request.AssistantName) ? "assistant" : request.AssistantName;
         var modelDeploymentId = request.ModelDeploymentId;
@@ -449,7 +877,10 @@ public class ConversationService : IConversationService
             : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
-    private async Task CreateTurnAndUserMessageAsync(StreamSendContext ctx, CancellationToken ct)
+    private async Task CreateTurnAndUserMessageAsync(
+        StreamSendContext ctx,
+        Guid executionId,
+        CancellationToken ct)
     {
         var turnResult = await _persistence.CreateNextTurnAsync(
             new CreateTurnRequest(
@@ -457,7 +888,8 @@ public class ConversationService : IConversationService
                 ctx.AssistantName,
                 ctx.ModelDeploymentId,
                 ctx.Request.Instructions,
-                InitialStatus: "streaming"),
+                InitialStatus: "streaming",
+                ExecutionId: executionId),
             ct);
 
         var userResult = await _persistence.CreateUserMessageAsync(
@@ -494,10 +926,18 @@ public class ConversationService : IConversationService
         {
             if (attachment.NotebookFileId.HasValue)
             {
-                var messages = await _attachmentContentService.CreateOpenAiMessagesFromNotebookFileAsync(attachment.NotebookFileId.Value, ct);
-                foreach (var message in messages)
+                var attachmentContents = await _attachmentContentService.ExpandAttachmentToChatContentsAsync(
+                    new MessageAttachment
+                    {
+                        NotebookFileId = attachment.NotebookFileId.Value,
+                        UploadType = attachment.UploadType
+                    },
+                    ct);
+                if (attachmentContents.Count > 0)
                 {
-                    ctx.PreviousMessages.Add(message);
+                    ctx.PreviousMessages.Add(new ChatMessage(
+                        AntRunner.Chat.Abstractions.ChatRole.User,
+                        attachmentContents));
                 }
                 continue;
             }
@@ -515,7 +955,7 @@ public class ConversationService : IConversationService
                 continue;
             }
 
-            var normalizedPath = attachment.RelativePath.Replace("\\", "/").TrimStart('/');
+            var normalizedPath = attachment.RelativePath.Replace("\\", "/").Trim().TrimStart('/');
 
             if (attachment.UploadType == ContentUploadType.Folder)
             {
@@ -574,4 +1014,82 @@ public class ConversationService : IConversationService
             UserMessageId = ctx.UserMessage?.Id,
             User = user
         };
+
+    private async Task<bool> ForceReleaseConversationLockAsync(
+        Guid conversationId,
+        Guid orphanedTurnId,
+        Guid? expectedLeaseId)
+    {
+        if (_streamRunRegistry.IsAnyActiveForConversation(conversationId, orphanedTurnId))
+        {
+            _logger.LogWarning(
+                "Refusing orphaned-turn lock release for {ConversationId}; another local stream is active",
+                conversationId);
+            return false;
+        }
+
+        // The caller already verified that no active distributed lock existed before
+        // terminalization. Verify again immediately before touching the local gate; if a newer
+        // stream acquired the conversation meanwhile, never release or over-release its lock.
+        if (await RunStopDatabaseOperationAsync(
+                orphanedTurnId,
+                ct => _distributedLock.GetActiveLockAsync(conversationId, ct)) != null)
+        {
+            _logger.LogWarning(
+                "Refusing orphaned-turn lock release for {ConversationId}; a distributed stream acquired the lock",
+                conversationId);
+            return false;
+        }
+
+        if (!_streamPolicy.TryReleaseOrphanedConversationGate(conversationId))
+        {
+            _logger.LogWarning(
+                "Refusing orphaned-turn local gate release for {ConversationId}; another stream is acquiring the lock",
+                conversationId);
+            return false;
+        }
+
+        var activeLock = await RunStopDatabaseOperationAsync(
+            orphanedTurnId,
+            ct => _distributedLock.GetActiveLockAsync(conversationId, ct));
+        if (activeLock != null)
+        {
+            _logger.LogError(
+                "Distributed conversation lock appeared during orphan cleanup for {ConversationId}",
+                conversationId);
+            return false;
+        }
+
+        if (expectedLeaseId.HasValue)
+        {
+            var released = await RunStopDatabaseOperationAsync(
+                orphanedTurnId,
+                ct => _distributedLock.ReleaseLockAsync(
+                    conversationId,
+                    expectedLeaseId.Value,
+                    ct));
+            if (!released)
+            {
+                // A false result is safe only when the exact old lease is gone and no newer
+                // active owner appeared. Never interpret it as permission to release a newer
+                // lease or to report a clean lifecycle while that owner is present.
+                var replacementLock = await RunStopDatabaseOperationAsync(
+                    orphanedTurnId,
+                    ct => _distributedLock.GetActiveLockAsync(conversationId, ct));
+                if (replacementLock != null)
+                {
+                    _logger.LogWarning(
+                        "Refusing orphaned-turn cleanup for {ConversationId}; a newer distributed lease is active",
+                        conversationId);
+                    return false;
+                }
+            }
+        }
+
+        // This path has no lease that can authoritatively announce an unlock. A newer stream may
+        // acquire the distributed lock immediately after the final observation, so broadcasting
+        // here would be a false unlock for that newer owner. The exact-lease release above is
+        // conditional and cannot remove that newer owner's lock.
+        return true;
+    }
 }

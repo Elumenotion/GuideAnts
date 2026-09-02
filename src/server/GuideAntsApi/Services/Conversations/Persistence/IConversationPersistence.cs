@@ -8,7 +8,8 @@ public sealed record CreateTurnRequest(
     string AssistantName,
     string? ModelDeploymentId,
     string Instructions,
-    string? InitialStatus = null);
+    string? InitialStatus = null,
+    Guid? ExecutionId = null);
 
 public sealed record CreatedTurnResult(int TurnIndex, Guid TurnId, ConversationTurn Turn);
 
@@ -35,7 +36,8 @@ public sealed record StartAssistantMessageRequest(
     Guid? AssistantId,
     string Content = "",
     bool IsStreaming = true,
-    string? ToolCallsJson = null);
+    string? ToolCallsJson = null,
+    Guid? ExpectedExecutionId = null);
 
 public sealed record AssistantMessageUpdateRequest(
     Guid MessageId,
@@ -43,7 +45,8 @@ public sealed record AssistantMessageUpdateRequest(
     string Content,
     bool Finalize,
     string? ToolCallsJson = null,
-    string? ThinkingBlocksJson = null);
+    string? ThinkingBlocksJson = null,
+    Guid? ExpectedExecutionId = null);
 
 public sealed record CreateToolMessageRequest(
     Guid ConversationId,
@@ -54,7 +57,8 @@ public sealed record CreateToolMessageRequest(
     string? ToolCallId,
     string? FunctionName,
     Guid? AssistantId,
-    string? AssistantName);
+    string? AssistantName,
+    Guid? ExpectedExecutionId = null);
 
 /// <summary>
 /// Result of creating or replacing a tool message.
@@ -72,7 +76,8 @@ public sealed record AppendTurnTraceSegmentRequest(
     int TurnIndex,
     int SchemaVersion,
     string CaptureState,
-    string SegmentJson);
+    string SegmentJson,
+    Guid? ExpectedExecutionId = null);
 
 public sealed record TerminalizeAssistantSnapshot(
     Guid MessageId,
@@ -93,6 +98,30 @@ public sealed record TerminalizeTurnRequest(
     bool PruneIncompleteToolCalls = false,
     IReadOnlyList<Guid>? AssistantMessageIdsForThinking = null);
 
+/// <summary>
+/// Result of the authoritative Stop transition. The turn is fenced before the old worker is
+/// allowed to lose the conversation lock, so a replacement turn cannot be affected by late work.
+/// </summary>
+public sealed record FencedTurnCancellationResult(
+    bool Found,
+    bool WasStreaming,
+    Guid? PreviousExecutionId,
+    Guid? FencedExecutionId,
+    bool PreviousLeaseWasReleased,
+    string? Status,
+    bool ConflictingLeasePresent = false,
+    bool WasPendingClientTool = false);
+
+/// <summary>
+/// Raised when a stream attempts to write after its execution generation has been revoked.
+/// This is an expected hard-stop boundary, not a provider failure.
+/// </summary>
+public sealed class ConversationTurnExecutionFencedException(Guid turnId)
+    : InvalidOperationException($"Stream execution is no longer allowed to write turn {turnId}.")
+{
+    public Guid TurnId { get; } = turnId;
+}
+
 public interface IConversationPersistence
 {
     Task<CreatedTurnResult> CreateTurnAsync(CreateTurnRequest request, int turnIndex, CancellationToken ct = default);
@@ -103,6 +132,67 @@ public interface IConversationPersistence
 
     Task<bool> SetTurnStatusAsync(Guid turnId, string status, string? onlyIfCurrentStatus = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// Records a durable cancellation request without terminalizing a still-running turn.
+    /// This lets a Stop request routed to a different API instance signal the worker that owns
+    /// the in-process cancellation token.
+    /// </summary>
+    Task<bool> RequestTurnCancellationAsync(
+        Guid conversationId,
+        Guid turnId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically marks a streaming turn cancelled, advances its execution fence, finalizes
+    /// streaming assistant rows without deleting content, and removes only the lock owned by the
+    /// previous execution. This is the logical Stop boundary; it never waits for the provider
+    /// worker to exit.
+    /// </summary>
+    Task<FencedTurnCancellationResult> FenceTurnCancellationAsync(
+        Guid conversationId,
+        Guid turnId,
+        Guid? expectedExecutionId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Materializes cancellation tool-result rows for every persisted function call that does not
+    /// yet have a matching tool message. Idempotent and safe to call after Stop fences or a
+    /// tool-call persistence race.
+    /// </summary>
+    Task<int> MaterializeMissingCancellationToolResultsAsync(
+        Guid conversationId,
+        Guid turnId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Preserves an announced assistant tool-call message after Stop has fenced the turn.
+    /// Updates the supplied row when it is still empty, appends a distinct row when that row
+    /// already contains different tool calls, and is idempotent when the same calls are present.
+    /// </summary>
+    Task<bool> TryPreserveStoppedAssistantToolCallsAsync(
+        Guid conversationId,
+        Guid turnId,
+        Guid? messageId,
+        string? content,
+        string toolCallsJson,
+        Guid? assistantId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads the durable cancellation marker so a provider that returns normally after Stop
+    /// cannot be recorded as a successful completion.
+    /// </summary>
+    Task<bool> IsTurnCancellationRequestedAsync(Guid turnId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns true only while the supplied execution generation is still allowed to publish
+    /// turn-owned side effects.
+    /// </summary>
+    Task<bool> IsTurnExecutionActiveAsync(
+        Guid turnId,
+        Guid expectedExecutionId,
+        CancellationToken ct = default);
+
     Task<Guid> StartAssistantMessageAsync(StartAssistantMessageRequest request, CancellationToken ct = default);
 
     Task AppendOrFinalizeAssistantMessageAsync(AssistantMessageUpdateRequest request, CancellationToken ct = default);
@@ -111,7 +201,8 @@ public interface IConversationPersistence
         Guid messageId,
         Guid turnId,
         string content,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        Guid? expectedExecutionId = null);
 
     Task<CreateToolMessageResult> CreateToolMessageAsync(CreateToolMessageRequest request, CancellationToken ct = default);
 
@@ -141,5 +232,6 @@ public interface IConversationPersistence
         string content,
         string? thinkingBlocksJson,
         int checkpointVersion,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        Guid? expectedExecutionId = null);
 }

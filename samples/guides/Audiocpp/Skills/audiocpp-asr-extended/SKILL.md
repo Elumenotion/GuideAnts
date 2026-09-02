@@ -19,7 +19,7 @@ directories the catalog doesn't list (unlike the strictly-gated TTS wrapper).
 ## Preflight
 
 ```bash
-python3 Output/Skills/audiocpp-asr-extended/scripts/preflight.py --for asr-extended
+python3 Skills/audiocpp-asr-extended/scripts/preflight.py --for asr-extended
 ```
 
 Trust its verdict over this document. `open: false` means no ASR model is
@@ -29,8 +29,8 @@ Warnings tell you whether the sideload path (below) is available.
 ## Transcribing by path (with language hint)
 
 ```bash
-python3 Output/Skills/audiocpp-asr-extended/scripts/engine_tool.py transcribe \
-  Output/uploads/clip.wav [--language de]
+python3 Skills/audiocpp-asr-extended/scripts/engine_tool.py transcribe \
+  clip.wav [--language de]
 ```
 
 - No upload and no gateway size cap — the engine reads the file in place.
@@ -49,7 +49,7 @@ families would need the `GA_ASR_ENGINE_FAMILY` env at service start — a compos
 change, out of skill scope).
 
 ```bash
-python3 Output/Skills/audiocpp-asr-extended/scripts/fetch_model.py <hf-repo-id> \
+python3 Skills/audiocpp-asr-extended/scripts/fetch_model.py <hf-repo-id> \
   --dest /models-local/asr/<DirName>
 curl -s -X POST http://127.0.0.1:8082/admin/load \
   -H "Content-Type: application/json" -d '{"model_id": "<DirName>"}'

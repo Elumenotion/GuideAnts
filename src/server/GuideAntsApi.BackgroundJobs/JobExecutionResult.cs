@@ -21,4 +21,25 @@ public sealed class JobExecutionResult
         FailureClass = JobFailureClass.PermanentMissingInput,
         ErrorMessage = message,
     };
+
+    public static JobExecutionResult ShutdownCancellation(string? message = null) => new()
+    {
+        IsSuccess = false,
+        FailureClass = JobFailureClass.ShutdownCancellation,
+        ErrorMessage = message,
+    };
+
+    public static JobExecutionResult DependencyNotReady(string? message = null) => new()
+    {
+        IsSuccess = false,
+        FailureClass = JobFailureClass.DependencyNotReady,
+        ErrorMessage = message,
+    };
+
+    public static JobExecutionResult PermanentInvalidInput(string? message = null) => new()
+    {
+        IsSuccess = false,
+        FailureClass = JobFailureClass.PermanentInvalidInput,
+        ErrorMessage = message,
+    };
 }

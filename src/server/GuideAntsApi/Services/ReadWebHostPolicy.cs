@@ -3,7 +3,7 @@ namespace GuideAntsApi.Services;
 internal static class ReadWebHostPolicy
 {
     internal const string ExcludedHostMessage =
-        "Host is blocked due to prior failures. Do not fetch from this host — use search or local files.";
+        "Host is blocked due to prior failures. Do not retry or issue another ReadWeb tool call for this invocation.";
 
     private static readonly HashSet<string> AutoExclusionProtectedHosts = new(StringComparer.OrdinalIgnoreCase)
     {

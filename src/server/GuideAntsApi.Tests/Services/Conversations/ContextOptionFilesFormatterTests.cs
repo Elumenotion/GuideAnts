@@ -64,6 +64,7 @@ public sealed class NotebookArtifactPathExclusionsTests
         NotebookArtifactPathExclusions.IsExcludedRelativePath("Output/node_modules/pkg/index.js").Should().BeTrue();
         NotebookArtifactPathExclusions.IsExcludedRelativePath("Output/.audiocpp-extended/engine-18099.log").Should().BeTrue();
         NotebookArtifactPathExclusions.IsExcludedRelativePath("Output/.wire-attachments/x.bin").Should().BeTrue();
+        NotebookArtifactPathExclusions.IsExcludedRelativePath("Output/models-timestamps/weights.bin").Should().BeTrue();
         NotebookArtifactPathExclusions.IsExcludedRelativePath("docs/readme.md").Should().BeFalse();
     }
 }

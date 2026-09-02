@@ -1337,10 +1337,13 @@ public class GuidesService(
             return null;
         }
 
-        var trimmed = reasoningEffort.Trim();
-        return string.Equals(trimmed, "none", StringComparison.OrdinalIgnoreCase)
-            ? null
-            : trimmed;
+        // Preserve "none" as a first-class value: catalog models that declare it use it to
+        // DISABLE thinking (their ThinkingControlJson has a "none" action entry), and the
+        // entity editor must round-trip it. Collapsing it to null here made the editor snap
+        // the selection back to the model's defaultChoice after every save, and made a saved
+        // "None" indistinguishable from "unspecified" at runtime. Null now means
+        // "unspecified" only (the model row's defaultChoice applies).
+        return reasoningEffort.Trim();
     }
 
     private sealed record NormalizedModelParameters(

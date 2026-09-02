@@ -717,33 +717,27 @@ using var scope = CreateDbScope();
 
         var mountKey = mount.Id.ToString("N");
         var cacheKey = HostMountListingCache.LevelKey(mountKey, normalizedPath);
-        HostMountDirectoryScanner.ScanResult scanResult;
-        if (HostMountListingCache.TryGet(cacheKey, out var cached))
-        {
-            _logger.LogDebug(
-                "Project host mount listing cache_hit for mount {MountId} path {Path}",
-                mount.Id,
-                normalizedPath);
-            scanResult = cached;
-        }
-        else
-        {
-            scanResult = HostMountDirectoryScanner.ListLevel(
-                mount.ContainerSourcePath,
-                mount.LeafName,
-                withinMount,
-                _linkedMountTreeMaxFiles,
-                _linkedMountTreeScanBudget,
-                _logger);
-            HostMountListingCache.Set(cacheKey, scanResult, _projectMountTreeCacheTtl);
-            _logger.LogInformation(
-                "Project host mount lazy_list for mount {MountId} path {Path} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
-                mount.Id,
-                normalizedPath,
-                scanResult.Files.Count,
-                scanResult.Directories.Count,
-                scanResult.WasTruncated);
-        }
+        var scanResult = HostMountListingCache.GetOrAdd(
+            cacheKey,
+            () =>
+            {
+                var listed = HostMountDirectoryScanner.ListLevel(
+                    mount.ContainerSourcePath,
+                    mount.LeafName,
+                    withinMount,
+                    _linkedMountTreeMaxFiles,
+                    _linkedMountTreeScanBudget,
+                    _logger);
+                _logger.LogInformation(
+                    "Project host mount lazy_list for mount {MountId} path {Path} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
+                    mount.Id,
+                    normalizedPath,
+                    listed.Files.Count,
+                    listed.Directories.Count,
+                    listed.WasTruncated);
+                return listed;
+            },
+            _projectMountTreeCacheTtl);
 
         var folders = scanResult.Directories
             .Select(d => new HostMountListingFolderDto(d.Name, d.RelativePath))
@@ -771,43 +765,30 @@ using var scope = CreateDbScope();
     {
         var mountKey = mount.Id.ToString("N");
         var cacheKey = HostMountListingCache.ShallowKey(mountKey);
-        if (HostMountListingCache.TryGet(cacheKey, out var cached))
-        {
-            _logger.LogDebug("Project host mount shallow cache_hit for mount {MountId}", mount.Id);
-            return cached;
-        }
+        return HostMountListingCache.GetOrAdd(
+            cacheKey,
+            () =>
+            {
+                var scanRoots = new List<HostMountDirectoryScanner.MountRoot>
+                {
+                    new(mount.LeafName, mount.ContainerSourcePath)
+                };
 
-        var scanRoots = new List<HostMountDirectoryScanner.MountRoot>
-        {
-            new(mount.LeafName, mount.ContainerSourcePath)
-        };
-
-        var scanResult = HostMountDirectoryScanner.Scan(
-            scanRoots,
-            _linkedMountTreeMaxFiles,
-            _linkedMountTreeMaxDepth,
-            _linkedMountTreeScanBudget,
-            _logger);
-
-        HostMountListingCache.Set(cacheKey, scanResult, _projectMountTreeCacheTtl);
-        _logger.LogInformation(
-            "Project host mount shallow_scan for mount {MountId} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
-            mount.Id,
-            scanResult.Files.Count,
-            scanResult.Directories.Count,
-            scanResult.WasTruncated);
-
-        if (scanResult.WasTruncated)
-        {
-            _logger.LogWarning(
-                "Project mount tree enumeration was truncated for mount {MountId} (maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
-                mount.Id,
-                _linkedMountTreeMaxFiles,
-                _linkedMountTreeMaxDepth,
-                (int)_linkedMountTreeScanBudget.TotalMilliseconds);
-        }
-
-        return scanResult;
+                var scanResult = HostMountDirectoryScanner.Scan(
+                    scanRoots,
+                    _linkedMountTreeMaxFiles,
+                    _linkedMountTreeMaxDepth,
+                    _linkedMountTreeScanBudget,
+                    _logger);
+                _logger.LogInformation(
+                    "Project host mount shallow_scan for mount {MountId} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
+                    mount.Id,
+                    scanResult.Files.Count,
+                    scanResult.Directories.Count,
+                    scanResult.WasTruncated);
+                return scanResult;
+            },
+            _projectMountTreeCacheTtl);
     }
 
     private FolderTreeDto BuildMountFolderTree(

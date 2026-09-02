@@ -20,7 +20,7 @@ path is untouched. E2E-verified in this stack (2026-07-15).
 ## Preflight
 
 ```bash
-python3 Output/Skills/audiocpp-diarize/scripts/preflight.py --for diarize
+python3 Skills/audiocpp-diarize/scripts/preflight.py --for diarize
 ```
 
 Trust its verdict over this document. It also tells you whether the model is
@@ -30,19 +30,19 @@ already on disk (skip the download) and whether ASR labeling is available.
 
 ```bash
 # 1. Download the model — skip if preflight says modelAlreadyDownloaded
-python3 Output/Skills/audiocpp-diarize/scripts/fetch_model.py nvidia/diar_sortformer_4spk-v1 \
+python3 Skills/audiocpp-diarize/scripts/fetch_model.py nvidia/diar_sortformer_4spk-v1 \
   --dest /models-local/asr/diar_sortformer_4spk-v1 --exclude diar_sortformer_4spk-v1.nemo
 
 # 2. Spawn the private engine (loads in seconds; ~494 MB weights, fits next to
 #    the wrappers' models without an unload)
-python3 Output/Skills/audiocpp-diarize/scripts/spawn_engine.py start \
+python3 Skills/audiocpp-diarize/scripts/spawn_engine.py start \
   --path /models-local/asr/diar_sortformer_4spk-v1 --family sortformer_diar --task diar
 
 # 3. Diarize (any ffmpeg-decodable input)
-python3 Output/Skills/audiocpp-diarize/scripts/diarize.py Output/uploads/meeting.mp3 -o Output/meeting
+python3 Skills/audiocpp-diarize/scripts/diarize.py meeting.mp3 -o meeting
 
 # 4. Always stop the engine when done
-python3 Output/Skills/audiocpp-diarize/scripts/spawn_engine.py stop
+python3 Skills/audiocpp-diarize/scripts/spawn_engine.py stop
 ```
 
 `diarize.py` converts the input to the 16 kHz mono WAV the engine requires

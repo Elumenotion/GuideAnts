@@ -44,6 +44,12 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
             return JobExecutionResult.PermanentMissingInput("Notebook shadow not found");
         }
 
+        if (shadow.Status == MarkdownExtractionStatus.Completed)
+        {
+            Logger.LogDebug("Notebook shadow already completed for {Id}; skipping transcription", payload.NotebookFileId);
+            return JobExecutionResult.Success();
+        }
+
         var originalFile = shadow.OriginalFile;
         if (originalFile == null)
         {
@@ -148,12 +154,28 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
         }
         catch (Exception ex)
         {
+            var result = TranscriptionJobFailureClassifier.Classify(ex, cancellationToken);
+            if (result.FailureClass == JobFailureClass.ShutdownCancellation)
+            {
+                Logger.LogInformation(
+                    "Transcription cancelled for NotebookFile {Id}: {Message}",
+                    payload.NotebookFileId,
+                    ex.Message);
+                return result;
+            }
+
             Logger.LogError(ex, "Transcription failed for NotebookFile {Id}", payload.NotebookFileId);
-            shadow.Status = MarkdownExtractionStatus.Failed;
-            shadow.ErrorMessage = ex.Message;
-            shadow.ProcessedAt = DateTime.UtcNow;
-            try { await context.SaveChangesAsync(cancellationToken); } catch { }
-            return JobExecutionResult.RetryableTransient(ex.Message);
+            shadow.Status = result.FailureClass == JobFailureClass.PermanentMissingInput
+                ? MarkdownExtractionStatus.Failed
+                : shadow.Status;
+            if (result.FailureClass == JobFailureClass.PermanentMissingInput)
+            {
+                shadow.ErrorMessage = ex.Message;
+                shadow.ProcessedAt = DateTime.UtcNow;
+                try { await context.SaveChangesAsync(cancellationToken); } catch { }
+            }
+
+            return result;
         }
     }
 

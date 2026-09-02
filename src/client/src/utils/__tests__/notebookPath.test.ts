@@ -3,6 +3,7 @@ import {
   getNotebookPathCandidates,
   normalizeNotebookRelativePath,
   notebookPathMatches,
+  resolveCwdRelativeNotebookPath,
 } from '../notebookPath';
 
 describe('notebookPath', () => {
@@ -46,6 +47,14 @@ describe('notebookPath', () => {
       'report.md',
       'Output/report.md',
     ]);
+  });
+
+  it('matches CWD-relative ../ paths to notebook-root tree entries', () => {
+    expect(resolveCwdRelativeNotebookPath('../jack_keller_speakers.rttm')).toBe('jack_keller_speakers.rttm');
+    expect(notebookPathMatches('jack_keller_speakers.rttm', '../jack_keller_speakers.rttm')).toBe(true);
+    expect(getNotebookPathCandidates('../report.md')).toEqual(
+      expect.arrayContaining(['../report.md', 'report.md'])
+    );
   });
 
   it('falls back when notebook paths contain invalid URI escapes', () => {

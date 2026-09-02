@@ -14,6 +14,7 @@ interface UserCellProps {
   userEmail?: string;
   attachments?: AttachedFile[];
   onPreviewFile?: (fileId: string) => void;
+  onPreviewFileByPath?: (relativePath: string) => void;
   projectId?: string;
   notebookId?: string;
 }
@@ -32,6 +33,7 @@ export default function UserCell({
   userEmail,
   attachments,
   onPreviewFile,
+  onPreviewFileByPath,
   projectId,
   notebookId,
 }: UserCellProps) {
@@ -120,7 +122,13 @@ export default function UserCell({
             {attachments.map((att) => (
               <button
                 key={att.id}
-                onClick={() => onPreviewFile?.(att.notebookFileId)}
+                onClick={() => {
+                  if (att.relativePath && onPreviewFileByPath) {
+                    onPreviewFileByPath(att.relativePath);
+                  } else if (att.notebookFileId) {
+                    onPreviewFile?.(att.notebookFileId);
+                  }
+                }}
                 className="flex items-center px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-xs cursor-pointer transition-colors"
                 title={`Click to preview ${att.fileName}`}
               >

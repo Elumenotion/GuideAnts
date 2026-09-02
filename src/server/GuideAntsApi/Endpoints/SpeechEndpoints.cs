@@ -71,6 +71,12 @@ public static class SpeechEndpoints
                     new { error = "transcription_timeout", message = ex.Message },
                     statusCode: StatusCodes.Status504GatewayTimeout);
             }
+            catch (OperationCanceledException) when (!ctx.RequestAborted.IsCancellationRequested)
+            {
+                return Results.Json(
+                    new { error = "transcription_timeout", message = "Audio transcription timed out." },
+                    statusCode: StatusCodes.Status504GatewayTimeout);
+            }
             catch (InvalidOperationException ex)
             {
                 return Results.Json(

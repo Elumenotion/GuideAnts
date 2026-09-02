@@ -27,7 +27,7 @@ consent is the missing piece.
 ## Preflight
 
 ```bash
-python3 Output/Skills/audiocpp-voice-clone/scripts/preflight.py --for voice-clone
+python3 Skills/audiocpp-voice-clone/scripts/preflight.py --for voice-clone
 ```
 
 Trust its verdict over this document. `open: false` usually means no TTS model
@@ -37,14 +37,14 @@ chatterbox (the `clon`-task catalog model) is the known-good family.
 
 ## Cloning
 
-The reference clip must be a file in the workspace (e.g. an upload under
-`Output/uploads/`). Same container filesystem, so the engine reads it by path:
+The reference clip must be a file in the workspace (e.g. an attached file like
+`user_voice.wav`). Same container filesystem, so the engine reads it by path:
 
 ```bash
-python3 Output/Skills/audiocpp-voice-clone/scripts/engine_tool.py speech \
+python3 Skills/audiocpp-voice-clone/scripts/engine_tool.py speech \
   "Text to speak in the cloned voice" \
-  -o Output/cloned.wav \
-  --voice-ref Output/uploads/user_voice.wav \
+  -o cloned.wav \
+  --voice-ref user_voice.wav \
   [--reference-text "transcript of the reference clip"] \
   [--seed 42]
 ```
@@ -62,7 +62,7 @@ Transcribe the result back and check it matches the input text (the ASR engine
 at `127.0.0.1:18082` accepts workspace paths):
 
 ```bash
-python3 Output/Skills/audiocpp-voice-clone/scripts/engine_tool.py transcribe Output/cloned.wav
+python3 Skills/audiocpp-voice-clone/scripts/engine_tool.py transcribe cloned.wav
 ```
 
 ## When this skill isn't enough

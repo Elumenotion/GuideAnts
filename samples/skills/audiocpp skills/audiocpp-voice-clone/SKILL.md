@@ -1,6 +1,6 @@
 ---
 name: audiocpp-voice-clone
-description: "Clone a voice from a user-supplied reference clip and synthesize speech with it, by calling the raw audio.cpp TTS engine with voice_ref/reference_text — fields the built-in GuideAnts audio tools do not expose. Use when the user wants generated speech to sound like their own voice or another consenting speaker's recording."
+description: "Clone a voice from a user-supplied reference clip via the GPU host raw audiocpp gateway (stage /files, then /tts/v1/audio/speech with voice_ref), which the built-in GuideAnts audio tools do not expose."
 metadata:
   guideants:
     enabled: true
@@ -10,69 +10,64 @@ metadata:
 
 # audio.cpp voice cloning (experimental)
 
-The GuideAnts TTS wrapper only accepts `{text, voice, speed}`, but the real
-`audiocpp_server` engine it spawns (on `127.0.0.1:18084`) accepts a reference
-clip for cloning. This skill calls that engine directly. Deliverables are WAV
-files in `Output/`; nothing here touches the live phone/voice path.
+Paths — fixed layout, do not probe or re-derive. The sandbox CWD is the
+notebook's **output directory**. This skill's scripts live under
+`Skills/audiocpp-voice-clone/scripts/` relative to it. Write deliverables with
+**bare filenames**; never prefix with `Output/`.
+
+Product TTS only accepts `{text, voice, speed}`. This skill stages the reference
+clip (`/files`) then calls raw `/tts/v1/audio/speech` with `voice_ref`. WAVs are
+written to the CWD with bare filenames — never prefix with `Output/`.
 
 ## Consent rule (read first)
 
-Cloning from a reference clip is a supported, intended use **when the speaker
-consents**: the user states the clip is their own voice, or that they have the
-speaker's permission. In that case proceed — do not refuse consented cloning as
-a "security risk". Decline only when the request is to imitate a third party
-without consent (a celebrity, a colleague, a public figure), and say that
-consent is the missing piece.
+Proceed only when the speaker consents (own voice or stated permission). Decline
+unconsented third-party imitation.
+
+## Environment (required for PC → the GPU host)
+
+```text
+AUDIOCPP_SKILL_BASE_URL=http://<gpu-host-lan-ip>:8112/audiocpp-skill
+AUDIOCPP_SKILL_TOKEN=<same as the GPU host GA_AUDIOCPP_SKILL_TOKEN>
+```
+
+Load a clon-capable TTS model on the GPU host first (chatterbox is the known-good catalog
+entry).
 
 ## Preflight
 
 ```bash
-python3 Output/Skills/audiocpp-voice-clone/scripts/preflight.py --for voice-clone
+python3 Skills/audiocpp-voice-clone/scripts/preflight.py --for voice-clone
 ```
-
-Trust its verdict over this document. `open: false` usually means no TTS model
-is loaded — ask the user to load one via GuideAnts Settings → Local models.
-A warning about the loaded model's family means `voice_ref` may be rejected;
-chatterbox (the `clon`-task catalog model) is the known-good family.
 
 ## Cloning
 
-The reference clip must be a file in the workspace (e.g. an upload under
-`Output/uploads/`). Same container filesystem, so the engine reads it by path:
+Reference clip must be a workspace file (e.g. `uploads/…`). The script
+uploads it to the GPU host — no shared filesystem with the engine required:
 
 ```bash
-python3 Output/Skills/audiocpp-voice-clone/scripts/engine_tool.py speech \
+python3 Skills/audiocpp-voice-clone/scripts/engine_tool.py speech \
   "Text to speak in the cloned voice" \
-  -o Output/cloned.wav \
-  --voice-ref Output/uploads/user_voice.wav \
+  -o cloned.wav \
+  --voice-ref uploads/user_voice.wav \
   [--reference-text "transcript of the reference clip"] \
   [--seed 42]
 ```
 
-- The engine model id is auto-detected from the wrapper's `/health`
-  (`catalogEntryId`); no flag needed.
-- `--reference-text` helps families that want the reference transcript.
-- `--seed` makes the synthesis reproducible.
-- The engine errors loudly on options the loaded family doesn't support —
-  surface that error text to the user; it is usually self-explanatory.
+Model id is auto-detected from gateway TTS health (`catalogEntryId`).
 
-## Verifying
-
-Transcribe the result back and check it matches the input text (the ASR engine
-at `127.0.0.1:18082` accepts workspace paths):
+## Verify
 
 ```bash
-python3 Output/Skills/audiocpp-voice-clone/scripts/engine_tool.py transcribe Output/cloned.wav
+python3 Skills/audiocpp-voice-clone/scripts/engine_tool.py transcribe cloned.wav
 ```
 
-## When this skill isn't enough
+## When this isn't enough
 
-- Loaded model rejects `voice_ref` → ask the user to load chatterbox via
-  Settings, or use the **audiocpp-deferred-tts** skill (several deferred
-  families also clone from reference audio).
-- No TTS model loaded at all and the user can't load one → blocked; say so.
+- Loaded model rejects `voice_ref` → load chatterbox on the GPU host, or try
+  **audiocpp-deferred-tts**.
+- No TTS loaded on the GPU host → blocked; say so.
 
 ## Reporting
 
-End by telling the user what worked and what was blocked, quoting the
-preflight/engine evidence, so the experiment log stays honest.
+End by telling the user what worked and what was blocked, quoting preflight evidence.

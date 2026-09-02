@@ -175,6 +175,11 @@ namespace GuideAntsApi.DataModel
                 // For correlation tracking (filtered for non-null)
                 b.HasIndex(x => x.CorrelationId)
                  .HasFilter("[CorrelationId] IS NOT NULL");
+
+                b.HasIndex(x => new { x.CorrelationId, x.JobType, x.Status })
+                 .IsUnique()
+                 .HasDatabaseName("IX_JobQueue_CorrelationDedup")
+                 .HasFilter("[CorrelationId] IS NOT NULL AND [Status] IN (0, 2)");
             });
             
             modelBuilder.Entity<ContentFileVersion>()
@@ -278,10 +283,13 @@ namespace GuideAntsApi.DataModel
             modelBuilder.Entity<NotebookConversationMessage>()
                 .HasIndex(m => new { m.NotebookConversationId, m.TurnIndex, m.MessageSequence });
 
-            // MessageAttachment unique index on (MessageId, NotebookFileId, OrderIndex)
+            // File-backed attachment uniqueness. Path-only attachments have a
+            // nullable NotebookFileId and are deduplicated by the persistence
+            // service on their normalized path.
             modelBuilder.Entity<MessageAttachment>()
                 .HasIndex(ma => new { ma.MessageId, ma.NotebookFileId })
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("[NotebookFileId] IS NOT NULL");
 
             modelBuilder.Entity<MessageAttachment>()
                 .HasIndex(ma => new { ma.MessageId, ma.OrderIndex })
@@ -302,6 +310,17 @@ namespace GuideAntsApi.DataModel
             modelBuilder.Entity<ConversationTurn>()
                 .Property(t => t.Status)
                 .HasDefaultValue("completed");
+
+            // Fenced stream writes use EF's implicit SaveChanges transaction. Treat the
+            // lifecycle fields as optimistic concurrency predicates so a worker cannot pass
+            // the active-turn read and then write after Stop or recovery changes the fence.
+            modelBuilder.Entity<ConversationTurn>()
+                .Property(t => t.Status)
+                .IsConcurrencyToken();
+
+            modelBuilder.Entity<ConversationTurn>()
+                .Property(t => t.ExecutionId)
+                .IsConcurrencyToken();
 
             modelBuilder.Entity<ConversationTurn>()
                 .Property(t => t.LastUpdated)

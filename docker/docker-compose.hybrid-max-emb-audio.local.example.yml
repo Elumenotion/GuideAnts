@@ -1,0 +1,14 @@
+# Example only — copy to docker-compose.hybrid-max-emb-audio.local.yml
+# to route embeddings + audiocpp (ASR/TTS) at a remote GuideAnts AI gateway
+# (Max) while keeping LLM, SD, media, and sandbox on local guideants-ai.
+#
+# Set GA_REMOTE_AUDIO_EMB_BASE_URL in docker/.env, e.g.
+#   GA_REMOTE_AUDIO_EMB_BASE_URL=http://192.168.0.111:8112
+services:
+  guideants-webapi-ui:
+    extra_hosts:
+      - "max:${GA_REMOTE_AUDIO_EMB_HOST_IP:-192.168.0.111}"
+    environment:
+      - LocalServiceHosts__EmbeddingsBaseUrl=${GA_REMOTE_AUDIO_EMB_BASE_URL}
+      - LocalServiceHosts__SpeechTranscriptionBaseUrl=${GA_REMOTE_AUDIO_EMB_BASE_URL}
+      - LocalServiceHosts__SpeechSynthesisBaseUrl=${GA_REMOTE_AUDIO_EMB_BASE_URL}

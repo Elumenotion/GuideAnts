@@ -584,7 +584,9 @@ describe('NotebookFolderTree extended coverage', () => {
       );
 
       await waitFor(() => {
-        expect(warnSpy).toHaveBeenCalledWith('File not found for path: missing/file.txt');
+        expect(warnSpy).toHaveBeenCalledWith(
+          'File not found for path: missing/file.txt; refreshing notebook files and retrying',
+        );
       });
       warnSpy.mockRestore();
     });

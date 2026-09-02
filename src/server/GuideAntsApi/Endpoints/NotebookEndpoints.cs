@@ -224,13 +224,9 @@ public static class NotebookEndpoints
         fileGroup.MapPost("/sync", async (
             Guid projectId,
             Guid notebookId,
-            INotebookFileSyncService syncService,
-            GuideAntsApi.BackgroundJobs.IJobQueueService jobQueue) =>
+            INotebookFileSyncService syncService) =>
         {
-
-await jobQueue.EnqueueAsync(
-                jobType: nameof(GuideAntsApi.BackgroundJobs.Jobs.SyncNotebookJob).Replace("Job", string.Empty),
-                payload: new GuideAntsApi.BackgroundJobs.Jobs.SyncNotebookJob(notebookId));
+            await syncService.QueueReconcileAsync(notebookId);
             return Results.NoContent();
         })
         .WithName("SyncNotebookFiles")

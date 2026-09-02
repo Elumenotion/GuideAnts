@@ -4,7 +4,7 @@ Companion to `00-orchestration.md`. Run after **Phase 2** and at **final accepta
 
 This gate proves the user-visible fix: files are **servable and listable** as soon as the
 chat turn completes, without waiting for the background `SyncNotebook` job (poll interval +
-full-notebook hash walk).
+metadata walk; SHA-256 only for new/changed/placeholder rows).
 
 ---
 

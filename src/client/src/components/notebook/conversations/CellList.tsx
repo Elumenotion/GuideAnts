@@ -87,6 +87,7 @@ function UserCellWrapper({
   getUserInfo,
   attachments,
   onPreviewFile,
+  onPreviewFileByPath,
   projectId,
   notebookId
 }: { 
@@ -96,6 +97,7 @@ function UserCellWrapper({
   getUserInfo: (userId?: string) => Promise<UserInfo | null>;
   attachments?: AttachedFile[];
   onPreviewFile?: (fileId: string) => void;
+  onPreviewFileByPath?: (relativePath: string) => void;
   projectId?: string;
   notebookId?: string;
 }) {
@@ -153,6 +155,7 @@ function UserCellWrapper({
       userEmail={userInfo?.email ?? message.userEmail}
       attachments={attachments}
       onPreviewFile={onPreviewFile}
+      onPreviewFileByPath={onPreviewFileByPath}
       projectId={projectId}
       notebookId={notebookId}
     />
@@ -759,8 +762,10 @@ const CellList = React.memo(function CellList({
         // Extract attachments from user message
         if (m.attachments && m.attachments.length > 0) {
           const attachedFiles: AttachedFile[] = m.attachments.map(att => ({
-            id: `${m.id}-${att.notebookFileId}`,
-            notebookFileId: att.notebookFileId,
+            id: `${m.id}-${att.notebookFileId ?? att.relativePath ?? att.fileName}`,
+            notebookFileId: att.notebookFileId ?? `path:${att.relativePath ?? att.fileName}`,
+            relativePath: att.relativePath,
+            uploadType: att.uploadType,
             fileName: att.fileName,
             fileType: att.fileType,
             fileSize: att.fileSize,
@@ -891,7 +896,10 @@ const CellList = React.memo(function CellList({
               // Get all non-user messages for workflow processing
               const workflowMessages = turn.allMessages.filter(m => m.role.toLowerCase() !== 'user');
               const finalAssistantMessage = turn.assistantMessages[turn.assistantMessages.length - 1];
-              const workflowOnlyMessages = workflowMessages.filter(m => m.id !== finalAssistantMessage?.id);
+              const finalAssistantHasToolCalls = (finalAssistantMessage?.toolCalls?.length ?? 0) > 0;
+              const workflowOnlyMessages = finalAssistantHasToolCalls
+                ? workflowMessages
+                : workflowMessages.filter(m => m.id !== finalAssistantMessage?.id);
               const isLastTurn = idx === groupedTurns.length - 1;
 
               return (
@@ -908,6 +916,7 @@ const CellList = React.memo(function CellList({
                         getUserInfo={getUserInfo}
                         attachments={turn.attachedFiles}
                         onPreviewFile={onPreviewFile}
+                        onPreviewFileByPath={onPreviewFileByPath}
                         projectId={projectId}
                         notebookId={contextNotebookId}
                       />
@@ -998,7 +1007,7 @@ const CellList = React.memo(function CellList({
                 value={draftUserContent}
                 onChange={onDraftChange}
                 onSend={handleSendDraft}
-                disabled={isStreaming}
+                isStreaming={isStreaming}
                 canEdit={true}
                 placeholder="Type your message..."
                 userId={currentUser?.id}

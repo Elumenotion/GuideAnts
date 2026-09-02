@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -19,6 +20,10 @@ from guideants_hf.catalog_download import download_catalog_entry_files, verify_r
 from guideants_hf.engine_process import format_engine_exit_error
 from guideants_hf.operations import find_in_flight_operation
 from ga_blocking import await_blocking
+from guideants_http.engine_failure import (
+    engine_rpc_exception_is_engine_failure,
+    wrapper_http_status_for_engine_exception,
+)
 from guideants_http.request_timeout import clamp_request_timeout_seconds, resolve_request_timeout_seconds
 
 import soundfile as sf
@@ -226,6 +231,9 @@ class AsrRuntimeState:
         self.warmup_error: str | None = None
         self.warmup_audio_path: str | None = None
         self.warmup_completed_at_utc: str | None = None
+        self.inference_failed: bool = False
+        self.inference_failed_reason: str | None = None
+        self.inference_failed_at_utc: str | None = None
 
     def is_loaded(self) -> bool:
         with self.lock:
@@ -246,6 +254,14 @@ class AsrRuntimeState:
                 "warmupError": self.warmup_error,
                 "warmupAudioPath": self.warmup_audio_path,
                 "warmupCompletedAtUtc": self.warmup_completed_at_utc,
+                "engineAlive": is_engine_process_alive(),
+                "enginePid": self.engine_process.pid if self.engine_process is not None else None,
+                "busy": TRANSCRIBE_IN_FLIGHT > 0 or self.loading or MODEL_LOAD_LOCK.locked(),
+                "inFlightTranscriptions": TRANSCRIBE_IN_FLIGHT,
+                "oldestInFlightAgeMs": oldest_in_flight_age_ms(),
+                "failed": self.inference_failed,
+                "failedReason": self.inference_failed_reason,
+                "failedAtUtc": self.inference_failed_at_utc,
             }
 
 
@@ -254,11 +270,96 @@ APP = FastAPI(title="GuideAnts ASR Service", version="2.0.0")
 MODEL_LOAD_LOCK = threading.Lock()
 MODEL_OPS_LOCK = threading.Lock()
 MODEL_DOWNLOAD_OPERATIONS: dict[str, dict[str, Any]] = {}
+TRANSCRIBE_IN_FLIGHT = 0
+TRANSCRIBE_IN_FLIGHT_LOCK = threading.Lock()
+TRANSCRIBE_IN_FLIGHT_STARTED: list[float] = []
 
 
 def is_engine_process_alive() -> bool:
     process = STATE.engine_process
     return process is not None and process.poll() is None
+
+
+def oldest_in_flight_age_ms() -> int | None:
+    with TRANSCRIBE_IN_FLIGHT_LOCK:
+        if not TRANSCRIBE_IN_FLIGHT_STARTED:
+            return None
+        oldest = min(TRANSCRIBE_IN_FLIGHT_STARTED)
+    return int((time.monotonic() - oldest) * 1000)
+
+
+def heartbeat_interval_seconds() -> float:
+    raw = os.getenv("GA_ASR_HEARTBEAT_SECONDS")
+    if not raw:
+        return 10.0
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return 10.0
+    return parsed if parsed > 0 else 10.0
+
+
+def run_with_sync_heartbeat(event: str, fields: dict[str, Any], work: Any) -> Any:
+    started = time.perf_counter()
+    interval = heartbeat_interval_seconds()
+    stop = threading.Event()
+
+    def _beat() -> None:
+        while not stop.wait(interval):
+            log_event(
+                event,
+                elapsedMs=int((time.perf_counter() - started) * 1000),
+                inFlight=TRANSCRIBE_IN_FLIGHT,
+                **fields,
+            )
+
+    thread = threading.Thread(target=_beat, name=f"{event}-heartbeat", daemon=True)
+    thread.start()
+    try:
+        return work()
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)
+
+
+def mark_inference_failed(reason: str) -> None:
+    with STATE.lock:
+        STATE.inference_failed = True
+        STATE.inference_failed_reason = reason
+        STATE.inference_failed_at_utc = utc_now_iso()
+    log_event(
+        "asr_engine_failed",
+        reason=reason,
+        modelRef=STATE.model_ref,
+        enginePid=STATE.engine_process.pid if STATE.engine_process is not None else None,
+        inFlightTranscriptions=TRANSCRIBE_IN_FLIGHT,
+        oldestInFlightAgeMs=oldest_in_flight_age_ms(),
+    )
+
+
+def clear_inference_failed() -> None:
+    with STATE.lock:
+        STATE.inference_failed = False
+        STATE.inference_failed_reason = None
+        STATE.inference_failed_at_utc = None
+
+
+@contextlib.contextmanager
+def track_transcription() -> Any:
+    global TRANSCRIBE_IN_FLIGHT
+    started = time.monotonic()
+    with TRANSCRIBE_IN_FLIGHT_LOCK:
+        TRANSCRIBE_IN_FLIGHT += 1
+        TRANSCRIBE_IN_FLIGHT_STARTED.append(started)
+    try:
+        yield
+    finally:
+        with TRANSCRIBE_IN_FLIGHT_LOCK:
+            TRANSCRIBE_IN_FLIGHT = max(0, TRANSCRIBE_IN_FLIGHT - 1)
+            try:
+                TRANSCRIBE_IN_FLIGHT_STARTED.remove(started)
+            except ValueError:
+                pass
 
 
 def get_model_dir() -> str:
@@ -579,6 +680,89 @@ def stop_engine() -> None:
     STATE.warmup_error = None
     STATE.warmup_audio_path = None
     STATE.warmup_completed_at_utc = None
+    STATE.inference_failed = False
+    STATE.inference_failed_reason = None
+    STATE.inference_failed_at_utc = None
+
+
+def restart_engine_on_failure_enabled() -> bool:
+    return env_flag("GA_ASR_RESTART_ON_FAILURE", default=True)
+
+
+def transcription_error_is_recoverable(exc: BaseException) -> bool:
+    return engine_rpc_exception_is_engine_failure(exc)
+
+
+def _restart_engine_process_locked(config: AsrEngineConfig, *, reason: str) -> None:
+    """Kill and respawn audiocpp_server. Caller must hold MODEL_LOAD_LOCK."""
+    previous = STATE.engine_process
+    previous_pid = previous.pid if previous is not None else None
+    log_event(
+        "asr_engine_restart_start",
+        modelRef=config.model_ref,
+        reason=reason,
+        previousPid=previous_pid,
+    )
+    stop_engine_process()
+    command = [config.server_path, "--config", config.config_path]
+    STATE.engine_process = subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=os.environ.copy(),
+    )
+    wait_for_engine_ready(config)
+    clear_inference_failed()
+    log_event(
+        "asr_engine_restart_success",
+        modelRef=config.model_ref,
+        reason=reason,
+        previousPid=previous_pid,
+        enginePid=STATE.engine_process.pid if STATE.engine_process is not None else None,
+    )
+
+
+def restart_engine_process(config: AsrEngineConfig, *, reason: str) -> None:
+    with MODEL_LOAD_LOCK:
+        _restart_engine_process_locked(config, reason=reason)
+
+
+def transcribe_via_engine_with_recovery(
+    config: AsrEngineConfig,
+    audio_path: str,
+    language: str | None = None,
+    request_timeout_seconds: int | None = None,
+) -> tuple[str, str | None]:
+    try:
+        return transcribe_via_engine(
+            config,
+            audio_path,
+            language,
+            request_timeout_seconds=request_timeout_seconds,
+        )
+    except Exception as exc:
+        if not engine_rpc_exception_is_engine_failure(exc):
+            raise
+        mark_inference_failed(f"{type(exc).__name__}: {exc}")
+        if not restart_engine_on_failure_enabled():
+            raise
+        log_event(
+            "asr_transcribe_recovering",
+            modelRef=config.model_ref,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        with MODEL_LOAD_LOCK:
+            _restart_engine_process_locked(
+                config,
+                reason=f"transcription_failure:{type(exc).__name__}",
+            )
+        return transcribe_via_engine(
+            config,
+            audio_path,
+            language,
+            request_timeout_seconds=request_timeout_seconds,
+        )
 
 
 def transcribe_via_engine(
@@ -604,7 +788,14 @@ def transcribe_via_engine(
         payload=payload,
     )
     if status_code != 200:
-        raise RuntimeError(f"audiocpp_server /v1/audio/transcriptions returned HTTP {status_code}.")
+        detail = parsed.get("error") if isinstance(parsed.get("error"), str) else None
+        if detail is None and isinstance(parsed.get("error"), dict):
+            nested = parsed["error"].get("message")
+            detail = str(nested) if nested is not None else None
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"audiocpp_server /v1/audio/transcriptions returned HTTP {status_code}{suffix}."
+        )
     text = str(parsed.get("text") or "")
     detected_language = parsed.get("language")
     if detected_language is not None:
@@ -720,6 +911,7 @@ def start_engine(request: LoadModelRequest) -> dict[str, Any]:
         STATE.config
         and STATE.config.model_path == model_path
         and is_engine_process_alive()
+        and not STATE.inference_failed
     ):
         return {
             "modelRef": STATE.model_ref,
@@ -757,6 +949,9 @@ def start_engine(request: LoadModelRequest) -> dict[str, Any]:
         STATE.warmup_error = warmup_details.get("warmupError")
         STATE.warmup_audio_path = warmup_details.get("warmupAudioPath")
         STATE.warmup_completed_at_utc = warmup_details.get("warmupCompletedAtUtc")
+        STATE.inference_failed = False
+        STATE.inference_failed_reason = None
+        STATE.inference_failed_at_utc = None
 
     return {
         "modelRef": model_ref,
@@ -940,6 +1135,15 @@ async def ready() -> JSONResponse:
                 **snapshot,
             },
         )
+    if snapshot.get("failed"):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ready": False,
+                "message": "ASR engine is in a failed state and must be recycled.",
+                **snapshot,
+            },
+        )
     return JSONResponse(status_code=200, content={"ready": True, **snapshot})
 
 
@@ -1028,6 +1232,52 @@ async def admin_unload(request: Request) -> JSONResponse:
         )
     finally:
         MODEL_LOAD_LOCK.release()
+
+
+class ReportEngineFailureRequest(BaseModel):
+    reason: str
+    requestId: str | None = None
+
+
+@APP.post("/admin/report-engine-failure")
+async def admin_report_engine_failure(
+    request: Request,
+    payload: ReportEngineFailureRequest,
+) -> JSONResponse:
+    """Mark the engine failed and recycle the process. GPU work does not stop on HTTP timeout."""
+    request_id = payload.requestId or request.headers.get("x-request-id", str(uuid.uuid4()))
+    reason = (payload.reason or "").strip() or "reported_engine_failure"
+    mark_inference_failed(reason)
+    config = STATE.config
+    if config is None or not restart_engine_on_failure_enabled():
+        return JSONResponse(
+            status_code=200,
+            content={"requestId": request_id, "ok": True, "action": "marked_failed", **STATE.snapshot()},
+        )
+    try:
+        restart_engine_process(config, reason=reason)
+        return JSONResponse(
+            status_code=200,
+            content={"requestId": request_id, "ok": True, "action": "restarted", **STATE.snapshot()},
+        )
+    except Exception as exc:
+        log_event(
+            "asr_engine_restart_failed",
+            requestId=request_id,
+            reason=reason,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "requestId": request_id,
+                "ok": False,
+                "error": "engine_restart_failed",
+                "message": str(exc),
+                **STATE.snapshot(),
+            },
+        )
 
 
 @APP.get("/admin/models")
@@ -1194,20 +1444,32 @@ async def transcribe(
         )
 
         def _run_transcribe() -> tuple[str, float, str | None, str]:
-            decoded_path_local = decode_audio_to_wav_16k_mono(temp_path)
-            duration_seconds_local = get_audio_duration_seconds(decoded_path_local)
-            with STATE.lock:
-                config_local = STATE.config
-                model_ref_local = STATE.model_ref
-            if config_local is None:
-                raise RuntimeError("ASR engine is not loaded.")
-            text_local, _detected_language_local = transcribe_via_engine(
-                config_local,
-                decoded_path_local,
-                language if language else None,
-                request_timeout_seconds=request_timeout_seconds,
+            def _work() -> tuple[str, float, str | None, str]:
+                with track_transcription():
+                    decoded_path_local = decode_audio_to_wav_16k_mono(temp_path)
+                    duration_seconds_local = get_audio_duration_seconds(decoded_path_local)
+                    with STATE.lock:
+                        config_local = STATE.config
+                        model_ref_local = STATE.model_ref
+                    if config_local is None:
+                        raise RuntimeError("ASR engine is not loaded.")
+                    text_local, _detected_language_local = transcribe_via_engine_with_recovery(
+                        config_local,
+                        decoded_path_local,
+                        language if language else None,
+                        request_timeout_seconds=request_timeout_seconds,
+                    )
+                    return text_local, duration_seconds_local, model_ref_local, decoded_path_local
+
+            return run_with_sync_heartbeat(
+                "asr_transcribe_heartbeat",
+                {
+                    "requestId": request_id,
+                    "modelRef": snapshot.get("modelRef"),
+                    "payloadSizeBucket": size_bucket,
+                },
+                _work,
             )
-            return text_local, duration_seconds_local, model_ref_local, decoded_path_local
 
         text, duration_seconds, model_ref, decoded_path = await await_blocking(_run_transcribe)
 
@@ -1240,11 +1502,12 @@ async def transcribe(
             errorType=type(exc).__name__,
             error=str(exc),
         )
+        status_code = wrapper_http_status_for_engine_exception(exc)
         return JSONResponse(
-            status_code=500,
+            status_code=status_code,
             content={
                 "requestId": request_id,
-                "error": "transcription_failed",
+                "error": "transcription_failed" if status_code >= 500 else "transcription_rejected",
                 "message": "Transcription failed. Check service logs for details.",
             },
         )

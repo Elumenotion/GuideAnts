@@ -17,7 +17,7 @@ deliverables are WAV files in `Output/`, the live voice path is untouched.
 ## Preflight
 
 ```bash
-python3 Output/Skills/audiocpp-tts-controls/scripts/preflight.py --for tts-controls
+python3 Skills/audiocpp-tts-controls/scripts/preflight.py --for tts-controls
 ```
 
 Trust its verdict over this document. `open: false` usually means no TTS model
@@ -28,8 +28,8 @@ is loaded — ask the user to load one via GuideAnts Settings → Local models.
 All via one script (engine model id auto-detected from the wrapper's health):
 
 ```bash
-python3 Output/Skills/audiocpp-tts-controls/scripts/engine_tool.py speech "Hello there" \
-  -o Output/out.wav \
+python3 Skills/audiocpp-tts-controls/scripts/engine_tool.py speech "Hello there" \
+  -o out.wav \
   [--seed 42]                       # deterministic, reproducible synthesis
   [--language de]                   # force spoken language (family-specific values)
   [--instructions "a calm, deep narrator voice"]   # voice design — vdes-task models only
@@ -48,7 +48,7 @@ Notes:
 ## Listing available voices
 
 ```bash
-python3 Output/Skills/audiocpp-tts-controls/scripts/engine_tool.py voices   # engine's cached/builtin ids
+python3 Skills/audiocpp-tts-controls/scripts/engine_tool.py voices   # engine's cached/builtin ids
 curl -s http://127.0.0.1:8084/admin/voice-pack   # wrapper's preset voice packs
 curl -s http://127.0.0.1:8084/admin/voices       # wrapper's builtin speaker list
 ```

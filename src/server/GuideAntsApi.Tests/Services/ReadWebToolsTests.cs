@@ -125,7 +125,7 @@ public sealed class ReadWebToolsTests
         var result = await ReadWebTools.GetContentFromUrl("https://example.com/page");
 
         result.Content.Should().Be(
-            "403 Forbidden. This host blocks unauthenticated access. Do not retry — use a different source or local files.");
+            "403 Forbidden. This host blocks unauthenticated access. Do not retry or issue another ReadWeb tool call for this invocation.");
         browser.CallCount.Should().Be(1);
 
         var excludedHosts = await _context.ExcludedHosts.ToListAsync();
@@ -150,7 +150,7 @@ public sealed class ReadWebToolsTests
         var result = await ReadWebTools.GetContentFromUrl("https://example.com/page");
 
         result.Content.Should().Be(
-            "Server error (5xx). You may retry once; if it fails again, use a different source.");
+            "Server error (5xx). Do not retry or issue another ReadWeb tool call for this invocation.");
         browser.CallCount.Should().Be(1);
         (await _context.ExcludedHosts.CountAsync()).Should().Be(0);
     }
@@ -171,7 +171,7 @@ public sealed class ReadWebToolsTests
         var result = await ReadWebTools.GetContentFromUrl("https://example.com/missing");
 
         result.Content.Should().Be(
-            "404 Not Found. This URL does not exist. Do not retry — fix the path or use local file search.");
+            "404 Not Found. This URL does not exist. Do not retry or issue another ReadWeb tool call for this invocation.");
         browser.CallCount.Should().Be(1);
         (await _context.ExcludedHosts.CountAsync()).Should().Be(0);
     }
@@ -264,7 +264,7 @@ public sealed class ReadWebToolsTests
         var result = await ReadWebTools.GetContentFromUrl("https://api.github.com/repos/example/example");
 
         result.Content.Should().Be(
-            "403 Forbidden. This host blocks unauthenticated access. Do not retry — use a different source or local files.");
+            "403 Forbidden. This host blocks unauthenticated access. Do not retry or issue another ReadWeb tool call for this invocation.");
         (await _context.ExcludedHosts.CountAsync()).Should().Be(0);
     }
 

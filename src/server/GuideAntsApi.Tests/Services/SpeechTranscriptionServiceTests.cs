@@ -63,6 +63,84 @@ public sealed class SpeechTranscriptionServiceTests
     }
 
     [TestMethod]
+    public async Task TranscribeAudioWithDurationAsync_LocalAsr_MicAudioWebm_SkipsMediaExtract()
+    {
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"text\":\"hello\",\"durationSeconds\":1,\"modelRef\":\"Qwen3-ASR-0.6B\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+
+        var storageRoot = Path.Combine(Path.GetTempPath(), "guideants-asr-webm-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(storageRoot);
+        try
+        {
+            var mediaClient = new Mock<IMediaExtractionClient>(MockBehavior.Strict);
+            var realVideoClassifier = new VideoAudioExtractionService(
+                Microsoft.Extensions.Options.Options.Create(new VideoAudioExtractionOptions
+                {
+                    AudioFormat = "mp3",
+                    AudioQuality = "2",
+                    TimeoutSeconds = 1800,
+                    MaxFileSizeMB = 2048
+                }),
+                mediaClient.Object,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["FileStorage:Path"] = storageRoot })
+                    .Build(),
+                NullLogger<VideoAudioExtractionService>.Instance);
+
+            var videoMock = new Mock<IVideoAudioExtractionService>();
+            videoMock
+                .Setup(x => x.IsVideoFileSupported(It.IsAny<string>(), It.IsAny<string>()))
+                .Returns((string fileName, string contentType) =>
+                    realVideoClassifier.IsVideoFileSupported(fileName, contentType));
+
+            using var httpClient = new HttpClient(handler);
+            var service = CreateService(
+                httpClient,
+                providerSection: LocalProviderSection,
+                azureOptions: new AzureSpeechServiceOptions
+                {
+                    Endpoint = "https://azure-speech.example.com",
+                    ApiKey = "test-key"
+                },
+                transcriptionOptions: new SpeechTranscriptionOptions { TimeoutSeconds = 120 },
+                localServiceHostsOptions: new LocalServiceHostsOptions
+                {
+                    SpeechTranscriptionBaseUrl = "http://max:8112",
+                    MediaBaseUrl = "http://guideants-ai:80"
+                },
+                videoService: videoMock);
+
+            await using var audio = new MemoryStream(new byte[1024]);
+            var result = await service.TranscribeAudioWithDurationAsync(
+                audio,
+                "recording.webm",
+                "audio/webm;codecs=opus");
+
+            result.Text.Should().Be("hello");
+            handler.LastRequestUri!.ToString().Should().Be("http://max:8112/asr/transcribe");
+            mediaClient.Verify(
+                x => x.ExtractAudioAsync(It.IsAny<MediaExtractionRequest>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+            videoMock.Verify(
+                x => x.ExtractAudioToTempFileAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+        finally
+        {
+            if (Directory.Exists(storageRoot))
+            {
+                Directory.Delete(storageRoot, recursive: true);
+            }
+        }
+    }
+
+    [TestMethod]
     public async Task TranscribeAudioWithDurationAsync_UsesAzureSpeechProvider_WhenModeSelectsAzure()
     {
         var handler = new CapturingHandler(_ =>

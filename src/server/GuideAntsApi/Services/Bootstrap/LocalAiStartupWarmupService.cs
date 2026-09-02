@@ -27,6 +27,13 @@ public interface ILocalAiStartupWarmupService
     Task<LocalServiceReconcileResult> PowerOffLocalServiceEngineAsync(
         string serviceId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Unload then reload the API-owned SpeechTranscription and SpeechSynthesis
+    /// selections on this stack. Used when a local transcribe/synthesize RPC
+    /// throws (timeout, transport, HTTP 5xx). Does not change which model is selected.
+    /// </summary>
+    Task RecycleSharedSpeechEnginesAsync(CancellationToken cancellationToken = default);
 }
 
 public enum LocalServiceReconcileOutcome
@@ -191,6 +198,31 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
 
     public Task<WarmupStatusDocument> GetStatusAsync(CancellationToken cancellationToken = default) =>
         _orchestrationClient.GetStatusAsync(cancellationToken);
+
+    public async Task RecycleSharedSpeechEnginesAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsOrchestrationConfigured())
+        {
+            _logger.LogWarning("asr_api_engine_recycle_skipped reason=orchestration_not_configured");
+            return;
+        }
+
+        var idleSpeech = new WarmupDesiredBuildOptions
+        {
+            ServiceDesiredOverrides = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [RoutedServiceNames.SpeechTranscription] = "idle",
+                [RoutedServiceNames.SpeechSynthesis] = "idle",
+            },
+        };
+
+        _logger.LogWarning("asr_tts_api_engine_recycle_start");
+        await SyncDesiredAndApplyAsync(idleSpeech, waitForCompletion: true, cancellationToken)
+            .ConfigureAwait(false);
+        await SyncDesiredAndApplyAsync(options: null, waitForCompletion: true, cancellationToken)
+            .ConfigureAwait(false);
+        _logger.LogWarning("asr_tts_api_engine_recycle_complete");
+    }
 
     public async Task<LocalServiceReconcileResult> PowerOffLocalServiceEngineAsync(
         string serviceId,

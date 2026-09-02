@@ -7,10 +7,17 @@ namespace GuideAntsApi.Services
 {
     public partial class NotebookImageService
     {
-        private async Task<byte[]?> GenerateImageViaAzureOpenAI(string prompt, string size, int n, string outputFormat, ServiceMode mode)
+        private async Task<byte[]?> GenerateImageViaAzureOpenAI(
+            string prompt,
+            string size,
+            int n,
+            string outputFormat,
+            ServiceMode mode,
+            CancellationToken cancellationToken)
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var endpoint = _configuration["AzureOpenAiImages:Endpoint"] ?? throw new Exception("Bad config");
                 var deployment = !string.IsNullOrWhiteSpace(mode.ModelId)
                     ? mode.ModelId.Trim()
@@ -45,8 +52,8 @@ namespace GuideAntsApi.Services
                     var json = JsonSerializer.Serialize(generationBody);
                     genRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                    var genResponse = await client.SendAsync(genRequest);
-                    var genResult = await genResponse.Content.ReadAsStringAsync();
+                    var genResponse = await client.SendAsync(genRequest, cancellationToken);
+                    var genResult = await genResponse.Content.ReadAsStringAsync(cancellationToken);
 
                     if (!genResponse.IsSuccessStatusCode)
                     {
@@ -57,6 +64,7 @@ namespace GuideAntsApi.Services
                         throw new InvalidOperationException($"Image API error {statusCode} {reason}: {apiError}");
                     }
 
+                    cancellationToken.ThrowIfCancellationRequested();
                     return await SaveResponseAndReturnBytes(genResult);
                 }
             }
@@ -78,8 +86,10 @@ namespace GuideAntsApi.Services
             byte[] imageBytes,
             string imageContentType,
             string imageFileName,
-            ServiceMode mode)
+            ServiceMode mode,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var endpoint = _configuration["AzureOpenAiImages:Endpoint"] ?? throw new InvalidOperationException("AzureOpenAiImages:Endpoint is not configured");
             var editDeployment = ReadServiceModePresetField(mode.RequestPresetJson, "EditModelDeployment")
                 ?? throw new InvalidOperationException(
@@ -118,8 +128,8 @@ namespace GuideAntsApi.Services
 
             request.Headers.Add("Api-Key", apiKey);
 
-            using var response = await client.SendAsync(request);
-            var result = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, cancellationToken);
+            var result = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -130,6 +140,7 @@ namespace GuideAntsApi.Services
                 throw new InvalidOperationException($"Image edits API error {statusCode} {reason}: {apiError}");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             return await SaveResponseAndReturnBytes(result);
         }
     }

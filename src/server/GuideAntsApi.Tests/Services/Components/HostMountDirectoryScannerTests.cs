@@ -4,6 +4,7 @@ using GuideAntsApi.Services.Components;
 namespace GuideAntsApi.Tests.Services.Components;
 
 [TestClass]
+[DoNotParallelize]
 public class HostMountDirectoryScannerTests
 {
     private string _root = null!;

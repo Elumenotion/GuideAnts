@@ -127,6 +127,44 @@ describe('conversation reducer', () => {
     expect(cleared.pendingAttachments).toEqual([]);
   });
 
+  it('replaces pending attachments and skips duplicate ids or normalized paths', () => {
+    const first = {
+      notebookFileId: 'file-1',
+      relativePath: 'Data/report.csv',
+      fileName: 'report.csv',
+      uploadType: 'text',
+    };
+    const withFirst = reducer(initialState, { type: 'ADD_ATTACHMENT', payload: first });
+    const duplicateId = reducer(withFirst, {
+      type: 'ADD_ATTACHMENT',
+      payload: { ...first, relativePath: 'other/report.csv' },
+    });
+    const duplicatePath = reducer(duplicateId, {
+      type: 'ADD_ATTACHMENT',
+      payload: {
+        ...first,
+        notebookFileId: 'path:Data/report.csv',
+        relativePath: '\\data\\REPORT.csv',
+      },
+    });
+
+    expect(duplicatePath.pendingAttachments).toHaveLength(1);
+
+    const replacement = reducer(duplicatePath, {
+      type: 'SET_ATTACHMENTS',
+      payload: [{
+        notebookFileId: 'file-2',
+        fileName: 'audio.mp3',
+        uploadType: 'audio',
+      }],
+    });
+    expect(replacement.pendingAttachments).toEqual([{
+      notebookFileId: 'file-2',
+      fileName: 'audio.mp3',
+      uploadType: 'audio',
+    }]);
+  });
+
   it('records tool errors on the active turn', () => {
     const state = withTurn(initialState);
     const timestamp = new Date('2026-01-01T00:00:00Z');
@@ -213,7 +251,7 @@ describe('conversation reducer', () => {
     };
 
     const next = reducer(
-      { ...initialState, messages: [streamingMessage], selectedAssistant: 'Guide' },
+      { ...initialState, isStreaming: true, messages: [streamingMessage], selectedAssistant: 'Guide' },
       { type: 'APPEND_TOKEN', payload: JSON.stringify({ contentDelta: ' world' }) }
     );
 
@@ -331,15 +369,27 @@ describe('conversation reducer', () => {
     expect(next).toBe(initialState);
   });
 
+  it('ignores APPEND_TOKEN when not streaming', () => {
+    const next = reducer(
+      { ...initialState, selectedAssistant: 'Guide' },
+      { type: 'APPEND_TOKEN', payload: 'orphan token' }
+    );
+    expect(next.messages).toHaveLength(0);
+    expect(next.isStreaming).toBe(false);
+  });
+
   it('throws when creating a streaming cell without a selected assistant', () => {
     expect(() =>
-      reducer(initialState, { type: 'APPEND_TOKEN', payload: 'orphan token' })
+      reducer(
+        { ...initialState, isStreaming: true },
+        { type: 'APPEND_TOKEN', payload: 'orphan token' }
+      )
     ).toThrow('No assistant selected');
   });
 
   it('creates a streaming assistant cell when appending the first token', () => {
     const next = reducer(
-      { ...initialState, selectedAssistant: 'Guide' },
+      { ...initialState, isStreaming: true, selectedAssistant: 'Guide' },
       { type: 'APPEND_TOKEN', payload: 'First token' }
     );
 
@@ -503,7 +553,7 @@ describe('conversation reducer', () => {
       assistantName: 'Guide',
     };
 
-    const base = { ...initialState, messages: [streamingMessage] };
+    const base = { ...initialState, isStreaming: true, messages: [streamingMessage] };
     const next = reducer(base, { type: 'APPEND_TOKEN', payload: JSON.stringify({ contentDelta: '' }) });
     expect(next).toBe(base);
   });
@@ -518,7 +568,7 @@ describe('conversation reducer', () => {
       assistantName: 'Guide',
     };
 
-    const baseState = withTurn({ ...initialState, messages: [streamingMessage] });
+    const baseState = withTurn({ ...initialState, isStreaming: true, messages: [streamingMessage] });
     const pendingClear = {
       ...baseState,
       currentTurn: {

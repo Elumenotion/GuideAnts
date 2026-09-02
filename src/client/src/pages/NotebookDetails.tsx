@@ -71,12 +71,25 @@ function NotebookDetailsContent() {
     
     const [fileToPreview, setFileToPreview] = useState<NotebookFileDto | null>(null);
 
-    // Use polling hook to get folder tree for file-by-path lookup
-    const { folderTree, lastUpdated: fileTreeLastUpdated } = useNotebookFilesPolling({
+    // Use polling hook to get folder tree for file-by-path lookup (pills / preview).
+    // Must listen for refresh-notebook-files — loadNotebookFiles alone does not update this instance.
+    const {
+        folderTree,
+        lastUpdated: fileTreeLastUpdated,
+        refresh: refreshNotebookFilesForPreview,
+    } = useNotebookFilesPolling({
         projectId: projectId || '',
         notebookId: notebookId || '',
         enabled: Boolean(projectId && notebookId),
     });
+
+    useEffect(() => {
+        const handler = () => {
+            try { refreshNotebookFilesForPreview(); } catch { /* ignore */ }
+        };
+        window.addEventListener('refresh-notebook-files', handler);
+        return () => window.removeEventListener('refresh-notebook-files', handler);
+    }, [refreshNotebookFilesForPreview]);
 
     // Keep project file picker current (ProjectContext tree is a one-shot load)
     const { folderTree: polledProjectFolderTree } = useProjectFilesPolling({
@@ -719,15 +732,35 @@ function NotebookDetailsContent() {
         return null;
     }, []);
 
-    // Handler for previewing a file by its relative path (for turn file pills)
+    // Handler for previewing a file by its relative path (for turn file pills).
+    // After a turn, pills appear from turn metadata before the tree refresh lands —
+    // refresh and retry so double-click preview works immediately.
     const handlePreviewFileByPath = useCallback((relativePath: string) => {
         const file = findFileByPath(folderTree, relativePath);
         if (file) {
             handlePreviewFile(file);
-        } else {
-            console.warn(`File not found for path: ${relativePath}`);
+            return;
         }
-    }, [folderTree, findFileByPath]);
+
+        console.warn(`File not found for path: ${relativePath}; refreshing notebook files and retrying`);
+        refreshNotebookFilesForPreview();
+
+        let attempts = 0;
+        const retry = () => {
+            attempts += 1;
+            const retried = findFileByPath(folderTreeRef.current, relativePath);
+            if (retried) {
+                handlePreviewFile(retried);
+                return;
+            }
+            if (attempts < 5) {
+                window.setTimeout(retry, 300);
+                return;
+            }
+            console.warn(`File still not found for path after refresh: ${relativePath}`);
+        };
+        window.setTimeout(retry, 300);
+    }, [folderTree, findFileByPath, refreshNotebookFilesForPreview]);
 
     // Handle navigation from within the preview overlay (e.g., clicking links in HTML)
     const handlePreviewNavigate = useCallback((path: string) => {

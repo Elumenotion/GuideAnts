@@ -20,8 +20,15 @@ public class ConversationLock
     public NotebookConversation NotebookConversation { get; set; } = null!;
 
     /// <summary>
+    /// Unpredictable lease identity used to fence stale workers after expiration or reacquisition.
+    /// Display names are not ownership credentials and must never be used for release or renewal.
+    /// </summary>
+    [Required]
+    public Guid LeaseId { get; set; } = Guid.NewGuid();
+
+    /// <summary>
     /// Display name of the user holding the lock (denormalized for performance).
-    /// Used for both display in UI and for comparison to determine if current user owns the lock.
+    /// Used for display only; ownership is determined by <see cref="LeaseId"/>.
     /// </summary>
     [Required]
     [StringLength(255)]

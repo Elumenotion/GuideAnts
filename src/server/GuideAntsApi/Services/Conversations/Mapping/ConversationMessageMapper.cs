@@ -103,14 +103,7 @@ public static class ConversationMessageMapper
 
         var attachments = m.Attachments?
             .OrderBy(a => a.OrderIndex)
-            .Select(a => new AttachedFileDto(
-                a.NotebookFileId,
-                Path.GetFileName(a.NotebookFile?.RelativePath ?? "unknown"),
-                DetermineFileTypeString(a.NotebookFile?.RelativePath ?? string.Empty),
-                a.NotebookFile?.FileSize ?? 0,
-                null,
-                a.Type
-            ))
+            .Select(a => MessageAttachmentProjector.ToAttachedFileDto(a))
             .ToList() ?? [];
 
         return new MessageDto(

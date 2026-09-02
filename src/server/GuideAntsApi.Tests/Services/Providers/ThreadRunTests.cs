@@ -5,6 +5,7 @@ using AntRunner.Chat;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.LlamaCpp;
 using AntRunner.ToolCalling;
+using AntRunner.ToolCalling.AssistantDefinitions;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -529,6 +530,34 @@ public sealed class ThreadRunTests
 
         messages.Should().ContainSingle(m => m.Role == ChatRole.Tool);
         messages[0].GetText().Should().Contain("Tool execution limit reached");
+    }
+
+    [TestMethod]
+    public async Task CollectToolOutputsAfterCancelAsync_does_not_wait_forever_for_a_tool()
+    {
+        var neverCompletes = new TaskCompletionSource<ToolOutput>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var toolCall = new ChatToolCall
+        {
+            Id = "call-hung",
+            Type = "function",
+            Function = new ChatToolCallFunction
+            {
+                Name = "slow_tool",
+                Arguments = System.Text.Json.JsonSerializer.SerializeToElement(new { })
+            }
+        };
+
+        var collection = Invoke<Task<ToolOutput[]>>(
+            "CollectToolOutputsAfterCancelAsync",
+            new List<Task<ToolOutput>> { neverCompletes.Task },
+            new List<ChatToolCall> { toolCall });
+
+        var outputs = await collection.WaitAsync(TimeSpan.FromSeconds(2));
+
+        outputs.Should().ContainSingle();
+        outputs[0].ToolCallId.Should().Be("call-hung");
+        outputs[0].Output.Should().Be("ERROR: Operation was cancelled");
     }
 
     [TestMethod]

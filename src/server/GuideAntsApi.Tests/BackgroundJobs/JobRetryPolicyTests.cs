@@ -74,5 +74,47 @@ public sealed class JobRetryPolicyTests
                 now,
                 TimeSpan.FromMinutes(2))
             .Should().BeFalse();
+
+        policy.CanRetry(
+                JobFailureClass.PermanentInvalidInput,
+                attemptsAfterFailure: 1,
+                maxAttempts: 40,
+                created,
+                now,
+                TimeSpan.FromMinutes(2))
+            .Should().BeFalse();
+
+        policy.CanRetry(
+                JobFailureClass.ShutdownCancellation,
+                attemptsAfterFailure: 1,
+                maxAttempts: 40,
+                created,
+                now,
+                TimeSpan.FromMinutes(2))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void CanRetry_DependencyNotReadyAndLeaseOwnershipLost_CanRetryWithinBudget()
+    {
+        var policy = CreatePolicy();
+        var created = DateTime.UtcNow;
+        var now = created.AddMinutes(1);
+        var delay = TimeSpan.FromMinutes(2);
+
+        policy.CanRetry(JobFailureClass.DependencyNotReady, 1, 40, created, now, delay)
+            .Should().BeTrue();
+
+        policy.CanRetry(JobFailureClass.LeaseOwnershipLost, 1, 40, created, now, delay)
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void BurnsAttemptBudget_OnlyCountsHandlerFailures()
+    {
+        JobRetryPolicy.BurnsAttemptBudget(JobFailureClass.RetryableTransient).Should().BeTrue();
+        JobRetryPolicy.BurnsAttemptBudget(JobFailureClass.DependencyNotReady).Should().BeTrue();
+        JobRetryPolicy.BurnsAttemptBudget(JobFailureClass.LeaseOwnershipLost).Should().BeFalse();
+        JobRetryPolicy.BurnsAttemptBudget(JobFailureClass.ShutdownCancellation).Should().BeFalse();
     }
 }

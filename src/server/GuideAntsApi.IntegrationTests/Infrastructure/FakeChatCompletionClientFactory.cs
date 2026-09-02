@@ -12,12 +12,14 @@ internal enum FakeChatScenario
 {
     Default,
     SlowCancellableStream,
+    NonCooperativeStream,
     ToolCallsCancelBeforeExecution,
     ToolCallThenReply,
     ThinkingStream,
     LongThinkingStream,
     RepeatedToolCalls,
     PartialTimeoutStream,
+    NestedAgentBlocking,
 }
 
 internal sealed class FakeChatCompletionBehavior
@@ -31,6 +33,13 @@ internal sealed class FakeChatCompletionBehavior
     public string ThinkingText { get; set; } = "integration reasoning step";
     public string ToolCallId { get; set; } = "call_integration_test";
     public string ToolFunctionName { get; set; } = "IntegrationTestTool";
+    public string ToolArgumentsJson { get; set; } = """{"query":"integration"}""";
+    public TaskCompletionSource<bool> NestedCompletionStarted { get; private set; } = CreateSignal();
+    public TaskCompletionSource<bool> NestedCompletionCancelled { get; private set; } = CreateSignal();
+    public TaskCompletionSource<bool> NonCooperativeStreamStarted { get; private set; } = CreateSignal();
+    public TaskCompletionSource<bool> NonCooperativeStreamRelease { get; private set; } = CreateSignal();
+    public TaskCompletionSource<bool> SlowStreamFirstChunkEmitted { get; private set; } = CreateSignal();
+    public IReadOnlyList<ChatMessage>? LastRequestMessages { get; private set; }
 
     /// <summary>
     /// Invoked synchronously immediately before a tool_calls response is returned.
@@ -44,6 +53,8 @@ internal sealed class FakeChatCompletionBehavior
     public int NextCallIndex() => Interlocked.Increment(ref _callIndex);
 
     public int ToolChoiceNoneRequestCount => Volatile.Read(ref _toolChoiceNoneRequestCount);
+
+    public int RepeatedToolCallCount => Volatile.Read(ref _callIndex);
 
     public void RecordToolChoiceRequest(string? toolChoice)
     {
@@ -62,10 +73,25 @@ internal sealed class FakeChatCompletionBehavior
         ThinkingText = "integration reasoning step";
         ToolCallId = "call_integration_test";
         ToolFunctionName = "IntegrationTestTool";
+        ToolArgumentsJson = """{"query":"integration"}""";
+        NestedCompletionStarted = CreateSignal();
+        NestedCompletionCancelled = CreateSignal();
+        NonCooperativeStreamStarted = CreateSignal();
+        NonCooperativeStreamRelease = CreateSignal();
+        SlowStreamFirstChunkEmitted = CreateSignal();
         OnToolCallsReturning = null;
+        LastRequestMessages = null;
         Interlocked.Exchange(ref _callIndex, 0);
         Interlocked.Exchange(ref _toolChoiceNoneRequestCount, 0);
     }
+
+    private static TaskCompletionSource<bool> CreateSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public void SignalNestedCompletionStarted() => NestedCompletionStarted.TrySetResult(true);
+
+    public void CaptureRequest(ChatCompletionRequest request) =>
+        LastRequestMessages = request.Messages.ToList();
 }
 
 internal sealed class FakeChatCompletionClientFactory : IChatCompletionClientFactory
@@ -93,6 +119,12 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
         ChatCompletionRequest request,
         CancellationToken cancellationToken = default)
     {
+        _behavior.CaptureRequest(request);
+        if (_behavior.Scenario == FakeChatScenario.NestedAgentBlocking)
+        {
+            return WaitForNestedCompletionAsync(cancellationToken);
+        }
+
         return Task.FromResult(CreateDefaultResponse());
     }
 
@@ -101,17 +133,47 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
         Action<ChatCompletionChunk> onChunk,
         CancellationToken cancellationToken = default)
     {
+        _behavior.CaptureRequest(request);
         return _behavior.Scenario switch
         {
             FakeChatScenario.SlowCancellableStream => SlowCancellableStreamAsync(onChunk, cancellationToken),
+            FakeChatScenario.NonCooperativeStream => NonCooperativeStreamAsync(onChunk),
             FakeChatScenario.ToolCallsCancelBeforeExecution => ToolCallsCancelBeforeExecutionAsync(onChunk),
             FakeChatScenario.ToolCallThenReply => ToolCallThenReplyAsync(onChunk, cancellationToken),
             FakeChatScenario.ThinkingStream => ThinkingStreamAsync(onChunk, cancellationToken),
             FakeChatScenario.LongThinkingStream => LongThinkingStreamAsync(onChunk, cancellationToken),
             FakeChatScenario.RepeatedToolCalls => RepeatedToolCallsAsync(request, onChunk),
             FakeChatScenario.PartialTimeoutStream => PartialTimeoutStreamAsync(onChunk, cancellationToken),
+            FakeChatScenario.NestedAgentBlocking => NestedAgentBlockingStreamAsync(onChunk),
             _ => DefaultStreamAsync(onChunk)
         };
+    }
+
+    private Task<ChatCompletionResponse> NestedAgentBlockingStreamAsync(
+        Action<ChatCompletionChunk> onChunk)
+    {
+        onChunk(new ChatCompletionChunk(
+        [
+            new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, "Reading the web page."), null)
+        ]));
+        return Task.FromResult(CreateToolCallsResponse());
+    }
+
+    private async Task<ChatCompletionResponse> WaitForNestedCompletionAsync(
+        CancellationToken cancellationToken)
+    {
+        _behavior.SignalNestedCompletionStarted();
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _behavior.NestedCompletionCancelled.TrySetResult(true);
+            throw;
+        }
+
+        return CreateDefaultResponse();
     }
 
     private Task<ChatCompletionResponse> DefaultStreamAsync(Action<ChatCompletionChunk> onChunk)
@@ -135,10 +197,26 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
             [
                 new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, word + " "), null)
             ]));
+            _behavior.SlowStreamFirstChunkEmitted.TrySetResult(true);
             await Task.Delay(_behavior.ChunkDelayMs, cancellationToken);
         }
 
         return CreateResponse(_behavior.SlowStreamText, finishReason: "stop");
+    }
+
+    private async Task<ChatCompletionResponse> NonCooperativeStreamAsync(
+        Action<ChatCompletionChunk> onChunk)
+    {
+        _behavior.NonCooperativeStreamStarted.TrySetResult(true);
+        onChunk(new ChatCompletionChunk(
+        [
+            new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, "Provider ignored cancellation."), null)
+        ]));
+
+        // Deliberately ignore the worker token. The engine must let the cancellation request win
+        // when this provider eventually returns a normal response.
+        await _behavior.NonCooperativeStreamRelease.Task;
+        return CreateResponse("Provider completed after cancellation.", finishReason: "stop");
     }
 
     private Task<ChatCompletionResponse> ToolCallsCancelBeforeExecutionAsync(Action<ChatCompletionChunk> onChunk)
@@ -291,6 +369,7 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
 
     private ChatCompletionResponse CreateToolCallsResponse(int callIndex = 1)
     {
+        using var argumentsDocument = JsonDocument.Parse(_behavior.ToolArgumentsJson);
         var toolCallId = _behavior.Scenario == FakeChatScenario.RepeatedToolCalls
             ? $"{_behavior.ToolCallId}_{callIndex}"
             : _behavior.ToolCallId;
@@ -302,7 +381,7 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
             Function = new ChatToolCallFunction
             {
                 Name = _behavior.ToolFunctionName,
-                Arguments = JsonSerializer.SerializeToElement(new { query = "integration" })
+                Arguments = argumentsDocument.RootElement.Clone()
             }
         };
 

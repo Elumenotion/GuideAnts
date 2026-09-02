@@ -1,6 +1,7 @@
-import type { MessageDto, EnhancedConversationState, StreamingProgress, StreamingMessage, StreamingToolActivity, StreamingToolResult } from '../../types/conversation';
+import type { MessageDto, EnhancedConversationState, StreamingProgress, StreamingMessage, StreamingToolActivity, StreamingToolResult, PendingAttachment } from '../../types/conversation';
 import type { ActionType, ExtendedConversationState, StreamingMode } from './types';
 import { generateTurnId, appendAssistantStepChunk, convertTurnToMessages, calculateStreamingProgress } from './streamingHelpers';
+import { normalizeRelativePath } from '../../utils/attachments';
 
 export const initialState: EnhancedConversationState = {
   messages: [],
@@ -86,6 +87,9 @@ export function reducer(state: ExtendedConversationState, action: ActionType): E
     case 'SET_DRAFT':
       return { ...state, draftUserContent: action.payload };
 
+    case 'SET_ATTACHMENTS':
+      return { ...state, pendingAttachments: [...(action.payload || [])] };
+
     case 'SET_EDITING':
       return { ...state, editingAssistantId: action.payload };
 
@@ -127,6 +131,11 @@ export function reducer(state: ExtendedConversationState, action: ActionType): E
       return { ...state, streamingError: action.payload };
 
     case 'APPEND_TOKEN': {
+      if (!state.isStreaming) {
+        console.warn('APPEND_TOKEN ignored: conversation is not streaming');
+        return state;
+      }
+
       let parsedPayload = action.payload;
       if (typeof action.payload === 'string') {
         try {
@@ -575,8 +584,30 @@ export function reducer(state: ExtendedConversationState, action: ActionType): E
       };
     }
 
-    case 'ADD_ATTACHMENT':
-      return { ...state, pendingAttachments: [...(state.pendingAttachments || []), action.payload] };
+    case 'ADD_ATTACHMENT': {
+      const pendingAttachments = state.pendingAttachments || [];
+      const candidate = action.payload as PendingAttachment;
+      const normalizedPath = candidate.relativePath
+        ? normalizeRelativePath(candidate.relativePath)
+        : '';
+      const isDuplicate = pendingAttachments.some(existing => {
+        if (existing.notebookFileId
+          && candidate.notebookFileId
+          && existing.notebookFileId.toLowerCase() === candidate.notebookFileId.toLowerCase()) {
+          return true;
+        }
+
+        return Boolean(normalizedPath)
+          && Boolean(existing.relativePath)
+          && normalizeRelativePath(existing.relativePath!).toLowerCase() === normalizedPath.toLowerCase();
+      });
+
+      if (isDuplicate) {
+        return state;
+      }
+
+      return { ...state, pendingAttachments: [...pendingAttachments, candidate] };
+    }
 
     case 'REMOVE_ATTACHMENT':
       return { ...state, pendingAttachments: (state.pendingAttachments || []).filter(a => a.notebookFileId !== action.payload) };

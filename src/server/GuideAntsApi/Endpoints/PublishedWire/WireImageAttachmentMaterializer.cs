@@ -1,4 +1,5 @@
 using GuideAntsApi.Models.Conversations;
+using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Components;
 using Microsoft.AspNetCore.Http;
 

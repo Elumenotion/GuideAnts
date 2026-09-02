@@ -626,9 +626,15 @@ Update both final stages plus `entrypoint.sh`:
 
 1. Add binaries/install steps
 2. Start/monitor process in `entrypoint.sh`
-3. Update gateway route prefix mapping in `nginx.conf`
-4. Update `EXPOSE` / health checks
-5. Update compose port mappings as needed
+3. Update gateway route prefix mapping in `nginx.conf.template` (rendered to
+   `/etc/nginx/nginx.conf` at container start from `GA_NGINX_ASR_CLIENT_MAX_BODY_SIZE`
+   in `docker/.env`).
+4. For routes that accept large multipart uploads (ASR `/asr/transcribe`), keep a
+   location-level `client_max_body_size` placeholder in the template. Compose default
+   is `300m`, matching the webapi ASR forward cap; raise via
+   `GA_NGINX_ASR_CLIENT_MAX_BODY_SIZE` when needed.
+5. Update `EXPOSE` / health checks
+6. Update compose port mappings as needed
 
 ## Key Constraints and Decisions
 

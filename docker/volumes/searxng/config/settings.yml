@@ -321,6 +321,49 @@ engines:
     engine: yahoo
     shortcut: yh
 
+  - name: brave
+    engine: brave
+    shortcut: br
+    time_range_support: true
+    paging: true
+    categories: [general, web]
+    brave_category: search
+
+  - name: bing images
+    engine: bing_images
+    shortcut: bii
+    categories: [images]
+
+  - name: duckduckgo images
+    engine: duckduckgo_extra
+    categories: [images]
+    ddg_category: images
+    shortcut: ddi
+
+  - name: startpage images
+    engine: startpage
+    startpage_categ: images
+    categories: [images, web]
+    shortcut: spi
+
+  - name: brave.images
+    engine: brave
+    network: brave
+    shortcut: brimg
+    categories: [images, web]
+    brave_category: images
+
+  - name: openverse
+    engine: openverse
+    categories: [images]
+    shortcut: opv
+
+  - name: wikicommons.images
+    engine: wikicommons
+    shortcut: wci
+    categories: [images]
+    wc_search_type: image
+
 # Doku engine lets you access to any Doku wiki instance:
 # A public one or a privete/corporate one.
 #  - name: ubuntuwiki

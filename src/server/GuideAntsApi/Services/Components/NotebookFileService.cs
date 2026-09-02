@@ -189,33 +189,27 @@ using var scope2 = CreateDbScope();
 
         var mountKey = mount.MountId.ToString("N");
         var cacheKey = HostMountListingCache.LevelKey(mountKey, normalizedPath);
-        HostMountDirectoryScanner.ScanResult scanResult;
-        if (HostMountListingCache.TryGet(cacheKey, out var cached))
-        {
-            _logger.LogDebug(
-                "Host mount listing cache_hit for notebook {NotebookId} path {Path}",
-                notebookId,
-                normalizedPath);
-            scanResult = cached;
-        }
-        else
-        {
-            scanResult = HostMountDirectoryScanner.ListLevel(
-                mount.LinkPhysicalPath,
-                mount.LinkRelativePath,
-                withinMount,
-                _linkedMountTreeMaxFiles,
-                _linkedMountTreeScanBudget,
-                _logger);
-            HostMountListingCache.Set(cacheKey, scanResult, _linkedMountTreeCacheTtl);
-            _logger.LogInformation(
-                "Host mount lazy_list for notebook {NotebookId} path {Path} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
-                notebookId,
-                normalizedPath,
-                scanResult.Files.Count,
-                scanResult.Directories.Count,
-                scanResult.WasTruncated);
-        }
+        var scanResult = HostMountListingCache.GetOrAdd(
+            cacheKey,
+            () =>
+            {
+                var listed = HostMountDirectoryScanner.ListLevel(
+                    mount.LinkPhysicalPath,
+                    mount.LinkRelativePath,
+                    withinMount,
+                    _linkedMountTreeMaxFiles,
+                    _linkedMountTreeScanBudget,
+                    _logger);
+                _logger.LogInformation(
+                    "Host mount lazy_list for notebook {NotebookId} path {Path} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
+                    notebookId,
+                    normalizedPath,
+                    listed.Files.Count,
+                    listed.Directories.Count,
+                    listed.WasTruncated);
+                return listed;
+            },
+            _linkedMountTreeCacheTtl);
 
         var folders = scanResult.Directories
             .Where(d => !IsInResourcesFolder(d.RelativePath) && !IsInGuideantsFolder(d.RelativePath))
@@ -572,42 +566,36 @@ using var scope = CreateDbScope();
         {
             var mountKey = root.MountId.ToString("N");
             var cacheKey = HostMountListingCache.ShallowKey(mountKey);
-            HostMountDirectoryScanner.ScanResult scanResult;
-            if (HostMountListingCache.TryGet(cacheKey, out var cached))
-            {
-                _logger.LogDebug(
-                    "Host mount shallow cache_hit for notebook {NotebookId} mount {MountId}",
-                    notebookId,
-                    root.MountId);
-                scanResult = cached;
-            }
-            else
-            {
-                scanResult = HostMountDirectoryScanner.Scan(
-                    [new HostMountDirectoryScanner.MountRoot(root.LinkRelativePath, root.LinkPhysicalPath)],
-                    _linkedMountTreeMaxFiles,
-                    _linkedMountTreeMaxDepth,
-                    _linkedMountTreeScanBudget,
-                    _logger);
-                HostMountListingCache.Set(cacheKey, scanResult, _linkedMountTreeCacheTtl);
-                _logger.LogInformation(
-                    "Host mount shallow_scan for notebook {NotebookId} mount {MountId} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
-                    notebookId,
-                    root.MountId,
-                    scanResult.Files.Count,
-                    scanResult.Directories.Count,
-                    scanResult.WasTruncated);
-
-                if (scanResult.WasTruncated)
+            var scanResult = HostMountListingCache.GetOrAdd(
+                cacheKey,
+                () =>
                 {
-                    _logger.LogWarning(
-                        "Linked mount tree enumeration was truncated for notebook {NotebookId} mount {MountId} (maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
-                        notebookId,
-                        root.MountId,
+                    var scanned = HostMountDirectoryScanner.Scan(
+                        [new HostMountDirectoryScanner.MountRoot(root.LinkRelativePath, root.LinkPhysicalPath)],
                         _linkedMountTreeMaxFiles,
                         _linkedMountTreeMaxDepth,
-                        (int)_linkedMountTreeScanBudget.TotalMilliseconds);
-                }
+                        _linkedMountTreeScanBudget,
+                        _logger);
+                    _logger.LogInformation(
+                        "Host mount shallow_scan for notebook {NotebookId} mount {MountId} (files={FileCount}, dirs={DirCount}, truncated={Truncated})",
+                        notebookId,
+                        root.MountId,
+                        scanned.Files.Count,
+                        scanned.Directories.Count,
+                        scanned.WasTruncated);
+                    return scanned;
+                },
+                _linkedMountTreeCacheTtl);
+
+            if (scanResult.WasTruncated)
+            {
+                _logger.LogWarning(
+                    "Linked mount tree enumeration was truncated for notebook {NotebookId} mount {MountId} (maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
+                    notebookId,
+                    root.MountId,
+                    _linkedMountTreeMaxFiles,
+                    _linkedMountTreeMaxDepth,
+                    (int)_linkedMountTreeScanBudget.TotalMilliseconds);
             }
 
             if (seenDirs.Add(root.LinkRelativePath))

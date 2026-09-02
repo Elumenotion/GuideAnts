@@ -113,7 +113,8 @@ public sealed class ProjectScheduledJobExecutorTests
                 It.IsAny<string>(),
                 "guideants-ai",
                 ScriptType.Python,
-                It.IsAny<InvocationContext>()))
+                It.IsAny<InvocationContext>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(scriptResult);
 
         var executor = new ProjectScheduledJobExecutor(

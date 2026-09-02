@@ -137,7 +137,7 @@ public sealed class ContextOptionsServiceDeepTests
             }
         };
 
-        var message = service.BuildPublishedContextMessage(assistant, Guid.NewGuid(), notebookId);
+        var message = await service.BuildPublishedContextMessageAsync(assistant, Guid.NewGuid(), notebookId);
 
         var contextOptions = ParseContextOptions(message);
         contextOptions.Should().ContainKey("files");
@@ -166,7 +166,7 @@ public sealed class ContextOptionsServiceDeepTests
             }
         };
 
-        var message = service.BuildPublishedContextMessage(assistant, Guid.NewGuid(), Guid.NewGuid());
+        var message = await service.BuildPublishedContextMessageAsync(assistant, Guid.NewGuid(), Guid.NewGuid());
 
         message.Should().BeNull();
     }

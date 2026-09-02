@@ -36,9 +36,11 @@ export interface MessageDto {
 }
 
 export interface AttachedFileDto {
-  notebookFileId: string;
+  notebookFileId?: string;
+  relativePath?: string;
+  uploadType?: 'ImageFile' | 'ImageUrl' | 'AudioFile' | 'TextFile' | 'SandboxFile' | 'Folder' | null;
   fileName: string;
-  fileType: 'image' | 'audio' | 'text' | 'other';
+  fileType: 'image' | 'audio' | 'text' | 'folder' | 'other';
   fileSize: number;
   previewUrl?: string;
   type: 'Referenced' | 'Created' | 'Modified';
@@ -109,8 +111,10 @@ export interface ToolResult {
 export interface AttachedFile {
   id: string;
   notebookFileId: string;
+  relativePath?: string;
+  uploadType?: 'ImageFile' | 'ImageUrl' | 'AudioFile' | 'TextFile' | 'SandboxFile' | 'Folder' | null;
   fileName: string;
-  fileType: 'image' | 'audio' | 'text' | 'other';
+  fileType: 'image' | 'audio' | 'text' | 'folder' | 'other';
   fileSize: number;
   processedContent?: string; // base64 or embedded content
   uploadedAt: Date;

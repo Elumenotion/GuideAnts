@@ -1,9 +1,13 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import DraftUserCell from '../DraftUserCell';
+import { ToastProvider } from '../../../common/Toast';
+
+const render = (ui: React.ReactElement) =>
+  rtlRender(ui, { wrapper: ToastProvider });
 
 vi.mock('../../../../contexts/NotebookContext', () => ({
   useNotebook: () => ({ notebook: { id: 'nb-1', projectId: 'proj-1' } }),

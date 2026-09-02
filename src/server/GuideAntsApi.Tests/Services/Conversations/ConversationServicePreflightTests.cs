@@ -101,11 +101,19 @@ public sealed class ConversationServicePreflightTests
                     ExpiresAt = DateTime.UtcNow.AddMinutes(5)
                 }));
         lockMock
-            .Setup(l => l.RenewLockAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .Setup(l => l.RenewLockAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         lockMock
-            .Setup(l => l.ReleaseLockAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Setup(l => l.ReleaseLockAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var chatClient = new Mock<IChatCompletionClient>();
         chatClient.SetupGet(c => c.SupportsToolChoiceNone).Returns(true);
@@ -278,7 +286,9 @@ public sealed class ConversationServicePreflightTests
         turn.Status.Should().Be("failed");
 
         registry.RequestCancel(turn.Id).Should().BeFalse("the worker registration must be cleaned up");
-        lockMock.Verify(l => l.ReleaseLockAsync(_conversationId, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        lockMock.Verify(
+            l => l.ReleaseLockAsync(_conversationId, It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
 
         // Observers attached via ObserveConversationEventsAsync must receive the same terminal error
         // the requesting client got - they have no handler for conversation_unlocked, so without this

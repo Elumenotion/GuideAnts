@@ -9,13 +9,11 @@ using AntRunner.Chat.LlamaCpp;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Services.Conversations.Attachments;
 using GuideAntsApi.Services.Conversations.Mapping;
 using GuideAntsApi.Services.Core;
-using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
-using Microsoft.Extensions.Options;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 
 namespace AntRunner.Chat;
@@ -595,7 +593,7 @@ public static class Agent
         // Load attachments
         var attachments = await db.MessageAttachments
             .Include(ma => ma.NotebookFile)
-                .ThenInclude(nf => nf.Notebook)
+                .ThenInclude(nf => nf!.Notebook)
             .Where(ma => ma.MessageId == userMessage.Id)
             .OrderBy(ma => ma.OrderIndex)
             .ToListAsync(cancellationToken);
@@ -603,27 +601,17 @@ public static class Agent
         if (attachments.Count == 0) return null;
 
         var messages = new List<ChatMessage>();
-
-        // Get services for attachment processing
-        var notebookFileService = scope.ServiceProvider.GetService<INotebookFileService>();
-        var markdownExtractionService = scope.ServiceProvider.GetService<IMarkdownExtractionService>();
-        var configuration = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
-        var storagePath = configuration["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path not configured");
-        var markdownOpts = scope.ServiceProvider.GetRequiredService<IOptions<MarkdownAttachmentOptions>>();
-        var attachmentMdLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>()
-            .CreateLogger("AttachmentMessageBuilder");
+        var attachmentContentService = scope.ServiceProvider
+            .GetRequiredService<IAttachmentContentService>();
 
         foreach (var attachment in attachments)
         {
-            var attachmentMessages = await AttachmentMessageBuilder.CreateMessagesFromNotebookFileAsync(
-                attachment.NotebookFile!,
-                notebookFileService,
-                markdownExtractionService,
-                storagePath,
-                cancellationToken,
-                markdownOpts.Value.MaxInlineCharacters,
-                attachmentMdLogger);
-            messages.AddRange(attachmentMessages);
+            var attachmentContents = await attachmentContentService
+                .ExpandAttachmentToChatContentsAsync(db, attachment, cancellationToken);
+            if (attachmentContents.Count > 0)
+            {
+                messages.Add(new ChatMessage(AntRunner.Chat.Abstractions.ChatRole.User, attachmentContents));
+            }
         }
 
         return messages.Count > 0 ? messages : null;
@@ -680,7 +668,9 @@ or contains pronouns or vague terms which might be clear in the broader conversa
 
             if (message.Attachments != null && message.Attachments.Count > 0)
             {
-                var files = message.Attachments.Select(a => a.NotebookFile?.RelativePath ?? "unknown").ToList();
+                var files = message.Attachments
+                    .Select(a => a.RelativePath ?? a.NotebookFile?.RelativePath ?? "unknown")
+                    .ToList();
                 sb.AppendLine($"  Attachments: {string.Join(", ", files)}");
             }
 

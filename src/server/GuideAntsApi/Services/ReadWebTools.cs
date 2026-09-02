@@ -163,6 +163,10 @@ public static class ReadWebTools
                 ? new DirectFetchResult(html, (int)response.StatusCode, null)
                 : new DirectFetchResult(null, (int)response.StatusCode, "HTML was empty or exceeded max size");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             return new DirectFetchResult(null, null, "Direct fetch timed out");
@@ -190,6 +194,10 @@ public static class ReadWebTools
             }
 
             return new RenderedFetchResult(result.Html, result.FinalUrl, null, result.StatusCode);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

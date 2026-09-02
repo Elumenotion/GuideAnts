@@ -36,6 +36,8 @@ public sealed class McpSandboxExecutor(
             return "ERROR: InvocationContext is required for MCP sandbox tool execution.";
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+
         var connection = await McpSandboxConnectionReader.ResolveConnectionAsync(
             assistantName,
             mcpServerUrl,
@@ -57,6 +59,10 @@ public sealed class McpSandboxExecutor(
         {
             guideScopeId = await ResolveGuideScopeIdAsync(context, cancellationToken);
             executionEnvironment = await ResolveExecutionEnvironmentAsync(context, guideScopeId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -108,6 +114,7 @@ public sealed class McpSandboxExecutor(
             var executeUri = NotebookDockerScriptService.BuildEndpointUri(scriptExecutionBaseUrl, "mcp-stdio");
             var json = JsonSerializer.Serialize(requestBody);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            cancellationToken.ThrowIfCancellationRequested();
             var response = await httpClient.PostAsync(executeUri, content, cancellationToken);
 
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -137,7 +144,11 @@ public sealed class McpSandboxExecutor(
 
             return "ERROR: MCP sandbox stdio tool call returned an unexpected response.";
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
         {
             return $"ERROR: MCP sandbox tool call timed out after {timeoutSeconds:0} seconds.";
         }

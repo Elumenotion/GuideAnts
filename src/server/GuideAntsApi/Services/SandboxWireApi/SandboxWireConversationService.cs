@@ -92,12 +92,13 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
         var hostUrl = GetHostUrl();
 
         NotebookConversation dbConversation;
-        ConversationTurn dbTurn;
+        ConversationTurn? dbTurn = null;
         Guid userMessageId;
         var assistantName = wireContext.TargetAssistantName;
         Guid runningAssistantId = wireContext.TargetAssistantId;
         string modelDeploymentId;
         var previousMessages = new List<ChatMessage>();
+        IStreamLockHandle? lockHandle = null;
 
         using (var scope = _scopeFactory.CreateScope())
         {
@@ -136,50 +137,90 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
                 request.ClientMessages,
                 ct));
 
-            var turnResult = await _persistence.CreateNextTurnAsync(
-                new CreateTurnRequest(
-                    dbConversation.Id,
-                    assistantName,
-                    modelDeploymentId,
-                    request.Instructions,
-                    InitialStatus: "streaming"),
-                ct);
-            dbTurn = turnResult.Turn;
-
-            var userResult = await _persistence.CreateUserMessageAsync(
-                new CreateUserMessageRequest(
-                    dbConversation.Id,
-                    turnResult.TurnIndex,
-                    MessageSequence: 1,
-                    Content: request.Instructions,
-                    ModelDeploymentId: modelDeploymentId,
-                    UserId: wireContext.InternalUserId,
-                    ExternalUserIdentity: wireContext.ExternalUserIdentity,
-                    AssistantId: runningAssistantId),
-                ct);
-            userMessageId = userResult.MessageId;
-
-            if (request.Attachments != null && request.Attachments.Count > 0)
+            lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, ct);
+            try
             {
-                await _attachmentContentService.AddAttachmentsToUserMessageAsync(
-                    db,
-                    userResult.MessageId,
-                    dbConversation.NotebookId,
-                    request.Attachments,
+                var turnResult = await _persistence.CreateNextTurnAsync(
+                    new CreateTurnRequest(
+                        dbConversation.Id,
+                        assistantName,
+                        modelDeploymentId,
+                        request.Instructions,
+                        InitialStatus: "streaming",
+                        ExecutionId: lockHandle.LeaseId),
                     ct);
-                foreach (var attachment in request.Attachments)
-                {
-                    if (!attachment.NotebookFileId.HasValue)
-                    {
-                        continue;
-                    }
+                dbTurn = turnResult.Turn;
 
-                    var messages = await _attachmentContentService.CreateOpenAiMessagesFromNotebookFileAsync(
+                var userResult = await _persistence.CreateUserMessageAsync(
+                    new CreateUserMessageRequest(
+                        dbConversation.Id,
+                        turnResult.TurnIndex,
+                        MessageSequence: 1,
+                        Content: request.Instructions,
+                        ModelDeploymentId: modelDeploymentId,
+                        UserId: wireContext.InternalUserId,
+                        ExternalUserIdentity: wireContext.ExternalUserIdentity,
+                        AssistantId: runningAssistantId),
+                    ct);
+                userMessageId = userResult.MessageId;
+
+                if (request.Attachments != null && request.Attachments.Count > 0)
+                {
+                    await _attachmentContentService.AddAttachmentsToUserMessageAsync(
                         db,
-                        attachment.NotebookFileId.Value,
+                        userResult.MessageId,
+                        dbConversation.NotebookId,
+                        request.Attachments,
                         ct);
-                    previousMessages.AddRange(messages);
+                    var persistedAttachments = await db.MessageAttachments
+                        .Include(a => a.NotebookFile)
+                        .Where(a => a.MessageId == userResult.MessageId)
+                        .OrderBy(a => a.OrderIndex)
+                        .ToListAsync(ct);
+                    foreach (var attachment in persistedAttachments)
+                    {
+                        var attachmentContents = await _attachmentContentService
+                            .ExpandAttachmentToChatContentsAsync(db, attachment, ct);
+                        if (attachmentContents.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        previousMessages.Add(new ChatMessage(
+                            AntRunner.Chat.Abstractions.ChatRole.User,
+                            attachmentContents));
+                    }
                 }
+            }
+            catch
+            {
+                if (dbTurn != null)
+                {
+                    try
+                    {
+                        await _persistence.TerminalizeTurnAsync(
+                            new TerminalizeTurnRequest(
+                                dbTurn.Id,
+                                conversationId,
+                                dbTurn.TurnIndex,
+                                "failed",
+                                TerminationCode: "stream_setup_failed",
+                                TerminationDetail: "Sandbox wire stream setup failed.",
+                                ExecutionId: dbTurn.ExecutionId),
+                            ct);
+                    }
+                    catch
+                    {
+                        // Best-effort cleanup before rethrowing setup failure.
+                    }
+                }
+
+                if (lockHandle != null)
+                {
+                    await lockHandle.ReleaseAsync(CancellationToken.None);
+                }
+
+                throw;
             }
         }
 
@@ -188,7 +229,7 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
             Policy = _streamPolicy,
             ConversationId = conversationId,
             Conversation = dbConversation,
-            DbTurn = dbTurn,
+            DbTurn = dbTurn!,
             TurnIndex = dbTurn.TurnIndex,
             AssistantName = assistantName,
             AssistantId = runningAssistantId,
@@ -210,12 +251,11 @@ public sealed class SandboxWireConversationService : ISandboxWireConversationSer
             UsageContextLabel = "SandboxWireSendMessageStreamAsync"
         };
 
-        var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, ct);
         var turnId = runContext.DbTurn.Id;
-        var workerCts = _streamRunRegistry.Register(turnId);
+        var workerCts = _streamRunRegistry.Register(turnId, conversationId);
         await foreach (var ev in _streamEngine.RunStreamAsync(
             runContext,
-            lockHandle,
+            lockHandle!,
             ct,
             workerCts.Token,
             () => _streamRunRegistry.Unregister(turnId)))

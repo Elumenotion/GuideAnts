@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Endpoints.PublishedWire;
 using GuideAntsApi.Models;
 using GuideAntsApi.Models.Conversations;

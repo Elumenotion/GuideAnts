@@ -479,7 +479,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         }
     }
 
-    private async Task ValidateLlamaInstallTargetAsync(
+    private Task ValidateLlamaInstallTargetAsync(
         LocalModelOnboardingCommand command,
         CancellationToken cancellationToken)
     {
@@ -490,6 +490,8 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
             Provider: "llama-cpp",
             RuntimeConfigJson: LocalModelOnboardingOrchestrator.BuildLlamaLocalRuntimeJson(command),
             ChatBehavior: chatBehavior));
+
+        return Task.CompletedTask;
     }
 
     private static AddModelException MapRoutingException(RoutingException exception)

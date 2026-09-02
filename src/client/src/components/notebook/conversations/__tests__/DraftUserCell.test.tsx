@@ -1,9 +1,13 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import DraftUserCell from '../DraftUserCell';
+import { ToastProvider } from '../../../common/Toast';
+
+const render = (ui: React.ReactElement) =>
+  rtlRender(ui, { wrapper: ToastProvider });
 
 // Mock NotebookContext to avoid requiring a real provider
 vi.mock('../../../../contexts/NotebookContext', () => ({
@@ -195,6 +199,19 @@ describe('DraftUserCell', () => {
 
     // Verify onSend was called with existing value
     expect(mockOnSend).toHaveBeenCalledWith('Existing message');
+  });
+
+  it('disables the send button while streaming', () => {
+    render(
+      <DraftUserCell
+        value="Existing message"
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        isStreaming
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 
   it('opens and closes fullscreen editor properly', async () => {

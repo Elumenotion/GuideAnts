@@ -16,19 +16,17 @@ public static class NotebookFileChangeReporter
     /// Scans the notebook root (same rules as sync indexing) and returns CWD-relative paths for
     /// new and modified files. Call this BEFORE database sync to surface change hints to the assistant.
     /// <para>
-    /// This is a best-effort, metadata-only heuristic: modification is inferred from a difference in
-    /// file size or last-write time, NOT from content hashing. It intentionally trades precision for
-    /// speed so the post-execution hot path never opens or hashes file contents. The authoritative
-    /// reconciliation in <see cref="NotebookFileSyncService"/> still hashes each file (SHA-256) and is
-    /// the source of truth; a content change that preserves both size and timestamp will be caught by
-    /// that sync even though it is not reported here. Do not reintroduce hashing on this path.
+    /// Modification is inferred from file size or last-write time only — never from content hashing.
+    /// Full reconcile uses the same metadata-first gate (<see cref="NotebookFileHash.IsUnchanged"/>)
+    /// and hashes only new/changed/placeholder rows. Do not reintroduce hashing on this path.
     /// </para>
     /// </summary>
     public static async Task<(List<string> NewFiles, List<string> ModifiedFiles)> DetectChangesAsync(
         IServiceProvider serviceProvider,
         string storageRoot,
         InvocationContext context,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        CancellationToken cancellationToken = default)
     {
         using var scope = serviceProvider.CreateScope();
         var resolver = scope.ServiceProvider.GetService<IStoragePathResolver>();
@@ -43,17 +41,18 @@ public static class NotebookFileChangeReporter
 
         var dbFiles = await dbContext.NotebookFiles
             .Where(f => f.NotebookId == context.NotebookId)
-            .ToDictionaryAsync(f => f.RelativePath, f => new { f.FileSize, f.LastModifiedUtc });
+            .ToDictionaryAsync(f => f.RelativePath, f => new { f.FileSize, f.LastModifiedUtc }, cancellationToken);
 
         var syncableRelativePaths = NotebookSyncFileEnumerator.EnumerateSyncableRelativePaths(
             notebookRoot,
-            fileNameFilter: f => !IsTempScriptFile(f) && !NotebookFileIndexingRules.IsTemporaryScriptFile(f));
+            fileNameFilter: f => !NotebookFileIndexingRules.IsTemporaryScriptFile(f));
 
         var newFiles = new List<string>();
         var modifiedFiles = new List<string>();
 
         foreach (var dbRelativePath in syncableRelativePaths)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var localFile = Path.Combine(notebookRoot, dbRelativePath.Replace('/', Path.DirectorySeparatorChar));
 
             long fileSize;
@@ -82,7 +81,10 @@ public static class NotebookFileChangeReporter
 
             if (dbFiles.TryGetValue(dbRelativePath, out var dbFile))
             {
-                if (dbFile.FileSize != fileSize || dbFile.LastModifiedUtc != lastModifiedUtc)
+                // Same durable metadata gate as reconcile (size + whole-second mtime).
+                if (dbFile.FileSize != fileSize
+                    || NotebookFileHash.ToUtcSecondTicks(dbFile.LastModifiedUtc)
+                        != NotebookFileHash.ToUtcSecondTicks(lastModifiedUtc))
                 {
                     modifiedFiles.Add(cwdRelativePath);
                 }
@@ -161,40 +163,5 @@ public static class NotebookFileChangeReporter
             // Notebook-root or other non-Output paths are addressed from Output/ via ../
             return $"../{normalized}";
         }
-    }
-
-    /// <summary>
-    /// Checks if a filename is a temporary script file that should be excluded from file change reporting.
-    /// Matches patterns like: {guid}_script.py, {guid}_script.sh, {guid}_script.ps1, script_{guid}.py, etc.
-    /// </summary>
-    private static bool IsTempScriptFile(string fileName)
-    {
-        if (string.IsNullOrWhiteSpace(fileName))
-            return false;
-
-        // Pattern 1: script_{something}.ext (e.g., "script_test.py")
-        if (fileName.StartsWith("script_", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        // Pattern 2: {guid}_script.ext (e.g., "4f02928666d64d09ad265f2f52c96309_script.py")
-        // Look for "_script." in the filename
-        var lowerName = fileName.ToLowerInvariant();
-        if (lowerName.Contains("_script."))
-        {
-            // Check if the part before _script looks like a guid (32 hex chars or with hyphens)
-            var underscoreIdx = lowerName.IndexOf("_script.", StringComparison.Ordinal);
-            if (underscoreIdx > 0)
-            {
-                var prefix = fileName.Substring(0, underscoreIdx);
-                // Check if it's a GUID (with or without hyphens)
-                if (Guid.TryParse(prefix, out _) ||
-                    (prefix.Length == 32 && prefix.All(c => char.IsAsciiHexDigit(c))))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 }

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>html-craft fixture</title>
+<style>
+  body{margin:0;font-family:system-ui,sans-serif;background:#10151f;color:#dbe4f0;display:flex;flex-direction:column;align-items:center;padding-top:60px}
+  #kick{font-weight:700;letter-spacing:.2em;color:#7db4ff}
+  #big{font-size:42px}
+</style>
+</head>
+<body>
+  <div id="kick">READY</div>
+  <div id="big">n=0</div>
+<script>
+  let n = 0;
+  window.addEventListener("keydown", function (e) {
+    if (e.repeat) return;
+    if (e.key === " " || e.key === "Enter") {
+      n += 1;
+      document.getElementById("kick").textContent = "TURN " + n;
+      document.getElementById("big").textContent = "n=" + n;
+    }
+  });
+</script>
+</body>
+</html>

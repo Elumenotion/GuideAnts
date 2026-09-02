@@ -18,7 +18,7 @@ WAV files in `Output/`.
 ## Preflight
 
 ```bash
-python3 Output/Skills/audiocpp-host-tts/scripts/preflight.py --for host-tts
+python3 Skills/audiocpp-host-tts/scripts/preflight.py --for host-tts
 ```
 
 Resolution order: `AUDIOCPP_ENGINE_URL` env (set via the guide editor's
@@ -31,9 +31,9 @@ happens to answer `/health` on the same port.
 `--model` is required — there is no wrapper to auto-detect from:
 
 ```bash
-python3 Output/Skills/audiocpp-host-tts/scripts/engine_tool.py speech "Hello" \
+python3 Skills/audiocpp-host-tts/scripts/engine_tool.py speech "Hello" \
   --engine-url http://host.docker.internal:8080 --model <engine-model-id> \
-  -o Output/hello.wav [--voice <id>] [--seed 42] [--language en] [--voice-ref ...]
+  -o hello.wav [--voice <id>] [--seed 42] [--language en] [--voice-ref ...]
 ```
 
 List the models the host build serves: `GET <base>/v1/models`; voices:

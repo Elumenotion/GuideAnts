@@ -1987,24 +1987,22 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
     return null;
   }, []);
 
+  // Keep a live ref so pill-click retry can see the tree after refresh-notebook-files.
+  const effectiveTreeRef = useRef<NotebookFolderTreeDto | null>(null);
+  useEffect(() => {
+    effectiveTreeRef.current = effectiveTree;
+  }, [effectiveTree]);
+
   // Listen for external file selection requests (from turn file pills)
   useEffect(() => {
-    const handleSelectFile = (event: Event) => {
-      const customEvent = event as CustomEvent<{ relativePath: string }>;
-      const { relativePath } = customEvent.detail;
-      
-      if (!tree || !relativePath) return;
-      
-      // Find the file and its parent folders
-      const result = findFileAndParents(tree, relativePath);
+    const selectInTree = (relativePath: string, currentTree: NotebookFolderTreeDto) => {
+      const result = findFileAndParents(currentTree, relativePath);
       if (!result) {
-        console.warn(`File not found for path: ${relativePath}`);
-        return;
+        return false;
       }
-      
+
       const { file, parentPaths } = result;
-      
-      // Expand all parent folders to make the file visible
+
       setExpandedIds(prev => {
         const next = new Set(prev);
         for (const path of parentPaths) {
@@ -2012,23 +2010,50 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
         }
         return next;
       });
-      
-      // Select the file
+
       multiSelect.setSelection([file.id]);
-      
-      // Set focus on the file
       listNav.setFocusedId(file.id);
-      
-      // Activate the notebookFiles section
       onSectionActivate?.('notebookFiles');
-      
-      // Scroll the file into view after a brief delay for DOM update
+
       setTimeout(() => {
         const fileElement = document.querySelector(`[data-file-id="${file.id}"]`);
         if (fileElement) {
           fileElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }, 100);
+
+      return true;
+    };
+
+    const handleSelectFile = (event: Event) => {
+      const customEvent = event as CustomEvent<{ relativePath: string }>;
+      const { relativePath } = customEvent.detail;
+
+      if (!relativePath) return;
+
+      const currentTree = effectiveTreeRef.current ?? tree;
+      if (currentTree && selectInTree(relativePath, currentTree)) {
+        return;
+      }
+
+      // Pills can appear before the polled tree catches RegisterFiles — refresh and retry.
+      console.warn(`File not found for path: ${relativePath}; refreshing notebook files and retrying`);
+      requestNotebookFilesRefresh();
+
+      let attempts = 0;
+      const retry = () => {
+        attempts += 1;
+        const latestTree = effectiveTreeRef.current;
+        if (latestTree && selectInTree(relativePath, latestTree)) {
+          return;
+        }
+        if (attempts < 5) {
+          window.setTimeout(retry, 300);
+          return;
+        }
+        console.warn(`File still not found for path after refresh: ${relativePath}`);
+      };
+      window.setTimeout(retry, 300);
     };
     
     window.addEventListener('select-notebook-file', handleSelectFile);
@@ -2036,7 +2061,7 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
     return () => {
       window.removeEventListener('select-notebook-file', handleSelectFile);
     };
-  }, [tree, findFileAndParents, multiSelect, listNav, onSectionActivate]);
+  }, [tree, findFileAndParents, multiSelect, listNav, onSectionActivate, requestNotebookFilesRefresh]);
 
   if (!effectiveTree) {
     return (

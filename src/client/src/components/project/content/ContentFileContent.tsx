@@ -10,8 +10,10 @@ import { ConfirmationDialog } from '../../common/ConfirmationDialog';
 import MarkdownViewer from '../../common/MarkdownViewer';
 import { isMarkdownExtractionSupported } from '../../../utils/markdownUtils';
 import FullScreenEditor from '../../notebook/conversations/FullScreenEditor';
+import PlainTextEditor from '../../common/PlainTextEditor';
 import { FaRegEdit, FaDownload } from 'react-icons/fa';
 import { getDocumentServerCapabilities, looksLikeDocumentServerFile } from '../../../services/documentServer';
+import { isPlainTextFile } from '../../../utils/textFiles';
 
 interface ContentFileContentProps {
     hideHeader?: boolean;
@@ -59,6 +61,8 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
     // Markdown edit state (full-screen editor)
     const [isEditingMd, setIsEditingMd] = useState(false);
     const [mdEditorContent, setMdEditorContent] = useState<string>('');
+    const [isEditingPlainText, setIsEditingPlainText] = useState(false);
+    const [plainEditorContent, setPlainEditorContent] = useState<string>('');
     const [mdEditorLoading, setMdEditorLoading] = useState<boolean>(false);
     const [mdEditorError, setMdEditorError] = useState<string | undefined>(undefined);
 
@@ -314,6 +318,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
     };
 
     const isMarkdown = file?.contentType === 'text/markdown' || file?.contentType === 'text/x-markdown' || (file?.fileName?.toLowerCase()?.endsWith('.md'));
+    const isPlainText = isPlainTextFile(file?.fileName ?? '', file?.contentType);
 
     const openMarkdownEditor = async () => {
         if (!file || !isMarkdown) return;
@@ -372,6 +377,56 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
         }
     };
 
+    const openPlainTextEditor = async () => {
+        if (!file || !isPlainText) return;
+        setMdEditorError(undefined);
+        setMdEditorLoading(true);
+        try {
+            if (isMounted && mountedRelativePath) {
+                const result = await api.projects.getMountedContentByPath(projectId, mountedRelativePath);
+                const text = await result.blob.text();
+                setPlainEditorContent(text);
+            } else {
+                const result = await api.projects.getContentFileContent(projectId, fileId, file.latestVersion);
+                const text = await result.blob.text();
+                setPlainEditorContent(text);
+            }
+            setIsEditingPlainText(true);
+        } catch {
+            setMdEditorError('Failed to load text content.');
+        } finally {
+            setMdEditorLoading(false);
+        }
+    };
+
+    const savePlainTextEditor = async (newContent: string) => {
+        if (!file) return;
+        setMdEditorLoading(true);
+        setMdEditorError(undefined);
+        try {
+            const uploadType = file.contentType || 'text/plain';
+            if (isMounted && mountedRelativePath) {
+                await api.projects.saveMountedByPath(projectId, mountedRelativePath, newContent);
+                setIsEditingPlainText(false);
+                await fetchFile();
+            } else {
+                const folderId = file.folderId || undefined;
+                const textFile = new File([newContent], file.fileName, { type: uploadType });
+                const uploadResults = await api.projects.uploadFiles(projectId, [textFile], folderId);
+                const newVersion = uploadResults[0]?.latestVersion;
+                if (newVersion !== undefined) {
+                    setFile(prev => prev ? { ...prev, latestVersion: newVersion } : null);
+                }
+                setIsEditingPlainText(false);
+                await fetchFile();
+            }
+        } catch {
+            setMdEditorError('Failed to save text file.');
+        } finally {
+            setMdEditorLoading(false);
+        }
+    };
+
     if (isLoading) {
         return (
             <div className="h-full flex items-center justify-center">
@@ -415,6 +470,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                     canEdit={canEdit}
                     resolveProjectFilePath={resolveProjectFilePath}
                     onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
+                    onEditPlainText={isPlainText && canEdit ? openPlainTextEditor : undefined}
                     mountedRelativePath={mountedRelativePath}
                 />
             </div>
@@ -433,6 +489,17 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                             className="px-4 py-2 text-sm border rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 flex items-center gap-2"
                             onClick={openMarkdownEditor}
                             aria-label="Edit markdown"
+                            title="Edit"
+                        >
+                            <FaRegEdit className="w-4 h-4" />
+                            <span>Edit</span>
+                        </button>
+                    )}
+                    {isPlainText && canEdit && (
+                        <button
+                            className="px-4 py-2 text-sm border rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 flex items-center gap-2"
+                            onClick={openPlainTextEditor}
+                            aria-label="Edit text"
                             title="Edit"
                         >
                             <FaRegEdit className="w-4 h-4" />
@@ -521,6 +588,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                                     canEdit={canEdit}
                                     resolveProjectFilePath={resolveProjectFilePath}
                                     onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
+                    onEditPlainText={isPlainText && canEdit ? openPlainTextEditor : undefined}
                                     mountedRelativePath={mountedRelativePath}
                                 />
                             ) : (
@@ -591,6 +659,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                                 canEdit={canEdit}
                                 resolveProjectFilePath={resolveProjectFilePath}
                                 onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
+                    onEditPlainText={isPlainText && canEdit ? openPlainTextEditor : undefined}
                                 mountedRelativePath={mountedRelativePath}
                             />
                         </div>
@@ -635,6 +704,17 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                 projectId={projectId}
                 notebookId={undefined}
                 resolveProjectFilePath={resolveProjectFilePath}
+            />
+        )}
+        {isEditingPlainText && (
+            <PlainTextEditor
+                value={plainEditorContent}
+                onSave={savePlainTextEditor}
+                onCancel={() => setIsEditingPlainText(false)}
+                title={`Edit File: ${file.fileName}`}
+                isLoading={mdEditorLoading}
+                error={mdEditorError}
+                canEdit={canEdit}
             />
         )}
         </>

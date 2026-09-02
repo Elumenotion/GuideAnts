@@ -19,6 +19,7 @@ namespace GuideAntsApi.Services.Conversations;
 
 public class PublishedConversationService : IPublishedConversationService
 {
+    private static readonly TimeSpan LifecycleCleanupTimeout = TimeSpan.FromSeconds(1);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -92,7 +93,7 @@ public class PublishedConversationService : IPublishedConversationService
         var hostUrl = GetHostUrl();
 
         NotebookConversation dbConversation;
-        ConversationTurn dbTurn;
+        ConversationTurn? dbTurn = null;
         int currentMessageSequence;
         Guid? notebookConversationMessageId;
 
@@ -142,26 +143,35 @@ public class PublishedConversationService : IPublishedConversationService
             ?? throw new InvalidOperationException($"Assistant definition not found for {assistantName}");
         var resolvedResume = _chatModelResolver.Resolve(assistantDefForResume.Model);
 
-        currentMessageSequence = await ExecuteDeferredServerToolsAsync(
-            dbConversation,
-            dbTurn,
-            assistantName,
-            publishedAssistantId,
-            notebookConversationMessageId,
-            previousMessages,
-            clientToolDefinitions,
-            publisherId,
-            hostUrl,
-            currentMessageSequence,
-            cancellationToken);
+        var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, cancellationToken);
+        try
+        {
+            currentMessageSequence = await ExecuteDeferredServerToolsAsync(
+                dbConversation,
+                dbTurn!,
+                assistantName,
+                publishedAssistantId,
+                notebookConversationMessageId,
+                previousMessages,
+                clientToolDefinitions,
+                publisherId,
+                hostUrl,
+                currentMessageSequence,
+                cancellationToken);
+        }
+        catch
+        {
+            await ReleaseLockUntilConfirmedAsync(lockHandle, conversationId);
+            throw;
+        }
 
         var runContext = new ConversationStreamRunContext
         {
             Policy = _streamPolicy,
             ConversationId = conversationId,
             Conversation = dbConversation,
-            DbTurn = dbTurn,
-            TurnIndex = dbTurn.TurnIndex,
+            DbTurn = dbTurn!,
+            TurnIndex = dbTurn!.TurnIndex,
             AssistantName = assistantName,
             AssistantId = publishedAssistantId,
             ModelDeploymentId = resolvedResume.ModelId,
@@ -183,7 +193,6 @@ public class PublishedConversationService : IPublishedConversationService
             InitialMessageSequence = currentMessageSequence
         };
 
-        var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, cancellationToken);
         await foreach (var ev in RunRegisteredStreamAsync(runContext, lockHandle, cancellationToken))
         {
             yield return ev;
@@ -207,13 +216,14 @@ public class PublishedConversationService : IPublishedConversationService
         var hostUrl = GetHostUrl();
 
         NotebookConversation dbConversation;
-        ConversationTurn dbTurn;
+        ConversationTurn? dbTurn = null;
         Guid userMessageId;
         string assistantName;
         Guid runningAssistantId;
         string modelDeploymentId;
         ResolvedExecutionPolicy executionPolicy;
         var previousMessages = new List<ChatMessage>();
+        IStreamLockHandle? lockHandle = null;
 
         using (var scope = _scopeFactory.CreateScope())
         {
@@ -258,50 +268,88 @@ public class PublishedConversationService : IPublishedConversationService
                 request.ClientMessages,
                 cancellationToken));
 
-            var turnResult = await _persistence.CreateNextTurnAsync(
-                new CreateTurnRequest(
-                    dbConversation.Id,
-                    assistantName,
-                    modelDeploymentId,
-                    request.Instructions,
-                    InitialStatus: "streaming"),
-                cancellationToken);
-            dbTurn = turnResult.Turn;
-
-            var userResult = await _persistence.CreateUserMessageAsync(
-                new CreateUserMessageRequest(
-                    dbConversation.Id,
-                    turnResult.TurnIndex,
-                    MessageSequence: 1,
-                    Content: request.Instructions,
-                    ModelDeploymentId: modelDeploymentId,
-                    UserId: internalUserId,
-                    ExternalUserIdentity: externalUserIdentity,
-                    AssistantId: runningAssistantId),
-                cancellationToken);
-            userMessageId = userResult.MessageId;
-
-            if (request.Attachments != null && request.Attachments.Count > 0)
+            lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, cancellationToken);
+            try
             {
-                await _attachmentContentService.AddAttachmentsToUserMessageAsync(
-                    db,
-                    userResult.MessageId,
-                    dbConversation.NotebookId,
-                    request.Attachments,
+                var turnResult = await _persistence.CreateNextTurnAsync(
+                    new CreateTurnRequest(
+                        dbConversation.Id,
+                        assistantName,
+                        modelDeploymentId,
+                        request.Instructions,
+                        InitialStatus: "streaming",
+                        ExecutionId: lockHandle.LeaseId),
                     cancellationToken);
-                foreach (var attachment in request.Attachments)
-                {
-                    if (!attachment.NotebookFileId.HasValue)
-                    {
-                        continue;
-                    }
+                dbTurn = turnResult.Turn;
 
-                    var messages = await _attachmentContentService.CreateOpenAiMessagesFromNotebookFileAsync(
+                var userResult = await _persistence.CreateUserMessageAsync(
+                    new CreateUserMessageRequest(
+                        dbConversation.Id,
+                        turnResult.TurnIndex,
+                        MessageSequence: 1,
+                        Content: request.Instructions,
+                        ModelDeploymentId: modelDeploymentId,
+                        UserId: internalUserId,
+                        ExternalUserIdentity: externalUserIdentity,
+                        AssistantId: runningAssistantId),
+                    cancellationToken);
+                userMessageId = userResult.MessageId;
+
+                if (request.Attachments != null && request.Attachments.Count > 0)
+                {
+                    await _attachmentContentService.AddAttachmentsToUserMessageAsync(
                         db,
-                        attachment.NotebookFileId.Value,
+                        userResult.MessageId,
+                        dbConversation.NotebookId,
+                        request.Attachments,
                         cancellationToken);
-                    previousMessages.AddRange(messages);
+                    var persistedAttachments = await db.MessageAttachments
+                        .Include(a => a.NotebookFile)
+                        .Where(a => a.MessageId == userResult.MessageId)
+                        .OrderBy(a => a.OrderIndex)
+                        .ToListAsync(cancellationToken);
+                    foreach (var attachment in persistedAttachments)
+                    {
+                        var attachmentContents = await _attachmentContentService
+                            .ExpandAttachmentToChatContentsAsync(db, attachment, cancellationToken);
+                        if (attachmentContents.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        previousMessages.Add(new ChatMessage(
+                            AntRunner.Chat.Abstractions.ChatRole.User,
+                            attachmentContents));
+                    }
                 }
+            }
+            catch
+            {
+                if (dbTurn != null)
+                {
+                    try
+                    {
+                        await TerminalizeTurnUntilConfirmedAsync(
+                            new TerminalizeTurnRequest(
+                                dbTurn.Id,
+                                conversationId,
+                                dbTurn.TurnIndex,
+                                "failed",
+                                TerminationCode: "stream_setup_failed",
+                                TerminationDetail: "Published conversation stream setup failed.",
+                                ExecutionId: dbTurn.ExecutionId));
+                    }
+                    catch (Exception terminalizeEx)
+                    {
+                        _logger.LogError(
+                            terminalizeEx,
+                            "Failed to terminalize published setup turn {TurnId}",
+                            dbTurn.Id);
+                    }
+                }
+
+                await ReleaseLockUntilConfirmedAsync(lockHandle, conversationId);
+                throw;
             }
         }
 
@@ -310,8 +358,8 @@ public class PublishedConversationService : IPublishedConversationService
             Policy = _streamPolicy,
             ConversationId = conversationId,
             Conversation = dbConversation,
-            DbTurn = dbTurn,
-            TurnIndex = dbTurn.TurnIndex,
+            DbTurn = dbTurn!,
+            TurnIndex = dbTurn!.TurnIndex,
             AssistantName = assistantName,
             AssistantId = runningAssistantId,
             ModelDeploymentId = modelDeploymentId,
@@ -332,8 +380,7 @@ public class PublishedConversationService : IPublishedConversationService
             UsageContextLabel = "SendMessageStreamAsync"
         };
 
-        var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, cancellationToken);
-        await foreach (var ev in RunRegisteredStreamAsync(runContext, lockHandle, cancellationToken))
+        await foreach (var ev in RunRegisteredStreamAsync(runContext, lockHandle!, cancellationToken))
         {
             yield return ev;
         }
@@ -345,7 +392,7 @@ public class PublishedConversationService : IPublishedConversationService
         [EnumeratorCancellation] CancellationToken sseCt)
     {
         var turnId = runContext.DbTurn.Id;
-        var workerCts = _streamRunRegistry.Register(turnId);
+        var workerCts = _streamRunRegistry.Register(turnId, runContext.Conversation.Id);
         await foreach (var ev in _streamEngine.RunStreamAsync(
             runContext,
             lockHandle,
@@ -354,6 +401,128 @@ public class PublishedConversationService : IPublishedConversationService
             () => _streamRunRegistry.Unregister(turnId)))
         {
             yield return ev;
+        }
+    }
+
+    private async Task<bool> TerminalizeTurnUntilConfirmedAsync(TerminalizeTurnRequest request)
+    {
+        for (var attempt = 1; attempt <= 4; attempt++)
+        {
+            Task<bool>? operationTask = null;
+            try
+            {
+                operationTask = _persistence.TerminalizeTurnAsync(request, CancellationToken.None);
+                if (await operationTask.WaitAsync(LifecycleCleanupTimeout).ConfigureAwait(false))
+                {
+                    return true;
+                }
+
+                if (request.ExecutionId.HasValue)
+                {
+                    return true;
+                }
+
+                throw new InvalidOperationException(
+                    $"Published turn {request.TurnId} was not found while terminalizing setup.");
+            }
+            catch (TimeoutException)
+            {
+                if (operationTask != null)
+                {
+                    _ = ObserveLifecycleTaskAsync(operationTask);
+                }
+
+                _logger.LogWarning(
+                    "Timed out terminalizing published turn {TurnId}; recovery will finish setup cleanup",
+                    request.TurnId);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                if (attempt == 1 || attempt == 4)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Published setup terminalization attempt {Attempt} failed for turn {TurnId}; retrying",
+                        attempt,
+                        request.TurnId);
+                }
+
+                if (attempt < 4)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private async Task ReleaseLockUntilConfirmedAsync(
+        IStreamLockHandle? lockHandle,
+        Guid conversationId)
+    {
+        if (lockHandle == null)
+        {
+            return;
+        }
+
+        for (var attempt = 1; attempt <= 4; attempt++)
+        {
+            Task<bool>? releaseTask = null;
+            try
+            {
+                releaseTask = lockHandle.ReleaseAsync(CancellationToken.None);
+                if (await releaseTask.WaitAsync(LifecycleCleanupTimeout).ConfigureAwait(false))
+                {
+                    if (lockHandle.ConversationLockEventSent)
+                    {
+                        await _streamPolicy.OnUnlockAsync(conversationId, CancellationToken.None);
+                    }
+
+                    return;
+                }
+            }
+            catch (TimeoutException)
+            {
+                if (releaseTask != null)
+                {
+                    _ = ObserveLifecycleTaskAsync(releaseTask);
+                }
+
+                _logger.LogWarning(
+                    "Timed out releasing published conversation lock for {ConversationId}; the lease will expire",
+                    conversationId);
+                return;
+            }
+            catch (Exception ex)
+            {
+                if (attempt == 1 || attempt == 4)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Published conversation lock release attempt {Attempt} failed for {ConversationId}; retrying",
+                        attempt,
+                        conversationId);
+                }
+            }
+
+            if (attempt < 4)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
+            }
+        }
+    }
+
+    private static async Task ObserveLifecycleTaskAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The bounded lifecycle attempt already returned; observe late cleanup failures.
         }
     }
 
@@ -455,6 +624,8 @@ public class PublishedConversationService : IPublishedConversationService
         }
 
         var sequence = currentMessageSequence;
+        var deferredAssistantMessages = new List<StartAssistantMessageRequest>();
+        var deferredToolMessages = new List<CreateToolMessageRequest>();
 
         MessageAddedEventHandler onMessageAdded = (_, e) =>
         {
@@ -463,34 +634,28 @@ public class PublishedConversationService : IPublishedConversationService
                 return;
             }
 
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var fileUrlContext = _streamPolicy.BuildFileUrlContext(dbConversation, publisherId, hostUrl);
 
             if (e.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
             {
                 var sanitizedAssistant = _streamPolicy.SanitizeAssistantContent(e.Message ?? string.Empty, new Dictionary<string, string>(), fileUrlContext);
-                var msg = new NotebookConversationMessage
-                {
-                    NotebookConversationId = dbConversation.Id,
-                    TurnIndex = dbTurn.TurnIndex,
-                    MessageSequence = sequence++,
-                    Role = DataModelChatRole.Assistant,
-                    AssistantId = publishedAssistantId,
-                    AssistantName = assistantName,
-                    Content = sanitizedAssistant,
-                    IsStreaming = false,
-                    Created = DateTime.UtcNow,
-                    ToolCalls = string.IsNullOrEmpty(e.ToolCallsJson) ? null : e.ToolCallsJson
-                };
-                db.NotebookConversationMessages.Add(msg);
-                var turn = db.ConversationTurns.First(t => t.Id == dbTurn.Id);
-                turn.LastUpdated = DateTime.UtcNow;
-                db.SaveChanges();
+                deferredAssistantMessages.Add(
+                    new StartAssistantMessageRequest(
+                        dbConversation.Id,
+                        dbTurn.Id,
+                        dbTurn.TurnIndex,
+                        sequence++,
+                        assistantName,
+                        dbTurn.ModelDeploymentId,
+                        publishedAssistantId,
+                        Content: sanitizedAssistant,
+                        IsStreaming: false,
+                        ToolCallsJson: string.IsNullOrEmpty(e.ToolCallsJson) ? null : e.ToolCallsJson,
+                        ExpectedExecutionId: dbTurn.ExecutionId));
             }
             else if (e.Role.Equals("tool", StringComparison.OrdinalIgnoreCase))
             {
-                var result = _persistence.CreateToolMessageAsync(
+                deferredToolMessages.Add(
                     new CreateToolMessageRequest(
                         dbConversation.Id,
                         dbTurn.Id,
@@ -500,13 +665,8 @@ public class PublishedConversationService : IPublishedConversationService
                         e.ToolCallId,
                         e.FunctionName,
                         publishedAssistantId,
-                        assistantName),
-                    CancellationToken.None).GetAwaiter().GetResult();
-
-                if (result.Created)
-                {
-                    sequence++;
-                }
+                        assistantName,
+                        ExpectedExecutionId: dbTurn.ExecutionId));
             }
         };
 
@@ -530,6 +690,20 @@ public class PublishedConversationService : IPublishedConversationService
             httpClient: httpClient,
             messageAdded: onMessageAdded,
             ctx: resumeToolContext);
+
+        foreach (var assistantRequest in deferredAssistantMessages)
+        {
+            await _persistence.StartAssistantMessageAsync(assistantRequest, cancellationToken);
+        }
+
+        foreach (var toolRequest in deferredToolMessages)
+        {
+            var result = await _persistence.CreateToolMessageAsync(toolRequest, cancellationToken);
+            if (result.Created)
+            {
+                sequence++;
+            }
+        }
 
         return sequence;
     }

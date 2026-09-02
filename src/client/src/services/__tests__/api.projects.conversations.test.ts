@@ -398,6 +398,102 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
         vi.useRealTimers();
       }
     });
+
+    it('delivers the terminal event type to onComplete exactly once and stops reading', async () => {
+      const onEvent = vi.fn();
+      const onComplete = vi.fn();
+      const read = vi.fn()
+        .mockResolvedValueOnce({ done: false, value: new TextEncoder().encode('event: complete\ndata: {"turnId":"t1"}\n\n') })
+        .mockResolvedValueOnce({ done: false, value: new TextEncoder().encode('event: token\ndata: {"contentDelta":"late"}\n\n') })
+        .mockResolvedValue({ done: true, value: undefined });
+      mockFetch.mockResolvedValue({
+        ok: true, status: 200, json: vi.fn(),
+        body: { getReader: () => ({ read, releaseLock: vi.fn() }) },
+      });
+
+      await api.projects.notebooks.conversations.sendMessageStream(
+        projectId, notebookId, convoId, { instructions: 'x' },
+        onEvent, vi.fn(), onComplete,
+      );
+
+      // Only the pre-terminal event reaches onEvent; the post-terminal token is dropped.
+      expect(onEvent).toHaveBeenCalledTimes(1);
+      expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'complete' }));
+      // Exactly one terminal callback, tagged with the observed terminal event type.
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith('complete');
+      // The loop stopped reading as soon as the terminal event was delivered.
+      expect(read).toHaveBeenCalledTimes(1);
+    });
+
+    it('tags cancelled and pending_client_tool terminals on the single onComplete callback', async () => {
+      const make = (terminal: string) => ({
+        ok: true, status: 200, json: vi.fn(),
+        body: {
+          getReader: () => ({
+            read: vi.fn()
+              .mockResolvedValueOnce({ done: false, value: new TextEncoder().encode(`event: ${terminal}\ndata: {"turnId":"t9"}\n\n`) })
+              .mockResolvedValue({ done: true, value: undefined }),
+            releaseLock: vi.fn(),
+          }),
+        },
+      });
+
+      for (const terminal of ['cancelled', 'pending_client_tool', 'error']) {
+        const onComplete = vi.fn();
+        mockFetch.mockReset().mockResolvedValue(make(terminal));
+        await api.projects.notebooks.conversations.sendMessageStream(
+          projectId, notebookId, convoId, { instructions: 'x' },
+          vi.fn(), vi.fn(), onComplete,
+        );
+        expect(onComplete).toHaveBeenCalledTimes(1);
+        expect(onComplete).toHaveBeenCalledWith(terminal);
+      }
+    });
+
+    it('reports an error (not a clean complete) when the body closes without any terminal event', async () => {
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      mockFetch.mockResolvedValue(sseResponse([
+        'event: token\n',
+        'data: {"contentDelta":"done"}\n',
+        '\n',
+      ]));
+      await api.projects.notebooks.conversations.sendMessageStream(
+        projectId, notebookId, convoId, { instructions: 'x' },
+        vi.fn(), onError, onComplete,
+      );
+      // A body close without a terminal SSE event is a server drop, never success — the
+      // action owner's reconcile path keys off this, so it must stay an error.
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringMatching(/ended without a reply/i),
+      }));
+    });
+
+    it('returns silently on AbortError even after a terminal event was seen', async () => {
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      const abortController = new AbortController();
+      abortController.abort();
+      mockFetch.mockResolvedValue({
+        ok: true, status: 200,
+        body: {
+          getReader: () => ({
+            read: vi.fn().mockRejectedValue(new DOMException('aborted', 'AbortError')),
+            cancel: vi.fn(),
+            releaseLock: vi.fn(),
+          }),
+        },
+      });
+      await api.projects.notebooks.conversations.sendMessageStream(
+        projectId, notebookId, convoId, { instructions: 'x' },
+        vi.fn(), onError, onComplete, abortController.signal,
+      );
+      // Abort is a cleanup primitive: no onError, no spurious terminal callback.
+      expect(onError).not.toHaveBeenCalled();
+      expect(onComplete).not.toHaveBeenCalled();
+    });
   });
 
   describe('observeConversationEvents', () => {

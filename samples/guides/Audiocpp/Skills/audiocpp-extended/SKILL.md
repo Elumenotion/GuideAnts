@@ -22,7 +22,7 @@ document, and tell the user plainly when a route is blocked.
 ## Always start with the probe
 
 ```bash
-python3 Output/Skills/audiocpp-extended/scripts/probe.py
+python3 Skills/audiocpp-extended/scripts/probe.py
 ```
 
 It prints a JSON report saying which of the four routes below are open in this
@@ -59,10 +59,10 @@ model GuideAnts already loaded:
   `/v1/audio/transcriptions` — no upload, no wrapper contract.
 
 ```bash
-python3 Output/Skills/audiocpp-extended/scripts/engine_tool.py speech "Hello there" \
-  -o Output/cloned.wav --voice-ref Output/uploads/user_voice.wav --seed 42
-python3 Output/Skills/audiocpp-extended/scripts/engine_tool.py transcribe Output/uploads/clip.wav --language de
-python3 Output/Skills/audiocpp-extended/scripts/engine_tool.py voices
+python3 Skills/audiocpp-extended/scripts/engine_tool.py speech "Hello there" \
+  -o cloned.wav --voice-ref user_voice.wav --seed 42
+python3 Skills/audiocpp-extended/scripts/engine_tool.py transcribe clip.wav --language de
+python3 Skills/audiocpp-extended/scripts/engine_tool.py voices
 ```
 
 `engine_tool.py speech` auto-detects the TTS engine's model id from the wrapper's
@@ -78,7 +78,7 @@ which a skill cannot set — so this route is only useful for other
 qwen3_asr-family snapshots).
 
 ```bash
-python3 Output/Skills/audiocpp-extended/scripts/fetch_model.py <hf-repo-id> --dest /models-local/asr/<DirName>
+python3 Skills/audiocpp-extended/scripts/fetch_model.py <hf-repo-id> --dest /models-local/asr/<DirName>
 curl -s -X POST http://127.0.0.1:8082/admin/load -H "Content-Type: application/json" -d '{"model_id": "<DirName>"}'
 ```
 
@@ -99,12 +99,12 @@ are download/packaging chores a script can do by hand. So:
 2. Spawn your own engine on a free port (default 18099):
 
 ```bash
-python3 Output/Skills/audiocpp-extended/scripts/spawn_engine.py start \
+python3 Skills/audiocpp-extended/scripts/spawn_engine.py start \
   --path /models-local/tts/Qwen3-TTS-12Hz-1.7B-CustomVoice --family qwen3_tts --task tts
-python3 Output/Skills/audiocpp-extended/scripts/spawn_engine.py status   # poll until ready
-python3 Output/Skills/audiocpp-extended/scripts/engine_tool.py speech "Hi" \
-  --engine-url http://127.0.0.1:18099 --model Qwen3-TTS-12Hz-1.7B-CustomVoice --voice Vivian -o Output/hi.wav
-python3 Output/Skills/audiocpp-extended/scripts/spawn_engine.py stop     # always stop when done
+python3 Skills/audiocpp-extended/scripts/spawn_engine.py status   # poll until ready
+python3 Skills/audiocpp-extended/scripts/engine_tool.py speech "Hi" \
+  --engine-url http://127.0.0.1:18099 --model Qwen3-TTS-12Hz-1.7B-CustomVoice --voice Vivian -o hi.wav
+python3 Skills/audiocpp-extended/scripts/spawn_engine.py stop     # always stop when done
 ```
 
 Ground rules for this route:
@@ -137,12 +137,12 @@ Azure cloud transcription provider does it) — but the container binary ships t
 with a small model (~hundreds of MB, usually fits without unloading anything):
 
 ```bash
-python3 Output/Skills/audiocpp-extended/scripts/fetch_model.py nvidia/diar_sortformer_4spk-v1 \
+python3 Skills/audiocpp-extended/scripts/fetch_model.py nvidia/diar_sortformer_4spk-v1 \
   --dest /models-local/asr/diar_sortformer_4spk-v1 --exclude diar_sortformer_4spk-v1.nemo
-python3 Output/Skills/audiocpp-extended/scripts/spawn_engine.py start \
+python3 Skills/audiocpp-extended/scripts/spawn_engine.py start \
   --path /models-local/asr/diar_sortformer_4spk-v1 --family sortformer_diar --task diar
-python3 Output/Skills/audiocpp-extended/scripts/diarize.py Output/uploads/meeting.mp3 -o Output/meeting
-python3 Output/Skills/audiocpp-extended/scripts/spawn_engine.py stop
+python3 Skills/audiocpp-extended/scripts/diarize.py meeting.mp3 -o meeting
+python3 Skills/audiocpp-extended/scripts/spawn_engine.py stop
 ```
 
 (Check whether `/models-local/asr/diar_sortformer_4spk-v1/model.safetensors`

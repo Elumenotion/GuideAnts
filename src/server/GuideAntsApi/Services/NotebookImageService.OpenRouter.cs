@@ -16,8 +16,10 @@ namespace GuideAntsApi.Services
             int n,
             string outputFormat,
             string? modelId,
-            string? requestPresetJson)
+            string? requestPresetJson,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _ = outputFormat;
             var apiKey = _configuration["OpenRouter:ApiKey"];
             var baseUrl = _configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
@@ -59,13 +61,14 @@ namespace GuideAntsApi.Services
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
             AddOpenRouterAttributionHeaders(request);
 
-            using var response = await client.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException($"OpenRouter image generation failed: {(int)response.StatusCode} {responseBody}");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             return await SaveResponseAndReturnBytes(responseBody);
         }
 
@@ -78,8 +81,10 @@ namespace GuideAntsApi.Services
             string? imageContentType,
             string? imageFileName,
             string? modelId,
-            string? requestPresetJson)
+            string? requestPresetJson,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _ = outputFormat;
             var model = RequireImageModelId(
                 OpenRouterProviderSection,
@@ -125,13 +130,14 @@ namespace GuideAntsApi.Services
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
             AddOpenRouterAttributionHeaders(request);
 
-            using var response = await client.SendAsync(request);
-            var result = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, cancellationToken);
+            var result = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException($"OpenRouter image edit failed: {(int)response.StatusCode} {result}");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             return await SaveResponseAndReturnBytes(result);
         }
 

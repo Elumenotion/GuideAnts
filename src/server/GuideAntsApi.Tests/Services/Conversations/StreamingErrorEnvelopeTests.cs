@@ -117,6 +117,16 @@ public sealed class StreamingErrorEnvelopeTests
     json.GetProperty("message").GetString().Should().Be("Chat run failed.");
   }
 
+  [TestMethod]
+  public void Build_Includes_turnId_when_provided()
+  {
+    var turnId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    var json = Serialize(StreamingErrorEnvelope.Build(new InvalidOperationException("boom"), turnId));
+
+    json.GetProperty("turnId").GetGuid().Should().Be(turnId);
+    json.GetProperty("message").GetString().Should().Be("boom");
+  }
+
   private static JsonElement Serialize(object envelope) =>
     JsonSerializer.SerializeToElement(envelope);
 }

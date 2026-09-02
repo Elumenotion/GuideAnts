@@ -7,6 +7,7 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.PublishedGuides;
 using GuideAntsApi.Services;
+using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Usage;
 
 namespace GuideAntsApi.Endpoints;
@@ -252,7 +253,7 @@ public static class PublishedNotebookConversationsEndpoints
             [FromServices] GuideAntsApi.DataModel.ApplicationDbContext db,
             [FromServices] IStoragePathResolver pathResolver,
             [FromServices] IMarkdownExtractionService markdownService,
-            [FromServices] IServiceScopeFactory scopeFactory,
+            [FromServices] INotebookFileSyncService notebookFileSyncService,
             Guid projectId,
             Guid notebookId) =>
         {
@@ -383,12 +384,7 @@ public static class PublishedNotebookConversationsEndpoints
                         try 
                         {
                             await markdownService.CreateNotebookMarkdownShadowAsync(fileId);
-                            
-                            using var scope = scopeFactory.CreateScope();
-                            var jobQueue = scope.ServiceProvider.GetRequiredService<GuideAntsApi.BackgroundJobs.IJobQueueService>();
-                            await jobQueue.EnqueueAsync(
-                                jobType: "SyncNotebook",
-                                payload: new GuideAntsApi.BackgroundJobs.Jobs.SyncNotebookJob(notebookId));
+                            await notebookFileSyncService.QueueReconcileAsync(notebookId);
                         }
                         catch { /* best effort */ }
                     });
