@@ -34,6 +34,7 @@ namespace AntRunner.Chat
         };
 
         private static readonly ConcurrentDictionary<string, Dictionary<string, ToolCaller>> RequestBuilderCache = new();
+        private static readonly ConcurrentDictionary<string, long> RequestBuilderCacheGenerations = new();
 
         // Tracks which files have already been announced in a conversation to avoid duplicates
         private static readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> ConversationFileAnnouncements = new();
@@ -283,6 +284,7 @@ namespace AntRunner.Chat
         {
             var cacheKey = GenerateRequestBuilderCacheKey(assistantName);
             RequestBuilderCache.TryRemove(cacheKey, out _);
+            RequestBuilderCacheGenerations.AddOrUpdate(cacheKey, 1, static (_, generation) => generation + 1);
         }
 
         /// <summary>
@@ -292,6 +294,10 @@ namespace AntRunner.Chat
         public static void ClearAllRequestBuilderCache()
         {
             RequestBuilderCache.Clear();
+            foreach (var cacheKey in RequestBuilderCacheGenerations.Keys)
+            {
+                RequestBuilderCacheGenerations.AddOrUpdate(cacheKey, 1, static (_, generation) => generation + 1);
+            }
         }
 
         /// <summary>
@@ -2127,6 +2133,7 @@ namespace AntRunner.Chat
                 return;
             }
 
+            var cacheGeneration = RequestBuilderCacheGenerations.GetOrAdd(cacheKey, 0);
             Dictionary<string, ToolCaller> assistantRequestBuilders = [];
 
             // Try to get OpenAPI schemas from database first
@@ -2241,7 +2248,11 @@ namespace AntRunner.Chat
                 }
             }
 
-            RequestBuilderCache[cacheKey] = assistantRequestBuilders;
+            if (RequestBuilderCacheGenerations.TryGetValue(cacheKey, out var currentGeneration)
+                && currentGeneration == cacheGeneration)
+            {
+                RequestBuilderCache[cacheKey] = assistantRequestBuilders;
+            }
         }
 
         /// <summary>

@@ -103,6 +103,7 @@ namespace AntRunner.Chat
         {
             var cacheKey = GenerateCacheKey(assistantName);
             AssistantDefinitionCache.TryRemove(cacheKey, out _);
+            ThreadRun.ClearRequestBuilderCache(assistantName);
         }
 
         /// <summary>
@@ -111,6 +112,7 @@ namespace AntRunner.Chat
         public static void ClearAllCache()
         {
             AssistantDefinitionCache.Clear();
+            ThreadRun.ClearAllRequestBuilderCache();
         }
 
         private static async Task<AssistantDefinition?> LoadAssistantDefinitionAsync(string assistantName)
