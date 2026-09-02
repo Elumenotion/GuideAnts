@@ -1,6 +1,6 @@
 ---
 name: audiocpp-tts-controls
-description: "Advanced synthesis on the loaded Max TTS model via the raw audiocpp gateway (/tts): seed, language, voice-design instructions, builtin/voice-pack speakers, and multi-speaker dialogue with overlapping interruptions. None of which the built-in GuideAnts audio tools expose."
+description: "Advanced synthesis on the loaded GPU host TTS model via the raw audiocpp gateway (/tts): seed, language, voice-design instructions, builtin/voice-pack speakers, and multi-speaker dialogue with overlapping interruptions. None of which the built-in GuideAnts audio tools expose."
 metadata:
   guideants:
     enabled: true
@@ -10,31 +10,68 @@ metadata:
 
 # audio.cpp synthesis controls (experimental)
 
-Product TTS is `{text, voice, speed}`. This skill calls raw
-`/tts/v1/audio/speech` on Max. Deliverables are WAVs in `Output/`.
+Paths — fixed layout, do not probe or re-derive. The sandbox CWD is the
+notebook's **output directory**. This skill's scripts live under
+`Skills/audiocpp-tts-controls/scripts/` relative to it. Write deliverables with
+**bare filenames** (e.g. `-o scene.wav`); never prefix with `Output/`.
 
-## Environment (required for PC → Max)
+Product TTS is `{text, voice, speed}`. This skill calls raw
+`/tts/v1/audio/speech` on the GPU host. Deliverables are WAVs written to the CWD (bare filenames).
+
+## Environment (required for PC → the GPU host)
 
 ```text
-AUDIOCPP_SKILL_BASE_URL=http://<max-lan-ip>:8112/audiocpp-skill
-AUDIOCPP_SKILL_TOKEN=<same as Max GA_AUDIOCPP_SKILL_TOKEN>
+AUDIOCPP_SKILL_BASE_URL=http://<gpu-host-lan-ip>:8112/audiocpp-skill
+AUDIOCPP_SKILL_TOKEN=<same as the GPU host GA_AUDIOCPP_SKILL_TOKEN>
 ```
 
-A TTS model must already be loaded on Max via GuideAnts Settings. Chatterbox
+A TTS model must already be loaded on the GPU host via GuideAnts Settings. Chatterbox
 (`ResembleAI/chatterbox`) is the known-good catalog entry for cloning /
 voice-pack presets.
 
-## Preflight
+## Long-form single-speaker narration (video scripts)
+
+**Skill users:** write the final narration script as plain text (markdown headers
+ok) and call `narration.py`. Do **not** chunk, concat, trim silence, or run
+preflight yourself — the tool owns all of that.
+
+`start` runs preflight, creates a job, and spawns a **detached background worker**
+that synthesizes the full script. Each sandbox call returns immediately. Poll
+`status` until `"status": "done"`. Use `cancel` if the user stops the turn or
+asks to abort.
 
 ```bash
-python3 Output/Skills/audiocpp-tts-controls/scripts/preflight.py --for tts-controls
+python3 Skills/audiocpp-tts-controls/scripts/narration.py start script.txt \
+  -o narration.wav \
+  --voice narrator
+
+python3 Skills/audiocpp-tts-controls/scripts/narration.py status narration.wav
 ```
 
-## Controls
+Repeat `status` until `"status": "done"`. Job state lives in `.audiocpp-narration/`
+beside the output. Status responses report **job-level** progress only (`progress`,
+`elapsed_seconds`, `eta_seconds`) — never chunk indices or segment counts.
+
+To replace a finished or failed job:
 
 ```bash
-python3 Output/Skills/audiocpp-tts-controls/scripts/engine_tool.py speech "Hello there" \
-  -o Output/out.wav \
+python3 Skills/audiocpp-tts-controls/scripts/narration.py start script.txt \
+  -o narration.wav --voice narrator --force
+```
+
+To abort a running job:
+
+```bash
+python3 Skills/audiocpp-tts-controls/scripts/narration.py cancel narration.wav
+```
+
+## Short utterances
+
+For a single line or short clip, use `engine_tool.py speech` directly:
+
+```bash
+python3 Skills/audiocpp-tts-controls/scripts/engine_tool.py speech "Hello there" \
+  -o out.wav \
   [--seed 42] \
   [--language de] \
   [--instructions "a calm, deep narrator voice"] \
@@ -48,10 +85,10 @@ python3 Output/Skills/audiocpp-tts-controls/scripts/engine_tool.py speech "Hello
 ## Voices
 
 ```bash
-python3 Output/Skills/audiocpp-tts-controls/scripts/engine_tool.py voices
+python3 Skills/audiocpp-tts-controls/scripts/engine_tool.py voices
 ```
 
-Voice ids come from the **voice-pack** baked into the Max AI image at
+Voice ids come from the **voice-pack** baked into the GPU host AI image at
 `/opt/guideants/voice-pack/` (or a custom mount at
 `/opt/guideants/custom-voice-pack`). The engine resolves a `--voice` id to a
 reference clip **server-side** — you do NOT stage the clip for pack voices.
@@ -74,17 +111,17 @@ matching-language voice.
 ## Multi-speaker dialogue (overlap / interruptions)
 
 ```bash
-python3 Output/Skills/audiocpp-tts-controls/scripts/multi_speaker.py \
-  Output/scene.json -o Output/scene.wav \
+python3 Skills/audiocpp-tts-controls/scripts/multi_speaker.py \
+  scene.json -o scene.wav \
   [--model chatterbox] \
-  [--seed-map '{"doug":1001,"alice":3003}']
+  [--seed-map '{"narrator":1001,"alice":3003}']
 ```
 
 `scene.json` is an array of lines:
 
 ```json
 [
-  {"voice": "doug",      "text": "What's the air speed velocity of an unladen swallow?"},
+  {"voice": "narrator",  "text": "What's the air speed velocity of an unladen swallow?"},
   {"voice": "bm_george", "text": "African or European?", "overlap_ms": 400},
   {"voice": "bf_alice",  "text": "Oh no, you two are doing the swallow thing again.", "overlap_ms": 600}
 ]
@@ -125,10 +162,13 @@ fragment. A short `overlap_ms` on a clean turn is fine for pacing, but the
   the id is in `manifest.json`; for a brand-new custom voice add it to the
   pack and rebuild/remount, or stage a clip and use **audiocpp-voice-clone**
   (`--voice-ref`).
-- No TTS loaded on Max → blocked; say so.
+- No TTS loaded on the GPU host → blocked; say so.
 
 ## Reporting
 
 End by telling the user what worked and what was blocked, quoting preflight
-evidence. For multi-speaker output, state the total duration, per-speaker
-seeds, and which lines carry `overlap_ms`.
+evidence from `narration.py start` when using long-form narration. For
+multi-speaker output, state the total duration, per-speaker seeds, and which
+lines carry `overlap_ms`. For long narration, quote `status` (`progress`,
+`elapsed_seconds`, `eta_seconds`, final `result.duration_seconds`) — not
+chunk or segment details.

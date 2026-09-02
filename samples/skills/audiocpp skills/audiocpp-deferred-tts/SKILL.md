@@ -1,6 +1,6 @@
 ---
 name: audiocpp-deferred-tts
-description: "Run TTS families audio.cpp supports but GuideAnts does not ship (Qwen3 CustomVoice, VibeVoice, MioTTS, VoxCPM2, PocketTTS, Vevo2) by downloading onto Max and spawning a private engine via the raw audiocpp gateway (/admin + /private)."
+description: "Run TTS families audio.cpp supports but GuideAnts does not ship (Qwen3 CustomVoice, VibeVoice, MioTTS, VoxCPM2, PocketTTS, Vevo2) by downloading onto the GPU host and spawning a private engine via the raw audiocpp gateway (/admin + /private)."
 metadata:
   guideants:
     enabled: true
@@ -10,17 +10,22 @@ metadata:
 
 # audio.cpp deferred TTS families (experimental)
 
-Product TTS is catalog-gated. Max still ships loaders for deferred families.
-This skill downloads models onto Max and spawns a private engine through the
+Paths — fixed layout, do not probe or re-derive. The sandbox CWD is the
+notebook's **output directory**. This skill's scripts live under
+`Skills/audiocpp-deferred-tts/scripts/` relative to it. Write deliverables with
+**bare filenames**; never prefix with `Output/`.
+
+Product TTS is catalog-gated. The GPU host still ships loaders for deferred families.
+This skill downloads models onto the GPU host and spawns a private engine through the
 **raw audiocpp gateway** (`/admin/models/fetch`, `/admin/private/*`, then
-`/private/v1/audio/speech`). WAVs land in `Output/`; these models never appear in
+`/private/v1/audio/speech`). WAVs are written to the CWD with bare filenames; these models never appear in
 the GuideAnts voice picker.
 
-## Environment (required for PC → Max)
+## Environment (required for PC → the GPU host)
 
 ```text
-AUDIOCPP_SKILL_BASE_URL=http://<max-lan-ip>:8112/audiocpp-skill
-AUDIOCPP_SKILL_TOKEN=<same as Max GA_AUDIOCPP_SKILL_TOKEN>
+AUDIOCPP_SKILL_BASE_URL=http://<gpu-host-lan-ip>:8112/audiocpp-skill
+AUDIOCPP_SKILL_TOKEN=<same as the GPU host GA_AUDIOCPP_SKILL_TOKEN>
 ```
 
 Optional: `HF_TOKEN` for gated repos.
@@ -32,30 +37,30 @@ Families that take `voice_ref`: only with speaker consent.
 ## Preflight
 
 ```bash
-python3 Output/Skills/audiocpp-deferred-tts/scripts/preflight.py --for deferred-tts
+python3 Skills/audiocpp-deferred-tts/scripts/preflight.py --for deferred-tts
 ```
 
-VRAM: a second engine competes with Max’s loaded TTS — ask the user to unload
-product TTS via Settings if needed. Never unload silently.
+VRAM: product emb/ASR/TTS normally stay loaded. A private second engine may
+compete — ask before unloading anything via Settings; never unload silently.
 
 ## Pattern
 
-Dest paths are rewritten under `/models-local/skill/` on Max when the gateway is
+Dest paths are rewritten under `/models-local/skill/` on the GPU host when the gateway is
 set. `--engine-url http://127.0.0.1:18099` selects the gateway private engine
 (requests still go to `AUDIOCPP_SKILL_BASE_URL`):
 
 ```bash
-python3 Output/Skills/audiocpp-deferred-tts/scripts/fetch_model.py <hf-repo> \
+python3 Skills/audiocpp-deferred-tts/scripts/fetch_model.py <hf-repo> \
   --dest /models-local/tts/<DirName> [--include <prefix>]
 
-python3 Output/Skills/audiocpp-deferred-tts/scripts/spawn_engine.py start \
+python3 Skills/audiocpp-deferred-tts/scripts/spawn_engine.py start \
   --path /models-local/tts/<DirName> --family <family> --task tts
-python3 Output/Skills/audiocpp-deferred-tts/scripts/spawn_engine.py status
+python3 Skills/audiocpp-deferred-tts/scripts/spawn_engine.py status
 
-python3 Output/Skills/audiocpp-deferred-tts/scripts/engine_tool.py speech "Hi" \
-  --engine-url http://127.0.0.1:18099 --model <id> [--voice <speaker>] -o Output/hi.wav
+python3 Skills/audiocpp-deferred-tts/scripts/engine_tool.py speech "Hi" \
+  --engine-url http://127.0.0.1:18099 --model <id> [--voice <speaker>] -o hi.wav
 
-python3 Output/Skills/audiocpp-deferred-tts/scripts/spawn_engine.py stop
+python3 Skills/audiocpp-deferred-tts/scripts/spawn_engine.py stop
 ```
 
 Per-family recipes: `references/deferred-models.md`. Start with **Qwen3
@@ -67,7 +72,7 @@ CustomVoice**. Engine schema: `references/engine-api.md`.
 - Always `stop` the private engine when done.
 - Surface engine error text for unsupported options.
 
-## Not possible on Max’s binary
+## Not possible on the GPU host’s binary
 
 `kokoro_tts` / `parakeet_tdt` need a custom host build → **audiocpp-host-tts**.
 

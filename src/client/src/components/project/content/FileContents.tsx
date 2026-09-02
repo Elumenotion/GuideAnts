@@ -20,6 +20,7 @@ import {
     looksLikeDocumentServerFile,
     DocumentServerCapabilities,
 } from '@/services/documentServer';
+import { isPlainTextFile } from '@/utils/textFiles';
 
 interface FileContentsProps {
     inlineMode?: boolean;
@@ -30,11 +31,12 @@ interface FileContentsProps {
     version?: number;
     resolveProjectFilePath?: (relativePath: string) => string | undefined;
     onEditMarkdown?: () => void; // delegate to parent for identical behavior
+    onEditPlainText?: () => void;
     canEdit?: boolean;
     mountedRelativePath?: string;
 }
 
-function FileContentsComponent({ projectId, fileId, fileName, contentType, version, inlineMode = false, resolveProjectFilePath, onEditMarkdown, canEdit = false, mountedRelativePath }: FileContentsProps) {
+function FileContentsComponent({ projectId, fileId, fileName, contentType, version, inlineMode = false, resolveProjectFilePath, onEditMarkdown, onEditPlainText, canEdit = false, mountedRelativePath }: FileContentsProps) {
     const [content, setContent] = useState<{ blob: Blob; contentType: string; fileName: string } | null>(null);
     const [textContent, setTextContent] = useState<string | null>(null);
     const [isDetectedTextContent, setIsDetectedTextContent] = useState(false);
@@ -418,6 +420,7 @@ function FileContentsComponent({ projectId, fileId, fileName, contentType, versi
         contentType === 'text/markdown' ||
         contentType === 'text/x-markdown' ||
         (content?.fileName && content.fileName.toLowerCase().endsWith('.md'));
+    const isPlainText = isPlainTextFile(documentServerFileName || content?.fileName || fileName || '', contentType);
 
     if (isLoading) {
         return (
@@ -539,6 +542,38 @@ function FileContentsComponent({ projectId, fileId, fileName, contentType, versi
                     sandbox="allow-same-origin allow-scripts allow-popups allow-modals"
                 />
             </div>
+        );
+    }
+
+    // Handle plain .txt with optional edit affordance (mirrors markdown header pattern)
+    if (shouldRenderAsText && isPlainText && onEditPlainText && !inlineMode) {
+        if (textContent === null) {
+            return (
+                <div className="h-full w-full flex items-center justify-center">
+                    <LoadingSpinner message="Processing text content..." />
+                </div>
+            );
+        }
+        return (
+            <PreviewContainer
+                contentClassName="h-full p-4"
+                hideHeader={false}
+                showHeaderActionsOnlyWhenFull
+                headerActions={
+                    <button
+                        onClick={onEditPlainText}
+                        className="p-2 rounded hover:bg-gray-200 text-gray-600 hover:text-gray-800"
+                        aria-label="Edit text"
+                        title="Edit"
+                    >
+                        <FaRegEdit className="w-4 h-4" />
+                    </button>
+                }
+            >
+                <pre className="whitespace-pre-wrap break-words bg-gray-50 p-4 rounded select-text w-full h-full overflow-auto font-mono text-sm">
+                    {textContent}
+                </pre>
+            </PreviewContainer>
         );
     }
 

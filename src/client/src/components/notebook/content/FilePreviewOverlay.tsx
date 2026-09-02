@@ -3,6 +3,7 @@ import { NotebookFileDto } from '../../../types/notebook';
 import { notebookFilesApi } from '../../../services/notebookFiles';
 import { NotebookFileMarkdownShadowDto, MarkdownExtractionStatus } from '../../../types/api';
 import { isMarkdownExtractionSupported } from '../../../utils/markdownUtils';
+import { isPlainTextFile } from '../../../utils/textFiles';
 import { resolveHtmlResources, cleanupBlobUrls } from '../../../utils/htmlResourceResolver';
 import { useHref } from 'react-router';
 import { VscChromeClose, VscLinkExternal } from 'react-icons/vsc';
@@ -14,6 +15,7 @@ import VideoPlayer from '../../common/VideoPlayer';
 import AudioPlayer from '../../common/AudioPlayer';
 import LoadingSpinner from '../../LoadingSpinner';
 import FullScreenEditor from '../conversations/FullScreenEditor';
+import PlainTextEditor from '../../common/PlainTextEditor';
 import { FaRegEdit, FaExpandAlt, FaCompress, FaDownload } from 'react-icons/fa';
 import DocumentServerEditor from '../../common/DocumentServerEditor';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
@@ -110,6 +112,10 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
   const [mdEditorContent, setMdEditorContent] = useState<string>('');
   const [mdEditorLoading, setMdEditorLoading] = useState<boolean>(false);
   const [mdEditorError, setMdEditorError] = useState<string | undefined>(undefined);
+  const [isEditingPlainText, setIsEditingPlainText] = useState(false);
+  const [plainEditorContent, setPlainEditorContent] = useState<string>('');
+  const isEditingRef = useRef(false);
+  isEditingRef.current = isEditingMd || isEditingPlainText;
 
     const previewUrl = useHref(`/projects/${projectId}/notebooks/${notebookId}/files/preview?path=${encodeURIComponent(file.relativePath)}`);
   
@@ -175,11 +181,11 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape' && !isEditingMd) onClose();
+      if (e.key === 'Escape' && !isEditingRef.current) onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, isEditingMd]);
+  }, [onClose]);
 
   // Handle navigation messages from HTML preview iframe
   useEffect(() => {
@@ -439,6 +445,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     contentType === 'text/x-markdown' ||
     file.fileName.toLowerCase().endsWith('.md') ||
     file.fileName.toLowerCase().endsWith('.markdown');
+  const isPlainText = isPlainTextFile(file.fileName, contentType);
 
   const hasKnownTextHandler =
     contentType.startsWith('text/') ||
@@ -565,6 +572,46 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
       setIsEditingMd(false);
     } catch (err) {
       setMdEditorError('Failed to save markdown file.');
+    } finally {
+      setMdEditorLoading(false);
+    }
+  };
+
+  const openPlainTextEditorFromPreview = async () => {
+    if (!isPlainText || !canEdit) return;
+    setMdEditorError(undefined);
+    setMdEditorLoading(true);
+    try {
+      const blob = await notebookFilesApi.getNotebookFileContent(
+        projectId,
+        notebookId,
+        file.relativePath,
+        file.fileHash
+      );
+      const text = await blob.text();
+      setPlainEditorContent(text);
+      setIsEditingPlainText(true);
+    } catch {
+      setMdEditorError('Failed to load text content.');
+    } finally {
+      setMdEditorLoading(false);
+    }
+  };
+
+  const savePlainTextFromPreview = async (newContent: string) => {
+    setMdEditorLoading(true);
+    setMdEditorError(undefined);
+    try {
+      const relPath = file.relativePath || file.fileName;
+      const folderPath = relPath.includes('/') ? relPath.substring(0, relPath.lastIndexOf('/')) : '';
+      const uploadType = contentType === 'text/plain' ? contentType : 'text/plain';
+      const textFile = new File([newContent], file.fileName, { type: uploadType });
+      await notebookFilesApi.uploadFiles(projectId, notebookId, [textFile], folderPath, false);
+      setTextContent(newContent);
+      try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
+      setIsEditingPlainText(false);
+    } catch {
+      setMdEditorError('Failed to save text file.');
     } finally {
       setMdEditorLoading(false);
     }
@@ -1185,12 +1232,12 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
             ? "fixed inset-0 z-50" 
             : "fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4"
         }
-        onClick={isEmbedded || isFullScreen || isEditingMd || showOriginalContentErrorDialog ? undefined : onClose}
+        onClick={isEmbedded || isFullScreen || isEditingMd || isEditingPlainText || showOriginalContentErrorDialog ? undefined : onClose}
     >
       <div 
         className={getModalClasses()}
         onClick={(e) => e.stopPropagation()}
-        style={{ display: isEditingMd ? 'none' : undefined }}
+        style={{ display: isEditingMd || isEditingPlainText ? 'none' : undefined }}
         tabIndex={-1}
       >
         <header className={`flex flex-col bg-gray-50 ${isFullScreen ? '' : 'rounded-t-lg'}`} data-tour-id="file-preview.header">
@@ -1198,12 +1245,23 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
           <div className="flex items-center justify-between p-3 border-b">
             <h2 className="text-lg font-semibold truncate pr-4">{file.fileName}</h2>
             <div className="flex items-center space-x-2" data-tour-id="file-preview.controls">
-              {isMarkdown && (
+              {isMarkdown && canEdit && (
                 <button
                   onClick={openMarkdownEditorFromPreview}
                   className="p-2 rounded hover:bg-gray-200 text-gray-600 hover:text-gray-800 disabled:opacity-50"
                   disabled={mdEditorLoading}
                   aria-label="Edit markdown"
+                  title="Edit"
+                >
+                  <FaRegEdit className="w-4 h-4" />
+                </button>
+              )}
+              {isPlainText && canEdit && (
+                <button
+                  onClick={openPlainTextEditorFromPreview}
+                  className="p-2 rounded hover:bg-gray-200 text-gray-600 hover:text-gray-800 disabled:opacity-50"
+                  disabled={mdEditorLoading}
+                  aria-label="Edit text"
                   title="Edit"
                 >
                   <FaRegEdit className="w-4 h-4" />
@@ -1320,6 +1378,17 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
           projectId={projectId}
           notebookId={notebookId}
           basePath={file.relativePath.includes('/') ? file.relativePath.substring(0, file.relativePath.lastIndexOf('/')) : undefined}
+        />
+      )}
+      {isEditingPlainText && (
+        <PlainTextEditor
+          value={plainEditorContent}
+          onSave={savePlainTextFromPreview}
+          onCancel={() => setIsEditingPlainText(false)}
+          title={`Edit File: ${file.fileName}`}
+          isLoading={mdEditorLoading}
+          error={mdEditorError}
+          canEdit={canEdit}
         />
       )}
     </div>

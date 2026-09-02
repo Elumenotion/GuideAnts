@@ -53,7 +53,7 @@ public class NotebookConversationStreamingEndpointsTests
             yield break;
         }
 
-        public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default, Guid? resolvedAssistantId = null)
         {
             yield return new StreamingEvent("token", JsonSerializer.Serialize(new { role = "assistant", contentDelta = "Hel" }));
             await Task.Delay(10, cancellationToken);
@@ -117,7 +117,7 @@ public class NotebookConversationStreamingEndpointsTests
             yield break;
         }
 
-        public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default, Guid? resolvedAssistantId = null)
         {
             await Task.Yield();
             throw new InvalidOperationException("Conversation is locked by User");

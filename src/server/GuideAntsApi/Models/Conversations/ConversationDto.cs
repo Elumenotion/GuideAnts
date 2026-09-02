@@ -28,9 +28,11 @@ public record MessageDto(
 );
 
 public record AttachedFileDto(
-    Guid NotebookFileId,
+    Guid? NotebookFileId,
+    string? RelativePath,
+    ContentUploadType? UploadType,
     string FileName,
-    string FileType, // 'image', 'audio', 'text', 'other'
+    string FileType, // 'image', 'audio', 'text', 'folder', 'other'
     long FileSize,
     string? PreviewUrl,
     AttachmentType Type
@@ -110,16 +112,6 @@ public record SendMessageResponse(ConversationDto Conversation, UsageResponse Us
 public class UndoMessageRequest
 {
     public Guid MessageId { get; set; }
-}
-
-public enum ContentUploadType
-{
-    ImageFile,
-    ImageUrl,
-    AudioFile,
-    TextFile,
-    SandboxFile,
-    Folder
 }
 
 public record AttachmentDto(

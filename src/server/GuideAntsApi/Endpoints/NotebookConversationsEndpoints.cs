@@ -90,15 +90,43 @@ public static class NotebookConversationsEndpoints
         // POST cancel an in-flight stream turn (idempotent Stop control)
         group.MapPost("/{convoId:guid}/turns/{turnId:guid}/cancel", async (
             [FromServices] IConversationService svc,
+            [FromServices] ILoggerFactory loggerFactory,
             Guid convoId,
             Guid turnId) =>
         {
-            var cancelled = await svc.CancelTurnStreamAsync(convoId, turnId);
-            return cancelled ? Results.NoContent() : Results.NotFound();
+            try
+            {
+                var cancelled = await svc.CancelTurnStreamAsync(convoId, turnId);
+                return cancelled ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ConversationStopInProgressException ex)
+            {
+                return Results.Conflict(new
+                {
+                    code = "STOP_IN_PROGRESS",
+                    error = ex.Message,
+                    turnId = ex.TurnId
+                });
+            }
+            catch (Exception ex)
+            {
+                loggerFactory
+                    .CreateLogger("NotebookConversationsEndpoints")
+                    .LogError(
+                        ex,
+                        "Stop request could not confirm lifecycle completion for conversation {ConversationId} turn {TurnId}",
+                        convoId,
+                        turnId);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Stop not confirmed",
+                    detail: "The conversation stop could not be confirmed. Keep the conversation locked and retry.");
+            }
         })
         .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
-        .Produces(StatusCodes.Status404NotFound);
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status409Conflict);
 
         // GET observer SSE (subscribe-only; does not start a turn or acquire a lock)
         group.MapGet("/{convoId:guid}/events", async (
@@ -160,13 +188,8 @@ public static class NotebookConversationsEndpoints
             Guid? targetAssistantId = null;
             if (!string.IsNullOrEmpty(request.AssistantName))
             {
-                var assistant = await dbContext.Assistants
-                    .Where(a => a.Name == request.AssistantName)
-                    .FirstOrDefaultAsync(CancellationToken.None);
-                if (assistant != null)
-                {
-                    targetAssistantId = assistant.Id;
-                }
+                targetAssistantId = await GuideAntsApi.Services.Conversations.AssistantResolution
+                    .ResolveActiveAssistantIdAsync(dbContext, request.AssistantName, CancellationToken.None);
             }
 
             // Preflight local runtime readiness (do not link to client disconnect; streaming setup must still run)
@@ -228,7 +251,7 @@ public static class NotebookConversationsEndpoints
             try
             {
                 await ctx.Response.WriteSseStreamWithKeepAliveAsync(
-                    service.SendMessageStreamToConversationAsync(convoId, request, ctx.RequestAborted),
+                    service.SendMessageStreamToConversationAsync(convoId, request, ctx.RequestAborted, targetAssistantId),
                     ctx.RequestAborted);
             }
             catch (UnauthorizedAccessException)
@@ -311,7 +334,9 @@ public static class NotebookConversationsEndpoints
             {
                 return Results.NotFound(new { error = "Conversation not found" });
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("Conversation is locked by", StringComparison.OrdinalIgnoreCase))
+            catch (InvalidOperationException ex) when (
+                ex.Message.Contains("Conversation is locked by", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("still streaming", StringComparison.OrdinalIgnoreCase))
             {
                 return Results.Conflict(new { error = ex.Message });
             }
@@ -334,7 +359,9 @@ public static class NotebookConversationsEndpoints
             {
                 return Results.NotFound(new { error = ex.Message });
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("Conversation is locked by", StringComparison.OrdinalIgnoreCase))
+            catch (InvalidOperationException ex) when (
+                ex.Message.Contains("Conversation is locked by", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("still streaming", StringComparison.OrdinalIgnoreCase))
             {
                 return Results.Conflict(new { error = ex.Message });
             }

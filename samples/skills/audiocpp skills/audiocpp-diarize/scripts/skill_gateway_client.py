@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Shared helpers for remote raw audiocpp_server access via Max gateway.
+"""Shared helpers for remote raw audiocpp_server access via GPU host gateway.
 
-When AUDIOCPP_SKILL_BASE_URL is set, skills talk to the Max LAN raw gateway
+When AUDIOCPP_SKILL_BASE_URL is set, skills talk to the GPU host LAN raw gateway
 instead of loopback engines. The gateway is a transparent reverse proxy:
 
   {BASE}/asr/...      -> audiocpp_server ASR
   {BASE}/tts/...      -> audiocpp_server TTS
   {BASE}/private/...  -> skill-spawned private engine
-  {BASE}/files        -> stage upload; returns Max-local path
+  {BASE}/files        -> stage upload; returns host-local path
   {BASE}/admin/...    -> fetch models / private start|stop
 
 Auth: X-Audiocpp-Skill-Token. Stdlib-only.
@@ -21,6 +21,30 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+
+def normalize_sandbox_relative_path(value: str | os.PathLike[str]) -> str:
+    """Strip redundant Output/ prefix when sandbox CWD is already Output/."""
+    text = os.fspath(value).replace("\\", "/")
+    cwd = Path.cwd().resolve()
+    for candidate in (cwd, *cwd.parents):
+        if (candidate / ".guideants" / "notebook.json").is_file():
+            output_dir = candidate / "Output"
+            try:
+                cwd.relative_to(output_dir.resolve())
+            except ValueError:
+                return os.fspath(value)
+            normalized = text.lstrip("./").lstrip("/")
+            if normalized.lower().startswith("output/"):
+                stripped = normalized[7:]
+                print(
+                    "warning: path starts with Output/ but sandbox CWD is already Output/; "
+                    f"using {stripped!r} instead",
+                    file=sys.stderr,
+                )
+                return stripped
+            return os.fspath(value)
+    return os.fspath(value)
 
 
 def skill_base_url() -> str | None:
@@ -117,7 +141,7 @@ def gateway_request_multipart(
 
 
 def stage_file(local_path: str, *, timeout: float = 600.0) -> str:
-    """Upload a local file to Max staging; return absolute Max-side path for engine JSON."""
+    """Upload a local file to the GPU host staging; return absolute GPU host-side path for engine JSON."""
     path = Path(local_path)
     if not path.is_file():
         raise FileNotFoundError(local_path)

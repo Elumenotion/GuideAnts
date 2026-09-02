@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using GuideAntsApi.Options;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Tests.TestUtils;
@@ -384,16 +385,94 @@ public sealed class SpeechSynthesisServiceTests
     public async Task SynthesizeToWavAsync_Local_Fails_WhenTextEmptyAfterStripping()
     {
         using var httpClient = new HttpClient(new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)));
+        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
         var service = CreateService(
             httpClient,
             "LocalServiceHosts:SpeechSynthesisBaseUrl",
-            localServiceHostsOptions: new LocalServiceHostsOptions { SpeechSynthesisBaseUrl = "http://guideants-ai:80" });
+            localServiceHostsOptions: new LocalServiceHostsOptions { SpeechSynthesisBaseUrl = "http://guideants-ai:80" },
+            localSpeechEngineRecovery: recovery.Object);
 
-        // SSML strips to empty -> service throws internally and reports failure.
+        // SSML strips to empty -> request/config fault, not an engine exception.
         var result = await service.SynthesizeToWavAsync("<speak><break/></speak>", TempOutputPath());
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("empty after SSML stripping");
+        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task SynthesizeToWavAsync_Local_Recycles_OnHttp500_ThenRetries()
+    {
+        var calls = 0;
+        var audio = Encoding.ASCII.GetBytes("RIFFfakeWAVE");
+        var handler = new CapturingHandler(_ =>
+        {
+            calls++;
+            if (calls == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent(
+                        "{\"error\":\"failed to allocate Qwen3 ASR audio encoder graph\"}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(audio)
+            };
+        });
+        using var httpClient = new HttpClient(handler);
+        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        recovery
+            .Setup(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = CreateService(
+            httpClient,
+            "LocalServiceHosts:SpeechSynthesisBaseUrl",
+            localServiceHostsOptions: new LocalServiceHostsOptions { SpeechSynthesisBaseUrl = "http://guideants-ai:80" },
+            localSpeechEngineRecovery: recovery.Object);
+        var outputPath = TempOutputPath();
+
+        try
+        {
+            var result = await service.SynthesizeToWavAsync("<speak>Hello</speak>", outputPath);
+
+            result.Success.Should().BeTrue();
+            calls.Should().Be(2);
+            recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        }
+        finally
+        {
+            if (File.Exists(outputPath))
+            {
+                File.Delete(outputPath);
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task SynthesizeToWavAsync_Local_DoesNotRecycle_OnHttp400()
+    {
+        var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("bad voice", Encoding.UTF8, "text/plain")
+        });
+        using var httpClient = new HttpClient(handler);
+        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        var service = CreateService(
+            httpClient,
+            "LocalServiceHosts:SpeechSynthesisBaseUrl",
+            localServiceHostsOptions: new LocalServiceHostsOptions { SpeechSynthesisBaseUrl = "http://guideants-ai:80" },
+            localSpeechEngineRecovery: recovery.Object);
+
+        var result = await service.SynthesizeToWavAsync("<speak>Hello</speak>", TempOutputPath());
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("BadRequest");
+        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -460,7 +539,8 @@ public sealed class SpeechSynthesisServiceTests
         LocalServiceHostsOptions? localServiceHostsOptions = null,
         IDictionary<string, string?>? configurationValues = null,
         string? modelId = null,
-        string? requestPresetJson = null)
+        string? requestPresetJson = null,
+        ILocalAiStartupWarmupService? localSpeechEngineRecovery = null)
     {
         var azureOptionsMonitor = new Mock<IOptionsMonitor<AzureSpeechServiceOptions>>();
         azureOptionsMonitor.SetupGet(x => x.CurrentValue).Returns(new AzureSpeechServiceOptions
@@ -498,7 +578,8 @@ public sealed class SpeechSynthesisServiceTests
             localServiceHostsOptionsMonitor.Object,
             resolver,
             configuration,
-            NullLogger<SpeechSynthesisService>.Instance);
+            NullLogger<SpeechSynthesisService>.Instance,
+            localSpeechEngineRecovery);
     }
 
     private sealed class CapturingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler

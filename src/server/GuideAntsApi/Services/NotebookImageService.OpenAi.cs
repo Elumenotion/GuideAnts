@@ -10,8 +10,10 @@ namespace GuideAntsApi.Services
             string prompt,
             string size,
             int n,
-            string? modelId)
+            string? modelId,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var apiKey = _configuration["OpenAI:ApiKey"];
             if (string.IsNullOrWhiteSpace(apiKey))
             {
@@ -44,13 +46,14 @@ namespace GuideAntsApi.Services
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            using var response = await client.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException($"OpenAI image generation failed: {(int)response.StatusCode} {responseBody}");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             return await SaveResponseAndReturnBytes(responseBody);
         }
 
@@ -61,8 +64,10 @@ namespace GuideAntsApi.Services
             byte[] imageBytes,
             string? imageContentType,
             string? imageFileName,
-            string? modelId)
+            string? modelId,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var apiKey = _configuration["OpenAI:ApiKey"];
             if (string.IsNullOrWhiteSpace(apiKey))
             {
@@ -95,13 +100,14 @@ namespace GuideAntsApi.Services
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            using var response = await client.SendAsync(request);
-            var result = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, cancellationToken);
+            var result = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException($"OpenAI image edit failed: {(int)response.StatusCode} {result}");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             return await SaveResponseAndReturnBytes(result);
         }
 

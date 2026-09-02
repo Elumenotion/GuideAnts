@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for timed_transcribe cue builders (no Max / no network)."""
+"""Unit tests for timed_transcribe cue builders (no GPU host / no network)."""
 from __future__ import annotations
 
 import importlib.util

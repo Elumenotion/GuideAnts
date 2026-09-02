@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Time-coded transcript via Max product ASR + private qwen3_forced_aligner.
+"""Time-coded transcript via GPU host product ASR + private qwen3_forced_aligner.
 
 Pure AudioCPP: text from gateway /asr, word samples from /private/v1/tasks/run
 (align). Builds industry-standard SRT + WebVTT + segment JSON. Stdlib-only.
@@ -32,6 +32,7 @@ from skill_gateway_client import (
     fail_http,
     gateway_engine_prefix,
     gateway_request,
+    normalize_sandbox_relative_path,
     stage_file,
     using_skill_gateway,
 )
@@ -473,7 +474,7 @@ def main() -> None:
             words.extend(words_to_seconds(raw, offset))
 
     cues = build_cues(words, min_cue_s=args.min_cue_s, max_cue_s=args.max_cue_s)
-    out_base = Path(args.out_base)
+    out_base = Path(normalize_sandbox_relative_path(args.out_base))
     wall_s = time.perf_counter() - started
     write_outputs(
         out_base,

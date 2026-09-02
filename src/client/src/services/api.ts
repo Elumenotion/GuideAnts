@@ -69,6 +69,8 @@ interface ProjectDto {
     canCreateContent: boolean;
 }
 
+const CONVERSATION_STOP_REQUEST_TIMEOUT_MS = 3_000;
+
 // DTO for copying notebook
 export interface CopyNotebookDto {
     title: string;
@@ -1214,10 +1216,18 @@ export const api = {
                         { method: 'POST' }
                     ),
                 cancelTurn: (projectId: string, notebookId: string, convoId: string, turnId: string) =>
-                    callApi<void>(
-                        `/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/turns/${turnId}/cancel`,
-                        { method: 'POST' }
-                    ),
+                    (() => {
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(
+                            () => controller.abort(),
+                            CONVERSATION_STOP_REQUEST_TIMEOUT_MS,
+                        );
+
+                        return callApi<void>(
+                            `/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/turns/${turnId}/cancel`,
+                            { method: 'POST', signal: controller.signal },
+                        ).finally(() => clearTimeout(timeoutId));
+                    })(),
                 observeConversationEvents: async (
                     projectId: string,
                     notebookId: string,
@@ -1326,7 +1336,7 @@ export const api = {
                     data: { instructions: string; assistantName?: string; useAssistantDefinitionModel?: boolean },
                     onEvent: (event: { type: string; data: any }) => void,
                     onError: (error: Error) => void,
-                    onComplete: () => void,
+                    onComplete: (terminalEventType?: string) => void,
                     abortSignal?: AbortSignal,
                     streamControl?: {
                         requestServerCancel?: () => Promise<void>;
@@ -1358,7 +1368,8 @@ export const api = {
                     const decoder = new TextDecoder();
                     let buffer = '';
                     let currentEventType = '';
-                    let sawTerminalEvent = false;
+                    let terminalEventSeen = false;
+                    let lastTerminalEventType: string | undefined;
                     let idleTimedOut = false;
 
                     const readChunkWithIdleTimeout = (): Promise<ReadableStreamReadResult<Uint8Array>> => {
@@ -1395,6 +1406,8 @@ export const api = {
 
                     try {
                         while (true) {
+                            // A terminal event has already been delivered; stop reading the body.
+                            if (terminalEventSeen) break;
                             if (abortSignal?.aborted) {
                                 throw new DOMException('Operation was aborted', 'AbortError');
                             }
@@ -1416,16 +1429,23 @@ export const api = {
                                 } else if (line.startsWith('data: ')) {
                                     const eventData = line.slice(6);
                                     if (eventData === '[DONE]') {
-                                        sawTerminalEvent = true;
-                                        onComplete();
-                                        return;
+                                        terminalEventSeen = true;
+                                        break;
                                     }
-                                    
+
                                     try {
                                         const parsed = JSON.parse(eventData);
                                         const eventType = currentEventType || 'data';
                                         if (CONVERSATION_STREAM_TERMINAL_EVENT_TYPES.has(eventType)) {
-                                            sawTerminalEvent = true;
+                                            terminalEventSeen = true;
+                                            lastTerminalEventType = eventType;
+                                            // The terminal event is the composer boundary. The action
+                                            // layer (sendMessage's onComplete) owns composer terminal
+                                            // policy; it is invoked exactly once from the loop below
+                                            // rather than here, so this transport never has to guess
+                                            // whether the body close or an abort lands first.
+                                            onEvent({ type: eventType, data: parsed });
+                                            break;
                                         }
                                         onEvent({ type: eventType, data: parsed });
                                     } catch (err) {
@@ -1436,13 +1456,20 @@ export const api = {
                                 }
                             }
                         }
-                        if (!sawTerminalEvent) {
+                        // Exactly one terminal callback per stream. The server always emits a
+                        // terminal SSE event (complete / cancelled / error / pending_client_tool)
+                        // — or [DONE] — before closing the body, so a body close without one means
+                        // the server dropped the reply: report it as an error, never as success.
+                        // This removes the old body-close-vs-abort coin flip: the loop above
+                        // breaks the moment the terminal event is delivered.
+                        if (terminalEventSeen) {
+                            onComplete(lastTerminalEventType ?? undefined);
+                        } else {
                             onError(new Error(
                                 'The conversation stream ended without a reply. The server is no longer answering this request.',
                             ));
                             return;
                         }
-                        onComplete();
                     } catch (err) {
                         if (!idleTimedOut && err instanceof DOMException && err.name === 'AbortError') {
                             console.log('Stream was cancelled by user');

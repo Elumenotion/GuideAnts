@@ -6,7 +6,7 @@ per-line overlap (talk-over / interruption). Stdlib + numpy only.
 
 Dialogue format (JSON array):
   [
-    {"voice": "doug", "text": "What's the air speed...?"},
+    {"voice": "narrator", "text": "What's the air speed...?"},
     {"voice": "bm_george", "text": "African or European?", "overlap_ms": 400},
     {"voice": "bf_alice", "text": "Oh no, you two...", "overlap_ms": 600}
   ]
@@ -24,9 +24,9 @@ Seeds:
   all their lines. Pass --seed-map or per-line "seed" to override.
 
 Usage:
-  python3 multi_speaker.py dialogue.json -o Output/scene.wav
-  python3 multi_speaker.py dialogue.json -o Output/scene.wav --model chatterbox
-  python3 multi_speaker.py dialogue.json -o Output/scene.wav --seed-map '{"doug":1,"alice":2}'
+  python3 multi_speaker.py dialogue.json -o scene.wav
+  python3 multi_speaker.py dialogue.json -o scene.wav --model chatterbox
+  python3 multi_speaker.py dialogue.json -o scene.wav --seed-map '{"narrator":1,"alice":2}'
 
 Remote mode: set AUDIOCPP_SKILL_BASE_URL + AUDIOCPP_SKILL_TOKEN (same as
 all other audiocpp skills). The script stages nothing (voices are

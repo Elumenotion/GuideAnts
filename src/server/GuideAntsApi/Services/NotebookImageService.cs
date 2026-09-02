@@ -11,6 +11,7 @@ using GuideAnts.Usage;
 using AntRunner.ToolCalling.Functions;
 using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.Attributes;
+using GuideAntsApi.Services.Conversations.Persistence;
 
 namespace GuideAntsApi.Services
 {
@@ -42,7 +43,8 @@ namespace GuideAntsApi.Services
             string size = "1024x1024",
             int n = 1,
             string outputFormat = "png",
-            InvocationContext? context = null);
+            InvocationContext? context = null,
+            CancellationToken cancellationToken = default);
 
         Task<ScriptExecutionResult> CreateImageFromImageAsync(
             string prompt,
@@ -50,7 +52,8 @@ namespace GuideAntsApi.Services
             string outputFilename,
             int n = 1,
             string outputFormat = "png",
-            InvocationContext? context = null);
+            InvocationContext? context = null,
+            CancellationToken cancellationToken = default);
     }
 
     public partial class NotebookImageService : INotebookImageService
@@ -104,8 +107,10 @@ namespace GuideAntsApi.Services
             string size = "1024x1024",
             int n = 1,
             string outputFormat = "png",
-            InvocationContext? context = null)
+            InvocationContext? context = null,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var stdOutBuffer = new StringBuilder();
             var stdErrBuffer = new StringBuilder();
             Exception? executionException = null;
@@ -165,7 +170,7 @@ namespace GuideAntsApi.Services
             try
             {
                 Directory.CreateDirectory(notebookDirectory);
-                var mode = await ResolveImageGenerationModeAsync();
+                var mode = await ResolveImageGenerationModeAsync(cancellationToken);
                 var imageProvider = ResolveImageProviderId(mode);
 
                 var imageBytes = await GenerateImageBytesAsync(
@@ -173,12 +178,14 @@ namespace GuideAntsApi.Services
                     size,
                     n,
                     outputFormat,
-                    context);
+                    context,
+                    cancellationToken);
 
                 if (imageBytes != null && imageBytes.Length > 0)
                 {
+                    await EnsureTurnExecutionCanPublishAsync(context!, cancellationToken);
                     var outputFilename = SanitizeGeneratedImageFilename(filename, outputFormat);
-                    await WriteImageBytesToNotebookOutputAsync(imageBytes, outputFilename, context!, CancellationToken.None);
+                    await WriteImageBytesToNotebookOutputAsync(imageBytes, outputFilename, context!, cancellationToken);
 
                     _logger?.LogInformation("Image saved to: {FilePath}, Size: {Size} bytes", LogValueSanitizer.Sanitize(Path.Combine(notebookDirectory, outputFilename)), imageBytes.Length);
                     stdOutBuffer.AppendLine($"Image generated successfully: {outputFilename}");
@@ -192,9 +199,15 @@ namespace GuideAntsApi.Services
                         {
                             using var scope = _serviceProvider.CreateScope();
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                            await syncService.RegisterFilesAsync(context.NotebookId, [relativePath]);
-                            await syncService.QueueReconcileAsync(context.NotebookId);
+                            await EnsureTurnExecutionCanPublishAsync(context!, cancellationToken);
+                            await syncService.RegisterFilesAsync(context.NotebookId, [relativePath], cancellationToken);
+                            await EnsureTurnExecutionCanPublishAsync(context!, cancellationToken);
+                            await syncService.QueueReconcileAsync(context.NotebookId, cancellationToken);
                             _logger?.LogInformation("Registered and queued notebook sync for {NotebookId} after image generation", context.NotebookId);
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            throw;
                         }
                         catch (Exception syncEx)
                         {
@@ -209,7 +222,8 @@ namespace GuideAntsApi.Services
                         outputFilename,
                         imageBytes.Length,
                         imageCount: Math.Max(1, n),
-                        operation: "image-generation");
+                        operation: "image-generation",
+                        cancellationToken: cancellationToken);
                 }
                 else
                 {
@@ -218,6 +232,14 @@ namespace GuideAntsApi.Services
                 }
             }
             catch (RoutingException)
+            {
+                throw;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (ConversationTurnExecutionFencedException)
             {
                 throw;
             }
@@ -268,7 +290,7 @@ namespace GuideAntsApi.Services
             };
 
             var jsonResult = JsonSerializer.Serialize(logObject, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(resultPath, jsonResult);
+            await File.WriteAllTextAsync(resultPath, jsonResult, cancellationToken);
 
             return imageGenerationResult;
         }
@@ -279,8 +301,10 @@ namespace GuideAntsApi.Services
             string outputFilename,
             int n = 1,
             string outputFormat = "png",
-            InvocationContext? context = null)
+            InvocationContext? context = null,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var stdOutBuffer = new StringBuilder();
             var stdErrBuffer = new StringBuilder();
             Exception? executionException = null;
@@ -364,7 +388,7 @@ namespace GuideAntsApi.Services
                         var sanitizedSourceFilename = Path.GetFileName(sourceImageFilename);
                         var nbFile = await db.NotebookFiles
                             .Where(f => f.NotebookId == context.NotebookId && f.RelativePath.EndsWith(sanitizedSourceFilename))
-                            .FirstOrDefaultAsync();
+                            .FirstOrDefaultAsync(cancellationToken);
 
                         if (nbFile == null)
                         {
@@ -387,12 +411,16 @@ namespace GuideAntsApi.Services
 
                         using var stream = res.Value.Stream;
                         using var ms = new MemoryStream();
-                        await stream.CopyToAsync(ms);
+                        await stream.CopyToAsync(ms, cancellationToken);
                         sourceImageBytes = ms.ToArray();
                         sourceImageContentType = res.Value.ContentType;
                         sourceImageFileName = res.Value.FileName;
 
                         _logger?.LogInformation("Loaded source image file. Name={FileName}, Bytes={ByteCount}", LogValueSanitizer.Sanitize(sourceImageFileName), sourceImageBytes.Length);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
                     }
                     catch (Exception ex)
                     {
@@ -413,7 +441,7 @@ namespace GuideAntsApi.Services
                     return new ScriptExecutionResult { StandardOutput = stdOutBuffer.ToString(), StandardError = stdErrBuffer.ToString() };
                 }
 
-                var mode = await ResolveImageGenerationModeAsync();
+                var mode = await ResolveImageGenerationModeAsync(cancellationToken);
                 var imageProvider = ResolveImageProviderId(mode);
                 var imageSizeProfileName = ResolveImageSizeProfileName(imageProvider, mode);
 
@@ -429,7 +457,8 @@ namespace GuideAntsApi.Services
                         outputFormat: outputFormat,
                         imageBytes: sourceImageBytes,
                         imageContentType: sourceImageContentType,
-                        imageFileName: sourceImageFileName),
+                        imageFileName: sourceImageFileName,
+                        cancellationToken),
                     ImageProviderCloud => await GenerateImageEditViaAzureOpenAI(
                         prompt: prompt,
                         size: size,
@@ -437,7 +466,8 @@ namespace GuideAntsApi.Services
                         imageBytes: sourceImageBytes,
                         imageContentType: sourceImageContentType,
                         imageFileName: sourceImageFileName,
-                        mode: mode),
+                        mode: mode,
+                        cancellationToken),
                     ImageProviderGoogle => await GenerateImageEditViaGoogleGemini(
                         prompt: prompt,
                         size: size,
@@ -446,7 +476,8 @@ namespace GuideAntsApi.Services
                         imageBytes: sourceImageBytes,
                         imageContentType: sourceImageContentType,
                         imageFileName: sourceImageFileName,
-                        modelId: mode.ModelId),
+                        modelId: mode.ModelId,
+                        cancellationToken),
                     ImageProviderHuggingFace => await GenerateImageEditViaHuggingFace(
                         prompt: prompt,
                         size: size,
@@ -456,7 +487,8 @@ namespace GuideAntsApi.Services
                         imageContentType: sourceImageContentType,
                         imageFileName: sourceImageFileName,
                         modelId: mode.ModelId,
-                        requestPresetJson: mode.RequestPresetJson),
+                        requestPresetJson: mode.RequestPresetJson,
+                        cancellationToken),
                     ImageProviderOpenRouter => await GenerateImageEditViaOpenRouter(
                         prompt: prompt,
                         size: size,
@@ -466,7 +498,8 @@ namespace GuideAntsApi.Services
                         imageContentType: sourceImageContentType,
                         imageFileName: sourceImageFileName,
                         modelId: mode.ModelId,
-                        requestPresetJson: mode.RequestPresetJson),
+                        requestPresetJson: mode.RequestPresetJson,
+                        cancellationToken),
                     ImageProviderOpenAi => await GenerateImageEditViaOpenAi(
                         prompt: prompt,
                         size: size,
@@ -474,7 +507,8 @@ namespace GuideAntsApi.Services
                         imageBytes: sourceImageBytes,
                         imageContentType: sourceImageContentType,
                         imageFileName: sourceImageFileName,
-                        modelId: mode.ModelId),
+                        modelId: mode.ModelId,
+                        cancellationToken),
                     _ => throw new RoutingException(
                         RoutingErrorCodes.ProviderNotReady,
                         $"Image provider '{imageProvider}' is not recognized.",
@@ -485,8 +519,10 @@ namespace GuideAntsApi.Services
 
                 if (imageBytes != null && imageBytes.Length > 0)
                 {
+                    await EnsureTurnExecutionCanPublishAsync(context!, cancellationToken);
                     var filePath = Path.Combine(notebookDirectory, outputFilename);
-                    await File.WriteAllBytesAsync(filePath, imageBytes);
+                    await WriteImageFileAtomicallyAsync(filePath, imageBytes, cancellationToken);
+                    await EnsureTurnExecutionCanPublishAsync(context!, cancellationToken);
 
                     _logger?.LogInformation("Image edited successfully from source '{SourceImage}': {OutputFile}, Size: {Size} bytes",
                         LogValueSanitizer.Sanitize(sourceImageFilename), LogValueSanitizer.Sanitize(outputFilename), imageBytes.Length);
@@ -501,9 +537,15 @@ namespace GuideAntsApi.Services
                         {
                             using var scope = _serviceProvider.CreateScope();
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                            await syncService.RegisterFilesAsync(context.NotebookId, [relativePath]);
-                            await syncService.QueueReconcileAsync(context.NotebookId);
+                            await EnsureTurnExecutionCanPublishAsync(context!, cancellationToken);
+                            await syncService.RegisterFilesAsync(context.NotebookId, [relativePath], cancellationToken);
+                            await EnsureTurnExecutionCanPublishAsync(context!, cancellationToken);
+                            await syncService.QueueReconcileAsync(context.NotebookId, cancellationToken);
                             _logger?.LogInformation("Registered and queued notebook sync for {NotebookId} after image edit", context.NotebookId);
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            throw;
                         }
                         catch (Exception syncEx)
                         {
@@ -518,7 +560,8 @@ namespace GuideAntsApi.Services
                         outputFilename,
                         imageBytes.Length,
                         imageCount: Math.Max(1, n),
-                        operation: "image-edit");
+                        operation: "image-edit",
+                        cancellationToken: cancellationToken);
                 }
                 else
                 {
@@ -527,6 +570,14 @@ namespace GuideAntsApi.Services
                 }
             }
             catch (RoutingException)
+            {
+                throw;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (ConversationTurnExecutionFencedException)
             {
                 throw;
             }
@@ -579,9 +630,38 @@ namespace GuideAntsApi.Services
             };
 
             var jsonResult = JsonSerializer.Serialize(logObject, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(resultPath, jsonResult);
+            await File.WriteAllTextAsync(resultPath, jsonResult, cancellationToken);
 
             return imageEditResult;
+        }
+
+        private async Task EnsureTurnExecutionCanPublishAsync(
+            InvocationContext context,
+            CancellationToken cancellationToken)
+        {
+            if (!context.ExecutionId.HasValue || _serviceProvider == null)
+            {
+                return;
+            }
+
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var turn = await db.ConversationTurns
+                .AsNoTracking()
+                .Where(t =>
+                    t.NotebookConversationId == context.ConversationId
+                    && t.TurnIndex == context.TurnIndex)
+                .OrderByDescending(t => t.Id)
+                .Select(t => new { t.Id, t.Status, t.ExecutionId })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (turn == null
+                || (!string.Equals(turn.Status, "streaming", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(turn.Status, "pending_client_tool", StringComparison.OrdinalIgnoreCase))
+                || turn.ExecutionId != context.ExecutionId)
+            {
+                throw new ConversationTurnExecutionFencedException(turn?.Id ?? Guid.Empty);
+            }
         }
 
         private async Task RecordImageUsageAsync(
@@ -590,7 +670,8 @@ namespace GuideAntsApi.Services
             string filename,
             long bytes,
             int imageCount,
-            string operation)
+            string operation,
+            CancellationToken cancellationToken)
         {
             if (_serviceProvider == null)
             {
@@ -619,7 +700,12 @@ namespace GuideAntsApi.Services
                     }),
                     assistantId: context.AssistantId,
                     agentInvocationId: context.CurrentInvocationId,
-                    notebookConversationMessageId: context.NotebookConversationMessageIdForUsage);
+                    notebookConversationMessageId: context.NotebookConversationMessageIdForUsage,
+                    ct: cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -747,7 +833,8 @@ namespace GuideAntsApi.Services
             [Parameter(Description = "REQUIRED Image size. Valid sizes: '1024x1024' (square, default), '1024x1792' (portrait), '1792x1024' (landscape)")] string size,
             [Parameter(Description = "Number of images to generate (only first will be saved)")] int n = 1,
             [Parameter(Description = "Output format for the image")] string outputFormat = "png",
-            [Parameter(Description = "Invocation context", Hidden = true)] InvocationContext? context = null)
+            [Parameter(Description = "Invocation context", Hidden = true)] InvocationContext? context = null,
+            CancellationToken cancellationToken = default)
         {
             if (_staticServiceProvider == null)
             {
@@ -763,7 +850,8 @@ namespace GuideAntsApi.Services
                 size,
                 n,
                 outputFormat,
-                context);
+                context,
+                cancellationToken);
         }
 
         [Tool(
@@ -777,7 +865,8 @@ namespace GuideAntsApi.Services
             [Parameter(Description = "The filename for the output image")] string outputFilename,
             [Parameter(Description = "Number of images to generate (only first will be saved)")] int n = 1,
             [Parameter(Description = "Output format for the image")] string outputFormat = "png",
-            [Parameter(Description = "Invocation context", Hidden = true)] InvocationContext? context = null)
+            [Parameter(Description = "Invocation context", Hidden = true)] InvocationContext? context = null,
+            CancellationToken cancellationToken = default)
         {
             if (_staticServiceProvider == null)
             {
@@ -793,7 +882,8 @@ namespace GuideAntsApi.Services
                 outputFilename,
                 n,
                 outputFormat,
-                context);
+                context,
+                cancellationToken);
         }
     }
 }

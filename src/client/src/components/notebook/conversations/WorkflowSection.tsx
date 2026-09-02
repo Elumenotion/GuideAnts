@@ -613,7 +613,9 @@ function processWorkflowSteps(messages: MessageDto[], isStreaming: boolean): Wor
             m.role.toLowerCase() === 'tool' && m.toolCallId === toolCall.id
           );
           
-          const status = resultMessage ? 'completed' : (isStreaming ? 'running' : 'pending');
+          const status = resultMessage
+            ? (resultMessage.content?.trimStart().startsWith('ERROR:') ? 'error' : 'completed')
+            : (isStreaming ? 'running' : 'pending');
           
           toolCallsWithResults.push({
             call: toolCall,

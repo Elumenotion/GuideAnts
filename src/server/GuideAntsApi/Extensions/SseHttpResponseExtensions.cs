@@ -37,7 +37,7 @@ public static class SseHttpResponseExtensions
     /// <remarks>
     /// Compiler-generated async iterators throw <see cref="NotSupportedException"/> from
     /// <c>DisposeAsync</c> when an outstanding <c>MoveNextAsync</c> has not completed.
-    /// Keepalive uses <see cref="Task.WhenAny"/>, so a pending move-next is normal; cleanup
+    /// Keepalive uses <see cref="Task.WhenAny(IEnumerable{Task})"/>, so a pending move-next is normal; cleanup
     /// must cancel and await that task before disposing the enumerator.
     /// </remarks>
     public static async Task WriteSseStreamWithKeepAliveAsync(

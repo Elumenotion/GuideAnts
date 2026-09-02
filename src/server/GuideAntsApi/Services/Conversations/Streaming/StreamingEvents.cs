@@ -31,7 +31,8 @@ public static class StreamingEvents
     public static void EmitThinkingMessages(
         ChatRunOutput? output,
         IReadOnlyList<Guid> assistantMessageIds,
-        ChannelWriter<StreamingEvent> writer)
+        ChannelWriter<StreamingEvent> writer,
+        Guid? turnId = null)
     {
         if (output?.Messages == null || assistantMessageIds.Count == 0)
         {
@@ -70,6 +71,7 @@ public static class StreamingEvents
                 {
                     role = "assistant",
                     content,
+                    turnId,
                     timestamp = DateTime.UtcNow
                 };
                 writer.TryWrite(new StreamingEvent("assistant_message", JsonSerializer.Serialize(payload, JsonOptions)));
@@ -77,10 +79,11 @@ public static class StreamingEvents
         }
     }
 
-    public static StreamingEvent BuildToolActivityProgress(ToolActivityUpdate activity)
+    public static StreamingEvent BuildToolActivityProgress(ToolActivityUpdate activity, Guid? turnId = null)
     {
         var payload = new
         {
+            turnId,
             toolActivity = new
             {
                 name = activity.Name,

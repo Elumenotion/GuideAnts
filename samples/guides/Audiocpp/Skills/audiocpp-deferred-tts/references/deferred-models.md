@@ -15,7 +15,7 @@ python3 .../fetch_model.py <repo> --dest <dir> [--include <prefix>]   # repeat p
 # any conversion step the family needs (below)
 python3 .../spawn_engine.py start --path <dir> --family <family> --task tts
 python3 .../spawn_engine.py status        # until ready
-python3 .../engine_tool.py speech "..." --engine-url http://127.0.0.1:18099 --model <id> [voice flags] -o Output/out.wav
+python3 .../engine_tool.py speech "..." --engine-url http://127.0.0.1:18099 --model <id> [voice flags] -o out.wav
 python3 .../spawn_engine.py stop
 ```
 

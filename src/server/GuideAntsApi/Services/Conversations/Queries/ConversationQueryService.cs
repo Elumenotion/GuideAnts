@@ -105,8 +105,9 @@ public class ConversationQueryService : IConversationQueryService
                             .Select(a => new
                             {
                                 a.NotebookFileId,
-                                FileName = a.NotebookFile != null ? Path.GetFileName(a.NotebookFile.RelativePath ?? "unknown") : "unknown",
-                                FileType = a.NotebookFile != null ? ConversationMessageMapper.DetermineFileTypeString(a.NotebookFile.RelativePath ?? "") : "other",
+                                a.RelativePath,
+                                UploadType = a.UploadType,
+                                NotebookFileRelativePath = a.NotebookFile != null ? a.NotebookFile.RelativePath : null,
                                 FileSize = a.NotebookFile != null ? a.NotebookFile.FileSize : 0,
                                 a.Type
                             }).ToList()
@@ -190,14 +191,15 @@ public class ConversationQueryService : IConversationQueryService
                 catch { /* leave toolCalls null */ }
             }
 
-            var attachments = msg.Attachments.Select(a => new AttachedFileDto(
-                a.NotebookFileId,
-                a.FileName,
-                a.FileType,
-                a.FileSize,
-                null,
-                a.Type
-            )).ToList();
+            var attachments = msg.Attachments
+                .Select(a => MessageAttachmentProjector.ToAttachedFileDto(
+                    a.NotebookFileId,
+                    a.RelativePath,
+                    a.NotebookFileRelativePath,
+                    a.UploadType,
+                    a.FileSize,
+                    a.Type))
+                .ToList();
 
             var isLastAssistantInTurn = lastAssistantMessagePerTurn.TryGetValue(msg.TurnIndex, out var lastAssistantId)
                 && lastAssistantId == msg.Id;
@@ -250,17 +252,20 @@ public class ConversationQueryService : IConversationQueryService
             m => m.ToolCalls != null && m.ToolCalls.Count > 0
         );
 
-        var latestTurn = conversationData.Turns
+        var activeStreamingTurn = conversationData.Turns
+            .Where(t =>
+                string.Equals(t.Status, "streaming", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t.Status, "pending_client_tool", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(t => t.TurnIndex)
             .FirstOrDefault();
-        ConversationTurnStatusDto? activeTurn = latestTurn == null
+        ConversationTurnStatusDto? activeTurn = activeStreamingTurn == null
             ? null
             : new ConversationTurnStatusDto(
-                latestTurn.Id,
-                latestTurn.TurnIndex,
-                latestTurn.Status,
-                latestTurn.TerminationCode,
-                latestTurn.TerminalizedAt);
+                activeStreamingTurn.Id,
+                activeStreamingTurn.TurnIndex,
+                activeStreamingTurn.Status,
+                activeStreamingTurn.TerminationCode,
+                activeStreamingTurn.TerminalizedAt);
 
         ConversationLockStatusDto? lockStatus = null;
         var activeLock = await db.ConversationLocks
@@ -273,12 +278,12 @@ public class ConversationQueryService : IConversationQueryService
         }
 
         ConversationStreamingPreviewDto? streamingPreview = null;
-        if (latestTurn != null && string.Equals(latestTurn.Status, "streaming", StringComparison.OrdinalIgnoreCase))
+        if (activeStreamingTurn != null)
         {
             var streamingStub = await db.NotebookConversationMessages
                 .AsNoTracking()
                 .Where(m => m.NotebookConversationId == conversationId
-                    && m.TurnIndex == latestTurn.TurnIndex
+                    && m.TurnIndex == activeStreamingTurn.TurnIndex
                     && m.IsStreaming == true
                     && m.Role == DataModelChatRole.Assistant)
                 .OrderByDescending(m => m.MessageSequence)

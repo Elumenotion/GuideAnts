@@ -170,6 +170,58 @@ public sealed class PublishedConversationStreamingTests : BaseEndpointTest
     }
 
     [TestMethod]
+    public async Task SendMessageStream_With_path_only_folder_attachment_persists_and_injects_folder_notice()
+    {
+        SeededConversation seeded;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            seeded = await SeedConversationAsync(db);
+        }
+
+        const string relativePath = "Host/reference-pack";
+        List<StreamingEvent> events;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var svc = ResolveService(scope);
+            var request = new SendMessageRequest
+            {
+                Instructions = "Use the reference pack",
+                ModelDeploymentId = ModelId,
+                Attachments =
+                [
+                    new AttachmentDto(null, ContentUploadType.Folder, relativePath)
+                ]
+            };
+            events = await CollectAsync(svc.SendMessageStreamAsync(
+                seeded.ConversationId,
+                request,
+                publisherId: null,
+                externalUserIdentity: null));
+        }
+
+        events.Should().Contain(e => e.EventType == StreamingEventTypes.Complete);
+        FakeChatCompletionBehavior.Instance.LastRequestMessages.Should().NotBeNull();
+        FakeChatCompletionBehavior.Instance.LastRequestMessages!
+            .Should()
+            .Contain(message => message.GetText().Contains(
+                "Attachment (folder): ../Host/reference-pack",
+                StringComparison.Ordinal));
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var userMessage = await verifyDb.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == seeded.ConversationId && m.Role == DataModelChatRole.User)
+            .SingleAsync();
+        var attachment = await verifyDb.MessageAttachments
+            .SingleAsync(a => a.MessageId == userMessage.Id);
+
+        attachment.NotebookFileId.Should().BeNull();
+        attachment.RelativePath.Should().Be(relativePath);
+        attachment.UploadType.Should().Be(ContentUploadType.Folder);
+    }
+
+    [TestMethod]
     public async Task SendMessageStream_When_client_tool_is_requested_leaves_turn_streaming()
     {
         FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.ToolCallThenReply;

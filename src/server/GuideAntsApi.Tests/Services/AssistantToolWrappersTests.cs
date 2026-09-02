@@ -46,6 +46,7 @@ public sealed class AssistantToolWrappersTests
         schema.Should().Contain("\"url\"");
         schema.Should().Contain("\"instructions\"");
         schema.Should().NotContain("\"context\"");
+        schema.Should().NotContain("\"cancellationToken\"");
         schema.Should().Contain("\"required\"");
         schema.Should().Contain("\"url\"");
         schema.Should().Contain("\"instructions\"");

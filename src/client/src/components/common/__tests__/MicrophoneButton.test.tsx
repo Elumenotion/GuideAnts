@@ -65,4 +65,11 @@ describe('MicrophoneButton', () => {
     expect(defaultProps.onStartRecording).not.toHaveBeenCalled();
     expect(defaultProps.onStopRecording).not.toHaveBeenCalled();
   });
+
+  it('shows transcription error beside the mic when idle', () => {
+    render(<MicrophoneButton {...defaultProps} error="Audio transcription timed out after 100 seconds" />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Audio transcription timed out after 100 seconds');
+    expect(screen.getByRole('button', { name: 'Start voice input' })).toBeInTheDocument();
+  });
 });

@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -23,6 +24,7 @@ public interface IConversationUndoService
 
 public sealed class ConversationUndoService : IConversationUndoService
 {
+    private static readonly TimeSpan LockCleanupTimeout = TimeSpan.FromSeconds(1);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -75,78 +77,118 @@ public sealed class ConversationUndoService : IConversationUndoService
         Func<NotebookConversation, NotebookConversationMessage?> findTargetMessage,
         bool useLock)
     {
-        var streamGate = useLock ? await AcquireUndoLockAsync(conversationId) : null;
+        var streamLease = useLock ? await AcquireUndoLockAsync(conversationId) : null;
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
         try
         {
-            _logger.LogCritical("🚨 UNDO called for conversation {ConversationId}", conversationId);
-            var conv = await db.NotebookConversations
-                .Include(c => c.Notebook)
-                .Include(c => c.Messages)
-                    .ThenInclude(m => m.EditHistory)
-                .FirstOrDefaultAsync(c => c.Id == conversationId);
-
-            if (conv == null)
+            Func<Task<(int TurnIndex, int MessagesRemoved)?>> mutationOperation = async () =>
             {
-                if (useLock)
+                _logger.LogInformation("Undo called for conversation {ConversationId}", conversationId);
+                var conv = await db.NotebookConversations
+                    .Include(c => c.Notebook)
+                    .Include(c => c.Messages)
+                        .ThenInclude(m => m.EditHistory)
+                    .FirstOrDefaultAsync(c => c.Id == conversationId);
+
+                if (conv == null)
                 {
-                    throw new KeyNotFoundException("Conversation not found");
+                    if (useLock)
+                    {
+                        throw new KeyNotFoundException("Conversation not found");
+                    }
+
+                    return null;
                 }
 
-                return;
-            }
+                var targetMessage = findTargetMessage(conv);
+                if (targetMessage == null)
+                {
+                    return null;
+                }
 
-            var targetMessage = findTargetMessage(conv);
-            if (targetMessage == null)
+                var messagesToRemove = conv.Messages
+                    .Where(m => m.TurnIndex >= targetMessage.TurnIndex)
+                    .ToList();
+
+                var turnsToRemove = await db.ConversationTurns
+                    .Where(t => t.NotebookConversationId == conversationId)
+                    .Where(t => t.TurnIndex >= targetMessage.TurnIndex)
+                    .ToListAsync();
+
+                // Refuse undo while any in-process run for these turns is still alive so we never
+                // delete rows a worker will later try to terminalize or trace.
+                var activeTurn = turnsToRemove.FirstOrDefault(t => _streamRunRegistry.IsInFlight(t.Id));
+                if (activeTurn != null)
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot undo while turn {activeTurn.TurnIndex} is still streaming");
+                }
+
+                // A worker on another API instance is invisible to this process. A durable
+                // streaming row is therefore never treated as an orphan merely because the local
+                // registry is empty; Stop/recovery must terminalize it before Undo can delete its
+                // rows.
+                var durableStreamingTurn = turnsToRemove
+                    .FirstOrDefault(t => string.Equals(t.Status, "streaming", StringComparison.OrdinalIgnoreCase));
+                if (durableStreamingTurn != null)
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot undo while turn {durableStreamingTurn.TurnIndex} is still streaming");
+                }
+
+                _logger.LogInformation(
+                    "Undo removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}",
+                    messagesToRemove.Count,
+                    turnsToRemove.Count,
+                    targetMessage.TurnIndex,
+                    conversationId);
+
+                db.NotebookConversationMessages.RemoveRange(messagesToRemove);
+                db.ConversationTurns.RemoveRange(turnsToRemove);
+                await db.SaveChangesAsync();
+                return (targetMessage.TurnIndex, messagesToRemove.Count);
+            };
+
+            // Private Undo already holds the distributed conversation lock, so its single
+            // SaveChanges call supplies the atomic delete. Do not add an outer EF transaction:
+            // with MARS enabled that only disables savepoints and emits the warning on every
+            // normal Undo request. Published Undo has no lock and retains the serializable
+            // boundary below.
+            var mutation = useLock
+                ? await ExecuteImplicitWriteAsync(db, mutationOperation)
+                : await ExecuteSerializableWriteAsync(db, mutationOperation);
+
+            if (!mutation.HasValue)
             {
                 return;
             }
-
-            var messagesToRemove = conv.Messages
-                .Where(m => m.TurnIndex >= targetMessage.TurnIndex)
-                .ToList();
-
-            var turnsToRemove = await db.ConversationTurns
-                .Where(t => t.NotebookConversationId == conversationId)
-                .Where(t => t.TurnIndex >= targetMessage.TurnIndex)
-                .ToListAsync();
-
-            _logger.LogCritical(
-                "🚨 UNDO removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}",
-                messagesToRemove.Count,
-                turnsToRemove.Count,
-                targetMessage.TurnIndex,
-                conversationId);
-
-            db.NotebookConversationMessages.RemoveRange(messagesToRemove);
-            db.ConversationTurns.RemoveRange(turnsToRemove);
-            await db.SaveChangesAsync();
 
             if (useLock)
             {
                 await _broadcastHub.BroadcastToConversationAsync(conversationId,
                     new StreamingEvent(StreamingEventTypes.TurnRemoved, JsonSerializer.Serialize(new
                     {
-                        turnIndex = targetMessage.TurnIndex,
-                        messagesRemoved = messagesToRemove.Count,
+                        turnIndex = mutation.Value.TurnIndex,
+                        messagesRemoved = mutation.Value.MessagesRemoved,
                         timestamp = DateTime.UtcNow
                     }, JsonOptions)));
             }
 
-            _logger.LogCritical("🚨 UNDO completed for conversation {ConversationId}", conversationId);
+            _logger.LogInformation("Undo completed for conversation {ConversationId}", conversationId);
         }
         finally
         {
-            if (streamGate != null)
+            if (streamLease != null)
             {
-                await ReleaseUndoLockAsync(conversationId, streamGate);
+                await ReleaseUndoLockAsync(conversationId, streamLease);
             }
         }
     }
 
-    private async Task<SemaphoreSlim> AcquireUndoLockAsync(Guid conversationId)
+    private async Task<UndoLockLease> AcquireUndoLockAsync(Guid conversationId)
     {
         var lockResult = await _distributedLock.TryAcquireLockAsync(conversationId, "User", CancellationToken.None);
 
@@ -157,79 +199,204 @@ public sealed class ConversationUndoService : IConversationUndoService
 
         if (lockResult.Status != LockAcquisitionStatus.Acquired)
         {
-            var streamingTurnId = await GetActiveStreamingTurnIdAsync(conversationId);
-            if (streamingTurnId != null && _streamRunRegistry.IsActive(streamingTurnId.Value))
-            {
-                throw new InvalidOperationException($"Conversation is locked by {lockResult.LockedByUserName}");
-            }
+            // A lock that is not visible in this process may belong to a worker on another API
+            // instance. Never infer orphaned ownership from the local registry or semaphore.
+            throw new InvalidOperationException(
+                $"Conversation is locked by {lockResult.LockedByUserName ?? "another user"}");
+        }
 
-            if (_privateStreamPolicy.GetConversationGate(conversationId) is { CurrentCount: 0 })
-            {
-                throw new InvalidOperationException($"Conversation is locked by {lockResult.LockedByUserName}");
-            }
-
-            _logger.LogWarning(
-                "Undo clearing orphaned conversation lock for {ConversationId} (previously held by {LockedBy})",
-                conversationId,
-                lockResult.LockedByUserName);
-            await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
-
-            var retry = await _distributedLock.TryAcquireLockAsync(conversationId, "User", CancellationToken.None);
-            if (retry.Status != LockAcquisitionStatus.Acquired)
+        var acquiredLock = lockResult.Lock
+            ?? throw new InvalidOperationException("Distributed lock acquisition returned no lease.");
+        var streamGate = _privateStreamPolicy.GetOrCreateConversationGate(conversationId);
+        var gateAcquired = false;
+        try
+        {
+            if (!await streamGate.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None))
             {
                 throw new InvalidOperationException("Conversation is locked by another user");
             }
+
+            gateAcquired = true;
+            return new UndoLockLease(streamGate, acquiredLock.LeaseId);
+        }
+        catch
+        {
+            if (!gateAcquired)
+            {
+                await ReleaseDistributedLockUntilConfirmedAsync(
+                    conversationId,
+                    acquiredLock.LeaseId);
+            }
+
+            throw;
+        }
+    }
+
+    private static async Task<T> ExecuteImplicitWriteAsync<T>(
+        ApplicationDbContext db,
+        Func<Task<T>> operation)
+    {
+        if (string.Equals(
+                db.Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.InMemory",
+                StringComparison.Ordinal))
+        {
+            return await operation();
         }
 
-        var streamGate = _privateStreamPolicy.GetOrCreateConversationGate(conversationId);
-        if (!await streamGate.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None))
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
             try
             {
-                await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
+                return await operation();
             }
-            catch (Exception releaseEx)
+            catch
             {
-                _logger.LogError(releaseEx, "Failed to release conversation lock after undo gate timeout for {ConversationId}", conversationId);
+                // SaveChanges owns the implicit transaction. A retry still needs a fresh
+                // tracker because a failed delete batch leaves entries in Deleted state.
+                db.ChangeTracker.Clear();
+                throw;
             }
+        });
+    }
 
-            throw new InvalidOperationException("Conversation is locked by another user");
+    private static async Task<T> ExecuteSerializableWriteAsync<T>(
+        ApplicationDbContext db,
+        Func<Task<T>> operation)
+    {
+        if (string.Equals(
+                db.Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.InMemory",
+                StringComparison.Ordinal))
+        {
+            return await operation();
         }
 
-        return streamGate;
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                var result = await operation();
+                await transaction.CommitAsync();
+                return result;
+            }
+            catch
+            {
+                // MARS disables EF's automatic savepoints. Roll the transaction back before
+                // execution-strategy retry and detach every tracked delete from the failed
+                // attempt so a retry starts from a clean unit of work.
+                try
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                }
+                finally
+                {
+                    db.ChangeTracker.Clear();
+                }
+
+                throw;
+            }
+        });
     }
 
-    private async Task<Guid?> GetActiveStreamingTurnIdAsync(Guid conversationId)
+    private async Task ReleaseUndoLockAsync(Guid conversationId, UndoLockLease streamLease)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        return await db.ConversationTurns
-            .AsNoTracking()
-            .Where(t => t.NotebookConversationId == conversationId && t.Status == "streaming")
-            .OrderByDescending(t => t.TurnIndex)
-            .Select(t => (Guid?)t.Id)
-            .FirstOrDefaultAsync();
-    }
+        await ReleaseDistributedLockUntilConfirmedAsync(conversationId, streamLease.LeaseId);
 
-    private async Task ReleaseUndoLockAsync(Guid conversationId, SemaphoreSlim streamGate)
-    {
         try
         {
-            streamGate.Release();
+            streamLease.StreamGate.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // The gate is already available; cleanup is idempotent.
         }
         catch (Exception gateEx)
         {
             _logger.LogWarning(gateEx, "Failed to release undo gate for {ConversationId}", conversationId);
         }
 
-        try
+        _logger.LogInformation("Released conversation lock during undo for {ConversationId}", conversationId);
+    }
+
+    private async Task ReleaseDistributedLockUntilConfirmedAsync(Guid conversationId, Guid leaseId)
+    {
+        for (var releaseAttempt = 1; releaseAttempt <= 4; releaseAttempt++)
         {
-            await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
-            _logger.LogInformation("Released conversation lock during undo for {ConversationId}", conversationId);
-        }
-        catch (Exception releaseEx)
-        {
-            _logger.LogError(releaseEx, "Failed to release conversation lock during undo for {ConversationId}", conversationId);
+            Task<bool>? releaseTask = null;
+            Task<ConversationLock?>? activeLockTask = null;
+            try
+            {
+                releaseTask = _distributedLock.ReleaseLockAsync(
+                    conversationId,
+                    leaseId,
+                    CancellationToken.None);
+                var released = await releaseTask.WaitAsync(LockCleanupTimeout).ConfigureAwait(false);
+                if (released)
+                {
+                    return;
+                }
+
+                activeLockTask = _distributedLock.GetActiveLockAsync(
+                    conversationId,
+                    CancellationToken.None);
+                var activeLock = await activeLockTask.WaitAsync(LockCleanupTimeout).ConfigureAwait(false);
+                if (activeLock?.LeaseId != leaseId)
+                {
+                    // The lease is already gone or has been replaced. It is no longer safe or
+                    // necessary for this undo request to release anything else.
+                    return;
+                }
+            }
+            catch (TimeoutException)
+            {
+                if (releaseTask != null)
+                {
+                    _ = ObserveTaskAsync(releaseTask);
+                }
+
+                if (activeLockTask != null)
+                {
+                    _ = ObserveTaskAsync(activeLockTask);
+                }
+
+                _logger.LogWarning(
+                    "Timed out releasing conversation lock during undo for {ConversationId}; the lease will expire",
+                    conversationId);
+                return;
+            }
+            catch (Exception releaseEx)
+            {
+                if (releaseAttempt == 1 || releaseAttempt == 4)
+                {
+                    _logger.LogError(
+                        releaseEx,
+                        "Failed to release conversation lock during undo for {ConversationId}; retrying",
+                        conversationId);
+                }
+            }
+
+            if (releaseAttempt < 4)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
+            }
         }
     }
+
+    private static async Task ObserveTaskAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The bounded cleanup attempt already returned; observe late release failures.
+        }
+    }
+
+    private sealed record UndoLockLease(SemaphoreSlim StreamGate, Guid LeaseId);
 }

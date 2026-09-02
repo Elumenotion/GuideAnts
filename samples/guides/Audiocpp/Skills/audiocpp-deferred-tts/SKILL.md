@@ -26,7 +26,7 @@ permission). Decline only imitation of a third party without consent.
 ## Preflight
 
 ```bash
-python3 Output/Skills/audiocpp-deferred-tts/scripts/preflight.py --for deferred-tts
+python3 Skills/audiocpp-deferred-tts/scripts/preflight.py --for deferred-tts
 ```
 
 Trust its verdict over this document. Heed its VRAM warning: a second engine
@@ -37,13 +37,13 @@ the GuideAnts TTS model first (Settings, or
 ## The pattern
 
 ```bash
-python3 Output/Skills/audiocpp-deferred-tts/scripts/fetch_model.py <hf-repo> --dest <dir> [--include <prefix>]
+python3 Skills/audiocpp-deferred-tts/scripts/fetch_model.py <hf-repo> --dest <dir> [--include <prefix>]
 # any per-family conversion step — see references/deferred-models.md
-python3 Output/Skills/audiocpp-deferred-tts/scripts/spawn_engine.py start --path <dir> --family <family> --task tts
-python3 Output/Skills/audiocpp-deferred-tts/scripts/spawn_engine.py status   # poll until ready
-python3 Output/Skills/audiocpp-deferred-tts/scripts/engine_tool.py speech "Hi" \
-  --engine-url http://127.0.0.1:18099 --model <id> [--voice <speaker>] -o Output/hi.wav
-python3 Output/Skills/audiocpp-deferred-tts/scripts/spawn_engine.py stop     # always stop when done
+python3 Skills/audiocpp-deferred-tts/scripts/spawn_engine.py start --path <dir> --family <family> --task tts
+python3 Skills/audiocpp-deferred-tts/scripts/spawn_engine.py status   # poll until ready
+python3 Skills/audiocpp-deferred-tts/scripts/engine_tool.py speech "Hi" \
+  --engine-url http://127.0.0.1:18099 --model <id> [--voice <speaker>] -o hi.wav
+python3 Skills/audiocpp-deferred-tts/scripts/spawn_engine.py stop     # always stop when done
 ```
 
 Per-family recipes (repos, file scoping, conversions, known speaker ids) are in

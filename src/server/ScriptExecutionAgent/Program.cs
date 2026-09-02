@@ -189,7 +189,8 @@ app.MapPost("/execute", async (HttpContext context, ILogger<Program> logger) =>
             executionIdentity,
             scopeOptions,
             adminOptions,
-            executionStopwatch);
+            executionStopwatch,
+            context.RequestAborted);
 
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(result));
@@ -1082,7 +1083,8 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     NotebookExecutionIdentity? executionIdentity,
     ScriptExecutionScopeOptions scopeOptions,
     AdminApiOptions adminOptions,
-    System.Diagnostics.Stopwatch executionStopwatch)
+    System.Diagnostics.Stopwatch executionStopwatch,
+    CancellationToken requestAborted = default)
 {
     var stdOutBuffer = new StringBuilder();
     var stdErrBuffer = new StringBuilder();
@@ -1091,6 +1093,7 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     int? exitCode = null;
     var injectedEnvEntries = request.Environment?.Count ?? 0;
     var timedOut = false;
+    var cancelledByCaller = false;
 
     try
     {
@@ -1122,13 +1125,17 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
         }}";
 
         var scriptFilePath = Path.Combine(request.WorkingDirectory, scriptFilename);
-        await File.WriteAllTextAsync(scriptFilePath, request.Script);
+        await File.WriteAllTextAsync(scriptFilePath, request.Script, requestAborted);
 
         if (executionIdentity is not null && OperatingSystem.IsLinux())
         {
             try
             {
-                await NotebookExecutionIdentityProvider.PrepareScriptFileAsync(scriptFilePath, executionIdentity, CancellationToken.None);
+                await NotebookExecutionIdentityProvider.PrepareScriptFileAsync(scriptFilePath, executionIdentity, requestAborted);
+            }
+            catch (OperationCanceledException) when (requestAborted.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -1148,7 +1155,11 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
                 // EnsureScopeRequirementsForExecutionAsync ensures the venv itself internally; a
                 // separate EnsurePythonVenvAsync call here would consume the "just created" signal
                 // before it gets there, defeating its just-provisioned-vs-already-established check.
-                await ScriptExecutionScopeRuntime.EnsureScopeRequirementsForExecutionAsync(scope, scopeOptions, adminOptions, logger, CancellationToken.None);
+                await ScriptExecutionScopeRuntime.EnsureScopeRequirementsForExecutionAsync(scope, scopeOptions, adminOptions, logger, requestAborted);
+            }
+            catch (OperationCanceledException) when (requestAborted.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex) when (!scopeOptions.RequireScopedPythonVenv)
             {
@@ -1163,7 +1174,8 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
         var scopedEnvironment = ScriptExecutionScopeRuntime.BuildScriptEnvironment(scope, request.Environment, request.WorkingDirectory, logger);
         var (commandFile, commandArgs) = GetScriptCommand(request.ScriptType, scriptFilePath, scope);
         (commandFile, commandArgs) = ApplyPrivacyWrapper(commandFile, commandArgs);
-        using var cts = new CancellationTokenSource(ResolveExecutionTimeout(request, config));
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
+        cts.CancelAfter(ResolveExecutionTimeout(request, config));
         ScriptProcessResult run;
         if (executionIdentity is not null && OperatingSystem.IsLinux())
         {
@@ -1210,8 +1222,16 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     }
     catch (OperationCanceledException)
     {
-        timedOut = true;
-        stdErrBuffer.AppendLine("Script execution timed out");
+        if (requestAborted.IsCancellationRequested)
+        {
+            cancelledByCaller = true;
+            stdErrBuffer.AppendLine("Script execution was cancelled");
+        }
+        else
+        {
+            timedOut = true;
+            stdErrBuffer.AppendLine("Script execution timed out");
+        }
     }
     catch (Exception ex)
     {
@@ -1296,6 +1316,7 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
         ["preExistingFileCount"] = preExistingFiles.Count,
         ["injectedEnvEntries"] = injectedEnvEntries,
         ["timedOut"] = timedOut,
+        ["cancelledByCaller"] = cancelledByCaller,
     });
 
     return new ScriptExecutionResult
@@ -1364,13 +1385,42 @@ static async Task<ScriptProcessResult> RunScriptProcessAsync(
     using var process = System.Diagnostics.Process.Start(startInfo)
         ?? throw new InvalidOperationException($"Failed to start process '{commandFile}'.");
 
-    var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-    var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-    await process.WaitForExitAsync(cancellationToken);
-    return new ScriptProcessResult(
-        process.ExitCode,
-        await stdoutTask,
-        await stderrTask);
+    try
+    {
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        return new ScriptProcessResult(
+            process.ExitCode,
+            await stdoutTask,
+            await stderrTask);
+    }
+    catch (OperationCanceledException)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+        }
+
+        try
+        {
+            await process.WaitForExitAsync(CancellationToken.None);
+        }
+        catch
+        {
+        }
+
+        throw;
+    }
 }
 
 static (string FileName, string[] Arguments) ApplyPrivacyWrapper(string commandFile, string[] commandArgs)

@@ -175,7 +175,7 @@ describe('CellList Turn Grouping Integration', () => {
     expect(toolMessage.toolCallId).toBe('call_123');
   });
 
-  it('should not include final assistant message in workflow messages', async () => {
+  it('should not include final assistant message in workflow messages when it has no tool calls', async () => {
     render(
       <TestWrapper>
         <CellList {...defaultProps} />
@@ -190,8 +190,72 @@ describe('CellList Turn Grouping Integration', () => {
     const workflowMessagesElement = screen.getByTestId('workflow-messages');
     const workflowMessages = JSON.parse(workflowMessagesElement.textContent || '[]');
 
-    // Final assistant message should not be in workflow section
+    // Final assistant message without tool calls should not be in workflow section
     expect(workflowMessages.find((m: any) => m.id === 'assistant-2')).toBeUndefined();
+  });
+
+  it('should include final assistant message in workflow when it has tool calls', async () => {
+    const cancelledStopMessages: MessageDto[] = [
+      {
+        id: 'user-stop',
+        role: 'user',
+        content: 'continue',
+        userId: 'user-1',
+        assistantName: 'user',
+        isEdited: false,
+        created: '2025-01-07T10:05:00Z'
+      },
+      {
+        id: 'thinking-stop',
+        role: 'assistant',
+        content: 'Partial reasoning before stop',
+        assistantName: 'Python Ants',
+        isEdited: false,
+        created: '2025-01-07T10:05:01Z'
+      },
+      {
+        id: 'assistant-stop',
+        role: 'assistant',
+        content: 'Re-running the fix and test:',
+        assistantName: 'Python Ants',
+        isEdited: false,
+        created: '2025-01-07T10:05:02Z',
+        toolCalls: [
+          {
+            id: 'call_stop',
+            type: 'function',
+            function: {
+              name: 'run_python',
+              arguments: '{"script":"print(1)"}'
+            }
+          }
+        ]
+      },
+      {
+        id: 'tool-stop',
+        role: 'tool',
+        content: 'ERROR: Operation was cancelled',
+        isEdited: false,
+        created: '2025-01-07T10:05:03Z',
+        toolCallId: 'call_stop',
+        functionName: 'run_python'
+      }
+    ];
+
+    render(
+      <TestWrapper>
+        <CellList {...defaultProps} messages={cancelledStopMessages} />
+      </TestWrapper>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('workflow-section')).toBeInTheDocument();
+    });
+
+    const workflowMessages = JSON.parse(screen.getByTestId('workflow-messages').textContent || '[]');
+    expect(workflowMessages.find((m: any) => m.id === 'assistant-stop')).toBeDefined();
+    expect(workflowMessages.find((m: any) => m.id === 'thinking-stop')).toBeDefined();
+    expect(workflowMessages.find((m: any) => m.id === 'tool-stop')).toBeDefined();
   });
 
   it('should use traditional rendering when no multiple assistant messages', async () => {

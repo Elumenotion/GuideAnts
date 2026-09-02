@@ -191,6 +191,32 @@ def check_host_engine() -> dict:
     return entry
 
 
+
+def gateway_product_engine_ready(health_body: dict, kind: str) -> bool:
+    """True when GPU host product ASR/TTS is available. Busy/listening != down.
+
+    Gateway GET /health uses TCP for engines (state listening|down) and HTTP for
+    wrappers (body.loaded/busy). Legacy health returned engines.*.status == 200.
+    Prefer GET /ready for deep busy-vs-down classification when needed.
+    """
+    engines = health_body.get("engines") or {}
+    wrappers = health_body.get("wrappers") or {}
+    upstream = health_body.get("upstream") or {}
+    eng = engines.get(kind) or upstream.get(f"{kind}Engine") or {}
+    state = str(eng.get("state") or "").strip().lower()
+    if state in {"listening", "up", "busy"} or eng.get("listening") is True:
+        wrap = wrappers.get(kind) or {}
+        body = wrap.get("body") if isinstance(wrap.get("body"), dict) else {}
+        if body:
+            return bool(body.get("loaded") or body.get("busy") or body.get("loading"))
+        return True
+    if eng.get("status") == 200:
+        return True
+    wrap = wrappers.get(kind) or {}
+    body = wrap.get("body") if isinstance(wrap.get("body"), dict) else {}
+    return bool(body.get("loaded") or body.get("busy") or body.get("loading"))
+
+
 def run_scenario(scenario: str) -> dict:
     evidence: dict = {}
     blockers: list[str] = []
@@ -217,30 +243,26 @@ def run_scenario(scenario: str) -> dict:
         gateway = probe_gateway()
         evidence["skillGateway"] = gateway
         if gateway.get("open"):
-            # Prefer engines map from api_version 2 health; fall back to legacy upstream.
+            # Prefer engines/wrappers from api_version 2 health; fall back to legacy upstream.
             body = gateway.get("body") or {}
-            engines = body.get("engines") or {}
-            upstream = body.get("upstream") or {}
             if scenario in ("voice-clone", "tts-controls"):
-                tts = engines.get("tts") or upstream.get("ttsEngine") or {}
-                if tts.get("status") != 200:
+                if not gateway_product_engine_ready(body, "tts"):
                     blockers.append(
-                        "skillGateway: TTS engine not ready on Max — load a TTS model via GuideAnts Settings"
+                        "skillGateway: TTS engine not ready on the GPU host — load a TTS model via GuideAnts Settings"
                     )
             elif scenario in ("asr-extended", "timed-transcript"):
-                asr = engines.get("asr") or upstream.get("asrEngine") or {}
-                if asr.get("status") != 200:
+                if not gateway_product_engine_ready(body, "asr"):
                     blockers.append(
-                        "skillGateway: ASR engine not ready on Max — load an ASR model via GuideAnts Settings"
+                        "skillGateway: ASR engine not ready on the GPU host — load an ASR model via GuideAnts Settings"
                     )
                 if scenario == "timed-transcript":
                     warnings.append(
-                        "skillGateway: spawn qwen3_forced_aligner with --backend rocm on Max "
+                        "skillGateway: spawn qwen3_forced_aligner with --backend rocm on the GPU host "
                         "(/models-local/skill) before timed_transcribe.py"
                     )
             else:
                 warnings.append(
-                    "skillGateway: private engine start/fetch run on Max under /models-local/skill"
+                    "skillGateway: private engine start/fetch run on the GPU host under /models-local/skill"
                 )
             return {
                 "scenario": scenario,

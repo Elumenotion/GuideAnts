@@ -4,7 +4,7 @@ import { useNotebook } from './NotebookContext';
 import { useToast } from '../components/common/Toast';
 import { ensureValidTokensForTemplate } from '../utils/notebookAuth';
 
-import type { ConversationContextProps, ProviderProps } from './conversation/types';
+import type { ConversationContextProps, ProviderProps, SendStreamState } from './conversation/types';
 export type { StreamingMode } from './conversation/types';
 import { reducer, initialState } from './conversation/reducer';
 import { getNotebookRuntimeReadyCache, checkRuntimeStatus, clearNotebookRuntimeReadyCache } from './conversation/runtimeChecks';
@@ -42,7 +42,7 @@ function assistantsEqual(
   return true;
 }
 
-export function ConversationProvider({ projectId, notebookId, conversationId, guideId, assistants: notebookAssistants, notebookTemplate: initialTemplate, onPreviewFile, onPreviewFileByPath, children }: ProviderProps) {
+export function ConversationProvider({ projectId, notebookId, conversationId, guideId, assistants: notebookAssistants, notebookTemplate: initialTemplate, onPreviewFile, onPreviewFileByPath, composerTerminalPolicy, children }: ProviderProps) {
   const [state, dispatch] = useReducer(reducer, {
     ...initialState,
     assistants: notebookAssistants || [],
@@ -62,6 +62,8 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
   // Refs are authoritative for "is a socket open?" checks. State alone races with setState.
   const sendStreamRef = React.useRef<AbortController | null>(null);
   const observerStreamRef = React.useRef<AbortController | null>(null);
+  const sendStreamStateRef = React.useRef<SendStreamState | null>(null);
+  const pendingStopRef = React.useRef(false);
   const setCurrentStreamController = React.useCallback((controller: AbortController | null) => {
     sendStreamRef.current = controller;
     setCurrentStreamControllerState(controller);
@@ -71,18 +73,26 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     setObserverStreamControllerState(controller);
   }, []);
   const reattachIfStreamingRef = React.useRef<(convo: any) => Promise<void>>(async () => {});
-  const onTurnIdAssignedRef = React.useRef<(turnId: string) => void>(() => {});
+  const onTurnIdAssignedRef = React.useRef<(turnId: string) => boolean>(() => true);
   const onStreamTerminalRef = React.useRef<() => void>(() => {});
   const [activeStreamTurnId, setActiveStreamTurnIdState] = React.useState<string | null>(null);
   const activeStreamTurnIdRef = React.useRef<string | null>(null);
   const assignActiveStreamTurnId = React.useCallback((turnId: string | null) => {
+    // Let the action layer reject a late observer/refresh turn before it mutates the
+    // authoritative active-turn ref. Otherwise a newer turn can make an older Stop response
+    // look stale and clear the cancelling state without confirming the original lifecycle.
+    if (turnId && !onTurnIdAssignedRef.current(turnId)) {
+      return;
+    }
+
     activeStreamTurnIdRef.current = turnId;
     setActiveStreamTurnIdState(turnId);
-    if (turnId) {
-      onTurnIdAssignedRef.current(turnId);
-    }
   }, []);
   const getActiveStreamTurnId = React.useCallback(() => activeStreamTurnIdRef.current, []);
+  // NOTE (turn-terminal ownership P2): the SSE handler no longer aborts streams on terminal
+  // events. Abort is now only a cleanup primitive (conversation change / unmount, below) and a
+  // Stop-flow primitive (via the cancel endpoint). Terminal composer finalization is owned by
+  // the action layer's onComplete, which the transport invokes exactly once.
   const templateStartersRef = React.useRef<string[]>([]);
   const inflightRuntimeChecksRef = React.useRef<Set<string>>(new Set());
   const runtimeReadyCacheRef = React.useRef<Set<string>>(getNotebookRuntimeReadyCache(notebookId));
@@ -141,9 +151,11 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
         );
         dispatch({ type: 'SET_MESSAGES', payload: messages });
 
-        if (convo.activeTurn?.turnId) {
+        if (convo.activeTurn
+          && ['streaming', 'pending_client_tool'].includes((convo.activeTurn.status ?? '').toLowerCase())
+          && convo.activeTurn.turnId) {
           assignActiveStreamTurnId(convo.activeTurn.turnId);
-        } else if (convo.activeTurn?.status && convo.activeTurn.status !== 'streaming') {
+        } else {
           assignActiveStreamTurnId(null);
         }
 
@@ -345,6 +357,7 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
 
     dispatch({ type: 'SET_CANCELLING', payload: false });
     dispatch({ type: 'CLEAR_ATTACHMENTS' });
+    sendStreamStateRef.current = null;
     dispatch({ type: 'SET_MESSAGES', payload: [] });
     assignActiveStreamTurnId(null);
     onStreamTerminalRef.current();
@@ -383,8 +396,10 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     loadNotebookFiles, showToast,
     projectId, notebookId, conversationId, setCurrentStreamController,
     setActiveStreamTurnId: assignActiveStreamTurnId,
+    getActiveStreamTurnId,
     refreshConversation: refresh,
-    onStreamTerminal: () => onStreamTerminalRef.current(),
+    sendStreamStateRef,
+    pendingStopRef,
   });
 
   const actions = useConversationActions(dispatch, state, {
@@ -395,6 +410,9 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     sendStreamRef, observerStreamRef,
     inflightRuntimeChecksRef, runtimeReadyCacheRef, assistantByName,
     activeStreamTurnId, setActiveStreamTurnId: assignActiveStreamTurnId, getActiveStreamTurnId, refreshConversation: refresh,
+    sendStreamStateRef,
+    pendingStopRef,
+    composerTerminalPolicy,
   });
 
   reattachIfStreamingRef.current = actions.reattachIfStreaming;

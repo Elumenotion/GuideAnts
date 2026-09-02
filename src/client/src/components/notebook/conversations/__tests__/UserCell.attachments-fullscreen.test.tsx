@@ -102,4 +102,44 @@ describe('UserCell – attachments & fullscreen viewer', () => {
     // No throw; click is a no-op without handler
     expect(screen.getByText('orphan.dat')).toBeInTheDocument();
   });
+
+  it('previews path attachments by relative path', async () => {
+    const user = userEvent.setup();
+    const onPreviewFile = vi.fn();
+    const onPreviewFileByPath = vi.fn();
+    render(
+      <UserCell
+        content="Path attachment"
+        isLast={false}
+        attachments={[{
+          ...makeAttachment('5', 'report.csv', 100),
+          relativePath: 'Data/report.csv',
+        }]}
+        onPreviewFile={onPreviewFile}
+        onPreviewFileByPath={onPreviewFileByPath}
+      />
+    );
+
+    await user.click(screen.getByTitle('Click to preview report.csv'));
+
+    expect(onPreviewFileByPath).toHaveBeenCalledWith('Data/report.csv');
+    expect(onPreviewFile).not.toHaveBeenCalled();
+  });
+
+  it('previews file-id attachments by id', async () => {
+    const user = userEvent.setup();
+    const onPreviewFile = vi.fn();
+    render(
+      <UserCell
+        content="File attachment"
+        isLast={false}
+        attachments={[makeAttachment('6', 'notes.txt', 100)]}
+        onPreviewFile={onPreviewFile}
+      />
+    );
+
+    await user.click(screen.getByTitle('Click to preview notes.txt'));
+
+    expect(onPreviewFile).toHaveBeenCalledWith('file-6');
+  });
 });

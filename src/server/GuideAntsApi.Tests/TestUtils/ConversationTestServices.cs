@@ -83,7 +83,8 @@ internal static class ConversationTestServices
         IConversationBroadcastHub? broadcastHub = null,
         INotebookFileSyncService? notebookFileSyncService = null,
         IToolOAuthService? toolOAuthService = null,
-        ILogger<ConversationService>? logger = null)
+        ILogger<ConversationService>? logger = null,
+        ConversationStreamRunRegistry? streamRunRegistry = null)
     {
         var lockService = distributedLock ?? Mock.Of<IDistributedConversationLock>();
         var hub = broadcastHub ?? Mock.Of<IConversationBroadcastHub>();
@@ -93,15 +94,16 @@ internal static class ConversationTestServices
             lockCoordinator,
             scopeFactory,
             Mock.Of<ILogger<PrivateConversationStreamPolicy>>());
+        streamRunRegistry ??= new ConversationStreamRunRegistry();
         var streamEngine = new ConversationStreamEngine(
             Mock.Of<IHttpClientFactory>(),
             chatClientFactory,
             persistence,
             usageReporter,
             scopeFactory,
+            streamRunRegistry,
             Mock.Of<ILogger<ConversationStreamEngine>>(),
             notebookFileSyncService);
-        var streamRunRegistry = new ConversationStreamRunRegistry();
         var undoService = new ConversationUndoService(
             lockService,
             hub,
@@ -123,6 +125,7 @@ internal static class ConversationTestServices
             streamPolicy,
             streamEngine,
             streamRunRegistry,
+            lockService,
             hub,
             logger ?? Mock.Of<ILogger<ConversationService>>(),
             toolOAuthService);
@@ -154,23 +157,33 @@ internal static class ConversationTestServices
                     ExpiresAt = DateTime.UtcNow.AddMinutes(5)
                 }));
         distributedLock
-            .Setup(l => l.RenewLockAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .Setup(l => l.RenewLockAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         distributedLock
-            .Setup(l => l.ReleaseLockAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Setup(l => l.ReleaseLockAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var lockCoordinator = new ConversationStreamLockCoordinator(distributedLock.Object);
         var streamPolicy = new PublishedConversationStreamPolicy(
             scopeFactory,
             lockCoordinator,
             Mock.Of<ILogger<PublishedConversationStreamPolicy>>());
+        var streamRunRegistry = new ConversationStreamRunRegistry();
         var streamEngine = new ConversationStreamEngine(
             httpClientFactory ?? Mock.Of<IHttpClientFactory>(),
             chatClientFactory,
             persistence,
             usageReporter,
             scopeFactory,
+            streamRunRegistry,
             Mock.Of<ILogger<ConversationStreamEngine>>());
 
         var undoLockService = Mock.Of<IDistributedConversationLock>();
@@ -183,7 +196,7 @@ internal static class ConversationTestServices
             undoLockService,
             Mock.Of<IConversationBroadcastHub>(),
             privateStreamPolicy,
-            new ConversationStreamRunRegistry(),
+            streamRunRegistry,
             scopeFactory,
             Mock.Of<ILogger<ConversationUndoService>>());
 
@@ -200,7 +213,7 @@ internal static class ConversationTestServices
             attachmentService,
             streamPolicy,
             streamEngine,
-            new ConversationStreamRunRegistry(),
+            streamRunRegistry,
             configuration);
     }
 }

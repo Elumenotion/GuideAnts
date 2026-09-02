@@ -10,6 +10,11 @@ metadata:
 ---
 # PowerPoint authoring
 
+Paths — fixed layout, do not probe or re-derive. The sandbox CWD is the
+notebook's **output directory**. This skill's scripts live under
+`Skills/pptx-author/scripts/` relative to it. Write deliverables with
+**bare filenames**; never prefix with `Output/`.
+
 Use this skill when the user wants slide decks, speaker notes, or export-ready PPTX content.
 
 1. Confirm audience, slide count, and tone.

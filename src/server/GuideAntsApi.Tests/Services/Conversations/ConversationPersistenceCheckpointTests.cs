@@ -15,6 +15,27 @@ namespace GuideAntsApi.Tests.Services.Conversations;
 public sealed class ConversationPersistenceCheckpointTests
 {
     [TestMethod]
+    public async Task CheckpointTurnAsync_allows_pending_client_tool_status()
+    {
+        var (persistence, _, turnId, messageId, _) = await SeedStreamingTurnAsync();
+
+        await using (var db = new ApplicationDbContext(_options))
+        {
+            var turn = await db.ConversationTurns.SingleAsync(t => t.Id == turnId);
+            turn.Status = "pending_client_tool";
+            await db.SaveChangesAsync();
+        }
+
+        (await persistence.CheckpointTurnAsync(
+            turnId,
+            messageId,
+            "pending tool",
+            null,
+            checkpointVersion: 1,
+            CancellationToken.None)).Should().BeTrue();
+    }
+
+    [TestMethod]
     public async Task CheckpointTurnAsync_advances_version_last_updated_and_thinking()
     {
         var (persistence, conversationId, turnId, messageId, staleLastUpdated) = await SeedStreamingTurnAsync();
@@ -84,6 +105,42 @@ public sealed class ConversationPersistenceCheckpointTests
             null,
             checkpointVersion: 1,
             CancellationToken.None)).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task CheckpointTurnAsync_rejects_stale_execution_id()
+    {
+        var (persistence, _, turnId, messageId, _) = await SeedStreamingTurnAsync();
+
+        Guid executionId;
+        await using (var db = new ApplicationDbContext(_options))
+        {
+            executionId = (await db.ConversationTurns.SingleAsync(t => t.Id == turnId)).ExecutionId!.Value;
+        }
+
+        (await persistence.CheckpointTurnAsync(
+            turnId,
+            messageId,
+            "stale worker",
+            null,
+            checkpointVersion: 1,
+            CancellationToken.None,
+            expectedExecutionId: Guid.NewGuid())).Should().BeFalse();
+
+        await using (var db = new ApplicationDbContext(_options))
+        {
+            var assistant = await db.NotebookConversationMessages.SingleAsync(m => m.Id == messageId);
+            assistant.Content.Should().BeEmpty();
+        }
+
+        (await persistence.CheckpointTurnAsync(
+            turnId,
+            messageId,
+            "current worker",
+            null,
+            checkpointVersion: 1,
+            CancellationToken.None,
+            expectedExecutionId: executionId)).Should().BeTrue();
     }
 
     private DbContextOptions<ApplicationDbContext> _options = null!;

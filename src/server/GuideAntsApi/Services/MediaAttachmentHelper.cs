@@ -44,10 +44,15 @@ namespace GuideAntsApi.Services
 
             foreach (var att in attachments)
             {
+                if (!att.NotebookFileId.HasValue)
+                {
+                    continue;
+                }
+
                 var fileName = att.NotebookFile?.RelativePath ?? string.Empty;
                 if (IsImageFile(fileName))
                 {
-                    var res = await fileService.GetFileContentStreamAsync(att.NotebookFileId);
+                    var res = await fileService.GetFileContentStreamAsync(att.NotebookFileId.Value);
                     if (res.HasValue)
                     {
                         using var stream = res.Value.Stream;

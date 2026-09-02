@@ -397,6 +397,25 @@ EMB_PID=$!
 /app/start-media.sh &
 MEDIA_PID=$!
 
+render_nginx_config() {
+    local template="/etc/nginx/nginx.conf.template"
+    local output="/etc/nginx/nginx.conf"
+    local limit="${GA_NGINX_ASR_CLIENT_MAX_BODY_SIZE:-300m}"
+
+    if [ ! -f "$template" ]; then
+        echo "Missing nginx template: $template" >&2
+        exit 1
+    fi
+
+    if ! [[ "$limit" =~ ^[0-9]+[kKmMgG]?$ ]]; then
+        echo "Invalid GA_NGINX_ASR_CLIENT_MAX_BODY_SIZE: $limit (expected nginx size, e.g. 300m)" >&2
+        exit 1
+    fi
+
+    sed "s|__GA_NGINX_ASR_CLIENT_MAX_BODY_SIZE__|${limit}|g" "$template" > "$output"
+}
+
+render_nginx_config
 nginx -g 'daemon off;' &
 NGINX_PID=$!
 

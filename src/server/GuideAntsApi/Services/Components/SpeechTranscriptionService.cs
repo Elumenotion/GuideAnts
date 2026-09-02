@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.Options;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using AntRunner.Chat.OpenRouter;
@@ -35,6 +36,7 @@ namespace GuideAntsApi.Services.Components
         private readonly IServiceModeResolver _serviceModeResolver;
         private readonly IConfiguration _configuration;
         private readonly ILogger<SpeechTranscriptionService> _logger;
+        private readonly ILocalAiStartupWarmupService? _localSpeechEngineRecovery;
 
         public SpeechTranscriptionService(
             HttpClient httpClient,
@@ -45,7 +47,8 @@ namespace GuideAntsApi.Services.Components
             IVideoAudioExtractionService videoAudioExtractionService,
             IServiceModeResolver serviceModeResolver,
             IConfiguration configuration,
-            ILogger<SpeechTranscriptionService> logger)
+            ILogger<SpeechTranscriptionService> logger,
+            ILocalAiStartupWarmupService? localSpeechEngineRecovery = null)
         {
             _httpClient = httpClient;
             _speechOptionsMonitor = speechOptions;
@@ -56,6 +59,7 @@ namespace GuideAntsApi.Services.Components
             _serviceModeResolver = serviceModeResolver;
             _configuration = configuration;
             _logger = logger;
+            _localSpeechEngineRecovery = localSpeechEngineRecovery;
         }
 
         public async Task<string> TranscribeAudioAsync(Stream audioContent, string fileName, string contentType, CancellationToken cancellationToken = default)
@@ -198,7 +202,7 @@ namespace GuideAntsApi.Services.Components
             var payloadSizeBucket = BuildPayloadSizeBucket(payloadSizeBytes);
             var normalizedContentType = NormalizeAudioContentType(fileName, contentType);
 
-            _logger.LogWarning(
+            _logger.LogInformation(
                 "asr_api_request_start provider={Provider} requestId={RequestId} fileName={FileName} contentType={ContentType} diarization={Diarization} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket}",
                 mode.ProviderSection,
                 requestId,
@@ -300,7 +304,7 @@ namespace GuideAntsApi.Services.Components
                 .Select(part => part.Text)
                 .Where(x => !string.IsNullOrWhiteSpace(x)));
 
-            _logger.LogWarning(
+            _logger.LogInformation(
                 "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
                 GoogleGeminiProviderSection,
                 requestId,
@@ -373,7 +377,7 @@ namespace GuideAntsApi.Services.Components
             }
 
             var text = ParseHuggingFaceAsrText(body, includeTimestamps);
-            _logger.LogWarning(
+            _logger.LogInformation(
                 "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
                 HuggingFaceProviderSection,
                 requestId,
@@ -555,7 +559,7 @@ namespace GuideAntsApi.Services.Components
                 PropertyNameCaseInsensitive = true
             });
             var text = parsed?.Text ?? string.Empty;
-            _logger.LogWarning(
+            _logger.LogInformation(
                 "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
                 OpenRouterProviderSection,
                 requestId,
@@ -629,7 +633,7 @@ namespace GuideAntsApi.Services.Components
                 PropertyNameCaseInsensitive = true
             });
             var text = parsed?.Text ?? string.Empty;
-            _logger.LogWarning(
+            _logger.LogInformation(
                 "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
                 OpenAiProviderSection,
                 requestId,
@@ -782,7 +786,57 @@ namespace GuideAntsApi.Services.Components
             CancellationToken cancellationToken)
         {
             audioContent.Position = 0;
+            await using var buffered = new MemoryStream();
+            await audioContent.CopyToAsync(buffered, cancellationToken).ConfigureAwait(false);
+            var audioBytes = buffered.ToArray();
 
+            try
+            {
+                return await PostLocalAsrOnceAsync(
+                    audioBytes,
+                    fileName,
+                    contentType,
+                    requestId,
+                    payloadSizeBytes,
+                    payloadSizeBucket,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (
+                _localSpeechEngineRecovery is not null
+                && IsLocalAsrEngineException(ex)
+                && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogError(
+                    ex,
+                    "asr_api_engine_failed provider={Provider} requestId={RequestId} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} errorType={ErrorType}",
+                    LocalProviderSection,
+                    requestId,
+                    payloadSizeBytes,
+                    payloadSizeBucket,
+                    ex.GetType().Name);
+                await _localSpeechEngineRecovery
+                    .RecycleSharedSpeechEnginesAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                return await PostLocalAsrOnceAsync(
+                    audioBytes,
+                    fileName,
+                    contentType,
+                    requestId,
+                    payloadSizeBytes,
+                    payloadSizeBucket,
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        private async Task<TranscriptionResult> PostLocalAsrOnceAsync(
+            byte[] audioBytes,
+            string fileName,
+            string contentType,
+            string requestId,
+            long payloadSizeBytes,
+            string payloadSizeBucket,
+            CancellationToken cancellationToken)
+        {
             var localOptions = _transcriptionOptionsMonitor.CurrentValue;
             var localHosts = _localServiceHostsOptionsMonitor.CurrentValue;
             if (string.IsNullOrWhiteSpace(localHosts.SpeechTranscriptionBaseUrl))
@@ -795,7 +849,7 @@ namespace GuideAntsApi.Services.Components
             var apiUrl = $"{endpoint}/asr/transcribe";
 
             using var content = new MultipartFormDataContent();
-            var audioStreamContent = new StreamContent(audioContent);
+            var audioStreamContent = new StreamContent(new MemoryStream(audioBytes, writable: false));
             audioStreamContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
             content.Add(audioStreamContent, "audio", fileName);
 
@@ -838,7 +892,7 @@ namespace GuideAntsApi.Services.Components
             var text = result?.Text ?? string.Empty;
             var durationSeconds = result?.DurationSeconds ?? 0;
 
-            _logger.LogWarning(
+            _logger.LogInformation(
                 "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength} modelRef={ModelRef}",
                 LocalProviderSection,
                 requestId,
@@ -850,6 +904,48 @@ namespace GuideAntsApi.Services.Components
                 result?.ModelRef);
 
             return new TranscriptionResult(text, durationSeconds);
+        }
+
+        private static bool IsLocalAsrEngineException(Exception ex)
+        {
+            if (ex is TimeoutException or HttpRequestException)
+            {
+                return true;
+            }
+
+            // Wrapper HTTP timeout uses timeoutCts (OperationCanceledException).
+            // Caller catch already excludes user-cancelled tokens.
+            if (ex is OperationCanceledException)
+            {
+                return true;
+            }
+
+            if (ex is not InvalidOperationException)
+            {
+                return false;
+            }
+
+            const string prefix = "Local ASR API failed:";
+            var message = ex.Message;
+            if (!message.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var statusToken = message[prefix.Length..].TrimStart();
+            var space = statusToken.IndexOf(' ');
+            if (space > 0)
+            {
+                statusToken = statusToken[..space];
+            }
+
+            if (!Enum.TryParse<HttpStatusCode>(statusToken, out var status))
+            {
+                return false;
+            }
+
+            var code = (int)status;
+            return code == 408 || code >= 500;
         }
 
         private async Task<TranscriptionResult> TranscribeViaAzureSpeechWithDurationAsync(
@@ -966,7 +1062,7 @@ namespace GuideAntsApi.Services.Components
             }
 
             var durationSeconds = (long)Math.Round(transcriptionResult.DurationMilliseconds / 1000.0);
-            _logger.LogWarning(
+            _logger.LogInformation(
                 "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
                 AzureProviderSection,
                 requestId,

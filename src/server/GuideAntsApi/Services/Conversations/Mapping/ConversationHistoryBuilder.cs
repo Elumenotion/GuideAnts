@@ -201,8 +201,16 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             }
         }
 
+        var orderedMessages = dedupedMessages
+            .OrderBy(m => m.TurnIndex)
+            .ThenBy(m => m.MessageSequence)
+            .ToList();
+
+        var attachmentsByMessageId = await LoadAttachmentsByMessageIdAsync(
+            orderedMessages.Select(m => m.Id).ToList(), cancellationToken);
+
         var filteredMessages = new List<ChatMessage>();
-        foreach (var m in dedupedMessages.OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence))
+        foreach (var m in orderedMessages)
         {
             if (m.Role == DataModelChatRole.Tool)
             {
@@ -223,16 +231,9 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                 continue;
             }
 
-            List<MessageAttachment> attachments;
-            using (var attachmentScope = _scopeFactory.CreateScope())
-            {
-                var attachmentDb = attachmentScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                attachments = await attachmentDb.MessageAttachments
-                    .Include(ma => ma.NotebookFile)
-                    .Where(ma => ma.MessageId == m.Id)
-                    .OrderBy(ma => ma.OrderIndex)
-                    .ToListAsync(cancellationToken);
-            }
+            var attachments = attachmentsByMessageId.TryGetValue(m.Id, out var msgAttachments)
+                ? msgAttachments
+                : [];
 
             if (attachments.Count > 0)
             {
@@ -245,8 +246,9 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
 
                 foreach (var attachment in attachments)
                 {
-                    var fileContents = await _attachmentContentService.CreateOpenAiContentFromNotebookFileAsync(
-                        attachment.NotebookFileId, cancellationToken);
+                    var fileContents = attachment.NotebookFile != null
+                        ? await _attachmentContentService.CreateOpenAiContentFromLoadedFileAsync(attachment.NotebookFile, cancellationToken)
+                        : await _attachmentContentService.ExpandAttachmentToChatContentsAsync(attachment, cancellationToken);
                     contents.AddRange(fileContents);
                 }
 
@@ -320,7 +322,15 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             }
         }
 
-        foreach (var dbMsg in filteredMessages.OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence))
+        var orderedMessages = filteredMessages
+            .OrderBy(m => m.TurnIndex)
+            .ThenBy(m => m.MessageSequence)
+            .ToList();
+
+        var attachmentsByMessageId = await LoadAttachmentsByMessageIdAsync(
+            orderedMessages.Select(m => m.Id).ToList(), cancellationToken);
+
+        foreach (var dbMsg in orderedMessages)
         {
             if (dbMsg.Role == DataModelChatRole.Tool)
             {
@@ -338,16 +348,9 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                 }
             }
 
-            List<MessageAttachment> attachments;
-            using (var attachmentScope = _scopeFactory.CreateScope())
-            {
-                var attachmentDb = attachmentScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                attachments = await attachmentDb.MessageAttachments
-                    .Include(ma => ma.NotebookFile)
-                    .Where(ma => ma.MessageId == dbMsg.Id)
-                    .OrderBy(ma => ma.OrderIndex)
-                    .ToListAsync(cancellationToken);
-            }
+            var attachments = attachmentsByMessageId.TryGetValue(dbMsg.Id, out var msgAttachments)
+                ? msgAttachments
+                : [];
 
             if (attachments.Count > 0)
             {
@@ -360,8 +363,9 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
 
                 foreach (var attachment in attachments)
                 {
-                    var fileContents = await _attachmentContentService.CreateOpenAiContentFromNotebookFileAsync(
-                        attachment.NotebookFileId, cancellationToken);
+                    var fileContents = attachment.NotebookFile != null
+                        ? await _attachmentContentService.CreateOpenAiContentFromLoadedFileAsync(attachment.NotebookFile, cancellationToken)
+                        : await _attachmentContentService.ExpandAttachmentToChatContentsAsync(attachment, cancellationToken);
                     contents.AddRange(fileContents);
                 }
 
@@ -457,8 +461,10 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                     if (!string.IsNullOrEmpty(m.Content)) contents.Add(new ChatContent(m.Content));
                     foreach (var a in attachments)
                     {
-                        var fileContents = await _attachmentContentService.CreateOpenAiContentFromNotebookFileAsync(
-                            db, a.NotebookFileId, cancellationToken);
+                        var fileContents = await _attachmentContentService.ExpandAttachmentToChatContentsAsync(
+                            db,
+                            a,
+                            cancellationToken);
                         contents.AddRange(fileContents);
                     }
                     var role = m.Role switch
@@ -552,10 +558,11 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
 
         if (assistantDef != null)
         {
-            var serverContextMsg = _contextOptionsService.BuildPublishedContextMessage(
+            var serverContextMsg = await _contextOptionsService.BuildPublishedContextMessageAsync(
                 assistantDef,
                 conv.Notebook?.ProjectId ?? Guid.Empty,
-                conv.Notebook?.Id ?? Guid.Empty);
+                conv.Notebook?.Id ?? Guid.Empty,
+                cancellationToken);
             if (!string.IsNullOrWhiteSpace(serverContextMsg))
             {
                 list.Add(new ChatMessage(ChatMessageRole.System, serverContextMsg));
@@ -641,6 +648,29 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         }
 
         return validToolCallIds;
+    }
+
+    /// <summary>
+    /// Batch-loads message attachments for a set of message ids in a single scope/query, replacing what
+    /// used to be a per-message scope+query inside the BuildOpenAiMessagesAsync/ApplyAssistantSwitchLogicAsync
+    /// loops. NotebookFile (and its Notebook) is eagerly included so callers can render attachment content
+    /// from the already-loaded entity via CreateOpenAiContentFromLoadedFileAsync instead of re-querying per file.
+    /// </summary>
+    private async Task<Dictionary<Guid, List<MessageAttachment>>> LoadAttachmentsByMessageIdAsync(
+        List<Guid> messageIds,
+        CancellationToken cancellationToken)
+    {
+        using var attachmentScope = _scopeFactory.CreateScope();
+        var attachmentDb = attachmentScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        return (await attachmentDb.MessageAttachments
+                .AsNoTracking()
+                .Include(ma => ma.NotebookFile)
+                    .ThenInclude(nf => nf!.Notebook)
+                .Where(ma => messageIds.Contains(ma.MessageId))
+                .OrderBy(ma => ma.OrderIndex)
+                .ToListAsync(cancellationToken))
+            .GroupBy(ma => ma.MessageId)
+            .ToDictionary(g => g.Key, g => g.ToList());
     }
 
     private static void AddSkillsDiscoveryMessage(

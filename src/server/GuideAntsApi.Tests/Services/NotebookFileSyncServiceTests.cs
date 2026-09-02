@@ -2,8 +2,11 @@ using FluentAssertions;
 using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Sync;
+using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Tests.BackgroundJobs;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -17,8 +20,10 @@ public sealed class NotebookFileSyncServiceTests
     public async Task QueueReconcileAsync_EnqueuesSyncNotebookJob()
     {
         var queue = new CapturingJobQueueService();
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"notebook-sync-{Guid.NewGuid():N}");
         var services = new ServiceCollection();
         services.AddSingleton<IJobQueueService>(queue);
+        services.AddSingleton<IDbContextFactory<ApplicationDbContext>>(BackgroundJobTestHelpers.CreateFactory(options));
 
         await using var provider = services.BuildServiceProvider();
         var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();

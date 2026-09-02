@@ -171,6 +171,118 @@ public sealed class NotebookFileRegisterServingTests
     }
 
     [TestMethod]
+    public async Task RegisterFilesAsync_ResolvesAlternativePathWhenPrimaryMissing()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"register-alt-{Guid.NewGuid():N}");
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"register-alt-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        Guid projectId;
+        Guid notebookId;
+        try
+        {
+            await using (var seed = new ApplicationDbContext(options))
+            {
+                (projectId, notebookId) = await BackgroundJobTestHelpers.SeedProjectNotebookAsync(seed);
+            }
+
+            var notebookRoot = Path.Combine(tempRoot, "test-project", "test-notebook");
+            Directory.CreateDirectory(notebookRoot);
+            var relativePath = "Output/alt-resolved.txt";
+            var fullPath = Path.Combine(notebookRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            await File.WriteAllTextAsync(fullPath, "hello");
+
+            var pathResolver = new Mock<IStoragePathResolver>();
+            pathResolver.Setup(r => r.GetNotebookRootPath(projectId, notebookId)).Returns(notebookRoot);
+
+            var providerMock = new Mock<IServiceProvider>();
+            providerMock.Setup(p => p.GetService(typeof(ApplicationDbContext)))
+                .Returns(() => new ApplicationDbContext(options));
+            var scopeMock = new Mock<IServiceScope>();
+            scopeMock.SetupGet(s => s.ServiceProvider).Returns(providerMock.Object);
+            var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+            scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+
+            var reconciler = new NotebookFileReconciler(
+                scopeFactoryMock.Object,
+                pathResolver.Object,
+                new BackgroundJobTestHelpers.CapturingJobQueueService(),
+                Mock.Of<IFileLineageService>(),
+                Mock.Of<IUsageRecorder>(),
+                new InMemoryNotebookLockService(),
+                NullLogger<NotebookFileReconciler>.Instance);
+
+            // CWD-relative basename should resolve via Output/ alternative.
+            await reconciler.RegisterFilesAsync(notebookId, ["alt-resolved.txt"]);
+
+            await using var verify = new ApplicationDbContext(options);
+            var row = await verify.NotebookFiles.SingleAsync(f => f.NotebookId == notebookId);
+            row.RelativePath.Should().Be(relativePath);
+        }
+        finally
+        {
+            TryDeleteDirectory(tempRoot);
+        }
+    }
+
+    [TestMethod]
+    public async Task ReconcileNotebookAsync_SkipsHashingUnchangedFilesOnSecondPass()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"reconcile-skip-hash-{Guid.NewGuid():N}");
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"reconcile-skip-hash-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        Guid projectId;
+        Guid notebookId;
+        try
+        {
+            await using (var seed = new ApplicationDbContext(options))
+            {
+                (projectId, notebookId) = await BackgroundJobTestHelpers.SeedProjectNotebookAsync(seed);
+            }
+
+            var notebookRoot = Path.Combine(tempRoot, "test-project", "test-notebook");
+            Directory.CreateDirectory(notebookRoot);
+            var relativePath = "Output/stable.bin";
+            var fullPath = Path.Combine(notebookRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            await File.WriteAllBytesAsync(fullPath, Enumerable.Repeat((byte)0xAB, 4096).ToArray());
+
+            var pathResolver = new Mock<IStoragePathResolver>();
+            pathResolver.Setup(r => r.GetNotebookRootPath(projectId, notebookId)).Returns(notebookRoot);
+
+            var providerMock = new Mock<IServiceProvider>();
+            providerMock.Setup(p => p.GetService(typeof(ApplicationDbContext)))
+                .Returns(() => new ApplicationDbContext(options));
+            var scopeMock = new Mock<IServiceScope>();
+            scopeMock.SetupGet(s => s.ServiceProvider).Returns(providerMock.Object);
+            var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+            scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+
+            var reconciler = new NotebookFileReconciler(
+                scopeFactoryMock.Object,
+                pathResolver.Object,
+                new BackgroundJobTestHelpers.CapturingJobQueueService(),
+                Mock.Of<IFileLineageService>(),
+                Mock.Of<IUsageRecorder>(),
+                new InMemoryNotebookLockService(),
+                NullLogger<NotebookFileReconciler>.Instance);
+
+            var first = await reconciler.ReconcileNotebookAsync(notebookId);
+            first.Added.Should().Be(1);
+
+            var second = await reconciler.ReconcileNotebookAsync(notebookId);
+            second.Added.Should().Be(0);
+            second.Updated.Should().Be(0);
+        }
+        finally
+        {
+            TryDeleteDirectory(tempRoot);
+        }
+    }
+
+    [TestMethod]
     public async Task RegisterAndReconcileConcurrently_DoNotThrow_WhenInsertingSameFile()
     {
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"register-reconcile-race-{Guid.NewGuid():N}");

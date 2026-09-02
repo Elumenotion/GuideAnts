@@ -10,6 +10,11 @@ metadata:
 
 # transcript-to-pdf
 
+Paths — fixed layout, do not probe or re-derive. The sandbox CWD is the
+notebook's **output directory**. This skill's scripts live under
+`Skills/transcript-to-pdf/scripts/` relative to it. Write PDF output with a
+**bare filename** (e.g. `-o report.pdf`); never prefix with `Output/`.
+
 Turns a **markdown conversation transcript** (the kind produced by saving a
 GuideAnts / Code-Executor session) into a well-formatted PDF.
 
@@ -39,7 +44,7 @@ Check with `python3 -c "import weasyprint, pygments"`. If missing:
 Single command, one input, one output:
 
 ```bash
-python3 Output/Skills/transcript-to-pdf/scripts/md_transcript_to_pdf.py \
+python3 Skills/transcript-to-pdf/scripts/md_transcript_to_pdf.py \
   <transcript>.md -o <out>.pdf
 ```
 

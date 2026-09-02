@@ -28,7 +28,15 @@ vi.mock('../../conversations/FullScreenEditor', () => ({
     onCancel: () => void;
     content: string;
   }) => (
-    <div data-testid="fullscreen-md-editor">
+    <div
+      data-testid="fullscreen-md-editor"
+      onKeyDownCapture={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+    >
       <span>{content}</span>
       <button type="button" onClick={() => onSave('# Updated markdown')}>
         Save markdown
@@ -1210,11 +1218,12 @@ describe('FilePreviewOverlay', () => {
       });
 
       fireEvent.click(screen.getByLabelText('Edit markdown'));
-      await screen.findByTestId('fullscreen-md-editor');
-      fireEvent.keyDown(window, { key: 'Escape' });
+      const editor = await screen.findByTestId('fullscreen-md-editor');
+      fireEvent.keyDown(editor, { key: 'Escape' });
 
       expect(onClose).not.toHaveBeenCalled();
-      expect(screen.getByTestId('fullscreen-md-editor')).toBeInTheDocument();
+      expect(screen.queryByTestId('fullscreen-md-editor')).not.toBeInTheDocument();
+      expect(screen.getByTestId('markdown-viewer')).toBeInTheDocument();
     });
 
     it('cancels markdown editor without saving', async () => {

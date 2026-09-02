@@ -3,6 +3,8 @@ using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using System.Net;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace GuideAntsApi.Services.Conversations;
 
@@ -22,7 +24,26 @@ namespace GuideAntsApi.Services.Conversations;
 /// </summary>
 internal static class StreamingErrorEnvelope
 {
-    public static object Build(Exception ex)
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    public static object Build(Exception ex, Guid? turnId = null)
+    {
+        var payload = BuildCore(ex);
+        if (turnId is null)
+        {
+            return payload;
+        }
+
+        var node = JsonSerializer.SerializeToNode(payload, JsonOptions)?.AsObject()
+            ?? new JsonObject();
+        node["turnId"] = turnId.Value;
+        return node;
+    }
+
+    private static object BuildCore(Exception ex)
     {
         var inner = ex is ChatConversationException chatEx ? chatEx.InnerException : ex.InnerException;
         var display = ex is ChatConversationException && inner != null ? inner : ex;

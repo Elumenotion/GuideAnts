@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Shared helpers for remote raw audiocpp_server access via Max gateway.
+"""Shared helpers for remote raw audiocpp_server access via GPU host gateway.
 
-When AUDIOCPP_SKILL_BASE_URL is set, skills talk to the Max LAN raw gateway
+When AUDIOCPP_SKILL_BASE_URL is set, skills talk to the GPU host LAN raw gateway
 instead of loopback engines. The gateway is a transparent reverse proxy:
 
   {BASE}/asr/...      -> audiocpp_server ASR
   {BASE}/tts/...      -> audiocpp_server TTS
   {BASE}/private/...  -> skill-spawned private engine
-  {BASE}/files        -> stage upload; returns Max-local path
+  {BASE}/files        -> stage upload; returns host-local path
   {BASE}/admin/...    -> fetch models / private start|stop
 
 Auth: X-Audiocpp-Skill-Token. Stdlib-only.
@@ -117,7 +117,7 @@ def gateway_request_multipart(
 
 
 def stage_file(local_path: str, *, timeout: float = 600.0) -> str:
-    """Upload a local file to Max staging; return absolute Max-side path for engine JSON."""
+    """Upload a local file to the GPU host staging; return absolute GPU host-side path for engine JSON."""
     path = Path(local_path)
     if not path.is_file():
         raise FileNotFoundError(local_path)

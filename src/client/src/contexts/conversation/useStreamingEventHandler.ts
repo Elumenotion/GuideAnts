@@ -1,7 +1,6 @@
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import type { MessageDto, StreamingMessage, StreamingToolActivity } from '../../types/conversation';
-import { api } from '../../services/api';
-import type { ActionType, ExtendedConversationState } from './types';
+import type { ActionType, ExtendedConversationState, SendStreamState } from './types';
 
 interface StreamingEventDeps {
   loadNotebookFiles: () => Promise<void>;
@@ -11,30 +10,65 @@ interface StreamingEventDeps {
   conversationId: string;
   setCurrentStreamController: (c: AbortController | null) => void;
   setActiveStreamTurnId?: (turnId: string | null) => void;
+  getActiveStreamTurnId?: () => string | null;
   refreshConversation?: (options?: { force?: boolean }) => Promise<void>;
-  onStreamTerminal?: () => void;
+  // sendStreamStateRef / pendingStopRef are still read here, but only for NON-composer
+  // decisions: turn_created ownership (source === 'observer') and the stop-pending early
+  // return. Composer terminal state is owned by the action layer (see P2).
+  sendStreamStateRef?: React.MutableRefObject<SendStreamState | null>;
+  pendingStopRef?: React.MutableRefObject<boolean>;
+}
+
+/** Events that must not mutate the live UI when they belong to a different turn. */
+const TURN_SCOPED_EVENT_TYPES = new Set([
+  'assistant_message',
+  'token',
+  'error',
+  'cancelled',
+  'complete',
+  'pending_client_tool',
+  'tool_result',
+  'tool_error',
+  'streaming_progress',
+  'message',
+  'usage',
+]);
+
+function isForeignTurnEvent(
+  event: { type: string; data: any },
+  getActiveStreamTurnId?: () => string | null,
+): boolean {
+  if (!TURN_SCOPED_EVENT_TYPES.has(event.type)) {
+    return false;
+  }
+
+  const eventTurnId = event.data?.turnId;
+  if (typeof eventTurnId !== 'string' || !eventTurnId) {
+    return false;
+  }
+
+  const activeTurnId = getActiveStreamTurnId?.() ?? null;
+  if (!activeTurnId) {
+    return false;
+  }
+
+  return eventTurnId !== activeTurnId;
 }
 
 export function useStreamingEventHandler(
   dispatch: React.Dispatch<ActionType>,
   state: ExtendedConversationState,
   deps: StreamingEventDeps,
-): (event: { type: string; data: any }) => void {
+): (
+  event: { type: string; data: any },
+  source?: 'send' | 'observer',
+) => void {
   const {
     loadNotebookFiles, showToast,
     projectId, notebookId, conversationId, setCurrentStreamController,
   } = deps;
 
-  // Tracks which conversations we've already made an auto-title decision for in this
-  // session, so the decision is only ever made once per conversation (on its first
-  // completed turn) instead of on every turn — this callback closes over a `state` that
-  // goes stale once its dependency array stops changing, so re-deriving "is this the
-  // first turn" from `state.messages` on every event isn't reliable. The server is still
-  // the source of truth for whether the title actually gets applied (it no-ops once the
-  // conversation already has a non-default title).
-  const titleGenAttemptedRef = useRef<Set<string>>(new Set());
-
-  return useCallback((event: { type: string; data: any }) => {
+  return useCallback((event: { type: string; data: any }, source?: 'send' | 'observer') => {
     if (['user_message', 'tool_result', 'assistant_message'].includes(event.type)) {
       console.log('🔥 SSE Event:', event.type, event.data);
     }
@@ -43,6 +77,19 @@ export function useStreamingEventHandler(
       console.warn('SSE event received with no data:', event.type);
       return;
     }
+
+    if (isForeignTurnEvent(event, deps.getActiveStreamTurnId)) {
+      console.debug(
+        'Ignoring stream event for non-active turn',
+        event.type,
+        event.data?.turnId,
+        'active=',
+        deps.getActiveStreamTurnId?.(),
+      );
+      return;
+    }
+
+    const stopPending = deps.pendingStopRef?.current ?? state._isCancelling;
 
     switch (event.type) {
       case 'message':
@@ -84,51 +131,48 @@ export function useStreamingEventHandler(
 
       case 'complete':
         {
-          deps.onStreamTerminal?.();
-          const streamingMsg = state.messages.find(m =>
-            m.role.toLowerCase() === 'assistant' && m.id.startsWith('streaming-')
-          );
-          if (streamingMsg && streamingMsg.content && !state.currentTurn?.finalResponse) {
-            dispatch({ type: 'ADD_FINAL_RESPONSE', payload: {
-              role: 'assistant',
-              content: streamingMsg.content,
-              timestamp: new Date()
-            } as StreamingMessage });
+          if (stopPending) {
+            // A terminal SSE event is not the Stop acknowledgement. The cancel endpoint is the
+            // authoritative boundary because it also confirms durable terminalization and lock
+            // release. Keep the local workflow stopping until its HTTP response arrives.
+            return;
           }
+          deps.setActiveStreamTurnId?.(null);
+          // Conversation state only: finalize the streamed cell. Composer terminal state
+          // (draft/attachments/snapshot) is owned by the action layer's onComplete, which the
+          // transport invokes for this same terminal event — so no render-captured state.* is
+          // read here and the D4 stale `state.messages` backfill is gone (the reducer's
+          // COMPLETE_STREAMING_TURN already rewrites the streamed cell to its final content).
           dispatch({ type: 'COMPLETE_STREAMING_TURN' });
 
           // Fast-register completes on the server before SSE `complete`. Refresh the notebook
-          // file tree so sidebar/serving gate pick up newly registered paths without a hard reload.
-          console.log('📄 [SSE complete] Triggering loadNotebookFiles');
-          loadNotebookFiles().catch(error => {
-            console.error('Failed to refresh notebook files after conversation turn:', error);
-          });
-
-          try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
-
-          try {
-            if (!titleGenAttemptedRef.current.has(conversationId)) {
-              titleGenAttemptedRef.current.add(conversationId);
-              const hasPriorCompletedAssistantTurn = (state.messages || []).some(
-                m => m.role?.toLowerCase() === 'assistant' && !m.id.startsWith('streaming-')
-              );
-              if (!hasPriorCompletedAssistantTurn) {
-                api.projects.notebooks.conversations
-                  .generateTitle(projectId, notebookId, conversationId)
-                  .then(() => {
-                    try { window.dispatchEvent(new Event('refresh-conversations')); } catch {}
-                  })
-                  .catch(err => console.warn('Auto title generation failed:', err));
-              }
-            }
-          } catch (e) {
-            // Best-effort
+          // file tree so sidebar/serving gate pick up newly registered paths without a hard
+          // reload — but ONLY for observer completions: the send-side owner
+          // (useConversationActions onComplete) already refreshes the tree for every local
+          // terminal outcome, and refreshing here too would double the fetch + broadcast.
+          // (loadNotebookFiles emits the refresh-notebook-files event itself, so no manual
+          // dispatch is needed.)
+          if (source === 'observer') {
+            console.log('📄 [SSE complete] Triggering loadNotebookFiles (observer)');
+            loadNotebookFiles().catch(error => {
+              console.error('Failed to refresh notebook files after conversation turn:', error);
+            });
           }
+
+          // Title is set server-side on first turn complete; refresh sidebar when a turn finishes.
+          try { window.dispatchEvent(new Event('refresh-conversations')); } catch {}
         }
         break;
 
       case 'pending_client_tool':
-        deps.onStreamTerminal?.();
+        if (stopPending) {
+          return;
+        }
+        deps.setActiveStreamTurnId?.(null);
+        // Conversation state only. Composer restore (draft + chips from the send snapshot)
+        // is the action layer's job via onComplete('pending_client_tool') — the default
+        // policy restores-and-unlocks; a registered client-tool policy would block instead.
+        // This handler never decides composer behavior for the client-tool outcome.
         dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
         dispatch({ type: 'COMPLETE_STREAMING_TURN' });
         dispatch({ type: 'SET_STREAMING', payload: false });
@@ -137,15 +181,35 @@ export function useStreamingEventHandler(
 
       case 'turn_created':
         if (event.data?.turnId) {
+          // An observer receives every conversation broadcast. While this client is sending,
+          // accepting an observer's turn_created would make a pending Stop target a different
+          // client's turn. The send endpoint is the only authority for the sending turn.
+          if (source === 'observer' && deps.sendStreamStateRef?.current) {
+            return;
+          }
           deps.setActiveStreamTurnId?.(event.data.turnId);
         }
         break;
 
       case 'cancelled':
+        if (stopPending) {
+          return;
+        }
         console.log('🔥 Stream was cancelled, preserving partial content');
-        deps.onStreamTerminal?.();
+        deps.setActiveStreamTurnId?.(null);
+        // Conversation state only. Composer restore/clear is the action layer's
+        // onComplete('cancelled') call, which applies the turnId persistence oracle:
+        // turnId present → message persisted → clear; absent → restore the snapshot.
         dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
         dispatch({ type: 'COMPLETE_STREAMING_TURN' });
+        dispatch({ type: 'SET_STREAMING', payload: false });
+        dispatch({ type: 'SET_CANCELLING', payload: false });
+        // Cancelled tool ERROR results may land after optimistic unlock cleared currentTurn;
+        // reload so the transcript shows them like any other tool error.
+        if (deps.refreshConversation) {
+          void deps.refreshConversation({ force: true }).catch(err =>
+            console.warn('Failed to refresh conversation after cancel:', err));
+        }
         break;
 
       case 'user_message':
@@ -181,11 +245,20 @@ export function useStreamingEventHandler(
           dispatch({ type: 'ENSURE_TOOL_CALL', payload: toolCall });
 
           console.log('🔥 Dispatching ADD_TOOL_RESULT for:', toolCallId);
+          const isError = typeof toolContent === 'string'
+            && toolContent.trimStart().startsWith('ERROR:');
           dispatch({ type: 'ADD_TOOL_RESULT', payload: {
             toolCallId,
             content: toolContent,
+            isError,
             timestamp: new Date(event.data.timestamp || new Date())
           }});
+        }
+        break;
+
+      case 'token':
+        if (event.data.contentDelta) {
+          dispatch({ type: 'APPEND_TOKEN', payload: { contentDelta: event.data.contentDelta } });
         }
         break;
 
@@ -252,6 +325,9 @@ export function useStreamingEventHandler(
 
       case 'error':
         {
+          if (stopPending) {
+            return;
+          }
           console.error('Streaming error received:', event.data);
 
           const errorMessage = event.data?.message || 'An error occurred during the conversation';
@@ -267,7 +343,10 @@ export function useStreamingEventHandler(
           // See GuideAntsApi/Services/Conversations/StreamingErrorEnvelope.cs.
           const errorCode = event.data?.code;
 
-          deps.onStreamTerminal?.();
+          // Conversation state only. Composer restore/clear is the action layer's
+          // onComplete('error') call, which applies the same turnId persistence oracle as
+          // the cancelled path (turnId present → clear; absent → restore the snapshot).
+          deps.setActiveStreamTurnId?.(null);
           dispatch({ type: 'SET_STREAMING_ERROR', payload: displayMessage });
           dispatch({ type: 'SET_STREAMING', payload: false });
           dispatch({ type: 'SET_CANCELLING', payload: false });
@@ -325,8 +404,10 @@ export function useStreamingEventHandler(
               duration: 8000
             });
           }
-
-          setCurrentStreamController(null);
+          // Note: the send controller is released by the action owner (adoptSendStream(null)),
+          // not here. Nulling it here would trip the owner's stale-callback guard
+          // (sendStreamRef.current !== controller) before it restored the composer on error —
+          // the same abort-coupling this refactor removes.
         }
         break;
 
@@ -338,5 +419,5 @@ export function useStreamingEventHandler(
         }
         break;
     }
-  }, [loadNotebookFiles, showToast, projectId, notebookId, conversationId, setCurrentStreamController, deps, state.messages, state.currentTurn, dispatch]);
+  }, [loadNotebookFiles, showToast, projectId, notebookId, conversationId, setCurrentStreamController, deps, state.messages, state.currentTurn, state.streamingMode, state.selectedAssistant, state._isCancelling, dispatch]);
 }

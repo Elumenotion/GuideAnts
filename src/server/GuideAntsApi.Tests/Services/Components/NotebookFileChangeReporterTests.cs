@@ -303,6 +303,8 @@ public sealed class NotebookFileChangeReporterTests
         var projectId = Guid.NewGuid();
         var notebookId = Guid.NewGuid();
         var outputDir = storage.OutputDir(projectId, notebookId);
+        // User deliverables often start with script_ — must NOT be treated as execute temps.
+        File.WriteAllText(Path.Combine(outputDir, "script_01_story.md"), "# story");
         File.WriteAllText(Path.Combine(outputDir, "script_runner.py"), "print(1)");
         File.WriteAllText(Path.Combine(outputDir, $"{Guid.NewGuid():N}_script.py"), "print(2)");
         File.WriteAllText(Path.Combine(outputDir, "keep.txt"), "real output");
@@ -312,8 +314,9 @@ public sealed class NotebookFileChangeReporterTests
 
         var (newFiles, modifiedFiles) = await NotebookFileChangeReporter.DetectChangesAsync(provider, storage.Root, context);
 
-        newFiles.Should().ContainSingle().Which.Should().Be("keep.txt");
+        newFiles.Should().BeEquivalentTo(["keep.txt", "script_01_story.md", "script_runner.py"]);
         modifiedFiles.Should().BeEmpty();
+        newFiles.Should().NotContain(f => f.EndsWith("_script.py", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]

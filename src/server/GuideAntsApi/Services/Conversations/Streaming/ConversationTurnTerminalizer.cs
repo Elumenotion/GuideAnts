@@ -24,7 +24,8 @@ public static class ConversationTurnTerminalizer
         IReadOnlyList<Guid> assistantMessageIds,
         string? terminationCode = null,
         string? terminationDetail = null,
-        bool pruneIncompleteToolCalls = false)
+        bool pruneIncompleteToolCalls = false,
+        string? currentAssistantToolCallsJson = null)
     {
         var snapshots = new List<TerminalizeAssistantSnapshot>();
         if (currentAssistantMessageId.HasValue)
@@ -40,6 +41,7 @@ public static class ConversationTurnTerminalizer
             snapshots.Add(new TerminalizeAssistantSnapshot(
                 currentAssistantMessageId.Value,
                 currentAssistantContent.ToString(),
+                ToolCallsJson: currentAssistantToolCallsJson,
                 ThinkingBlocksJson: thinkingJson));
         }
 

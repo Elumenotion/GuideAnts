@@ -26,7 +26,7 @@ public static class ToolOutputTruncator
         PropertyNameCaseInsensitive = true
     };
 
-    public static ToolOutputTruncationResult Truncate(string? output)
+    public static ToolOutputTruncationResult Truncate(string? output, string? operationName = null)
     {
         if (string.IsNullOrEmpty(output))
         {
@@ -50,8 +50,8 @@ public static class ToolOutputTruncator
         }
 
         var truncated = TryDeserializeScriptExecutionResult(output, out parsed)
-            ? TruncateScriptExecutionResult(parsed.ForToolCall(), originalLength)
-            : TruncatePlainOutput(output, originalLength);
+            ? TruncateScriptExecutionResult(parsed.ForToolCall(), originalLength, operationName)
+            : TruncatePlainOutput(output, originalLength, operationName);
 
         return new ToolOutputTruncationResult(Serialize(truncated), true, originalLength);
     }
@@ -76,9 +76,12 @@ public static class ToolOutputTruncator
         }
     }
 
-    private static ScriptExecutionResult TruncateScriptExecutionResult(ScriptExecutionResult source, int originalLength)
+    private static ScriptExecutionResult TruncateScriptExecutionResult(
+        ScriptExecutionResult source,
+        int originalLength,
+        string? operationName)
     {
-        var notice = BuildTruncationNotice(originalLength);
+        var notice = BuildTruncationNotice(originalLength, operationName);
         var result = new ScriptExecutionResult
         {
             StandardOutput = source.StandardOutput ?? string.Empty,
@@ -97,14 +100,22 @@ public static class ToolOutputTruncator
         return result;
     }
 
-    private static ScriptExecutionResult TruncatePlainOutput(string output, int originalLength)
+    private static ScriptExecutionResult TruncatePlainOutput(
+        string output,
+        int originalLength,
+        string? operationName)
     {
-        var notice = BuildTruncationNotice(originalLength);
+        var notice = BuildTruncationNotice(originalLength, operationName);
         var result = new ScriptExecutionResult
         {
             StandardOutput = string.Empty,
             StandardError = notice
         };
+
+        if (IsReadWebContentFetch(operationName))
+        {
+            return result;
+        }
 
         result.StandardOutput = FitStdoutToBudget(output, result);
         return result;
@@ -157,10 +168,24 @@ public static class ToolOutputTruncator
         return builder.ToString();
     }
 
-    private static string BuildTruncationNotice(int originalLength) =>
-        $"Response truncated for length. Tool output exceeded the maximum of {MaxCharacters:N0} characters " +
-        $"(original output was approximately {originalLength:N0} characters). " +
-        "Write large results to a file and return a summary instead of full content.";
+    private static string BuildTruncationNotice(int originalLength, string? operationName)
+    {
+        if (IsReadWebContentFetch(operationName))
+        {
+            return
+                $"ReadWeb could not return the page because its content exceeded the {MaxCharacters:N0}-character " +
+                $"tool-output limit (original output was approximately {originalLength:N0} characters). " +
+                "The complete page is unavailable. Do not retry this ReadWeb request.";
+        }
+
+        return
+            $"Response truncated for length. Tool output exceeded the maximum of {MaxCharacters:N0} characters " +
+            $"(original output was approximately {originalLength:N0} characters). " +
+            "Write large results to a file and return a summary instead of full content.";
+    }
+
+    private static bool IsReadWebContentFetch(string? operationName) =>
+        string.Equals(operationName, "GetContentFromUrl", StringComparison.OrdinalIgnoreCase);
 
     private static string Serialize(ScriptExecutionResult result) =>
         JsonSerializer.Serialize(result, JsonOptions);

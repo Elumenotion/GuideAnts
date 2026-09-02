@@ -4,6 +4,9 @@ namespace GuideAntsApi.Services;
 
 internal static class ReadWebFetchErrors
 {
+    private const string NoRetrySuffix =
+        " Do not retry or issue another ReadWeb tool call for this invocation.";
+
     internal static string BuildMessage(
         int? directStatusCode,
         string? directError,
@@ -13,21 +16,21 @@ internal static class ReadWebFetchErrors
         return PickDominantFailure(directStatusCode, directError, renderStatusCode, renderError) switch
         {
             FetchFailureKind.Unauthorized =>
-                "401 Unauthorized. Credentials required. Do not retry without an authenticated tool.",
+                "401 Unauthorized. Credentials are required." + NoRetrySuffix,
             FetchFailureKind.Forbidden =>
-                "403 Forbidden. This host blocks unauthenticated access. Do not retry — use a different source or local files.",
+                "403 Forbidden. This host blocks unauthenticated access." + NoRetrySuffix,
             FetchFailureKind.NotFound =>
-                "404 Not Found. This URL does not exist. Do not retry — fix the path or use local file search.",
+                "404 Not Found. This URL does not exist." + NoRetrySuffix,
             FetchFailureKind.RateLimited =>
-                "429 Rate limited. Do not retry now — use a different source.",
+                "429 Rate limited." + NoRetrySuffix,
             FetchFailureKind.ServerError =>
-                "Server error (5xx). You may retry once; if it fails again, use a different source.",
+                "Server error (5xx)." + NoRetrySuffix,
             FetchFailureKind.Timeout =>
-                "Timed out. Do not retry this URL — try a lighter page or a different tool.",
+                "Timed out." + NoRetrySuffix,
             FetchFailureKind.EmptyContent =>
-                "Page returned no usable content. This may be an API endpoint or JS-only page — use a different tool.",
+                "Page returned no usable content." + NoRetrySuffix,
             _ =>
-                "Request failed. Do not retry — use a different source or tool."
+                "Request failed." + NoRetrySuffix
         };
     }
 

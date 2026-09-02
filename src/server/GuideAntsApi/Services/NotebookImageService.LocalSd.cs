@@ -8,8 +8,14 @@ namespace GuideAntsApi.Services
 {
     public partial class NotebookImageService
     {
-        private async Task<byte[]?> GenerateImageViaLocalSd(string prompt, string size, int n, string outputFormat)
+        private async Task<byte[]?> GenerateImageViaLocalSd(
+            string prompt,
+            string size,
+            int n,
+            string outputFormat,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             outputFormat = ResolveLocalOutputFormatFromSettings(outputFormat);
             ValidateLocalSdSize(size);
 
@@ -40,8 +46,8 @@ namespace GuideAntsApi.Services
                 n,
                 outputFormat);
 
-            using var response = await client.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             stopwatch.Stop();
             if (!response.IsSuccessStatusCode)
             {
@@ -64,6 +70,7 @@ namespace GuideAntsApi.Services
                 (int)response.StatusCode,
                 stopwatch.ElapsedMilliseconds,
                 responseBody.Length);
+            cancellationToken.ThrowIfCancellationRequested();
             return await SaveResponseAndReturnBytes(responseBody);
         }
 
@@ -74,8 +81,10 @@ namespace GuideAntsApi.Services
             string outputFormat,
             byte[] imageBytes,
             string? imageContentType,
-            string? imageFileName)
+            string? imageFileName,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             outputFormat = ResolveLocalOutputFormatFromSettings(outputFormat);
             ValidateLocalSdSize(size);
 
@@ -117,8 +126,8 @@ namespace GuideAntsApi.Services
                 imageContentType,
                 imageFileName);
 
-            using var response = await client.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             stopwatch.Stop();
             if (!response.IsSuccessStatusCode)
             {
@@ -141,6 +150,7 @@ namespace GuideAntsApi.Services
                 (int)response.StatusCode,
                 stopwatch.ElapsedMilliseconds,
                 responseBody.Length);
+            cancellationToken.ThrowIfCancellationRequested();
             return await SaveResponseAndReturnBytes(responseBody);
         }
 

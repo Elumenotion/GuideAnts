@@ -9,6 +9,7 @@ namespace GuideAntsApi.Services.Components;
 public static class HostMountListingCache
 {
     private static readonly ConcurrentDictionary<string, CacheEntry> Entries = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, object> SingleFlightLocks = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed record CacheEntry(DateTimeOffset ExpiresUtc, HostMountDirectoryScanner.ScanResult Result);
 
@@ -28,6 +29,30 @@ public static class HostMountListingCache
     public static void Set(string key, HostMountDirectoryScanner.ScanResult result, TimeSpan ttl)
     {
         Entries[key] = new CacheEntry(DateTimeOffset.UtcNow + ttl, result);
+    }
+
+    public static HostMountDirectoryScanner.ScanResult GetOrAdd(
+        string key,
+        Func<HostMountDirectoryScanner.ScanResult> factory,
+        TimeSpan ttl)
+    {
+        if (TryGet(key, out var cached))
+        {
+            return cached;
+        }
+
+        var gate = SingleFlightLocks.GetOrAdd(key, _ => new object());
+        lock (gate)
+        {
+            if (TryGet(key, out cached))
+            {
+                return cached;
+            }
+
+            var result = factory();
+            Set(key, result, ttl);
+            return result;
+        }
     }
 
     public static string ShallowKey(string mountKey) => $"shallow:{NormalizeMountKey(mountKey)}";
@@ -58,7 +83,11 @@ public static class HostMountListingCache
         InvalidateMount(mountKey);
     }
 
-    public static void ClearAll() => Entries.Clear();
+    public static void ClearAll()
+    {
+        Entries.Clear();
+        SingleFlightLocks.Clear();
+    }
 
     private static void PruneExpired(DateTimeOffset now)
     {

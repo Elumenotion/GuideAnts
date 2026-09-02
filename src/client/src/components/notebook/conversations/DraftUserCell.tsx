@@ -7,12 +7,13 @@ import FullScreenEditor from './FullScreenEditor';
 import LexicalEditor, { LexicalEditorRef } from './LexicalEditor';
 import { AssistantOption } from './AssistantSelector';
 import { useConversation } from '../../../contexts/ConversationContext';
-import { mapContentType } from '../../../utils/attachments';
+import { mapContentType, normalizeRelativePath } from '../../../utils/attachments';
 import { PendingAttachment } from '../../../types/conversation';
 import { resolveAgainstApiBase } from '../../../config/apiConfig';
 import { useAudioRecorder } from '../../../hooks/useAudioRecorder';
 import MicrophoneButton from '../../common/MicrophoneButton';
 import CameraCapture from '../../common/CameraCapture';
+import { useToast } from '../../common/Toast';
 
 /**
  * Normalizes markdown content for chat messages by converting paragraph breaks
@@ -43,7 +44,6 @@ interface DraftUserCellProps {
   value: string;
   onChange: (value: string) => void;
   onSend: (content: string) => void;
-  disabled?: boolean; // legacy streaming flag
   canEdit?: boolean;
   isStreaming?: boolean;
   placeholder?: string;
@@ -106,7 +106,14 @@ export default function DraftUserCell({
   const onChangeRef = useRef(onChange);
   const localContentRef = useRef(localContent);
 
+  // CONTRACT (turn-terminal ownership): the chips below render the composer's pending
+  // attachments from context. They are CLEARED by the composer owner at send time (see
+  // useConversationActions.sendMessage) and restored only by undo or by a terminal outcome
+  // that did not persist the send (see applyComposerTerminalOutcome). Do NOT re-add clearing
+  // logic here — the draft cell is a pure view of pendingAttachments; ownership lives in the
+  // action layer so the SSE handler never has to manage composer state.
   const { pendingAttachments, addPendingAttachment, removePendingAttachment } = useConversation();
+  const { showToast } = useToast();
 
   // Speech-to-text hook
   const handleTranscriptionComplete = useCallback((text: string) => {
@@ -123,6 +130,7 @@ export default function DraftUserCell({
     isProcessing: isTranscribing,
     duration: recordingDuration,
     isSupported: isSpeechSupported,
+    error: speechError,
     startRecording,
     stopRecording,
   } = useAudioRecorder({
@@ -158,6 +166,13 @@ export default function DraftUserCell({
       }
     } catch (err) {
       console.error('Camera capture upload failed', err);
+      showToast({
+        type: 'error',
+        title: 'Upload failed',
+        message: err instanceof Error && err.message
+          ? err.message
+          : 'The captured image could not be uploaded.',
+      });
     } finally {
       setUploadingImages(prev => prev.filter(u => u.id !== tempId));
     }
@@ -488,7 +503,13 @@ export default function DraftUserCell({
           }
         } catch (err) {
           console.error('Image paste upload failed', err);
-          // Silent failure – simply drop the chip
+          showToast({
+            type: 'error',
+            title: 'Upload failed',
+            message: err instanceof Error && err.message
+              ? err.message
+              : 'The pasted image could not be uploaded.',
+          });
         } finally {
           setUploadingImages(prev => prev.filter(u => u.id !== tempId));
         }
@@ -497,7 +518,7 @@ export default function DraftUserCell({
 
     container.addEventListener('paste', handlePaste);
     return () => container.removeEventListener('paste', handlePaste);
-  }, [projectId, notebookId, isReadOnly, isBusy, addPendingAttachment]);
+  }, [projectId, notebookId, isReadOnly, isBusy, addPendingAttachment, showToast]);
 
   // Get the current content from the editor
   const getCurrentContent = () => {
@@ -524,7 +545,7 @@ export default function DraftUserCell({
     const folderRelativePath = e.dataTransfer.getData('application/x-notebook-folder-relative-path');
     if (folderRelativePath) {
       const folderName = e.dataTransfer.getData('application/x-notebook-folder-name');
-      const normalized = folderRelativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+      const normalized = normalizeRelativePath(folderRelativePath);
       addPendingAttachment({
         notebookFileId: `path:${normalized}`,
         relativePath: normalized,
@@ -539,9 +560,10 @@ export default function DraftUserCell({
     const fileId = e.dataTransfer.getData('application/x-notebook-file-id') || e.dataTransfer.getData('text/plain');
     const fileName = e.dataTransfer.getData('application/x-notebook-file-name');
     if (fileName && isLinked && relativePath) {
+      const normalized = normalizeRelativePath(relativePath);
       addPendingAttachment({
-        notebookFileId: `path:${relativePath}`,
-        relativePath,
+        notebookFileId: `path:${normalized}`,
+        relativePath: normalized,
         fileName,
         uploadType: mapContentType(fileName),
       });
@@ -773,6 +795,7 @@ export default function DraftUserCell({
                     isProcessing={isTranscribing}
                     duration={recordingDuration}
                     isSupported={isSpeechSupported}
+                    error={speechError}
                     disabled={isStreaming}
                     onStartRecording={startRecording}
                     onStopRecording={stopRecording}

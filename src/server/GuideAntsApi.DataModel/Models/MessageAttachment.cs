@@ -23,9 +23,20 @@ public class MessageAttachment
     /// <summary>
     /// The notebook file being attached.
     /// </summary>
-    [Required]
-    public Guid NotebookFileId { get; set; }
-    public NotebookFile NotebookFile { get; set; } = null!;
+    public Guid? NotebookFileId { get; set; }
+    public NotebookFile? NotebookFile { get; set; }
+
+    /// <summary>
+    /// Notebook-relative path for attachments that cannot be represented by a
+    /// NotebookFile foreign key, such as linked host-mount files and folders.
+    /// </summary>
+    public string? RelativePath { get; set; }
+
+    /// <summary>
+    /// Upload type captured at message persistence time. This remains nullable
+    /// only for rows created before this column was introduced.
+    /// </summary>
+    public ContentUploadType? UploadType { get; set; }
 
     /// <summary>
     /// The type of attachment relationship.

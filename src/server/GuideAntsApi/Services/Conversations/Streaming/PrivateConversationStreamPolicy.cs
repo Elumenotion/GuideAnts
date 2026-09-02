@@ -16,7 +16,14 @@ public sealed class PrivateConversationStreamPolicy : ConversationStreamPolicyBa
 
     private readonly IConversationBroadcastHub _broadcastHub;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _conversationLocks = new();
+    private readonly ConcurrentDictionary<Guid, LocalGateState> _conversationLocks = new();
+
+    private sealed class LocalGateState
+    {
+        public SemaphoreSlim Gate { get; } = new(1, 1);
+        public object SyncRoot { get; } = new();
+        public int PendingAcquisitions { get; set; }
+    }
 
     public PrivateConversationStreamPolicy(
         IConversationBroadcastHub broadcastHub,
@@ -103,19 +110,23 @@ public sealed class PrivateConversationStreamPolicy : ConversationStreamPolicyBa
                 timestamp = DateTime.UtcNow
             }, JsonOptions)));
 
-    public override Task OnCompleteAsync(Guid conversationId, CancellationToken ct) =>
+    public override Task OnCompleteAsync(Guid conversationId, Guid turnId, CancellationToken ct) =>
         _broadcastHub.BroadcastToConversationAsync(conversationId,
-            new StreamingEvent(StreamingEventTypes.Complete, "{}"));
+            new StreamingEvent(
+                StreamingEventTypes.Complete,
+                JsonSerializer.Serialize(new { turnId }, JsonOptions)));
 
     public override Task BroadcastStreamingProgressAsync(
         Guid conversationId,
         StreamUserIdentity user,
+        Guid turnId,
         int contentLength,
         int tokensProcessed,
         CancellationToken ct) =>
         _broadcastHub.BroadcastToConversationAsync(conversationId,
             new StreamingEvent(StreamingEventTypes.StreamingProgress, JsonSerializer.Serialize(new
             {
+                turnId,
                 userId = user.UserId ?? Guid.Empty,
                 activeUserName = user.UserName,
                 contentLength,
@@ -130,9 +141,22 @@ public sealed class PrivateConversationStreamPolicy : ConversationStreamPolicyBa
 
     protected override async Task<SemaphoreSlim?> TryAcquireLocalGateAsync(Guid conversationId, CancellationToken ct)
     {
-        var lockSemaphore = _conversationLocks.GetOrAdd(conversationId, _ => new SemaphoreSlim(1, 1));
-        await lockSemaphore.WaitAsync(ct);
-        return lockSemaphore;
+        var state = _conversationLocks.GetOrAdd(conversationId, _ => new LocalGateState());
+        lock (state.SyncRoot)
+        {
+            state.PendingAcquisitions++;
+        }
+
+        try
+        {
+            await state.Gate.WaitAsync(ct);
+            return state.Gate;
+        }
+        catch
+        {
+            LocalGateAcquisitionResolved(conversationId);
+            throw;
+        }
     }
 
     protected override Task OnLockAcquiredAsync(Guid conversationId, StreamUserIdentity user, CancellationToken ct) =>
@@ -145,9 +169,92 @@ public sealed class PrivateConversationStreamPolicy : ConversationStreamPolicyBa
             }, JsonOptions)));
 
     internal SemaphoreSlim GetOrCreateConversationGate(Guid conversationId) =>
-        _conversationLocks.GetOrAdd(conversationId, _ => new SemaphoreSlim(1, 1));
+        _conversationLocks.GetOrAdd(conversationId, _ => new LocalGateState()).Gate;
 
     internal SemaphoreSlim? GetConversationGate(Guid conversationId) =>
-        _conversationLocks.TryGetValue(conversationId, out var gate) ? gate : null;
+        _conversationLocks.TryGetValue(conversationId, out var state) ? state.Gate : null;
+
+    /// <summary>
+    /// Repairs a local gate only when no stream is currently waiting for distributed lock
+    /// acquisition. The admission marker is synchronized with local gate acquisition so Stop
+    /// cannot over-release a gate owned by a request between local and distributed locking.
+    /// </summary>
+    internal bool TryReleaseOrphanedConversationGate(Guid conversationId)
+    {
+        if (!_conversationLocks.TryGetValue(conversationId, out var state))
+        {
+            return true;
+        }
+
+        lock (state.SyncRoot)
+        {
+            if (state.PendingAcquisitions > 0)
+            {
+                return false;
+            }
+
+            if (state.Gate.CurrentCount == 0)
+            {
+                try
+                {
+                    state.Gate.Release();
+                }
+                catch (SemaphoreFullException)
+                {
+                    // The gate became available before this idempotent repair.
+                }
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Releases the local gate after the durable Stop transaction has fenced the previous worker.
+    /// Unlike orphan repair, pending acquisitions are expected here: they are the requests that
+    /// must be allowed to proceed after the old owner is revoked.
+    /// </summary>
+    internal bool TryReleaseFencedConversationGate(Guid conversationId)
+    {
+        if (!_conversationLocks.TryGetValue(conversationId, out var state))
+        {
+            return true;
+        }
+
+        lock (state.SyncRoot)
+        {
+            if (state.Gate.CurrentCount != 0)
+            {
+                return true;
+            }
+
+            try
+            {
+                state.Gate.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+                // Another lifecycle path released the gate concurrently. It is already open.
+            }
+
+            return true;
+        }
+    }
+
+    protected override void LocalGateAcquisitionResolved(Guid conversationId)
+    {
+        if (!_conversationLocks.TryGetValue(conversationId, out var state))
+        {
+            return;
+        }
+
+        lock (state.SyncRoot)
+        {
+            if (state.PendingAcquisitions > 0)
+            {
+                state.PendingAcquisitions--;
+            }
+        }
+    }
 
 }

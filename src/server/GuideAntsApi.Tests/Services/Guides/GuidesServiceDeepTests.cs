@@ -245,6 +245,68 @@ public sealed class GuidesServiceDeepTests
     }
 
     [TestMethod]
+    public async Task GuideReasoningEffort_None_round_trips_literally()
+    {
+        // Regression: "none" is a first-class catalog choice that DISABLES thinking.
+        // NormalizeReasoningEffort used to collapse it to null on save, so the editor
+        // reloaded with the model's defaultChoice (snap-back) and a saved "None" was
+        // indistinguishable from "unspecified". It must persist and read back literally.
+        await using var context = NewContext("reason-none-roundtrip");
+        context.Models.Add(new Model
+        {
+            ModelId = "gpt-x",
+            DisplayName = "GPT X",
+            Provider = "openai-chat",
+            ReasoningChoicesJson = "[\"low\",\"medium\",\"none\"]"
+        });
+        await context.SaveChangesAsync();
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
+
+        // Create with "none" -> stored literally, not cleared.
+        var created = await service.CreateGuideAsync(
+            MinimalCreateGuideDto("Guide") with { ModelId = "gpt-x", ReasoningEffort = "none" });
+        var details = await service.GetGuideAsync(created.Id);
+        details!.ReasoningEffort.Should().Be("none");
+
+        // Update to another value, then back to "none" (the reported snap-back scenario).
+        await service.UpdateGuideAsync(
+            created.Id,
+            MinimalUpdateGuideDto("Guide") with { ModelId = "gpt-x", ReasoningEffort = "medium" });
+        (await service.GetGuideAsync(created.Id))!.ReasoningEffort.Should().Be("medium");
+
+        await service.UpdateGuideAsync(
+            created.Id,
+            MinimalUpdateGuideDto("Guide") with { ModelId = "gpt-x", ReasoningEffort = "none" });
+        (await service.GetGuideAsync(created.Id))!.ReasoningEffort.Should().Be("none");
+    }
+
+    [TestMethod]
+    public async Task GuideReasoningEffort_None_round_trip_is_case_insensitive_and_null_stays_null()
+    {
+        await using var context = NewContext("reason-none-case");
+        context.Models.Add(new Model
+        {
+            ModelId = "gpt-x",
+            DisplayName = "GPT X",
+            Provider = "openai-chat",
+            ReasoningChoicesJson = "[\"none\",\"low\"]"
+        });
+        await context.SaveChangesAsync();
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
+
+        // Case-insensitive: "None" validates and is stored trimmed (literal preserved).
+        var created = await service.CreateGuideAsync(
+            MinimalCreateGuideDto("Guide") with { ModelId = "gpt-x", ReasoningEffort = "None" });
+        (await service.GetGuideAsync(created.Id))!.ReasoningEffort.Should().Be("None");
+
+        // Clearing the setting (null) still means "unspecified" -> stored as null, not "none".
+        await service.UpdateGuideAsync(
+            created.Id,
+            MinimalUpdateGuideDto("Guide") with { ModelId = "gpt-x", ReasoningEffort = null });
+        (await service.GetGuideAsync(created.Id))!.ReasoningEffort.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task CreateGuideAsync_LocalModel_accepts_in_range_sampling_parameters()
     {
         await using var context = NewContext("local-sampling-ok");

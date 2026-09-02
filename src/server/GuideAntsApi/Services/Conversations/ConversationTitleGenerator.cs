@@ -7,7 +7,7 @@ namespace GuideAntsApi.Services.Conversations;
 
 public static class ConversationTitleGenerator
 {
-    public sealed record Result(bool Found, string Title);
+    public sealed record Result(bool Found, string Title, bool AttemptedGeneration = false);
 
     private static readonly string[] DefaultTitles = { "New Conversation", "Untitled" };
 
@@ -58,7 +58,7 @@ public static class ConversationTitleGenerator
         var dialogText = dialogBuilder.ToString().Trim();
         if (string.IsNullOrWhiteSpace(dialogText))
         {
-            dialogText = "(No substantive messages in this conversation.)";
+            return new Result(true, conversation.Title);
         }
 
         var context = new AntRunner.ToolCalling.InvocationContext(
@@ -84,9 +84,9 @@ public static class ConversationTitleGenerator
         {
             conversation.Title = title;
             await db.SaveChangesAsync(cancellationToken);
-            return new Result(true, title);
+            return new Result(true, title, AttemptedGeneration: true);
         }
 
-        return new Result(true, conversation.Title);
+        return new Result(true, conversation.Title, AttemptedGeneration: true);
     }
 }

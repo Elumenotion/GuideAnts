@@ -211,6 +211,9 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle));
 
+        public Task RecycleSharedSpeechEnginesAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
         public Task SyncDesiredAndApplyAsync(
             WarmupDesiredBuildOptions? options = null,
             bool waitForCompletion = false,

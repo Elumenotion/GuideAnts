@@ -73,7 +73,8 @@ namespace AntRunner.Chat
             Guid? assistantId = null,
             Guid? notebookConversationMessageId = null,
             Action<ToolActivityUpdate>? toolActivitySink = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            Guid? executionId = null)
         {
             // Create InvocationContext if we have the required context parameters
             InvocationContext? ctx = null;
@@ -91,6 +92,7 @@ namespace AntRunner.Chat
                         chatRunOptions.ExternalAuthTokens)
                     {
                         TurnIndex = turnIndex,
+                        ExecutionId = executionId,
                         AssistantId = assistantId,
                         NotebookConversationMessageId = notebookConversationMessageId,
                         ToolActivitySink = toolActivitySink

@@ -23,6 +23,12 @@ public sealed record InvocationContext(
     public int TurnIndex { get; set; }
 
     /// <summary>
+    /// Execution generation that is allowed to publish side effects for the parent turn.
+    /// Tool implementations can use this to reject late results after hard Stop fencing.
+    /// </summary>
+    public Guid? ExecutionId { get; set; }
+
+    /// <summary>
     /// The AgentInvocation ID if running within an agent invocation context.
     /// Null for top-level conversation runs. Set for Agent.Invoke calls.
     /// </summary>

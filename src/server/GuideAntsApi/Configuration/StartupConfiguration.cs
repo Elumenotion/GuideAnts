@@ -149,13 +149,14 @@ public static class StartupConfiguration
         services.AddScoped<IConversationQueryService, ConversationQueryService>();
         services.AddScoped<IConversationCommandService, ConversationCommandService>();
         services.AddScoped<IAttachmentContentService, AttachmentContentService>();
+        services.AddSingleton<IAttachmentRenderCache, AttachmentRenderCache>();
         services.AddScoped<IConversationHistoryBuilder, ConversationHistoryBuilder>();
         services.AddScoped<IConversationPersistence, ConversationPersistence>();
         services.AddScoped<IConversationUsageReporter, ConversationUsageReporter>();
         services.AddSingleton<ConversationStreamRunRegistry>();
-        services.AddScoped<ConversationStreamLockCoordinator>();
-        services.AddScoped<PrivateConversationStreamPolicy>();
-        services.AddScoped<PublishedConversationStreamPolicy>();
+        services.AddSingleton<ConversationStreamLockCoordinator>();
+        services.AddSingleton<PrivateConversationStreamPolicy>();
+        services.AddSingleton<PublishedConversationStreamPolicy>();
         services.AddScoped<IConversationStreamEngine, ConversationStreamEngine>();
         services.AddScoped<IConversationUndoService, ConversationUndoService>();
         services.AddScoped<IConversationService, ConversationService>();
@@ -280,7 +281,7 @@ public static class StartupConfiguration
 
         // Conversation Management Services
         services.AddSingleton<IConversationBroadcastHub, ConversationBroadcastHub>();
-        services.AddScoped<IDistributedConversationLock, DistributedConversationLockService>();
+        services.AddSingleton<IDistributedConversationLock, DistributedConversationLockService>();
         services.AddHostedService<GuideAntsApi.Services.Conversations.Recovery.ConversationTurnRecoveryService>();
         services.AddHostedService<LockCleanupBackgroundService>();
         services.AddHostedService<HostFolderMountStartupReconciliationService>();
@@ -417,7 +418,14 @@ public static class StartupConfiguration
         services.AddScoped<INotebookImageService, NotebookImageService>();
 
         // Markdown extraction services (provider-routed extraction moved into BackgroundJobs library)
-        services.AddHttpClient<ISpeechTranscriptionService, SpeechTranscriptionService>();
+        // Align HttpClient.Timeout with SpeechTranscription:TimeoutSeconds. Default HttpClient
+        // timeout is 100s; without this, Max ASR keeps working while webapi aborts (nginx 499)
+        // and the chat mic sits on "Transcribing..." until a generic failure.
+        services.AddHttpClient<ISpeechTranscriptionService, SpeechTranscriptionService>((serviceProvider, client) =>
+        {
+            var options = serviceProvider.GetRequiredService<IOptionsMonitor<SpeechTranscriptionOptions>>().CurrentValue;
+            client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds));
+        });
         services.AddHttpClient<IMediaExtractionClient, MediaExtractionClient>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetRequiredService<IOptionsMonitor<VideoAudioExtractionOptions>>().CurrentValue;
@@ -800,6 +808,7 @@ public static class StartupConfiguration
         services.Configure<VideoAudioExtractionOptions>(configuration.GetSection(VideoAudioExtractionOptions.SectionName));
         services.Configure<MarkdownExtractionOptions>(configuration.GetSection(MarkdownExtractionOptions.SectionName));
         services.Configure<MarkdownAttachmentOptions>(configuration.GetSection(MarkdownAttachmentOptions.SectionName));
+        services.Configure<AttachmentRenderCacheOptions>(configuration.GetSection(AttachmentRenderCacheOptions.SectionName));
         services.Configure<SearXngSearchOptions>(configuration.GetSection(SearXngSearchOptions.SectionName));
         services.Configure<BrowserRenderingOptions>(configuration.GetSection(BrowserRenderingOptions.SectionName));
         services.Configure<GoogleGeminiApiOptions>(configuration.GetSection(GoogleGeminiApiOptions.SectionName));

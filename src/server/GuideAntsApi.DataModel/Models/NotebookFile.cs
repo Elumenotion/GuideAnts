@@ -41,7 +41,8 @@ public class NotebookFile
     public DateTime LastModifiedUtc { get; set; }
 
     /// <summary>
-    /// SHA-256 hash of the file contents for precise change detection.
+    /// SHA-256 of file contents (or a fast-register placeholder). Used for indexing/lineage after
+    /// size+mtime metadata indicates a change — not as the primary change detector on every sync.
     /// </summary>
     [Required]
     public string FileHash { get; set; } = string.Empty;

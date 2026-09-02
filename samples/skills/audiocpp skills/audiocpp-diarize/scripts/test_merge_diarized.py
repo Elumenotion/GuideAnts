@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for merge_diarized (offline, no Max)."""
+"""Unit tests for merge_diarized (offline, no the GPU host)."""
 from __future__ import annotations
 
 import importlib.util

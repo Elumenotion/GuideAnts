@@ -1,10 +1,14 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import DraftUserCell from '../DraftUserCell';
 import { PendingAttachment } from '../../../../types/conversation';
+import { ToastProvider } from '../../../common/Toast';
+
+const render = (ui: React.ReactElement) =>
+  rtlRender(ui, { wrapper: ToastProvider });
 
 const mockAddPendingAttachment = vi.fn();
 const mockRemovePendingAttachment = vi.fn();
@@ -224,5 +228,29 @@ describe('DraftUserCell – attachments & mentions', () => {
         expect.objectContaining({ notebookFileId: 'uploaded-1' })
       );
     });
+  });
+
+  it('shows an error toast and removes the placeholder when pasted image upload fails', async () => {
+    const { notebookFilesApi } = await import('../../../../services/notebookFiles');
+    vi.mocked(notebookFilesApi.uploadFiles).mockRejectedValueOnce(new Error('upload unavailable'));
+
+    render(
+      <DraftUserCell value="" onChange={vi.fn()} onSend={vi.fn()} />
+    );
+
+    const editorContainer = screen.getByRole('group', { name: 'Compose message' });
+    const file = new File(['img'], 'paste.png', { type: 'image/png' });
+    fireEvent.paste(editorContainer.querySelector('.p-2') || editorContainer, {
+      clipboardData: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Upload failed')).toBeInTheDocument();
+      expect(screen.getByText('upload unavailable')).toBeInTheDocument();
+    });
+    expect(mockAddPendingAttachment).not.toHaveBeenCalled();
+    expect(screen.queryByText('paste.png')).not.toBeInTheDocument();
   });
 });

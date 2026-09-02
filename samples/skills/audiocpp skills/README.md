@@ -4,26 +4,26 @@ Experimental GuideAnts skills that reach **full** raw `audiocpp_server`
 capabilities (OpenAI-style audio APIs, `/v1/tasks/*`, cloning, seeds, deferred
 families, diarization) **without GuideAntsApi / ServiceModes changes**.
 
-**Default deployment is a PC sandbox talking to Max** over the audiocpp raw
+**Default deployment is a PC sandbox talking to the GPU host** over the audiocpp raw
 gateway — a token-gated transparent reverse proxy to the engines inside the AI
 container. Scripts read `AUDIOCPP_SKILL_BASE_URL` and stage files / manage
-private engines on Max. Do not assume `127.0.0.1` engines exist in the sandbox.
+private engines on the GPU host. Do not assume `127.0.0.1` engines exist in the sandbox.
 
-Deliverables land in `Output/` as WAV/text/JSON. Nothing here touches the live
+Deliverables are written to the sandbox CWD as WAV/text/JSON with bare filenames — never prefix with `Output/`. Nothing here touches the live
 phone/voice path or the GuideAnts voice picker.
 
-## Required Environment (PC → Max)
+## Required Environment (PC → the GPU host)
 
 ```text
-AUDIOCPP_SKILL_BASE_URL=http://<max-lan-ip>:8112/audiocpp-skill
-AUDIOCPP_SKILL_TOKEN=<same as Max GA_AUDIOCPP_SKILL_TOKEN>
+AUDIOCPP_SKILL_BASE_URL=http://<gpu-host-lan-ip>:8112/audiocpp-skill
+AUDIOCPP_SKILL_TOKEN=<same as the GPU host GA_AUDIOCPP_SKILL_TOKEN>
 ```
 
-Optional: `HF_TOKEN` for gated Hugging Face downloads (executed on Max).
+Optional: `HF_TOKEN` for gated Hugging Face downloads (executed on the GPU host).
 
 With those set, `probe.py` / `preflight.py` report the remote gateway open, and
 `engine_tool.py`, `fetch_model.py`, `spawn_engine.py`, and `diarize.py` use it
-automatically. Models land under `/models-local/skill/` on Max.
+automatically. Models land under `/models-local/skill/` on the GPU host.
 
 ### Raw access shape
 
@@ -32,7 +32,7 @@ automatically. Models land under `/models-local/skill/` on Max.
 | `{BASE}/asr/...` | Full ASR engine API (transcriptions = text; timed fields use `/private` `tasks/run`) |
 | `{BASE}/tts/...` | Full TTS engine API |
 | `{BASE}/private/...` | Full private engine API (align / diar / deferred) |
-| `{BASE}/files` | Upload → Max path for path-based JSON fields |
+| `{BASE}/files` | Upload → the GPU host path for path-based JSON fields |
 | `{BASE}/admin/...` | Fetch models / private start\|stop |
 
 Any curl/agent can use the same paths with `X-Audiocpp-Skill-Token`.
@@ -47,8 +47,8 @@ Any curl/agent can use the same paths with `X-Audiocpp-Skill-Token`.
 | [`audiocpp-asr`](audiocpp-asr/) | Transcribe with language hint |
 | [`audiocpp-timed-transcript`](audiocpp-timed-transcript/) | Long-form SRT/WebVTT/JSON (ASR + ForcedAligner; 30 s chunks) |
 | [`audiocpp-diarize`](audiocpp-diarize/) | Who-spoke-when (overlap windows) + optional speaker SRT/RTTM merge |
-| [`audiocpp-deferred-tts`](audiocpp-deferred-tts/) | Non-catalog TTS families via private engine on Max |
-| [`audiocpp-host-tts`](audiocpp-host-tts/) | User’s own host-native `audiocpp_server` (not Max gateway) |
+| [`audiocpp-deferred-tts`](audiocpp-deferred-tts/) | Non-catalog TTS families via private engine on the GPU host |
+| [`audiocpp-host-tts`](audiocpp-host-tts/) | User’s own host-native `audiocpp_server` (not GPU host gateway) |
 
 ## Common rules
 
@@ -60,6 +60,6 @@ Any curl/agent can use the same paths with `X-Audiocpp-Skill-Token`.
 
 ## Limits
 
-- Loaders missing from the Max container binary need `audiocpp-host-tts`.
+- Loaders missing from the GPU host container binary need `audiocpp-host-tts`.
 - Diarization: max 4 speakers; offline; windows ≤ ~120 s with overlap stitch for longer files; labels are arbitrary.
 - Product `/asr` `/tts` and ServiceModes are intentionally untouched.

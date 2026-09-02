@@ -63,6 +63,8 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
         var rootPath = _pathResolver.GetNotebookRootPath(notebook.ProjectId, notebookId);
         var changed = false;
 
+        var touchedPaths = new List<string>();
+
         foreach (var rawPath in dbRelativePaths)
         {
             var relativePath = NotebookPathResolver.NormalizeRelativePath(rawPath);
@@ -83,11 +85,29 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
             var fullPath = Path.Combine(rootPath, relativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
             if (!File.Exists(fullPath))
             {
-                _logger.LogWarning(
-                    "Skipping register for missing notebook file {RelativePath} in notebook {NotebookId}",
-                    relativePath,
-                    notebookId);
-                continue;
+                // Turn output paths are CWD-relative and sometimes resolve incorrectly once;
+                // try known alternatives before giving up (otherwise pills show but tree lags
+                // until a full SyncNotebook finally finds the file).
+                var resolvedAlternative = NotebookPathResolver.GetAlternativePaths(relativePath)
+                    .Select(alt => (
+                        RelativePath: NotebookPathResolver.NormalizeRelativePath(alt),
+                        FullPath: Path.Combine(rootPath, NotebookPathResolver.NormalizeRelativePath(alt)
+                            .Replace("/", Path.DirectorySeparatorChar.ToString()))))
+                    .FirstOrDefault(candidate =>
+                        !string.IsNullOrWhiteSpace(candidate.RelativePath)
+                        && File.Exists(candidate.FullPath));
+
+                if (string.IsNullOrWhiteSpace(resolvedAlternative.RelativePath))
+                {
+                    _logger.LogWarning(
+                        "Skipping register for missing notebook file {RelativePath} in notebook {NotebookId}",
+                        relativePath,
+                        notebookId);
+                    continue;
+                }
+
+                relativePath = resolvedAlternative.RelativePath;
+                fullPath = resolvedAlternative.FullPath;
             }
 
             FileInfo fileInfo;
@@ -113,15 +133,23 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
 
             if (existing != null)
             {
-                if (existing.FileSize != fileInfo.Length ||
-                    existing.LastModifiedUtc != fileInfo.LastWriteTimeUtc ||
-                    existing.FileHash != placeholderHash)
+                // Never downgrade a real hash to a placeholder when size+mtime are unchanged —
+                // that forced SyncNotebook to re-hash the whole registered set every turn.
+                if (NotebookFileHash.IsUnchanged(
+                        existing.FileSize,
+                        existing.LastModifiedUtc,
+                        existing.FileHash,
+                        fileInfo.Length,
+                        fileInfo.LastWriteTimeUtc))
                 {
-                    existing.FileSize = fileInfo.Length;
-                    existing.LastModifiedUtc = fileInfo.LastWriteTimeUtc;
-                    existing.FileHash = placeholderHash;
-                    changed = true;
+                    continue;
                 }
+
+                existing.FileSize = fileInfo.Length;
+                existing.LastModifiedUtc = fileInfo.LastWriteTimeUtc;
+                existing.FileHash = placeholderHash;
+                changed = true;
+                touchedPaths.Add(relativePath);
             }
             else
             {
@@ -136,6 +164,7 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
                 nf.GenerateDocumentId(notebookId);
                 context.NotebookFiles.Add(nf);
                 changed = true;
+                touchedPaths.Add(relativePath);
             }
         }
 
@@ -144,13 +173,45 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
             return;
         }
 
-        try
+        await SaveRegisteredFilesWithDuplicateRetryAsync(context, notebookId, touchedPaths, cancellationToken);
+    }
+
+    private async Task SaveRegisteredFilesWithDuplicateRetryAsync(
+        ApplicationDbContext context,
+        Guid notebookId,
+        IReadOnlyList<string> touchedRelativePaths,
+        CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 3;
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
-            await context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException dbEx) when (IsDuplicateNotebookFileConstraint(dbEx))
-        {
-            _logger.LogDebug("Concurrent register insert for notebook {NotebookId}; treating as success", notebookId);
+            try
+            {
+                await context.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (DbUpdateException dbEx) when (IsDuplicateNotebookFileConstraint(dbEx))
+            {
+                _logger.LogDebug(
+                    "Concurrent register insert for notebook {NotebookId}; reloading and retrying remainder (attempt {Attempt})",
+                    notebookId,
+                    attempt + 1);
+                context.ChangeTracker.Clear();
+
+                var existingCount = await context.NotebookFiles.CountAsync(
+                    f => f.NotebookId == notebookId && touchedRelativePaths.Contains(f.RelativePath),
+                    cancellationToken);
+
+                if (existingCount == touchedRelativePaths.Count)
+                {
+                    return;
+                }
+
+                if (attempt == maxAttempts - 1)
+                {
+                    throw;
+                }
+            }
         }
     }
 
@@ -170,7 +231,11 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
             _logger.LogDebug(
                 "Skipping reconcile for notebook {NotebookId} - another sync is already running",
                 notebookId);
-            return new ReconcileResult();
+            return new ReconcileResult
+            {
+                Skipped = true,
+                SkipReason = SyncNotebookHandler.LockNotAcquiredSkipReason,
+            };
         }
 
         using var scope = _scopeFactory.CreateScope();
@@ -182,7 +247,11 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
         if (notebook == null)
         {
             _logger.LogWarning("Notebook {NotebookId} not found for reconcile", notebookId);
-            return new ReconcileResult();
+            return new ReconcileResult
+            {
+                Skipped = true,
+                SkipReason = "NotebookNotFound",
+            };
         }
 
         var rootPath = _pathResolver.GetNotebookRootPath(notebook.ProjectId, notebookId);
@@ -221,6 +290,19 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
                 continue;
             }
 
+            dbFiles.TryGetValue(relativePath, out var existing);
+
+            if (existing != null
+                && NotebookFileHash.IsUnchanged(
+                    existing.FileSize,
+                    existing.LastModifiedUtc,
+                    existing.FileHash,
+                    fileInfo.Length,
+                    fileInfo.LastWriteTimeUtc))
+            {
+                continue;
+            }
+
             string fileHash;
             try
             {
@@ -232,28 +314,23 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
                 continue;
             }
 
-            if (dbFiles.TryGetValue(relativePath, out var existing))
+            if (existing != null)
             {
-                if (existing.FileSize != fileInfo.Length ||
-                    existing.LastModifiedUtc != fileInfo.LastWriteTimeUtc ||
-                    existing.FileHash != fileHash)
-                {
-                    existing.FileSize = fileInfo.Length;
-                    existing.LastModifiedUtc = fileInfo.LastWriteTimeUtc;
-                    existing.FileHash = fileHash;
+                existing.FileSize = fileInfo.Length;
+                existing.LastModifiedUtc = fileInfo.LastWriteTimeUtc;
+                existing.FileHash = fileHash;
 
-                    await _lineageService.RecordAsync(
-                        FileKind.Notebook,
-                        notebook.ProjectId,
-                        existing.Id,
-                        null,
-                        FileLineageAction.ExternalWrite,
-                        notebookId,
-                        fullPath,
-                        saveImmediately: false);
+                await _lineageService.RecordAsync(
+                    FileKind.Notebook,
+                    notebook.ProjectId,
+                    existing.Id,
+                    null,
+                    FileLineageAction.ExternalWrite,
+                    notebookId,
+                    fullPath,
+                    saveImmediately: false);
 
-                    updatedFiles.Add(existing);
-                }
+                updatedFiles.Add(existing);
             }
             else
             {
@@ -296,7 +373,22 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
                 continue;
             }
 
-            if (NotebookSyncFileEnumerator.IsUnderRegisteredMount(dbFile.RelativePath, rootPath))
+            // Re-check disk: a concurrent RegisterFiles during a long reconcile may have added a
+            // row for a file created after our start-of-reconcile enumeration snapshot.
+            var candidateFullPath = Path.Combine(
+                rootPath,
+                dbFile.RelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+            var isUnderRegisteredMount =
+                NotebookSyncFileEnumerator.IsUnderRegisteredMount(dbFile.RelativePath, rootPath);
+            if (!isUnderRegisteredMount && File.Exists(candidateFullPath))
+            {
+                _logger.LogDebug(
+                    "Keeping notebook file row not in start snapshot because it exists on disk: {RelativePath}",
+                    dbFile.RelativePath);
+                continue;
+            }
+
+            if (isUnderRegisteredMount)
             {
                 _logger.LogDebug(
                     "Removing stale indexed row under registered mount during reconcile: {RelativePath}",
@@ -330,12 +422,20 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
         catch (DbUpdateException dbEx) when (IsDuplicateNotebookFileConstraint(dbEx))
         {
             _logger.LogWarning("Constraint violation during reconcile for notebook {NotebookId}", notebookId);
-            return new ReconcileResult();
+            return new ReconcileResult
+            {
+                Skipped = true,
+                SkipReason = "DuplicateConstraint",
+            };
         }
         catch (DbUpdateConcurrencyException cx)
         {
             _logger.LogWarning(cx, "Concurrency conflict during reconcile for notebook {NotebookId}", notebookId);
-            return new ReconcileResult();
+            return new ReconcileResult
+            {
+                Skipped = true,
+                SkipReason = "ConcurrencyConflict",
+            };
         }
 
         foreach (var newFile in newFiles)
@@ -434,6 +534,14 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
         catch (DbUpdateException)
         {
             context.ChangeTracker.Clear();
+            var shadowExists = await context.NotebookFileMarkdownShadows
+                .AnyAsync(s => s.OriginalNotebookFileId == notebookFileId, cancellationToken);
+            if (shadowExists)
+            {
+                return;
+            }
+
+            throw;
         }
     }
 }

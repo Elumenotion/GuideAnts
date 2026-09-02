@@ -28,9 +28,13 @@ public sealed class ConversationStreamLockCoordinator
                 throw new InvalidOperationException("Conversation is locked by another user");
         }
 
+        var acquiredLock = lockResult.Lock
+            ?? throw new InvalidOperationException("Distributed lock acquisition returned no lease.");
+
         return new DistributedStreamLockHandle(
             conversationId,
             userName,
+            acquiredLock.LeaseId,
             semaphoreToRelease,
             _distributedLock,
             logger,

@@ -158,4 +158,25 @@ public sealed class ToolOutputTruncatorTests
         doc.RootElement.GetProperty("standardError").GetString().Should().Contain("Response truncated for length");
         doc.RootElement.GetProperty("standardOutput").GetString().Should().Contain("[... output truncated for length ...]");
     }
+
+    [TestMethod]
+    public void Truncate_LargeReadWebOutput_ReturnsTerminalMessageWithoutRecoveryInstructions()
+    {
+        var largeOutput = JsonSerializer.Serialize(new
+        {
+            Content = CreateOversizedOutput('z'),
+            PageLinks = new Dictionary<string, string>(),
+            ImageLinks = new Dictionary<string, string>()
+        }, JsonOptions);
+
+        var result = ToolOutputTruncator.Truncate(largeOutput, "GetContentFromUrl");
+
+        result.WasTruncated.Should().BeTrue();
+        using var doc = JsonDocument.Parse(result.Output!);
+        var stderr = doc.RootElement.GetProperty("standardError").GetString();
+        stderr.Should().Contain("ReadWeb could not return the page");
+        stderr.Should().Contain("Do not retry this ReadWeb request.");
+        stderr.Should().NotContain("Write large results to a file");
+        doc.RootElement.GetProperty("standardOutput").GetString().Should().BeEmpty();
+    }
 }

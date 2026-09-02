@@ -41,16 +41,21 @@ public interface IDistributedConversationLock
         CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Releases a lock on a conversation.
+    /// Releases only the lock identified by the caller's lease. Returns false when this lease
+    /// no longer owns the conversation lock.
     /// </summary>
-    Task ReleaseLockAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<bool> ReleaseLockAsync(
+        Guid conversationId,
+        Guid leaseId,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Extends an existing lock when it is still active and owned by the same user.
+    /// Extends an existing lock when it is still active and owned by the same lease and user.
     /// Returns false when no active owned lock exists.
     /// </summary>
     Task<bool> RenewLockAsync(
         Guid conversationId,
+        Guid leaseId,
         string userName,
         TimeSpan lockTtl,
         CancellationToken cancellationToken = default);

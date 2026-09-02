@@ -93,7 +93,7 @@ describe('ConversationContext reducer', () => {
         id: 'streaming-123', 
         content: 'Hello ' 
       });
-      const state = { ...initialState, messages: [streamingMsg] };
+      const state = { ...initialState, isStreaming: true, messages: [streamingMsg] };
 
       const result = reducer(state, { type: 'APPEND_TOKEN', payload: 'world!' });
 

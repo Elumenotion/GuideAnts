@@ -7,7 +7,7 @@ repo with different --dest). Resumable: files already present with the right siz
 are skipped, so re-running after the ~5 min sandbox budget continues where it left
 off. Stdlib-only.
 
-When AUDIOCPP_SKILL_BASE_URL is set, the download runs on the Max skill gateway
+When AUDIOCPP_SKILL_BASE_URL is set, the download runs on the GPU host skill gateway
 under /models-local/skill/...
 """
 import argparse

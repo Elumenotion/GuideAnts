@@ -26,6 +26,9 @@ public sealed record LocalAiRuntimeAlignmentMismatch(string ServiceId, string De
 
 public sealed class LocalAiRuntimeAlignmentVerifier : ILocalAiRuntimeAlignmentVerifier
 {
+    internal static readonly TimeSpan ReadinessPollInterval = TimeSpan.FromSeconds(2);
+    internal static readonly TimeSpan ReadinessWaitTimeout = TimeSpan.FromSeconds(30);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILocalAiStackHostResolver _stackHostResolver;
@@ -79,17 +82,20 @@ public sealed class LocalAiRuntimeAlignmentVerifier : ILocalAiRuntimeAlignmentVe
                 }
 
                 var enabled = section["enabled"]?.GetValue<bool?>() ?? false;
-                var planRef = ResolvePlanRef(serviceId, section);
-                var shouldLoad = enabled && !string.IsNullOrWhiteSpace(planRef);
+                var planRefs = ResolvePlanRefs(serviceId, section);
+                var shouldLoad = enabled && planRefs.Count > 0;
 
                 if (string.Equals(serviceId, LocalAiStackHostUrls.LlamaServiceId, StringComparison.Ordinal))
                 {
-                    mismatches.AddRange(await VerifyLlamaAsync(shouldLoad, planRef, cancellationToken).ConfigureAwait(false));
+                    mismatches.AddRange(
+                        await VerifyLlamaWithReadinessWaitAsync(shouldLoad, planRefs, cancellationToken)
+                            .ConfigureAwait(false));
                     continue;
                 }
 
                 mismatches.AddRange(
-                    await VerifyAuxiliaryAsync(serviceId, shouldLoad, planRef, cancellationToken).ConfigureAwait(false));
+                    await VerifyAuxiliaryWithReadinessWaitAsync(serviceId, shouldLoad, planRefs, cancellationToken)
+                        .ConfigureAwait(false));
             }
         }
         catch (Exception ex)
@@ -101,9 +107,31 @@ public sealed class LocalAiRuntimeAlignmentVerifier : ILocalAiRuntimeAlignmentVe
         return mismatches;
     }
 
-    private async Task<IReadOnlyList<LocalAiRuntimeAlignmentMismatch>> VerifyLlamaAsync(
+    private async Task<IReadOnlyList<LocalAiRuntimeAlignmentMismatch>> VerifyLlamaWithReadinessWaitAsync(
         bool shouldLoad,
-        string? planRef,
+        IReadOnlyList<string> planRefs,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + ReadinessWaitTimeout;
+        while (true)
+        {
+            var probe = await ProbeLlamaAsync(shouldLoad, planRefs, cancellationToken).ConfigureAwait(false);
+            if (!probe.IsTransientReadiness || DateTime.UtcNow >= deadline)
+            {
+                return probe.Mismatches;
+            }
+
+            _logger.LogDebug(
+                "Llama runtime not ready yet ({Detail}); waiting {IntervalSeconds}s before re-check",
+                probe.Mismatches[0].Detail,
+                ReadinessPollInterval.TotalSeconds);
+            await Task.Delay(ReadinessPollInterval, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<(IReadOnlyList<LocalAiRuntimeAlignmentMismatch> Mismatches, bool IsTransientReadiness)> ProbeLlamaAsync(
+        bool shouldLoad,
+        IReadOnlyList<string> planRefs,
         CancellationToken cancellationToken)
     {
         LlamaModelsResponse models;
@@ -111,77 +139,115 @@ public sealed class LocalAiRuntimeAlignmentVerifier : ILocalAiRuntimeAlignmentVe
         {
             models = await _llamaRuntimeClient.ListModelsAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch (Exception ex) when (shouldLoad && IsTransientTransportFailure(ex))
+        {
+            return ([new LocalAiRuntimeAlignmentMismatch(
+                LocalAiStackHostUrls.LlamaServiceId,
+                $"could not query llama models: {ex.Message}")], true);
+        }
         catch (Exception ex)
         {
-            return [new LocalAiRuntimeAlignmentMismatch(
+            return ([new LocalAiRuntimeAlignmentMismatch(
                 LocalAiStackHostUrls.LlamaServiceId,
-                $"could not query llama models: {ex.Message}")];
+                $"could not query llama models: {ex.Message}")], false);
         }
 
         var loaded = models.Data
             .Where(IsRouterModelLoaded)
-            .Select(m => m.Id)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .SelectMany(m => CollectRuntimeIdentifiers(m.Id))
             .ToList();
 
         if (shouldLoad)
         {
-            if (string.IsNullOrWhiteSpace(planRef))
+            if (planRefs.Count == 0)
             {
-                return [new LocalAiRuntimeAlignmentMismatch(
+                return ([new LocalAiRuntimeAlignmentMismatch(
                     LocalAiStackHostUrls.LlamaServiceId,
-                    "plan enabled but router alias missing")];
+                    "plan enabled but router alias missing")], false);
             }
 
-            if (!loaded.Any(id => string.Equals(id, planRef, StringComparison.Ordinal)))
+            if (!IdentifiersMatch(planRefs, loaded))
             {
-                return [new LocalAiRuntimeAlignmentMismatch(
+                if (loaded.Count == 0)
+                {
+                    return ([new LocalAiRuntimeAlignmentMismatch(
+                        LocalAiStackHostUrls.LlamaServiceId,
+                        $"expected loaded alias '{planRefs[0]}' but engine reports no loaded aliases")], true);
+                }
+
+                return ([new LocalAiRuntimeAlignmentMismatch(
                     LocalAiStackHostUrls.LlamaServiceId,
-                    $"expected loaded alias '{planRef}' but engine reports [{string.Join(", ", loaded)}]")];
+                    $"expected loaded alias '{planRefs[0]}' but engine reports [{string.Join(", ", loaded)}]")], false);
             }
 
-            return Array.Empty<LocalAiRuntimeAlignmentMismatch>();
+            return (Array.Empty<LocalAiRuntimeAlignmentMismatch>(), false);
         }
 
         if (loaded.Count > 0)
         {
-            return [new LocalAiRuntimeAlignmentMismatch(
+            return ([new LocalAiRuntimeAlignmentMismatch(
                 LocalAiStackHostUrls.LlamaServiceId,
-                $"plan idle but engine still has loaded aliases [{string.Join(", ", loaded)}]")];
+                $"plan idle but engine still has loaded aliases [{string.Join(", ", loaded)}]")], false);
         }
 
-        return Array.Empty<LocalAiRuntimeAlignmentMismatch>();
+        return (Array.Empty<LocalAiRuntimeAlignmentMismatch>(), false);
     }
 
-    private async Task<IReadOnlyList<LocalAiRuntimeAlignmentMismatch>> VerifyAuxiliaryAsync(
+    private async Task<IReadOnlyList<LocalAiRuntimeAlignmentMismatch>> VerifyAuxiliaryWithReadinessWaitAsync(
         string serviceId,
         bool shouldLoad,
-        string? planRef,
+        IReadOnlyList<string> planRefs,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + ReadinessWaitTimeout;
+        while (true)
+        {
+            var probe = await ProbeAuxiliaryAsync(serviceId, shouldLoad, planRefs, cancellationToken)
+                .ConfigureAwait(false);
+            if (!probe.IsTransientReadiness || DateTime.UtcNow >= deadline)
+            {
+                return probe.Mismatches;
+            }
+
+            _logger.LogDebug(
+                "Auxiliary runtime {ServiceId} not ready yet ({Detail}); waiting {IntervalSeconds}s before re-check",
+                serviceId,
+                probe.Mismatches[0].Detail,
+                ReadinessPollInterval.TotalSeconds);
+            await Task.Delay(ReadinessPollInterval, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<(IReadOnlyList<LocalAiRuntimeAlignmentMismatch> Mismatches, bool IsTransientReadiness)> ProbeAuxiliaryAsync(
+        string serviceId,
+        bool shouldLoad,
+        IReadOnlyList<string> planRefs,
         CancellationToken cancellationToken)
     {
         var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
         if (string.IsNullOrWhiteSpace(adminBase))
         {
-            return Array.Empty<LocalAiRuntimeAlignmentMismatch>();
+            return (Array.Empty<LocalAiRuntimeAlignmentMismatch>(), false);
         }
 
         var client = _httpClientFactory.CreateClient(LocalAiWarmupOrchestrationClient.HttpClientName);
         if (string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal))
         {
-            return await VerifyImageGenerationAsync(client, adminBase, shouldLoad, planRef, cancellationToken)
+            return await ProbeImageGenerationAsync(client, adminBase, shouldLoad, planRefs, cancellationToken)
                 .ConfigureAwait(false);
         }
 
-        return await VerifyReadyEndpointAsync(client, adminBase, serviceId, shouldLoad, planRef, cancellationToken)
+        return await ProbeReadyEndpointAsync(client, adminBase, serviceId, shouldLoad, planRefs, cancellationToken)
             .ConfigureAwait(false);
     }
 
-    private static async Task<IReadOnlyList<LocalAiRuntimeAlignmentMismatch>> VerifyImageGenerationAsync(
-        HttpClient client,
-        string adminBase,
-        bool shouldLoad,
-        string? planRef,
-        CancellationToken cancellationToken)
+    private static async Task<(IReadOnlyList<LocalAiRuntimeAlignmentMismatch> Mismatches, bool IsTransientReadiness)>
+        ProbeImageGenerationAsync(
+            HttpClient client,
+            string adminBase,
+            bool shouldLoad,
+            IReadOnlyList<string> planRefs,
+            CancellationToken cancellationToken)
     {
         using var response = await client.GetAsync($"{adminBase.TrimEnd('/')}/health", cancellationToken)
             .ConfigureAwait(false);
@@ -190,12 +256,19 @@ public sealed class LocalAiRuntimeAlignmentVerifier : ILocalAiRuntimeAlignmentVe
         {
             if (!shouldLoad)
             {
-                return Array.Empty<LocalAiRuntimeAlignmentMismatch>();
+                return (Array.Empty<LocalAiRuntimeAlignmentMismatch>(), false);
             }
 
-            return [new LocalAiRuntimeAlignmentMismatch(
+            if ((int)response.StatusCode == 503)
+            {
+                return ([new LocalAiRuntimeAlignmentMismatch(
+                    RoutedServiceNames.ImageGeneration,
+                    $"plan warm but /health returned {(int)response.StatusCode}")], true);
+            }
+
+            return ([new LocalAiRuntimeAlignmentMismatch(
                 RoutedServiceNames.ImageGeneration,
-                $"plan warm but /health returned {(int)response.StatusCode}")];
+                $"plan warm but /health returned {(int)response.StatusCode}")], false);
         }
 
         try
@@ -208,122 +281,327 @@ public sealed class LocalAiRuntimeAlignmentVerifier : ILocalAiRuntimeAlignmentVe
                 ?? node?["loadedBundleId"]?.GetValue<string>();
             var loaded = processAlive && healthy
                 || string.Equals(node?["status"]?.GetValue<string>(), "ok", StringComparison.OrdinalIgnoreCase);
+            var runtimeRefs = CollectRuntimeIdentifiers(loadedBundle)
+                .Concat(CollectRuntimeIdentifiers(node))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
 
             if (shouldLoad)
             {
                 if (!loaded)
                 {
-                    return [new LocalAiRuntimeAlignmentMismatch(
+                    if (IsWarmupIncomplete(node, failed: false, failedReason: null, statusCode: (int)response.StatusCode))
+                    {
+                        return ([new LocalAiRuntimeAlignmentMismatch(
+                            RoutedServiceNames.ImageGeneration,
+                            "plan warm but SD engine is warming up")], true);
+                    }
+
+                    return ([new LocalAiRuntimeAlignmentMismatch(
                         RoutedServiceNames.ImageGeneration,
-                        "plan warm but SD engine is not loaded")];
+                        "plan warm but SD engine is not loaded")], false);
                 }
 
-                if (!string.IsNullOrWhiteSpace(planRef)
-                    && !string.IsNullOrWhiteSpace(loadedBundle)
-                    && !string.Equals(loadedBundle.Trim(), planRef.Trim(), StringComparison.Ordinal))
+                if (planRefs.Count > 0
+                    && runtimeRefs.Count > 0
+                    && !IdentifiersMatch(planRefs, runtimeRefs))
                 {
-                    return [new LocalAiRuntimeAlignmentMismatch(
+                    return ([new LocalAiRuntimeAlignmentMismatch(
                         RoutedServiceNames.ImageGeneration,
-                        $"plan bundle '{planRef}' but engine reports '{loadedBundle}'")];
+                        $"plan bundle '{planRefs[0]}' but engine reports '{runtimeRefs[0]}'")], false);
                 }
 
-                return Array.Empty<LocalAiRuntimeAlignmentMismatch>();
+                return (Array.Empty<LocalAiRuntimeAlignmentMismatch>(), false);
             }
 
             if (loaded || processAlive)
             {
-                return [new LocalAiRuntimeAlignmentMismatch(
+                return ([new LocalAiRuntimeAlignmentMismatch(
                     RoutedServiceNames.ImageGeneration,
-                    $"plan idle but SD engine still active (bundle={loadedBundle ?? "none"})")];
+                    $"plan idle but SD engine still active (bundle={loadedBundle ?? "none"})")], false);
             }
 
-            return Array.Empty<LocalAiRuntimeAlignmentMismatch>();
+            return (Array.Empty<LocalAiRuntimeAlignmentMismatch>(), false);
         }
         catch (JsonException ex)
         {
-            return [new LocalAiRuntimeAlignmentMismatch(
+            return ([new LocalAiRuntimeAlignmentMismatch(
                 RoutedServiceNames.ImageGeneration,
-                $"failed to parse /health: {ex.Message}")];
+                $"failed to parse /health: {ex.Message}")], false);
         }
     }
 
-    private static async Task<IReadOnlyList<LocalAiRuntimeAlignmentMismatch>> VerifyReadyEndpointAsync(
-        HttpClient client,
-        string adminBase,
-        string serviceId,
-        bool shouldLoad,
-        string? planRef,
-        CancellationToken cancellationToken)
+    private static async Task<(IReadOnlyList<LocalAiRuntimeAlignmentMismatch> Mismatches, bool IsTransientReadiness)>
+        ProbeReadyEndpointAsync(
+            HttpClient client,
+            string adminBase,
+            string serviceId,
+            bool shouldLoad,
+            IReadOnlyList<string> planRefs,
+            CancellationToken cancellationToken)
     {
         using var response = await client.GetAsync($"{adminBase.TrimEnd('/')}/ready", cancellationToken)
             .ConfigureAwait(false);
         var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var loaded = false;
-        string? loadedRef = null;
+        var failed = false;
+        string? failedReason = null;
+        JsonNode? node = null;
 
-        if (response.IsSuccessStatusCode)
+        try
         {
-            try
-            {
-                var node = JsonNode.Parse(json);
-                loaded = node?["loaded"]?.GetValue<bool?>() ?? false;
-                loadedRef = node?["modelRef"]?.GetValue<string>()
-                    ?? node?["model_ref"]?.GetValue<string>()
-                    ?? node?["catalogEntryId"]?.GetValue<string>()
-                    ?? node?["catalog_entry_id"]?.GetValue<string>()
-                    ?? node?["bundleId"]?.GetValue<string>()
-                    ?? node?["bundle_id"]?.GetValue<string>();
-            }
-            catch (JsonException)
-            {
-                loaded = true;
-            }
+            node = JsonNode.Parse(json);
         }
+        catch (JsonException)
+        {
+            node = null;
+        }
+
+        if (node is not null)
+        {
+            loaded = node["loaded"]?.GetValue<bool?>() ?? false;
+            failed = node["failed"]?.GetValue<bool?>() ?? false;
+            failedReason = node["failedReason"]?.GetValue<string>()
+                ?? node["message"]?.GetValue<string>();
+        }
+        else if (response.IsSuccessStatusCode)
+        {
+            loaded = true;
+        }
+
+        var runtimeRefs = CollectRuntimeIdentifiers(node);
 
         if (shouldLoad)
         {
-            if (!loaded)
+            if (IsWarmupIncomplete(node, failed, failedReason, (int)response.StatusCode))
             {
-                return [new LocalAiRuntimeAlignmentMismatch(serviceId, "plan warm but engine /ready reports not loaded")];
+                return ([new LocalAiRuntimeAlignmentMismatch(serviceId, "engine warmup incomplete")], true);
             }
 
-            if (!string.IsNullOrWhiteSpace(planRef)
-                && !string.IsNullOrWhiteSpace(loadedRef)
-                && !string.Equals(loadedRef.Trim(), planRef.Trim(), StringComparison.Ordinal))
+            if (failed || (int)response.StatusCode == 503)
             {
-                return [new LocalAiRuntimeAlignmentMismatch(
+                var reason = string.IsNullOrWhiteSpace(failedReason)
+                    ? "engine is failed/unready"
+                    : $"engine is failed/unready: {failedReason}";
+                return ([new LocalAiRuntimeAlignmentMismatch(serviceId, reason)], true);
+            }
+
+            if (!response.IsSuccessStatusCode || !loaded)
+            {
+                return ([new LocalAiRuntimeAlignmentMismatch(serviceId, "plan warm but engine /ready reports not loaded")], true);
+            }
+
+            if (planRefs.Count > 0
+                && runtimeRefs.Count > 0
+                && !IdentifiersMatch(planRefs, runtimeRefs))
+            {
+                return ([new LocalAiRuntimeAlignmentMismatch(
                     serviceId,
-                    $"plan ref '{planRef}' but engine reports '{loadedRef}'")];
+                    $"plan ref '{planRefs[0]}' but engine reports '{runtimeRefs[0]}'")], false);
             }
 
-            return Array.Empty<LocalAiRuntimeAlignmentMismatch>();
+            return (Array.Empty<LocalAiRuntimeAlignmentMismatch>(), false);
         }
 
         if (loaded)
         {
-            return [new LocalAiRuntimeAlignmentMismatch(
+            return ([new LocalAiRuntimeAlignmentMismatch(
                 serviceId,
-                $"plan idle but engine still loaded (ref={loadedRef ?? "unknown"})")];
+                $"plan idle but engine still loaded (ref={runtimeRefs.FirstOrDefault() ?? "unknown"})")], false);
         }
 
-        return Array.Empty<LocalAiRuntimeAlignmentMismatch>();
+        return (Array.Empty<LocalAiRuntimeAlignmentMismatch>(), false);
     }
 
-    private static string? ResolvePlanRef(string serviceId, JsonObject section)
+    internal static IReadOnlyList<string> ResolvePlanRefs(string serviceId, JsonObject section)
     {
         if (string.Equals(serviceId, LocalAiStackHostUrls.LlamaServiceId, StringComparison.Ordinal))
         {
-            return TrimOrNull(section["routerAlias"]?.GetValue<string>());
+            return CollectRuntimeIdentifiers(section["routerAlias"]?.GetValue<string>());
         }
 
         if (string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal))
         {
-            return TrimOrNull(section["bundleId"]?.GetValue<string>());
+            return CollectRuntimeIdentifiers(section["bundleId"]?.GetValue<string>());
         }
 
-        return TrimOrNull(section["modelPath"]?.GetValue<string>())
-            ?? TrimOrNull(section["modelId"]?.GetValue<string>());
+        return CollectRuntimeIdentifiers(
+            section["modelPath"]?.GetValue<string>(),
+            section["modelId"]?.GetValue<string>(),
+            section["catalogEntryId"]?.GetValue<string>(),
+            section["bundleId"]?.GetValue<string>());
     }
+
+    internal static IReadOnlyList<string> CollectRuntimeIdentifiers(params string?[] values)
+    {
+        var identifiers = new List<string>();
+        foreach (var value in values)
+        {
+            AddIdentifier(identifiers, value);
+        }
+
+        return identifiers;
+    }
+
+    internal static IReadOnlyList<string> CollectRuntimeIdentifiers(JsonNode? node)
+    {
+        if (node is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        if (node is JsonObject obj)
+        {
+            return CollectRuntimeIdentifiers(
+                obj["modelRef"]?.GetValue<string>(),
+                obj["model_ref"]?.GetValue<string>(),
+                obj["catalogEntryId"]?.GetValue<string>(),
+                obj["catalog_entry_id"]?.GetValue<string>(),
+                obj["bundleId"]?.GetValue<string>(),
+                obj["bundle_id"]?.GetValue<string>(),
+                obj["modelPath"]?.GetValue<string>(),
+                obj["modelId"]?.GetValue<string>(),
+                obj["loadedBundleId"]?.GetValue<string>());
+        }
+
+        return CollectRuntimeIdentifiers(node.GetValue<string>());
+    }
+
+    internal static bool IdentifiersMatch(IReadOnlyList<string> expected, IReadOnlyList<string> actual)
+    {
+        if (expected.Count == 0 || actual.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var expectedRef in expected)
+        {
+            foreach (var actualRef in actual)
+            {
+                if (RuntimeIdentifiersEqual(expectedRef, actualRef))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool RuntimeIdentifiersEqual(string left, string right)
+    {
+        if (string.Equals(left, right, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (LooksLikePath(left) || LooksLikePath(right))
+        {
+            var normalizedLeft = NormalizePath(left);
+            var normalizedRight = NormalizePath(right);
+            if (string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var leftFileName = Path.GetFileName(normalizedLeft);
+            var rightFileName = Path.GetFileName(normalizedRight);
+            if (!string.IsNullOrWhiteSpace(leftFileName)
+                && string.Equals(leftFileName, rightFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (SlugifiedIdentifiersEqual(left, leftFileName)
+                || SlugifiedIdentifiersEqual(left, right)
+                || SlugifiedIdentifiersEqual(right, leftFileName)
+                || SlugifiedIdentifiersEqual(right, right))
+            {
+                return true;
+            }
+        }
+
+        return SlugifiedIdentifiersEqual(left, right);
+    }
+
+    private static bool SlugifiedIdentifiersEqual(string left, string right)
+    {
+        var normalizedLeft = SlugifyIdentifier(left);
+        var normalizedRight = SlugifyIdentifier(right);
+        return !string.IsNullOrWhiteSpace(normalizedLeft)
+            && string.Equals(normalizedLeft, normalizedRight, StringComparison.Ordinal);
+    }
+
+    private static string SlugifyIdentifier(string value)
+    {
+        var trimmed = TrimOrNull(value);
+        if (trimmed is null)
+        {
+            return string.Empty;
+        }
+
+        var withoutExtension = LooksLikePath(trimmed)
+            ? Path.GetFileNameWithoutExtension(trimmed)
+            : trimmed;
+
+        return new string(withoutExtension
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
+    }
+
+    private static bool IsWarmupIncomplete(JsonNode? node, bool failed, string? failedReason, int statusCode)
+    {
+        if (statusCode == 503)
+        {
+            return true;
+        }
+
+        var status = node?["status"]?.GetValue<string>();
+        if (string.Equals(status, "warmup-incomplete", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (node?["warmupIncomplete"]?.GetValue<bool?>() == true)
+        {
+            return true;
+        }
+
+        if (failed
+            && !string.IsNullOrWhiteSpace(failedReason)
+            && failedReason.Contains("warmup", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsTransientTransportFailure(Exception ex) =>
+        ex is HttpRequestException or TaskCanceledException or TimeoutException;
+
+    private static void AddIdentifier(List<string> identifiers, string? value)
+    {
+        var trimmed = TrimOrNull(value);
+        if (trimmed is null)
+        {
+            return;
+        }
+
+        if (!identifiers.Contains(trimmed, StringComparer.Ordinal))
+        {
+            identifiers.Add(trimmed);
+        }
+    }
+
+    private static bool LooksLikePath(string value) =>
+        value.Contains('/', StringComparison.Ordinal)
+        || value.Contains('\\', StringComparison.Ordinal)
+        || value.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizePath(string value) =>
+        value.Replace('\\', '/').Trim();
 
     private static string? TrimOrNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

@@ -129,6 +129,14 @@ namespace GuideAntsApi.Services.Components
             if (!string.IsNullOrEmpty(contentType))
             {
                 var lowerContentType = contentType.ToLowerInvariant();
+                // WebM is a container: mic capture is audio/webm and must not be treated as
+                // video just because the filename ends in .webm (ASR would otherwise always
+                // detour through local media extract before remote ASR).
+                if (lowerContentType.StartsWith("audio/", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
                 var supportedContentTypes = new[]
                 {
                     "video/mp4", "video/quicktime", "video/x-msvideo", "video/webm",

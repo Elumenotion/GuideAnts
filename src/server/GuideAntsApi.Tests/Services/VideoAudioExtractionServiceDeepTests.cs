@@ -25,6 +25,9 @@ public sealed class VideoAudioExtractionServiceDeepTests
         service.IsVideoFileSupported("clip.mkv", "").Should().BeTrue();
         service.IsVideoFileSupported("clip.txt", "text/plain").Should().BeFalse();
         service.IsVideoFileSupported("noext", "").Should().BeFalse();
+        service.IsVideoFileSupported("clip.webm", "video/webm").Should().BeTrue();
+        service.IsVideoFileSupported("recording.webm", "audio/webm").Should().BeFalse();
+        service.IsVideoFileSupported("recording.webm", "audio/webm;codecs=opus").Should().BeFalse();
     }
 
     [TestMethod]

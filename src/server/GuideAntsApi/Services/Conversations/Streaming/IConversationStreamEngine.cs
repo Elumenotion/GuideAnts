@@ -30,13 +30,15 @@ public interface IConversationStreamEngine
 {
     /// <summary>
     /// Runs a single streaming turn end-to-end: starts the chat run, forwards/broadcasts every event,
-    /// then in the correct order releases the conversation lock, broadcasts unlock, and emits the final
-    /// completion event. The same orchestration serves both private and published conversations; the
-    /// supplied <paramref name="lockHandle"/> is a no-op for paths that do not lock.
+    /// then persists terminal state, releases the conversation lock, unregisters the worker, and
+    /// emits the terminal event. The same orchestration serves both private and published
+    /// conversations; the supplied <paramref name="lockHandle"/> is a no-op for paths that do not lock.
     /// </summary>
+    /// <param name="context">The conversation, turn, and assistant execution context.</param>
+    /// <param name="lockHandle">The lock acquired for this turn.</param>
     /// <param name="sseCt">Cancels when the primary SSE client disconnects; does not stop the worker.</param>
     /// <param name="workerCt">Cancels the background worker (explicit Stop).</param>
-    /// <param name="onWorkerCompleted">Invoked when the background worker finishes (success, cancel, or error).</param>
+    /// <param name="onWorkerCompleted">Invoked after terminal persistence and lock release.</param>
     IAsyncEnumerable<StreamingEvent> RunStreamAsync(
         ConversationStreamRunContext context,
         IStreamLockHandle lockHandle,

@@ -147,8 +147,55 @@ public sealed class TranscribeNotebookFileMarkdownHandlerDeepTests
 
         await using var verify = new ApplicationDbContext(options);
         var shadow = await verify.NotebookFileMarkdownShadows.SingleAsync(s => s.OriginalNotebookFileId == notebookFileId);
-        shadow.Status.Should().Be(MarkdownExtractionStatus.Failed);
-        shadow.ErrorMessage.Should().Be("transcribe boom");
+        shadow.Status.Should().Be(MarkdownExtractionStatus.Pending);
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_PermanentMediaFailure_MarksFailedWithoutRetryClass()
+    {
+        using var storage = new TempStorage();
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"transcribe-deep-permanent-{Guid.NewGuid():N}");
+        var notebookFileId = await SeedAsync(options, "talk.mp3");
+        storage.WriteNotebookFile("test-project", "test-notebook", "talk.mp3", new byte[] { 1 });
+
+        var transcription = new Mock<ITranscriptionAdapter>();
+        transcription.Setup(x => x.IsAudioOrVideoSupported(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        transcription.Setup(x => x.IsFileSizeSupported(It.IsAny<long>())).Returns(true);
+        transcription.Setup(x => x.TranscribeToMarkdownAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Media extraction API failed (400): output contains no stream"));
+
+        var handler = CreateHandler(options, transcription.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
+
+        var result = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
+        (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Failed);
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_CompletedShadow_IsIdempotent()
+    {
+        using var storage = new TempStorage();
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"transcribe-deep-completed-{Guid.NewGuid():N}");
+        var notebookFileId = await SeedAsync(options, "talk.mp3");
+        storage.WriteNotebookFile("test-project", "test-notebook", "talk.mp3", new byte[] { 1 });
+
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            var shadow = await seed.NotebookFileMarkdownShadows.SingleAsync(s => s.OriginalNotebookFileId == notebookFileId);
+            shadow.Status = MarkdownExtractionStatus.Completed;
+            shadow.ContentHash = "done";
+            shadow.StoragePath = "/tmp/done.md";
+            await seed.SaveChangesAsync();
+        }
+
+        var transcription = new Mock<ITranscriptionAdapter>(MockBehavior.Strict);
+        var handler = CreateHandler(options, transcription.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
+
+        var result = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        transcription.VerifyNoOtherCalls();
     }
 
     private static async Task<Guid> SeedAsync(DbContextOptions<ApplicationDbContext> options, string relativePath)

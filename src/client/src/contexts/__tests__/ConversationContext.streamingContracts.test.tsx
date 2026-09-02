@@ -152,6 +152,17 @@ describe('ConversationContext streaming contracts', () => {
       capturedOnEvent?.({ type: 'assistant_message', data: { contentDelta: 'partial before cancel' } });
     });
 
+    vi.mocked(api.projects.notebooks.conversations.get).mockResolvedValue({
+      messages: [{
+        id: 'server-assistant',
+        role: 'assistant',
+        content: 'partial before cancel',
+        created: new Date().toISOString(),
+        isEdited: false,
+      }],
+      assistantName: 'Demo Guide',
+    } as any);
+
     await act(async () => {
       result.current.cancelStream();
     });
@@ -162,17 +173,9 @@ describe('ConversationContext streaming contracts', () => {
       'test-conversation',
       'turn-stop-1',
     );
-    expect(result.current.isCancelling).toBe(true);
-    expect(result.current.isStreaming).toBe(true);
-
-    await act(async () => {
-      capturedOnEvent?.({ type: 'cancelled', data: { status: 'cancelled' } });
-    });
-
-    await waitFor(() => {
-      expect(result.current.isStreaming).toBe(false);
-      expect(result.current.streamingError).toBeUndefined();
-    });
+    // The UI only leaves the live workflow after the server confirms cancellation.
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.isCancelling).toBe(false);
 
     const assistant = result.current.messages.find(m => m.role.toLowerCase() === 'assistant');
     expect(assistant?.content).toContain('partial before cancel');
@@ -192,8 +195,10 @@ describe('ConversationContext streaming contracts', () => {
     });
 
     expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
-    expect(result.current.isCancelling).toBe(true);
+    // Stop cannot post a request until the server has assigned the turn id, so keep the
+    // workflow visibly active while the pending cancellation waits for turn_created.
     expect(result.current.isStreaming).toBe(true);
+    expect(result.current.isCancelling).toBe(true);
 
     await act(async () => {
       capturedOnEvent?.({ type: 'turn_created', data: { turnId: 'turn-late' } });
@@ -205,5 +210,63 @@ describe('ConversationContext streaming contracts', () => {
       'test-conversation',
       'turn-late',
     );
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(false);
+      expect(result.current.isCancelling).toBe(false);
+    });
+  });
+
+  it('does not retarget a pending Stop when a newer turn is announced', async () => {
+    const { result } = renderHook(() => useConversation(), { wrapper: renderProvider() });
+    await waitFor(() => expect(result.current.isInitialized).toBe(true));
+
+    await act(async () => {
+      await result.current.sendMessage('hello');
+    });
+
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api.projects.notebooks.conversations.cancelTurn)
+        .mockRejectedValueOnce(Object.assign(new Error('busy'), { status: 409 }))
+        .mockResolvedValueOnce(undefined);
+
+      await act(async () => {
+        capturedOnEvent?.({ type: 'turn_created', data: { turnId: 'turn-stop-old' } });
+        result.current.cancelStream();
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        capturedOnEvent?.({ type: 'turn_created', data: { turnId: 'turn-newer' } });
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Without the turn-ownership guard, the stale Stop response would clear only cancelling
+    // while leaving the newer stream marked active. A confirmed old-turn Stop must finish the
+    // original workflow instead.
+    expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledTimes(2);
+    expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenNthCalledWith(
+      1,
+      'test-project',
+      'test-notebook',
+      'test-conversation',
+      'turn-stop-old',
+    );
+    expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenNthCalledWith(
+      2,
+      'test-project',
+      'test-notebook',
+      'test-conversation',
+      'turn-stop-old',
+    );
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.isCancelling).toBe(false);
   });
 });

@@ -249,4 +249,24 @@ describe('useNotebookFilesPolling', () => {
       await Promise.resolve();
     });
   });
+
+  it('shares one poller across multiple hook instances for the same notebook', async () => {
+    vi.useFakeTimers();
+
+    renderHook(() => useNotebookFilesPolling({ projectId, notebookId, pollInterval: 1000 }));
+    renderHook(() => useNotebookFilesPolling({ projectId, notebookId, pollInterval: 1000 }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(api.projects.notebooks.getNotebookFolderTree).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+
+    expect(api.projects.notebooks.getNotebookFolderTree).toHaveBeenCalledTimes(2);
+  });
 });

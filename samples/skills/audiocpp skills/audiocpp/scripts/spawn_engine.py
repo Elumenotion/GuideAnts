@@ -4,7 +4,7 @@
 Writes an engine config mirroring what the GuideAnts wrapper services generate,
 launches the container's audiocpp_server binary detached on a private port, and
 tracks it via a state dir in the workspace so later script calls can poll or stop
-it. When AUDIOCPP_SKILL_BASE_URL is set, lifecycle is delegated to the Max skill
+it. When AUDIOCPP_SKILL_BASE_URL is set, lifecycle is delegated to the GPU host skill
 gateway. Stdlib-only.
 
 Subcommands:

@@ -6,7 +6,7 @@ Answers, with evidence, which escalation routes are open in this deployment:
   route2: sideload a bare ASR model dir through the ASR wrapper
   route3: spawn a private audiocpp_server for a non-catalog model
   route4: the user's host-native audiocpp_server
-  route5: remote Max skill gateway (AUDIOCPP_SKILL_BASE_URL) for PC sandboxes
+  route5: remote GPU host skill gateway (AUDIOCPP_SKILL_BASE_URL) for PC sandboxes
 plus scenario checks (e.g. sortformer diarization) that ride on those routes.
 
 Stdlib-only. Prints one JSON report to stdout.
@@ -260,7 +260,7 @@ def main() -> None:
         },
         "route5_remote_skill_gateway": {
             "open": bool(report["skillGateway"].get("open")),
-            "note": "PC sandbox -> Max /audiocpp-skill with AUDIOCPP_SKILL_BASE_URL + AUDIOCPP_SKILL_TOKEN",
+            "note": "PC sandbox -> GPU host /audiocpp-skill with AUDIOCPP_SKILL_BASE_URL + AUDIOCPP_SKILL_TOKEN",
             "evidence": report["skillGateway"],
         },
     }
@@ -286,7 +286,7 @@ def main() -> None:
             )
         ),
         "note": "Route 5 or Route 3 with qwen3_forced_aligner / align + product ASR; "
-        "Max ROCm: spawn --backend rocm; timings via /v1/tasks/run not /v1/audio/transcriptions",
+        "ROCm hosts: spawn --backend rocm; timings via /v1/tasks/run not /v1/audio/transcriptions",
     }
     print(json.dumps(report, indent=2))
 

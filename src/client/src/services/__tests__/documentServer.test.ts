@@ -86,6 +86,12 @@ describe('documentServer preview exclusions', () => {
     expect(looksLikeDocumentServerFile('page.htm', 'text/html')).toBe(false);
   });
 
+  it('does not route plain text (.txt) to DocumentServer', () => {
+    expect(looksLikeDocumentServerFile('notes.txt', 'text/plain')).toBe(false);
+    expect(isDocumentServerSupportedByExtension('notes.txt', enabledCapabilities)).toBe(false);
+    expect(isDocumentServerSupportedByContentType('text/plain', enabledCapabilities)).toBe(false);
+  });
+
   it('returns false when capabilities are disabled or missing', () => {
     expect(isDocumentServerSupportedByExtension('sample.docx', { ...enabledCapabilities, enabled: false })).toBe(false);
     expect(isDocumentServerSupportedByExtension('sample.docx', null)).toBe(false);

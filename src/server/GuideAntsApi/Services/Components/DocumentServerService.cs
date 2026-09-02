@@ -17,7 +17,7 @@ public sealed class DocumentServerService : IDocumentServerService
     {
         "csv", "doc", "docm", "docx", "dot", "dotm", "dotx", "epub", "fb2", "htm", "html",
         "odp", "ods", "odt", "pdf", "pot", "potm", "potx", "pps", "ppsm", "ppsx", "ppt",
-        "pptm", "pptx", "rtf", "txt", "xls", "xlsb", "xlsm", "xlsx", "xlt", "xltm", "xltx"
+        "pptm", "pptx", "rtf", "xls", "xlsb", "xlsm", "xlsx", "xlt", "xltm", "xltx"
     };
 
     private static readonly IReadOnlyCollection<string> SupportedMimeTypes = new[]
@@ -35,8 +35,7 @@ public sealed class DocumentServerService : IDocumentServerService
         "application/vnd.oasis.opendocument.spreadsheet",
         "application/vnd.oasis.opendocument.text",
         "text/csv",
-        "text/html",
-        "text/plain"
+        "text/html"
     };
 
     private readonly ApplicationDbContext _dbContext;
@@ -352,6 +351,12 @@ public sealed class DocumentServerService : IDocumentServerService
             LogValueSanitizer.Sanitize(callbackContext.FileId));
             return;
         }
+
+        // Defense-in-depth: re-check that the target file type is still a supported
+        // DocumentServer type before persisting the edited document. Protects against a
+        // stale client or a misconfigured DocumentServer posting a save for a type that is
+        // no longer routed here (e.g. txt, which the remote editor is known to truncate).
+        await EnsureCallbackFileStillSupportedAsync(callbackContext, cancellationToken);
 
         _logger.LogInformation(
             "DocumentServer callback save received. status={Status} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
@@ -677,6 +682,69 @@ public sealed class DocumentServerService : IDocumentServerService
         return rewrittenUrl;
     }
 
+    private async Task EnsureCallbackFileStillSupportedAsync(RequestContext context, CancellationToken cancellationToken)
+    {
+        string fileName;
+        string contentType;
+
+        if (context.Scope.Equals("project", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!context.FileId.HasValue)
+            {
+                throw new InvalidOperationException("Project callback is missing file identity.");
+            }
+
+            var file = await _contentFileService.GetAsync(context.ProjectId, context.FileId.Value);
+            if (file == null)
+            {
+                throw new InvalidOperationException("Project file not found for callback.");
+            }
+
+            fileName = file.FileName;
+            contentType = file.ContentType;
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(context.RelativePath))
+            {
+                if (!context.FileId.HasValue || !context.NotebookId.HasValue)
+                {
+                    throw new InvalidOperationException("Notebook callback is missing file identity.");
+                }
+
+                var notebookFile = await _dbContext.NotebookFiles
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        nf => nf.Id == context.FileId.Value && nf.NotebookId == context.NotebookId.Value,
+                        cancellationToken);
+                if (notebookFile == null)
+                {
+                    throw new InvalidOperationException("Notebook file not found for callback.");
+                }
+
+                fileName = Path.GetFileName(notebookFile.RelativePath.Replace('\\', '/'));
+            }
+            else
+            {
+                fileName = Path.GetFileName(context.RelativePath.Replace('\\', '/').TrimStart('/'));
+            }
+
+            contentType = InferContentType(fileName);
+        }
+
+        if (!IsSupported(fileName, contentType))
+        {
+            _logger.LogWarning(
+                "DocumentServer callback rejected because the file type is not supported. scope={Scope} projectId={ProjectId} fileId={FileId} fileName={FileName} contentType={ContentType}",
+                LogValueSanitizer.Sanitize(context.Scope),
+                LogValueSanitizer.Sanitize(context.ProjectId),
+                LogValueSanitizer.Sanitize(context.FileId),
+                LogValueSanitizer.Sanitize(fileName),
+                LogValueSanitizer.Sanitize(contentType));
+            throw new InvalidOperationException($"File type is not supported: {fileName}");
+        }
+    }
+
     private string InferContentType(string fileName)
     {
         var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
@@ -693,7 +761,6 @@ public sealed class DocumentServerService : IDocumentServerService
             "ppt" => "application/vnd.ms-powerpoint",
             "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             "rtf" => "application/rtf",
-            "txt" => "text/plain",
             "xls" => "application/vnd.ms-excel",
             "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             _ => "application/octet-stream"

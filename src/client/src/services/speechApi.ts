@@ -38,7 +38,7 @@ export async function transcribeAudio(params: TranscribeAudioParams): Promise<Tr
     let errorMessage = 'Transcription failed';
     try {
       const errorData = await response.json();
-      errorMessage = errorData.error || errorData.message || errorMessage;
+      errorMessage = errorData.message || errorData.error || errorMessage;
     } catch {
       // Use default message if JSON parsing fails
     }

@@ -22,7 +22,20 @@ public sealed record StreamStreamingStartedInfo(
 
 public interface IStreamLockHandle
 {
+    Guid LeaseId { get; }
+
     bool ConversationLockEventSent { get; }
+
+    /// <summary>
+    /// Begin TTL renewal. Must not run during pre-stream setup; renewal while setup is hung
+    /// keeps the conversation lock forever and makes Stop ineffective.
+    /// </summary>
+    void BeginStreamingRenewal();
+
+    /// <summary>
+    /// Reserved for explicit lease fencing. Slow or failed lock renewal does not cancel this token.
+    /// </summary>
+    CancellationToken LeaseLostToken { get; }
 
     Task<bool> ReleaseAsync(CancellationToken ct);
 }
@@ -63,11 +76,12 @@ public interface IConversationStreamPolicy
 
     Task OnUnlockAsync(Guid conversationId, CancellationToken ct);
 
-    Task OnCompleteAsync(Guid conversationId, CancellationToken ct);
+    Task OnCompleteAsync(Guid conversationId, Guid turnId, CancellationToken ct);
 
     Task BroadcastStreamingProgressAsync(
         Guid conversationId,
         StreamUserIdentity user,
+        Guid turnId,
         int contentLength,
         int tokensProcessed,
         CancellationToken ct);

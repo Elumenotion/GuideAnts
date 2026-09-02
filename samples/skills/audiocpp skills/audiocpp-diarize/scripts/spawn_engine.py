@@ -4,7 +4,7 @@
 Writes an engine config mirroring what the GuideAnts wrapper services generate,
 launches the container's audiocpp_server binary detached on a private port, and
 tracks it via a state dir in the workspace so later script calls can poll or stop
-it. When AUDIOCPP_SKILL_BASE_URL is set, lifecycle is delegated to the Max skill
+it. When AUDIOCPP_SKILL_BASE_URL is set, lifecycle is delegated to the GPU host skill
 gateway. Stdlib-only.
 
 Subcommands:
@@ -342,7 +342,7 @@ def main() -> None:
         default=os.environ.get("GA_ASR_BACKEND")
         or os.environ.get("GA_TTS_BACKEND")
         or "cuda",
-        help="Engine backend (Max ROCm stacks: rocm). Defaults to GA_ASR_BACKEND/GA_TTS_BACKEND or cuda.",
+        help="Engine backend (ROCm hosts stacks: rocm). Defaults to GA_ASR_BACKEND/GA_TTS_BACKEND or cuda.",
     )
     p_start.add_argument("--device", type=int, default=0)
     p_start.add_argument("--threads", type=int, default=max(1, (os.cpu_count() or 2) // 2))

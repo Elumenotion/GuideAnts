@@ -153,14 +153,25 @@ public class BackgroundJobProcessor : BackgroundService
             // Check if we can process more jobs of this type
             while (limit.CurrentCount > 0 && !ct.IsCancellationRequested)
             {
-                if (!await limit.WaitAsync(0, ct)) // Non-blocking check
+                if (!await limit.WaitAsync(0, ct))
                     break;
 
-                // Launch job processing on background thread
-                var task = ProcessSingleJobAsync(jobType, jobOptions, limit, ct);
+                JobQueue? claimedJob;
+                using (var claimScope = _serviceProvider.CreateScope())
+                {
+                    var jobQueueService = claimScope.ServiceProvider.GetRequiredService<IJobQueueService>();
+                    claimedJob = await jobQueueService.TryClaimAsync(jobType, jobOptions.LeaseSeconds, ct);
+                }
+
+                if (claimedJob == null)
+                {
+                    limit.Release();
+                    break;
+                }
+
+                var task = ProcessClaimedJobAsync(claimedJob, jobType, jobOptions, limit, ct);
                 tasks.Add(task);
 
-                // Don't create too many tasks at once
                 if (tasks.Count >= 10) break;
             }
         }
@@ -211,20 +222,12 @@ public class BackgroundJobProcessor : BackgroundService
             "Deferring extraction/indexing job claims while chat and embeddings use local AI and at least one conversation lock is active");
     }
 
-    private async Task ProcessSingleJobAsync(string jobType, JobTypeOptions jobOptions, SemaphoreSlim limit, CancellationToken ct)
+    private async Task ProcessClaimedJobAsync(JobQueue claimedJob, string jobType, JobTypeOptions jobOptions, SemaphoreSlim limit, CancellationToken ct)
     {
-        JobQueue? claimedJob = null;
         try
         {
             using var scope = _serviceProvider.CreateScope();
             var jobQueueService = scope.ServiceProvider.GetRequiredService<IJobQueueService>();
-
-            // Try to claim a job
-            claimedJob = await jobQueueService.TryClaimAsync(jobType, jobOptions.LeaseSeconds, ct);
-            if (claimedJob == null)
-            {
-                return; // No jobs available
-            }
 
             _activeExecutionRegistry.MarkActive(claimedJob.Id, claimedJob.ClaimToken);
             _logger.LogDebug("Processing job {JobId} of type {JobType}", claimedJob.Id, claimedJob.JobType);
@@ -257,6 +260,14 @@ public class BackgroundJobProcessor : BackgroundService
             try
             {
                 result = await handler.HandleAsync(claimedJob.PayloadJson, processingCts.Token);
+            }
+            catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
+            {
+                _logger.LogInformation(
+                    "Job handler cancelled during shutdown for job {JobId} of type {JobType}",
+                    claimedJob.Id,
+                    claimedJob.JobType);
+                result = JobExecutionResult.ShutdownCancellation(ex.Message);
             }
             catch (Exception ex)
             {
@@ -328,12 +339,8 @@ public class BackgroundJobProcessor : BackgroundService
         }
         finally
         {
-            if (claimedJob != null)
-            {
-                _activeExecutionRegistry.MarkInactive(claimedJob.Id, claimedJob.ClaimToken);
-            }
-
-            limit.Release(); // Always release the semaphore
+            _activeExecutionRegistry.MarkInactive(claimedJob.Id, claimedJob.ClaimToken);
+            limit.Release();
         }
     }
 

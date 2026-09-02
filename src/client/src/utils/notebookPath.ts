@@ -15,6 +15,38 @@ export function normalizeNotebookRelativePath(path: string): string {
     .replace(/\/{2,}/g, '/');
 }
 
+/**
+ * Collapse leading `../` segments used by CWD-relative turn paths
+ * (private notebooks CWD = Output/, so `../file.rttm` means notebook-root `file.rttm`).
+ */
+export function resolveCwdRelativeNotebookPath(path: string, cwdBase = 'Output'): string {
+  const normalized = normalizeNotebookRelativePath(path);
+  if (!normalized) {
+    return '';
+  }
+
+  const baseParts = cwdBase
+    .split('/')
+    .map(part => part.trim())
+    .filter(Boolean);
+  const resolved: string[] = [...baseParts];
+
+  for (const segment of normalized.split('/')) {
+    if (!segment || segment === '.') {
+      continue;
+    }
+    if (segment === '..') {
+      if (resolved.length > 0) {
+        resolved.pop();
+      }
+      continue;
+    }
+    resolved.push(segment);
+  }
+
+  return resolved.join('/');
+}
+
 export function getNotebookPathCandidates(path: string): string[] {
   const normalized = normalizeNotebookRelativePath(path);
   if (!normalized) {
@@ -24,11 +56,23 @@ export function getNotebookPathCandidates(path: string): string[] {
   const candidates = new Set<string>();
   candidates.add(normalized);
 
+  // Turn pills often use CWD-relative paths including `../` for notebook-root writes.
+  if (normalized.startsWith('../') || normalized.includes('/../')) {
+    const fromOutput = resolveCwdRelativeNotebookPath(normalized, 'Output');
+    if (fromOutput) {
+      candidates.add(fromOutput);
+    }
+    const fromRuns = resolveCwdRelativeNotebookPath(normalized, 'Runs');
+    if (fromRuns) {
+      candidates.add(fromRuns);
+    }
+  }
+
   const outputMatch = normalized.match(/^output\/(.+)$/i);
   if (outputMatch) {
     candidates.add(outputMatch[1]);
     candidates.add(`Output/${outputMatch[1]}`);
-  } else {
+  } else if (!normalized.startsWith('../')) {
     candidates.add(`Output/${normalized}`);
   }
 

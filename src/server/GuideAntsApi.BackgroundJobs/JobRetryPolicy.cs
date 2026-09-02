@@ -36,6 +36,17 @@ public sealed class JobRetryPolicy
         return _options.MaxRetryDelayMinutes;
     }
 
+    public static bool IsRetryableFailureClass(JobFailureClass failureClass) =>
+        failureClass is JobFailureClass.RetryableTransient
+            or JobFailureClass.DependencyNotReady
+            or JobFailureClass.LeaseOwnershipLost;
+
+    public static bool BurnsAttemptBudget(JobFailureClass failureClass) =>
+        failureClass is JobFailureClass.RetryableTransient
+            or JobFailureClass.DependencyNotReady
+            or JobFailureClass.PermanentMissingInput
+            or JobFailureClass.PermanentInvalidInput;
+
     public bool CanRetry(
         JobFailureClass failureClass,
         int attemptsAfterFailure,
@@ -44,7 +55,7 @@ public sealed class JobRetryPolicy
         DateTime nowUtc,
         TimeSpan nextDelay)
     {
-        if (failureClass != JobFailureClass.RetryableTransient)
+        if (!IsRetryableFailureClass(failureClass))
         {
             return false;
         }

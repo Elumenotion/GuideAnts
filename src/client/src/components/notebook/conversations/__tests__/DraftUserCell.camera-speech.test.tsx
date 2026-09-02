@@ -1,9 +1,13 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import DraftUserCell from '../DraftUserCell';
+import { ToastProvider } from '../../../common/Toast';
+
+const render = (ui: React.ReactElement) =>
+  rtlRender(ui, { wrapper: ToastProvider });
 
 const mockAddPendingAttachment = vi.fn();
 
@@ -88,6 +92,23 @@ describe('DraftUserCell – camera & speech', () => {
         expect.objectContaining({ notebookFileId: 'cam-1', uploadType: 'image' })
       );
     });
+  });
+
+  it('shows an error toast when camera capture upload fails', async () => {
+    const user = userEvent.setup();
+    const { notebookFilesApi } = await import('../../../../services/notebookFiles');
+    vi.mocked(notebookFilesApi.uploadFiles).mockRejectedValueOnce(new Error('camera upload unavailable'));
+
+    render(<DraftUserCell value="" onChange={vi.fn()} onSend={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Take photo' }));
+    await user.click(screen.getByRole('button', { name: 'Capture' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Upload failed')).toBeInTheDocument();
+      expect(screen.getByText('camera upload unavailable')).toBeInTheDocument();
+    });
+    expect(mockAddPendingAttachment).not.toHaveBeenCalled();
   });
 
   it('renders voice input control when speech is supported', () => {

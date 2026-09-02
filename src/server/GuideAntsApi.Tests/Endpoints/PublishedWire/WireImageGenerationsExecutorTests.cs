@@ -129,7 +129,8 @@ public sealed class WireImageGenerationsExecutorTests
                 It.IsAny<string>(),
                 It.IsAny<int>(),
                 It.IsAny<string>(),
-                It.IsAny<InvocationContext>()),
+                It.IsAny<InvocationContext>(),
+                It.IsAny<CancellationToken>()),
             Times.Never);
     }
 }

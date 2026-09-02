@@ -1,18 +1,18 @@
-# Raw audiocpp_server engine API (via Max LAN gateway)
+# Raw audiocpp_server engine API (via GPU host LAN gateway)
 
 Ground truth: GuideAnts `docker/build/guideants-ai/audiocpp-skill-gateway/skill_gateway.py`
 and audio.cpp `app/server`. This is the **full** engine surface — not a curated subset.
 
-## PC sandbox → Max raw gateway
+## PC sandbox → GPU host raw gateway
 
 ```text
-AUDIOCPP_SKILL_BASE_URL=http://<max-lan-ip>:8112/audiocpp-skill
-AUDIOCPP_SKILL_TOKEN=<same as Max GA_AUDIOCPP_SKILL_TOKEN>
+AUDIOCPP_SKILL_BASE_URL=http://<gpu-host-lan-ip>:8112/audiocpp-skill
+AUDIOCPP_SKILL_TOKEN=<same as the GPU host GA_AUDIOCPP_SKILL_TOKEN>
 ```
 
 The gateway is a **transparent reverse proxy** to `audiocpp_server`:
 
-| Client path | Upstream (inside Max AI container) |
+| Client path | Upstream (inside GPU host AI container) |
 |---|---|
 | `{BASE}/asr/{any}` | `127.0.0.1:18082/{any}` — wrapper ASR engine |
 | `{BASE}/tts/{any}` | `127.0.0.1:18084/{any}` — wrapper TTS engine |
@@ -24,8 +24,9 @@ Gateway-owned helpers (engines cannot do these over LAN alone):
 
 | Path | Purpose |
 |---|---|
-| `GET /health` | Gateway + upstream probe |
-| `POST /files` | Multipart upload → Max-local absolute `path` for path-based JSON fields |
+| `GET /health` | Gateway liveness (wrappers HTTP + engines TCP). Does **not** wait on busy engines. |
+| `GET /ready` | Deep parallel probes; `state=busy` means listening but inference stalled HTTP health |
+| `POST /files` | Multipart upload → host-local absolute `path` for path-based JSON fields |
 | `POST /admin/models/fetch` | HF download into `/models-local/skill/…` |
 | `POST /admin/private/start` | Spawn private `audiocpp_server` |
 | `GET /admin/private/status` | Private engine status |
@@ -35,11 +36,11 @@ Skill scripts (`engine_tool.py`, `fetch_model.py`, `spawn_engine.py`, `diarize.p
 use this automatically when `AUDIOCPP_SKILL_BASE_URL` is set.
 
 Do **not** curl `127.0.0.1:18082/18084/18099` from a PC sandbox — those exist only
-inside the Max AI container. Use `{BASE}/asr|tts|private/...` instead.
+inside the GPU host AI container. Use `{BASE}/asr|tts|private/...` instead.
 
 ## Full engine endpoints (proxied as-is)
 
-Whatever your Max `audiocpp_server` build exposes is available under the matching
+Whatever your GPU host `audiocpp_server` build exposes is available under the matching
 prefix. Typical surface:
 
 ### `GET /health`
@@ -52,7 +53,7 @@ Liveness when models are loaded (`lazy_load: false`).
   "model": "<engine model id — required>",
   "input": "<text — required>",
   "voice": "<builtin or preset id>",
-  "voice_ref": "<absolute path on Max>",
+  "voice_ref": "<absolute path on the GPU host>",
   "reference_text": "<optional>",
   "language": "<family-specific>",
   "instructions": "<vdes-task only>",
@@ -66,7 +67,7 @@ Remote clients: `POST /files` first, put returned `path` in `voice_ref`, then
 ### `POST /v1/audio/transcriptions`
 
 ```json
-{ "model": "qwen3-asr", "audio": "<absolute path on Max>", "language": "en" }
+{ "model": "qwen3-asr", "audio": "<absolute path on the GPU host>", "language": "en" }
 ```
 
 Remote: stage with `/files`, then `POST /asr/v1/audio/transcriptions`.
@@ -81,11 +82,11 @@ Generic tasks (diarization, VAD). Same path-based audio field. Remote: stage the
 ### `GET /v1/models` (when the build exposes it)
 ### Any other engine path your binary implements
 
-Example: `GET http://max:8112/audiocpp-skill/tts/v1/models` with the skill token.
+Example: `GET http://<gpu-host>:8112/audiocpp-skill/tts/v1/models` with the skill token.
 
 ## Private engine (`spawn_engine.py` / `/admin/private/*`)
 
-Written on Max; mirrors wrapper `build_server_config_json`. After start, call the
+Written on the GPU host; mirrors wrapper `build_server_config_json`. After start, call the
 engine through `{BASE}/private/...` — not a sandbox loopback URL.
 
 ## Product path (unchanged)

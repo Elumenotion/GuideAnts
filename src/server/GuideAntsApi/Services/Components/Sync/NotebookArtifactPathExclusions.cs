@@ -23,6 +23,8 @@ public static class NotebookArtifactPathExclusions
         // Skill/runtime working state under the notebook CWD (not user content).
         ".audiocpp-extended",
         ".wire-attachments",
+        // Local model / timestamp weight caches dropped under Output/ by some skills.
+        "models-timestamps",
     };
 
     public static bool IsExcludedDirectorySegment(string directoryName) =>

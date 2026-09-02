@@ -23,8 +23,10 @@ namespace GuideAntsApi.Services
             int n,
             string outputFormat,
             string? modelId,
-            string? requestPresetJson)
+            string? requestPresetJson,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var token = _configuration["HuggingFace:Token"];
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -43,7 +45,7 @@ namespace GuideAntsApi.Services
                     providerSection: HuggingFaceProviderSection);
             }
             var (width, height) = ParseImageSize(size);
-            var routes = await ResolveHuggingFaceProvidersAsync(textToImageModelId, "text-to-image", token);
+            var routes = await ResolveHuggingFaceProvidersAsync(textToImageModelId, "text-to-image", token, cancellationToken);
             using var client = _httpClientFactory.CreateClient();
 
             string? lastError = null;
@@ -61,8 +63,8 @@ namespace GuideAntsApi.Services
                 foreach (var (key, value) in extraHeaders)
                     request.Headers.TryAddWithoutValidation(key, value);
 
-                using var response = await client.SendAsync(request);
-                var responseBody = await response.Content.ReadAsStringAsync();
+                using var response = await client.SendAsync(request, cancellationToken);
+                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
                     lastError = $"{(int)response.StatusCode} {responseBody}";
@@ -70,7 +72,13 @@ namespace GuideAntsApi.Services
                     continue;
                 }
 
-                return await ReadHuggingFaceImageResultAsync(client, token, route.Provider, responseBody, endpoint);
+                return await ReadHuggingFaceImageResultAsync(
+                    client,
+                    token,
+                    route.Provider,
+                    responseBody,
+                    endpoint,
+                    cancellationToken);
             }
 
             throw new InvalidOperationException(
@@ -86,8 +94,10 @@ namespace GuideAntsApi.Services
             string? imageContentType,
             string? imageFileName,
             string? modelId,
-            string? requestPresetJson)
+            string? requestPresetJson,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var token = _configuration["HuggingFace:Token"];
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -110,7 +120,7 @@ namespace GuideAntsApi.Services
                 imageBytes,
                 string.IsNullOrWhiteSpace(imageContentType) ? "application/octet-stream" : imageContentType);
             var (width, height) = ParseImageSize(size);
-            var routes = await ResolveHuggingFaceProvidersAsync(imageToImageModelId, "image-to-image", token);
+            var routes = await ResolveHuggingFaceProvidersAsync(imageToImageModelId, "image-to-image", token, cancellationToken);
             using var client = _httpClientFactory.CreateClient();
 
             var imageDataUrl = $"data:{(string.IsNullOrWhiteSpace(imageContentType) ? "image/png" : imageContentType)};base64,{Convert.ToBase64String(resizedImageBytes)}";
@@ -130,8 +140,8 @@ namespace GuideAntsApi.Services
                 foreach (var (key, value) in extraHeaders)
                     request.Headers.TryAddWithoutValidation(key, value);
 
-                using var response = await client.SendAsync(request);
-                var responseBody = await response.Content.ReadAsStringAsync();
+                using var response = await client.SendAsync(request, cancellationToken);
+                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
                     lastError = $"{(int)response.StatusCode} {responseBody}";
@@ -139,21 +149,32 @@ namespace GuideAntsApi.Services
                     continue;
                 }
 
-                return await ReadHuggingFaceImageResultAsync(client, token, route.Provider, responseBody, endpoint);
+                return await ReadHuggingFaceImageResultAsync(
+                    client,
+                    token,
+                    route.Provider,
+                    responseBody,
+                    endpoint,
+                    cancellationToken);
             }
 
             throw new InvalidOperationException(
                 $"Hugging Face image edit failed: {(lastError ?? "No compatible live provider route was found.")}");
         }
 
-        private async Task<List<HfProviderRoute>> ResolveHuggingFaceProvidersAsync(string modelId, string task, string token)
+        private async Task<List<HfProviderRoute>> ResolveHuggingFaceProvidersAsync(
+            string modelId,
+            string task,
+            string token,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var client = _httpClientFactory.CreateClient();
             var url = $"https://huggingface.co/api/models/{modelId}?expand[]=inferenceProviderMapping";
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            using var resp = await client.SendAsync(req);
-            var body = await resp.Content.ReadAsStringAsync();
+            using var resp = await client.SendAsync(req, cancellationToken);
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
             if (!resp.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(
@@ -276,8 +297,14 @@ namespace GuideAntsApi.Services
         }
 
         private async Task<byte[]?> ReadHuggingFaceImageResultAsync(
-            HttpClient client, string token, string provider, string responseBody, string originalEndpoint)
+            HttpClient client,
+            string token,
+            string provider,
+            string responseBody,
+            string originalEndpoint,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var prov = provider.ToLowerInvariant();
 
             if (prov == "replicate")
@@ -292,7 +319,7 @@ namespace GuideAntsApi.Services
                             : null;
                     if (!string.IsNullOrWhiteSpace(imageUrl))
                     {
-                        return await DownloadImageBytesAsync(client, imageUrl);
+                        return await DownloadImageBytesAsync(client, imageUrl, cancellationToken);
                     }
                 }
                 throw new InvalidOperationException($"Replicate returned unexpected response: {responseBody}");
@@ -318,11 +345,11 @@ namespace GuideAntsApi.Services
 
                 for (var attempt = 0; attempt < 240; attempt++)
                 {
-                    await Task.Delay(500);
+                    await Task.Delay(500, cancellationToken);
                     using var pollReq = new HttpRequestMessage(HttpMethod.Get, pollUrl);
                     pollReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                    using var pollResp = await client.SendAsync(pollReq);
-                    var pollBody = await pollResp.Content.ReadAsStringAsync();
+                    using var pollResp = await client.SendAsync(pollReq, cancellationToken);
+                    var pollBody = await pollResp.Content.ReadAsStringAsync(cancellationToken);
                     if (!pollResp.IsSuccessStatusCode)
                     {
                         // fal-ai returns 400 {"detail":"Request is still in progress"} while processing
@@ -343,7 +370,7 @@ namespace GuideAntsApi.Services
                         var imageUrl = urlEl.GetString();
                         if (!string.IsNullOrWhiteSpace(imageUrl))
                         {
-                            return await DownloadImageBytesAsync(client, imageUrl);
+                            return await DownloadImageBytesAsync(client, imageUrl, cancellationToken);
                         }
                     }
 
@@ -379,11 +406,11 @@ namespace GuideAntsApi.Services
 
                 for (var attempt = 0; attempt < 240; attempt++)
                 {
-                    await Task.Delay(500);
+                    await Task.Delay(500, cancellationToken);
                     using var pollReq = new HttpRequestMessage(HttpMethod.Get, pollUrl);
                     pollReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                    using var pollResp = await client.SendAsync(pollReq);
-                    var pollBody = await pollResp.Content.ReadAsStringAsync();
+                    using var pollResp = await client.SendAsync(pollReq, cancellationToken);
+                    var pollBody = await pollResp.Content.ReadAsStringAsync(cancellationToken);
                     if (!pollResp.IsSuccessStatusCode)
                     {
                         throw new InvalidOperationException($"wavespeed poll failed: {(int)pollResp.StatusCode} {pollBody}");
@@ -403,7 +430,7 @@ namespace GuideAntsApi.Services
                                 var imageUrl = outputs[0].GetString();
                                 if (!string.IsNullOrWhiteSpace(imageUrl))
                                 {
-                                    return await DownloadImageBytesAsync(client, imageUrl);
+                                    return await DownloadImageBytesAsync(client, imageUrl, cancellationToken);
                                 }
                             }
                             throw new InvalidOperationException($"wavespeed completed but no outputs: {pollBody}");
@@ -424,15 +451,18 @@ namespace GuideAntsApi.Services
             throw new InvalidOperationException($"Unsupported HuggingFace provider '{provider}' response: {responseBody[..Math.Min(200, responseBody.Length)]}");
         }
 
-        private async Task<byte[]> DownloadImageBytesAsync(HttpClient client, string imageUrl)
+        private async Task<byte[]> DownloadImageBytesAsync(
+            HttpClient client,
+            string imageUrl,
+            CancellationToken cancellationToken)
         {
-            using var imageResp = await client.GetAsync(imageUrl);
+            using var imageResp = await client.GetAsync(imageUrl, cancellationToken);
             if (!imageResp.IsSuccessStatusCode)
             {
-                var err = await imageResp.Content.ReadAsStringAsync();
+                var err = await imageResp.Content.ReadAsStringAsync(cancellationToken);
                 throw new InvalidOperationException($"Failed to download image: {(int)imageResp.StatusCode} {err}");
             }
-            return await imageResp.Content.ReadAsByteArrayAsync();
+            return await imageResp.Content.ReadAsByteArrayAsync(cancellationToken);
         }
     }
 }

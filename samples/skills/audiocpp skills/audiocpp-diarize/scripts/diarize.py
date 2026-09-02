@@ -15,7 +15,7 @@ Pipeline:
   3. merge    sort, drop micro-turns, merge same-speaker turns across small gaps
   4. label    (unless --turns-only) slice each turn with the wave module and
               transcribe it via the ASR engine's path-based /v1/audio/transcriptions
-  5. write    <out-base>.diarization.json + <out-base>.transcript.txt in Output/
+  5. write    <out-base>.diarization.json + <out-base>.transcript.txt (CWD-relative)
 """
 import argparse
 import json
@@ -34,6 +34,7 @@ from skill_gateway_client import (
     fail_http,
     gateway_engine_prefix,
     gateway_request,
+    normalize_sandbox_relative_path,
     stage_file,
     using_skill_gateway,
 )
@@ -448,16 +449,43 @@ def slice_wav(source: wave.Wave_read, start: float, end: float, dest_path: str) 
         out.writeframes(frames)
 
 
+
+def gateway_product_engine_ready(health_body: dict, kind: str) -> bool:
+    """True when GPU host product ASR/TTS is available. Busy/listening != down."""
+    engines = health_body.get("engines") or {}
+    wrappers = health_body.get("wrappers") or {}
+    upstream = health_body.get("upstream") or {}
+    eng = engines.get(kind) or upstream.get(f"{kind}Engine") or {}
+    state = str(eng.get("state") or "").strip().lower()
+    if state in {"listening", "up", "busy"} or eng.get("listening") is True:
+        wrap = wrappers.get(kind) or {}
+        body = wrap.get("body") if isinstance(wrap.get("body"), dict) else {}
+        if body:
+            return bool(body.get("loaded") or body.get("busy") or body.get("loading"))
+        return True
+    if eng.get("status") == 200:
+        return True
+    wrap = wrappers.get(kind) or {}
+    body = wrap.get("body") if isinstance(wrap.get("body"), dict) else {}
+    return bool(body.get("loaded") or body.get("busy") or body.get("loading"))
+
+
 def transcribe_turns(turns: list[dict], prepped: str, args: argparse.Namespace) -> dict:
     """Label turns in place; returns a status dict for the report."""
     asr_url = args.asr_engine_url.rstrip("/")
     if using_skill_gateway():
         try:
             health = json.loads(gateway_request("/health", timeout=10).decode("utf-8"))
-            engines = health.get("engines") or {}
-            asr_ok = (engines.get("asr") or {}).get("status") == 200
+            asr_ok = gateway_product_engine_ready(health, "asr")
             if not asr_ok:
-                asr_ok = ((health.get("upstream") or {}).get("asrEngine") or {}).get("status") == 200
+                # Deep probe: busy engines may look down on legacy checks.
+                ready = json.loads(gateway_request("/ready", timeout=5).decode("utf-8"))
+                probes = ready.get("probes") or {}
+                for key in ("engineAsr", "wrapperAsr"):
+                    state = str((probes.get(key) or {}).get("state") or "").lower()
+                    if state in {"up", "busy"}:
+                        asr_ok = True
+                        break
         except Exception as exc:
             return {"labeled": False, "reason": f"skill gateway unreachable ({exc})"}
         if not asr_ok:
@@ -548,7 +576,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Diarize an audio file via a sortformer_diar engine")
     parser.add_argument("audio_file", help="Input audio (any ffmpeg-decodable format)")
     parser.add_argument("-o", "--output-base", default=None,
-                        help="Output path base (default Output/<input stem>); "
+                        help="Output path base (default <input stem>, CWD-relative); "
                              "writes <base>.diarization.json and <base>.transcript.txt")
     parser.add_argument("--engine-url", default=DIAR_ENGINE_DEFAULT, help="Engine serving the diar model")
     parser.add_argument("--model", default=None, help="Diar engine model id (auto-detected when the engine serves exactly one)")
@@ -582,7 +610,7 @@ def main() -> None:
     if args.overlap_seconds < 0 or args.overlap_seconds >= args.window_seconds:
         fail("--overlap-seconds must be in [0, window)")
     stem = os.path.splitext(os.path.basename(args.audio_file))[0]
-    out_base = args.output_base or os.path.join("Output", stem)
+    out_base = normalize_sandbox_relative_path(args.output_base or stem)
     os.makedirs(STATE_DIR, exist_ok=True)
 
     engine_url = args.engine_url.rstrip("/")

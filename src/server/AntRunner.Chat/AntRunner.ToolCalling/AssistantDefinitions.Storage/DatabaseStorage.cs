@@ -199,13 +199,19 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                 return null;
             }
 
-            using var context = CreateContext();
+            var nowUtc = DateTime.UtcNow;
+            if (!ReasoningChoicesCache.TryGet(modelId, nowUtc, out var reasoningChoicesJson))
+            {
+                using var context = CreateContext();
 
-            var reasoningChoicesJson = await context.Models
-                .AsNoTracking()
-                .Where(m => m.ModelId == modelId)
-                .Select(m => m.ReasoningChoicesJson)
-                .FirstOrDefaultAsync(cancellationToken);
+                reasoningChoicesJson = await context.Models
+                    .AsNoTracking()
+                    .Where(m => m.ModelId == modelId)
+                    .Select(m => m.ReasoningChoicesJson)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                ReasoningChoicesCache.Set(modelId, reasoningChoicesJson, nowUtc);
+            }
 
             return SelectDeclaredReasoningEffort(
                 reasoningEffort.Trim(),
