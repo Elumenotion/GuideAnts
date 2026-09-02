@@ -22,7 +22,7 @@ public sealed class ConversationPersistenceMarsSqlIntegrationTests : BaseEndpoin
     [TestMethod]
     public async Task Repeated_streaming_writes_do_not_trigger_mars_savepoint_warning()
     {
-        var (connectionString, conversationId, turnId, executionId) = await SeedScenarioAsync();
+        var (connectionString, conversationId, turnId, executionId, _) = await SeedScenarioAsync();
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -104,7 +104,7 @@ public sealed class ConversationPersistenceMarsSqlIntegrationTests : BaseEndpoin
             messageId: null,
             content: "Stopping after the tool call.",
             stoppedToolCallsJson,
-            assistantId: Guid.NewGuid()))
+            assistantId: cancellationScenario.AssistantId))
             .Should()
             .BeTrue();
 
@@ -122,7 +122,7 @@ public sealed class ConversationPersistenceMarsSqlIntegrationTests : BaseEndpoin
         cancellation.PreviousLeaseWasReleased.Should().BeTrue();
     }
 
-    private static async Task<(string ConnectionString, Guid ConversationId, Guid TurnId, Guid ExecutionId)>
+    private static async Task<(string ConnectionString, Guid ConversationId, Guid TurnId, Guid ExecutionId, Guid AssistantId)>
         SeedScenarioAsync(bool withLock = false)
     {
         var connectionString = await TestContainerManager.Instance.GetConnectionStringAsync();
@@ -134,6 +134,12 @@ public sealed class ConversationPersistenceMarsSqlIntegrationTests : BaseEndpoin
 
         using var scope = SharedFactory!.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var assistantId = await db.Assistants
+            .AsNoTracking()
+            .Where(a => a.Name == "assistant" && a.IsActive)
+            .OrderBy(a => a.IsGlobal)
+            .Select(a => a.Id)
+            .FirstAsync();
         db.Projects.Add(new Project
         {
             Id = projectId,
@@ -181,6 +187,6 @@ public sealed class ConversationPersistenceMarsSqlIntegrationTests : BaseEndpoin
 
         await db.SaveChangesAsync();
 
-        return (connectionString, conversationId, turnId, executionId);
+        return (connectionString, conversationId, turnId, executionId, assistantId);
     }
 }

@@ -766,6 +766,12 @@ namespace AntRunner.ToolCalling.Functions
 
                 if (Params != null && Params.TryGetValue(param.Name!, out var paramValue))
                 {
+                    if (paramValue == null || param.ParameterType.IsInstanceOfType(paramValue))
+                    {
+                        paramValues[i] = paramValue;
+                        continue;
+                    }
+
                     if (paramValue is JsonElement jsonElement)
                     {
                         // Convert JsonElement to the appropriate type
