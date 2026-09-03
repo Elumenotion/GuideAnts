@@ -141,6 +141,7 @@ installer_set_local_image_env() {
   [[ -n "${GA_AI_VULKAN_IMAGE:-}" ]] && export GA_AI_VULKAN_GHCR_IMAGE="$GA_AI_VULKAN_IMAGE"
   [[ -n "${GA_PLANTUML_IMAGE:-}" ]] && export GA_PLANTUML_GHCR_IMAGE="$GA_PLANTUML_IMAGE"
   [[ -n "${GA_SEARXNG_IMAGE:-}" ]] && export GA_SEARXNG_GHCR_IMAGE="$GA_SEARXNG_IMAGE"
+  return 0
 }
 
 # Optional release pin file (written into release zips; rewritten locally on update).
@@ -517,7 +518,7 @@ installer_run_wizard() {
     SELECTED_AI_BACKEND="$(installer_select_ai_backend)"
   fi
 
-  if [[ ${#COMPONENTS_OVERRIDE[@]:-0} -gt 0 ]]; then
+  if [[ ${#COMPONENTS_OVERRIDE[@]} -gt 0 ]]; then
     SELECTED_COMPONENTS=("${COMPONENTS_OVERRIDE[@]}")
   elif [[ "$use_saved" == "1" ]]; then
     IFS=',' read -r -a SELECTED_COMPONENTS <<< "$prior_components"
