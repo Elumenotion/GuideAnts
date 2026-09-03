@@ -517,7 +517,7 @@ installer_run_wizard() {
     SELECTED_AI_BACKEND="$(installer_select_ai_backend)"
   fi
 
-  if [[ ${#COMPONENTS_OVERRIDE[@]:-0} -gt 0 ]]; then
+  if [[ ${#COMPONENTS_OVERRIDE[@]} -gt 0 ]]; then
     SELECTED_COMPONENTS=("${COMPONENTS_OVERRIDE[@]}")
   elif [[ "$use_saved" == "1" ]]; then
     IFS=',' read -r -a SELECTED_COMPONENTS <<< "$prior_components"
