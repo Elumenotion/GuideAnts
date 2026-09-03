@@ -317,15 +317,11 @@ def materialize_talking_head_result(
     }
 
 
-IMAGE_WORKFLOW_VERSION = "qwen-image-edit-v1"
-IMAGE_EDIT_20_WORKFLOW_VERSION = "qwen-image-edit-20-v1"
 IMAGE_EDIT_BF16_WORKFLOW_VERSION = "qwen-image-edit-bf16-v1"
 IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION = "qwen-image-edit-bf16-inpaint-v1"
-IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-bf16-v1"
+IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-v1"
 IMAGE_EDIT_WORKFLOW_VERSIONS = frozenset(
     {
-        IMAGE_WORKFLOW_VERSION,
-        IMAGE_EDIT_20_WORKFLOW_VERSION,
         IMAGE_EDIT_BF16_WORKFLOW_VERSION,
         IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION,
     }
@@ -337,7 +333,7 @@ def submit_image_edit(
     prompt: str,
     output_filename: str,
     *,
-    workflow: str = IMAGE_WORKFLOW_VERSION,
+    workflow: str = IMAGE_EDIT_BF16_WORKFLOW_VERSION,
     mask_path: str | os.PathLike[str] | None = None,
     working_directory: str | os.PathLike[str] | None = None,
     parameters: dict[str, int | float] | None = None,

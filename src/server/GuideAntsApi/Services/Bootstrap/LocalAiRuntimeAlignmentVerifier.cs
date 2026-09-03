@@ -259,30 +259,49 @@ public sealed class LocalAiRuntimeAlignmentVerifier : ILocalAiRuntimeAlignmentVe
             .ConfigureAwait(false);
         var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var loaded = false;
+        var failed = false;
         string? loadedRef = null;
+        string? failedReason = null;
+        JsonNode? node = null;
 
-        if (response.IsSuccessStatusCode)
+        try
         {
-            try
-            {
-                var node = JsonNode.Parse(json);
-                loaded = node?["loaded"]?.GetValue<bool?>() ?? false;
-                loadedRef = node?["modelRef"]?.GetValue<string>()
-                    ?? node?["model_ref"]?.GetValue<string>()
-                    ?? node?["catalogEntryId"]?.GetValue<string>()
-                    ?? node?["catalog_entry_id"]?.GetValue<string>()
-                    ?? node?["bundleId"]?.GetValue<string>()
-                    ?? node?["bundle_id"]?.GetValue<string>();
-            }
-            catch (JsonException)
-            {
-                loaded = true;
-            }
+            node = JsonNode.Parse(json);
+        }
+        catch (JsonException)
+        {
+            node = null;
+        }
+
+        if (node is not null)
+        {
+            loaded = node["loaded"]?.GetValue<bool?>() ?? false;
+            failed = node["failed"]?.GetValue<bool?>() ?? false;
+            failedReason = node["failedReason"]?.GetValue<string>()
+                ?? node["message"]?.GetValue<string>();
+            loadedRef = node["modelRef"]?.GetValue<string>()
+                ?? node["model_ref"]?.GetValue<string>()
+                ?? node["catalogEntryId"]?.GetValue<string>()
+                ?? node["catalog_entry_id"]?.GetValue<string>()
+                ?? node["bundleId"]?.GetValue<string>()
+                ?? node["bundle_id"]?.GetValue<string>();
+        }
+        else if (response.IsSuccessStatusCode)
+        {
+            loaded = true;
         }
 
         if (shouldLoad)
         {
-            if (!loaded)
+            if (failed || (int)response.StatusCode == 503)
+            {
+                var reason = string.IsNullOrWhiteSpace(failedReason)
+                    ? "engine is failed/unready"
+                    : $"engine is failed/unready: {failedReason}";
+                return [new LocalAiRuntimeAlignmentMismatch(serviceId, reason)];
+            }
+
+            if (!response.IsSuccessStatusCode || !loaded)
             {
                 return [new LocalAiRuntimeAlignmentMismatch(serviceId, "plan warm but engine /ready reports not loaded")];
             }

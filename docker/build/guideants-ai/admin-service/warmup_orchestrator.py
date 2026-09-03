@@ -130,12 +130,15 @@ def derive_plan_commands(document: WarmupPlanDocument) -> dict[str, str]:
 
 def _llama_command_needs_gpu_drain(commands: dict[str, str], document: WarmupPlanDocument) -> bool:
     """
-    True when llama work will touch VRAM — unload, or load a different alias than
-    the engine currently reports. Unchanged warm llama does not drain aux.
+    True when llama work will touch VRAM — unload an actually-loaded alias, or load a
+    different alias than the engine currently reports.
+
+    Split stacks (Max aux / PC chat) submit Max plans with llama enabled=false every
+    re-apply. That must NOT drain warm ASR/TTS when this host has no llama loaded.
     """
     llama_cmd = commands.get(SERVICE_LLAMA)
     if llama_cmd == "unload":
-        return True
+        return bool(llama_engine_loaded_aliases())
     if llama_cmd == "load":
         section = document.services.get(SERVICE_LLAMA)
         alias = section_execution_ref(SERVICE_LLAMA, section) if section is not None else None

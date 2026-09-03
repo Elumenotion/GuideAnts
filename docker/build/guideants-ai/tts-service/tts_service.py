@@ -13,15 +13,24 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from guideants_hf.catalog_completeness import catalog_entry_for_directory_name, directory_model_entry_is_complete
 from guideants_hf.catalog_download import download_catalog_entry_files
-from guideants_hf.engine_process import format_engine_exit_error, read_subprocess_stderr_tail
+from guideants_hf.engine_process import (
+    EngineLogPump,
+    format_engine_exit_error,
+    spawn_engine_with_log_pump,
+)
 from guideants_hf.operations import find_in_flight_operation
 from ga_blocking import await_blocking
+from guideants_http.engine_failure import (
+    engine_rpc_exception_is_engine_failure,
+    wrapper_http_status_for_engine_exception,
+)
 from guideants_http.request_timeout import clamp_request_timeout_seconds, resolve_request_timeout_seconds
 
 import uvicorn
@@ -195,6 +204,103 @@ def log_event(event: str, **fields: Any) -> None:
     print(json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
 
 
+def heartbeat_interval_seconds() -> float:
+    return parse_positive_float(os.getenv("GA_TTS_HEARTBEAT_SECONDS"), 10.0)
+
+
+def emit_engine_log_line(line: str) -> None:
+    # CUDA graph warmup spam drowns real inference signal in docker logs.
+    if "CUDA graph warmup" in line:
+        return
+    log_event(
+        "tts_engine_log",
+        modelRef=STATE.model_ref or (STATE.config.model_ref if STATE.config is not None else None),
+        line=line,
+    )
+
+
+def engine_output_tail(max_chars: int = 4000) -> str:
+    pump = STATE.engine_log_pump
+    if pump is not None:
+        return pump.tail(max_chars=max_chars)
+    return ""
+
+
+def spawn_tts_engine(command: list[str]) -> subprocess.Popen[Any]:
+    process, pump = spawn_engine_with_log_pump(
+        command,
+        emit_line=emit_engine_log_line,
+        env=os.environ.copy(),
+    )
+    previous = STATE.engine_log_pump
+    STATE.engine_log_pump = pump
+    if previous is not None:
+        previous.stop()
+    return process
+
+
+def run_with_sync_heartbeat(
+    event: str,
+    fields: dict[str, Any],
+    work: Any,
+) -> Any:
+    """Run blocking work while emitting periodic heartbeats to container logs."""
+    started = time.perf_counter()
+    interval = heartbeat_interval_seconds()
+    stop = threading.Event()
+
+    def _beat() -> None:
+        while not stop.wait(interval):
+            log_event(
+                event,
+                elapsedMs=int((time.perf_counter() - started) * 1000),
+                **fields,
+            )
+
+    thread = threading.Thread(target=_beat, name=f"{event}-heartbeat", daemon=True)
+    thread.start()
+    try:
+        return work()
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)
+
+
+async def await_blocking_with_heartbeat(
+    event: str,
+    fields: dict[str, Any],
+    func: Any,
+    /,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    started = time.perf_counter()
+    interval = heartbeat_interval_seconds()
+    stop = asyncio.Event()
+
+    async def _beat() -> None:
+        while True:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+                return
+            except asyncio.TimeoutError:
+                log_event(
+                    event,
+                    elapsedMs=int((time.perf_counter() - started) * 1000),
+                    **fields,
+                )
+
+    beat_task = asyncio.create_task(_beat(), name=f"{event}-heartbeat")
+    try:
+        return await await_blocking(func, *args, **kwargs)
+    finally:
+        stop.set()
+        try:
+            await beat_task
+        except Exception:
+            pass
+
+
 def load_catalog() -> dict[str, Any]:
     with open(CATALOG_PATH, encoding="utf-8") as handle:
         data = json.load(handle)
@@ -315,6 +421,11 @@ class SynthesizeRequest(BaseModel):
     speed: float | None = None
 
 
+class ReportEngineFailureRequest(BaseModel):
+    reason: str
+    requestId: str | None = None
+
+
 class RuntimeTimeoutsRequest(BaseModel):
     readyTimeoutSeconds: int = Field(ge=1)
 
@@ -348,6 +459,7 @@ class TtsRuntimeState:
         self.lock = threading.RLock()
         self.config: TtsRuntimeConfig | None = None
         self.engine_process: subprocess.Popen[Any] | None = None
+        self.engine_log_pump: EngineLogPump | None = None
         self.engine_started_at_utc: str | None = None
         self.model_ref: str | None = None
         self.tokenizer_ref: str | None = None
@@ -368,6 +480,9 @@ class TtsRuntimeState:
         self.warmup_latency_ms: int = 0
         self.warmup_error: str | None = None
         self.warmup_completed_at_utc: str | None = None
+        self.inference_failed: bool = False
+        self.inference_failed_reason: str | None = None
+        self.inference_failed_at_utc: str | None = None
         self.engine_ready_timeout_seconds: int = parse_positive_int(
             os.getenv("GA_TTS_READY_TIMEOUT_SECONDS"),
             1800,
@@ -399,6 +514,11 @@ class TtsRuntimeState:
                 "warmupError": self.warmup_error,
                 "warmupCompletedAtUtc": self.warmup_completed_at_utc,
                 "engineAlive": is_engine_process_alive(),
+                "enginePid": self.engine_process.pid if self.engine_process is not None else None,
+                "busy": SYNTHESIS_LOCK.locked() or self.loading or ENGINE_LOCK.locked(),
+                "failed": self.inference_failed,
+                "failedReason": self.inference_failed_reason,
+                "failedAtUtc": self.inference_failed_at_utc,
             }
 
 
@@ -711,7 +831,13 @@ def wait_for_engine_ready(config: TtsRuntimeConfig) -> None:
         if not is_engine_process_alive():
             process = STATE.engine_process
             exit_code = process.poll() if process is not None else None
-            raise RuntimeError(format_engine_exit_error(process, exit_code))
+            raise RuntimeError(
+                format_engine_exit_error(
+                    process,
+                    exit_code,
+                    engine_output=engine_output_tail(),
+                )
+            )
         try:
             status_code, _, _ = engine_json_request(
                 config, "GET", "/health", min(5, config.request_timeout_seconds)
@@ -728,17 +854,18 @@ def wait_for_engine_ready(config: TtsRuntimeConfig) -> None:
 
 def stop_engine_process() -> None:
     process = STATE.engine_process
+    pump = STATE.engine_log_pump
     STATE.engine_process = None
-    if process is None:
-        return
-    if process.poll() is not None:
-        return
-    process.terminate()
-    try:
-        process.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=5)
+    STATE.engine_log_pump = None
+    if process is not None and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+    if pump is not None:
+        pump.stop()
 
 
 def stop_engine() -> None:
@@ -755,38 +882,44 @@ def stop_engine() -> None:
     STATE.warmup_latency_ms = 0
     STATE.warmup_error = None
     STATE.warmup_completed_at_utc = None
+    STATE.inference_failed = False
+    STATE.inference_failed_reason = None
+    STATE.inference_failed_at_utc = None
 
 
 def restart_engine_on_failure_enabled() -> bool:
     return env_flag("GA_TTS_RESTART_ON_FAILURE", default=True)
 
 
+def mark_inference_failed(reason: str) -> None:
+    with STATE.lock:
+        STATE.inference_failed = True
+        STATE.inference_failed_reason = reason
+        STATE.inference_failed_at_utc = utc_now_iso()
+    log_event(
+        "tts_engine_failed",
+        reason=reason,
+        modelRef=STATE.model_ref,
+        enginePid=STATE.engine_process.pid if STATE.engine_process is not None else None,
+    )
+
+
+def clear_inference_failed() -> None:
+    with STATE.lock:
+        STATE.inference_failed = False
+        STATE.inference_failed_reason = None
+        STATE.inference_failed_at_utc = None
+
+
 def synthesis_error_is_recoverable(exc: BaseException) -> bool:
-    if isinstance(exc, TimeoutError):
-        return True
-    if isinstance(exc, RuntimeError):
-        message = str(exc).lower()
-        return (
-            "timed out" in message
-            or "failed to reach audiocpp_server" in message
-            or "connection refused" in message
-            or "remote end closed connection" in message
-            or "broken pipe" in message
-        )
-    if isinstance(exc, urllib.error.URLError):
-        reason = exc.reason
-        if isinstance(reason, (TimeoutError, OSError)):
-            return True
-        message = str(reason).lower()
-        return "timed out" in message or "connection refused" in message
-    return False
+    return engine_rpc_exception_is_engine_failure(exc)
 
 
 def _restart_engine_process_locked(config: TtsRuntimeConfig, *, reason: str) -> None:
     """Kill and respawn audiocpp_server. Caller must hold ENGINE_LOCK."""
     previous = STATE.engine_process
     previous_pid = previous.pid if previous is not None else None
-    stderr_tail = read_subprocess_stderr_tail(previous)
+    stderr_tail = engine_output_tail()
     log_event(
         "tts_engine_restart_start",
         modelRef=config.model_ref,
@@ -796,14 +929,10 @@ def _restart_engine_process_locked(config: TtsRuntimeConfig, *, reason: str) -> 
     )
     stop_engine_process()
     command = build_audiocpp_server_command(config)
-    STATE.engine_process = subprocess.Popen(
-        command,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        env=os.environ.copy(),
-    )
+    STATE.engine_process = spawn_tts_engine(command)
     STATE.engine_started_at_utc = utc_now_iso()
     wait_for_engine_ready(config)
+    clear_inference_failed()
     log_event(
         "tts_engine_restart_success",
         modelRef=config.model_ref,
@@ -857,7 +986,10 @@ def synthesize_with_engine_recovery(
             request_timeout_seconds=request_timeout_seconds,
         )
     except Exception as exc:
-        if not restart_engine_on_failure_enabled() or not synthesis_error_is_recoverable(exc):
+        if not engine_rpc_exception_is_engine_failure(exc):
+            raise
+        mark_inference_failed(f"{type(exc).__name__}: {exc}")
+        if not restart_engine_on_failure_enabled():
             raise
         log_event(
             "tts_synthesize_recovering",
@@ -1155,11 +1287,27 @@ def run_model_warmup(config: TtsRuntimeConfig, force: bool = False) -> dict[str,
     started = time.perf_counter()
     log_event("tts_model_warmup_start", modelRef=config.model_ref, voice=resolved_voice)
     try:
-        wav_bytes = synthesize_via_engine(config, warmup_text, voice_fields, seed)
+        wav_bytes = run_with_sync_heartbeat(
+            "tts_model_warmup_heartbeat",
+            {
+                "modelRef": config.model_ref,
+                "voice": resolved_voice,
+                "textLength": len(warmup_text),
+            },
+            lambda: synthesize_via_engine(config, warmup_text, voice_fields, seed),
+        )
         duration_seconds, _ = wav_duration_seconds(wav_bytes)
         if duration_seconds <= 0:
             raise RuntimeError("Warmup produced zero-duration audio.")
         latency_ms = int((time.perf_counter() - started) * 1000)
+        log_event(
+            "tts_model_warmup_success",
+            modelRef=config.model_ref,
+            voice=resolved_voice,
+            latencyMs=latency_ms,
+            durationSeconds=duration_seconds,
+            outputBytes=len(wav_bytes),
+        )
         return {
             "warmupEnabled": True,
             "warmupRan": True,
@@ -1188,7 +1336,12 @@ def start_engine(request: LoadModelRequest) -> dict[str, Any]:
     model_path, model_ref, entry = resolve_model_target(request)
     config = build_runtime_config(model_path, model_ref, entry)
 
-    if STATE.config and STATE.config.model_path == model_path and is_engine_process_alive():
+    if (
+        STATE.config
+        and STATE.config.model_path == model_path
+        and is_engine_process_alive()
+        and not STATE.inference_failed
+    ):
         return {
             "modelRef": STATE.model_ref,
             "catalogEntryId": STATE.catalog_entry_id,
@@ -1198,12 +1351,7 @@ def start_engine(request: LoadModelRequest) -> dict[str, Any]:
     stop_engine()
     command = build_audiocpp_server_command(config)
     log_event("tts_engine_start", command=command, modelRef=model_ref)
-    STATE.engine_process = subprocess.Popen(
-        command,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        env=os.environ.copy(),
-    )
+    STATE.engine_process = spawn_tts_engine(command)
     STATE.engine_started_at_utc = utc_now_iso()
     wait_for_engine_ready(config)
 
@@ -1435,6 +1583,15 @@ async def ready() -> JSONResponse:
                 **snapshot,
             },
         )
+    if snapshot.get("failed"):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ready": False,
+                "message": "TTS engine is in a failed state and must be recycled.",
+                **snapshot,
+            },
+        )
     return JSONResponse(status_code=200, content={"ready": True, **snapshot})
 
 
@@ -1657,6 +1814,47 @@ async def admin_unload(request: Request) -> JSONResponse:
         )
     finally:
         ENGINE_LOCK.release()
+
+
+@APP.post("/admin/report-engine-failure")
+async def admin_report_engine_failure(
+    request: Request,
+    payload: ReportEngineFailureRequest,
+) -> JSONResponse:
+    """Mark the engine failed and recycle the process. GPU work does not stop on HTTP timeout."""
+    request_id = payload.requestId or request.headers.get("x-request-id", str(uuid.uuid4()))
+    reason = (payload.reason or "").strip() or "reported_engine_failure"
+    mark_inference_failed(reason)
+    config = STATE.config
+    if config is None or not restart_engine_on_failure_enabled():
+        return JSONResponse(
+            status_code=200,
+            content={"requestId": request_id, "ok": True, "action": "marked_failed", **STATE.snapshot()},
+        )
+    try:
+        restart_engine_process(config, reason=reason)
+        return JSONResponse(
+            status_code=200,
+            content={"requestId": request_id, "ok": True, "action": "restarted", **STATE.snapshot()},
+        )
+    except Exception as exc:
+        log_event(
+            "tts_engine_restart_failed",
+            requestId=request_id,
+            reason=reason,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "requestId": request_id,
+                "ok": False,
+                "error": "engine_restart_failed",
+                "message": str(exc),
+                **STATE.snapshot(),
+            },
+        )
 
 
 @APP.get("/admin/models")
@@ -1883,7 +2081,17 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
                 request.headers,
                 config.request_timeout_seconds,
             )
-            wav_bytes = await await_blocking(
+            wav_bytes = await await_blocking_with_heartbeat(
+                "tts_synthesize_heartbeat",
+                {
+                    "requestId": request_id,
+                    "traceparent": traceparent,
+                    "textLength": len(script_text),
+                    "modelRef": snapshot.get("modelRef"),
+                    "voice": resolved_voice,
+                    "langCode": lang_code,
+                    "speed": speed,
+                },
                 synthesize_with_engine_recovery,
                 config,
                 script_text,
@@ -1929,12 +2137,14 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
                 modelRef=snapshot.get("modelRef"),
                 errorType=type(exc).__name__,
                 error=str(exc),
+                engineStderrTail=engine_output_tail() or None,
             )
+            status_code = wrapper_http_status_for_engine_exception(exc)
             return JSONResponse(
-                status_code=500,
+                status_code=status_code,
                 content={
                     "requestId": request_id,
-                    "error": "synthesis_failed",
+                    "error": "synthesis_failed" if status_code >= 500 else "synthesis_rejected",
                     "message": "Speech synthesis failed. Check service logs for details.",
                     "modelRef": snapshot.get("modelRef"),
                 },

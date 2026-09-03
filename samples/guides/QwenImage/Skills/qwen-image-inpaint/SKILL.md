@@ -12,12 +12,30 @@ metadata:
 
 Source + mask + prompt → PNG. Mask convention: **white = editable**, **black = preserve**.
 
+Workflow (required): `qwen-image-edit-bf16-inpaint-v1`
+
 ## Environment (required for PC → Max)
 
 ```text
 QWEN_IMAGE_SKILL_BASE_URL=http://<max-lan-ip>:8189/qwen-image-skill
 QWEN_IMAGE_SKILL_TOKEN=<same as Max GA_QWEN_IMAGE_SKILL_TOKEN>
 ```
+
+## Sampler profile (locked — tested Lightning)
+
+Always use the CLI defaults. Do **not** pass `--steps`, `--cfg`, or `--lora-strength`.
+`image_tool.py` forces:
+
+| Parameter | Value |
+|-----------|-------|
+| steps | 4 |
+| cfg | 1 |
+| lora_strength | 1 |
+| denoise | 1 |
+| shift | 3.1 |
+| megapixels | 1.6 |
+
+This is the whiteboard / background profile that passed AC-I1. Never invent `steps=20`.
 
 ## Preflight
 

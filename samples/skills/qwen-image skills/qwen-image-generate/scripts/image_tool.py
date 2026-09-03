@@ -28,18 +28,41 @@ from skill_gateway_client import (
     using_skill_gateway,
 )
 
-GENERATE_WORKFLOW = "qwen-image-bf16-v1"
+# Live Max adapter generate API ids (compose bind-mounts workflows under these names).
+GENERATE_WORKFLOW_LIGHTNING = "qwen-image-v1"
+GENERATE_WORKFLOW_HIGH = "qwen-image-generate-20-v1"
+GENERATE_WORKFLOW = GENERATE_WORKFLOW_LIGHTNING
 EDIT_WORKFLOW = "qwen-image-edit-bf16-v1"
 INPAINT_WORKFLOW = "qwen-image-edit-bf16-inpaint-v1"
-# Tested BF16 Lightning profile (harness + AC). Edit/inpaint always use this.
+# Edit/inpaint: locked Lightning (AC-I1). Generate draft = Lightning graph; high = 20-step
+# reference graph (kyuz0, no LoRA node) via qwen-image-generate-20-v1.
 LIGHTNING_STEPS = 4
 LIGHTNING_CFG = 1.0
 LIGHTNING_LORA_STRENGTH = 1.0
 LIGHTNING_DENOISE = 1.0
 LIGHTNING_SHIFT = 3.1
 LIGHTNING_MEGAPIXELS = 1.6
+GENERATE_QUALITY_PROFILES: dict[str, dict[str, int | float | str]] = {
+    "draft": {
+        "workflow": GENERATE_WORKFLOW_LIGHTNING,
+        "steps": 4,
+        "cfg": 1.0,
+        "lora_strength": 1.0,
+    },
+    "high": {
+        "workflow": GENERATE_WORKFLOW_HIGH,
+        "steps": 20,
+        "cfg": 2.5,
+    },
+}
+GENERATE_CANVAS_SIZES: dict[str, tuple[int, int]] = {
+    "square": (1328, 1328),  # AC-G1 default
+    "landscape": (1664, 928),  # harness + full20 sidecar
+    "portrait": (928, 1664),  # transpose of tested landscape pair
+}
 HEX_UUID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 DEFAULT_POLL_SECONDS = 5
+MAX_POLL_SECONDS = 60
 DEFAULT_JOB_TIMEOUT_SECONDS = 1800
 
 
@@ -69,6 +92,29 @@ def _notebook_root(working_directory: Path) -> Path:
     )
 
 
+def _normalize_sandbox_path(
+    value: str | os.PathLike[str],
+    directory: Path,
+    root: Path,
+) -> str:
+    text = os.fspath(value).replace("\\", "/")
+    output_dir = root / "Output"
+    try:
+        directory.resolve().relative_to(output_dir.resolve())
+    except ValueError:
+        return os.fspath(value)
+    normalized = text.lstrip("./").lstrip("/")
+    if normalized.lower().startswith("output/"):
+        stripped = normalized[7:]
+        print(
+            "warning: path starts with Output/ but sandbox CWD is already Output/; "
+            f"using {stripped!r} instead",
+            file=sys.stderr,
+        )
+        return stripped
+    return os.fspath(value)
+
+
 def resolve_notebook_path(
     value: str | os.PathLike[str],
     working_directory: str | os.PathLike[str] | None = None,
@@ -77,7 +123,8 @@ def resolve_notebook_path(
 ) -> Path:
     directory = _working_directory(str(working_directory) if working_directory else None)
     root = _notebook_root(directory)
-    supplied = Path(value)
+    supplied_text = _normalize_sandbox_path(value, directory, root)
+    supplied = Path(supplied_text)
     candidate = supplied if supplied.is_absolute() else directory / supplied
     try:
         resolved = candidate.resolve(strict=must_exist)
@@ -149,7 +196,28 @@ def _submit_edit(
     return json.loads(body.decode("utf-8"))
 
 
+def _resolve_generate_quality(value: str) -> dict[str, int | float | str]:
+    profile = GENERATE_QUALITY_PROFILES.get(value)
+    if profile is None:
+        allowed = ", ".join(sorted(GENERATE_QUALITY_PROFILES))
+        raise ImageToolError(f"unsupported quality {value!r} (use {allowed})")
+    return dict(profile)
+
+
+def _resolve_generate_canvas(value: str) -> tuple[int, int]:
+    size = GENERATE_CANVAS_SIZES.get(value)
+    if size is None:
+        allowed = ", ".join(sorted(GENERATE_CANVAS_SIZES))
+        raise ImageToolError(f"unsupported canvas {value!r} (use {allowed})")
+    return size
+
+
 def _poll_job(job_id: str, *, timeout_seconds: int, poll_seconds: int) -> dict[str, Any]:
+    if poll_seconds > MAX_POLL_SECONDS:
+        raise ImageToolError(
+            f"--poll-seconds must be <= {MAX_POLL_SECONDS} (got {poll_seconds}); "
+            "it is the sleep between status checks, not the total wait budget — use --timeout"
+        )
     deadline = time.monotonic() + timeout_seconds
     while True:
         raw = gateway_request(f"/v1/image/jobs/{job_id}", timeout=60)
@@ -188,18 +256,36 @@ def _materialize_result(job_id: str, destination: Path) -> dict[str, Any]:
 
 
 def _default_generate_params(args: argparse.Namespace) -> dict[str, Any]:
+    profile = _resolve_generate_quality(args.quality)
+    width, height = _resolve_generate_canvas(args.canvas)
     params: dict[str, Any] = {
-        "steps": args.steps,
-        "cfg": args.cfg,
+        "steps": profile["steps"],
+        "cfg": profile["cfg"],
         "seed": args.seed,
-        "denoise": 1.0,
-        "shift": args.shift,
-        "megapixels": args.megapixels,
-        "lora_strength": args.lora_strength,
-        "width": args.width,
-        "height": args.height,
+        "denoise": LIGHTNING_DENOISE,
+        "shift": LIGHTNING_SHIFT,
+        "width": width,
+        "height": height,
     }
+    if "lora_strength" in profile:
+        params["lora_strength"] = profile["lora_strength"]
+        params["megapixels"] = LIGHTNING_MEGAPIXELS
     return params
+
+
+def _generate_workflow(args: argparse.Namespace) -> str:
+    if args.workflow != GENERATE_WORKFLOW:
+        return _resolve_generate_workflow(args.workflow)
+    return str(_resolve_generate_quality(args.quality)["workflow"])
+
+
+def _resolve_generate_workflow(value: str) -> str:
+    if value == "qwen-image-bf16-v1":
+        return GENERATE_WORKFLOW_LIGHTNING
+    if value in (GENERATE_WORKFLOW_LIGHTNING, GENERATE_WORKFLOW_HIGH):
+        return value
+    allowed = f"{GENERATE_WORKFLOW_LIGHTNING}, {GENERATE_WORKFLOW_HIGH}"
+    raise ImageToolError(f"unsupported generate workflow: {value} (use {allowed})")
 
 
 def _default_edit_params(args: argparse.Namespace) -> dict[str, Any]:
@@ -221,11 +307,15 @@ def cmd_generate(args: argparse.Namespace) -> None:
     submit = _submit_generate(
         args.prompt,
         output.name,
-        workflow=args.workflow,
+        workflow=_generate_workflow(args),
         parameters=_default_generate_params(args),
         negative_prompt=args.negative,
     )
     job_id = _job_id(str(submit.get("jobId")))
+    print(f"jobId={job_id}", file=sys.stderr)
+    if args.no_wait:
+        print(json.dumps({"jobId": job_id, "outputPath": str(output)}, separators=(",", ":")))
+        return
     _poll_job(job_id, timeout_seconds=args.timeout, poll_seconds=args.poll_seconds)
     result = _materialize_result(job_id, output)
     print(json.dumps(result, separators=(",", ":")))
@@ -288,8 +378,50 @@ def cmd_result(args: argparse.Namespace) -> None:
 
 
 def _add_common_job_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--timeout", type=int, default=DEFAULT_JOB_TIMEOUT_SECONDS)
-    parser.add_argument("--poll-seconds", type=int, default=DEFAULT_POLL_SECONDS)
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_JOB_TIMEOUT_SECONDS,
+        help="total seconds to wait for job completion (default 1800)",
+    )
+    parser.add_argument(
+        "--poll-seconds",
+        type=int,
+        default=DEFAULT_POLL_SECONDS,
+        help=f"seconds between status polls (default {DEFAULT_POLL_SECONDS}, max {MAX_POLL_SECONDS})",
+    )
+
+
+def _add_generate_params(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--negative", default=" ")
+    parser.add_argument(
+        "--canvas",
+        choices=sorted(GENERATE_CANVAS_SIZES),
+        default="square",
+        help="output aspect (maps to tested pixel sizes inside the script)",
+    )
+    parser.add_argument(
+        "--quality",
+        choices=sorted(GENERATE_QUALITY_PROFILES),
+        default="draft",
+        help="draft=Lightning 4-step graph (default); high=20-step non-LoRA graph",
+    )
+    parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="submit only; print jobId and exit (fetch later with result)",
+    )
+    # Kept for CLI compatibility; values are ignored — use --canvas and --quality.
+    parser.add_argument("--width", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--height", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--steps", type=int, default=LIGHTNING_STEPS, help=argparse.SUPPRESS)
+    parser.add_argument("--cfg", type=float, default=LIGHTNING_CFG, help=argparse.SUPPRESS)
+    parser.add_argument("--shift", type=float, default=LIGHTNING_SHIFT, help=argparse.SUPPRESS)
+    parser.add_argument("--megapixels", type=float, default=LIGHTNING_MEGAPIXELS, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--lora-strength", type=float, default=LIGHTNING_LORA_STRENGTH, help=argparse.SUPPRESS
+    )
 
 
 def _add_edit_params(parser: argparse.ArgumentParser) -> None:
@@ -312,19 +444,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Qwen Image BF16 jobs via Max skill gateway")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_generate = sub.add_parser("generate", help="Text to PNG (qwen-image-bf16-v1)")
+    p_generate = sub.add_parser("generate", help=f"Text to PNG ({GENERATE_WORKFLOW})")
     p_generate.add_argument("prompt")
     p_generate.add_argument("-o", "--output", required=True)
     p_generate.add_argument("--workflow", default=GENERATE_WORKFLOW)
-    p_generate.add_argument("--width", type=int, default=1328)
-    p_generate.add_argument("--height", type=int, default=1328)
-    p_generate.add_argument("--steps", type=int, default=4)
-    p_generate.add_argument("--cfg", type=float, default=1.0)
-    p_generate.add_argument("--seed", type=int, default=0)
-    p_generate.add_argument("--shift", type=float, default=3.1)
-    p_generate.add_argument("--megapixels", type=float, default=1.6)
-    p_generate.add_argument("--lora-strength", type=float, default=1.0)
-    p_generate.add_argument("--negative", default=" ")
+    _add_generate_params(p_generate)
     _add_common_job_flags(p_generate)
 
     p_edit = sub.add_parser("edit", help="Image + prompt to PNG (qwen-image-edit-bf16-v1)")

@@ -203,38 +203,30 @@ def test_submit_image_edit_streams_scoped_file(
     assert captured["path"] == "/v1/image/jobs"
     body = captured["body"]
     assert isinstance(body, bytes)
-    assert b"qwen-image-edit-v1" in body
+    assert b"qwen-image-edit-bf16-v1" in body
     assert b"complete the scene" in body
     assert b'"steps":4' in body
     assert b"png" in body
 
 
-def test_submit_image_edit_accepts_20_step_workflow(
+def test_submit_image_edit_rejects_retired_fp8_workflow(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _notebook, input_dir, output_dir = make_notebook(tmp_path)
     (input_dir / "office.png").write_bytes(b"png")
-    captured: dict = {}
 
     def fake_request(method: str, path: str, **kwargs: object) -> dict:
-        captured.update({"method": method, "path": path, **kwargs})
-        return {"jobId": JOB_ID, "state": "queued"}
+        raise AssertionError("retired FP8 workflow must not be posted")
 
     monkeypatch.setattr(client_module, "_request", fake_request)
-    result = submit_image_edit(
-        image_path="../Input/office.png",
-        prompt="restyle carefully",
-        output_filename="edited20.png",
-        workflow="qwen-image-edit-20-v1",
-        working_directory=output_dir,
-        parameters={"denoise": 0.8, "megapixels": 2.0},
-    )
-    assert result["jobId"] == JOB_ID
-    body = captured["body"]
-    assert isinstance(body, bytes)
-    assert b"qwen-image-edit-20-v1" in body
-    assert b'"denoise":0.8' in body
-    assert b'"megapixels":2.0' in body
+    with pytest.raises(VideoClientError, match="unsupported workflow"):
+        submit_image_edit(
+            image_path="../Input/office.png",
+            prompt="restyle carefully",
+            output_filename="edited20.png",
+            workflow="qwen-image-edit-20-v1",
+            working_directory=output_dir,
+        )
 
 
 def test_submit_image_edit_accepts_bf16_workflow(
@@ -316,7 +308,7 @@ def test_submit_image_generate_posts_form_without_source(
     assert captured["path"] == "/v1/image/generate/jobs"
     body = captured["body"]
     assert isinstance(body, bytes)
-    assert b"qwen-image-bf16-v1" in body
+    assert b"qwen-image-v1" in body
     assert b"a futuristic CPU on a motherboard" in body
     assert b'"steps":4' in body
     assert b'filename="' not in body

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
 from typing import Any
 
 UI_WORKFLOW_VERSION = 0.4
@@ -10,6 +13,7 @@ DEFAULT_NODE_HEIGHT = 82
 GRID_X = 360
 GRID_Y = 280
 GRID_COLUMNS = 4
+_SAFE_WORKFLOW_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def is_api_prompt(value: Any) -> bool:
@@ -93,6 +97,9 @@ def _output_slots(class_type: str, object_info: dict[str, Any]) -> list[dict[str
 def api_prompt_to_ui_workflow(
     api_prompt: dict[str, Any],
     object_info: dict[str, Any],
+    *,
+    workflow_id: str | None = None,
+    filename: str | None = None,
 ) -> dict[str, Any]:
     """Build a LiteGraph workflow ComfyUI's Workflows browser can open."""
     if not is_api_prompt(api_prompt):
@@ -158,7 +165,7 @@ def api_prompt_to_ui_workflow(
             }
         )
 
-    return {
+    ui: dict[str, Any] = {
         "last_node_id": max(sorted_ids) if sorted_ids else 0,
         "last_link_id": link_id - 1 if link_id > 1 else 0,
         "nodes": nodes,
@@ -168,3 +175,33 @@ def api_prompt_to_ui_workflow(
         "extra": {},
         "version": UI_WORKFLOW_VERSION,
     }
+    # ComfyUI Job Details reads extra_pnginfo.workflow.id as workflow_id;
+    # without it the Workflow field stays blank.
+    if workflow_id is not None:
+        ui["id"] = workflow_id
+    if filename is not None:
+        ui["filename"] = filename
+    return ui
+
+
+def publish_job_ui_workflow(
+    publish_dir: Path,
+    workflow_version: str,
+    job_id: str,
+    ui_workflow: dict[str, Any],
+) -> Path:
+    """Write the exact submitted graph for ComfyUI Workflows → guideants-jobs."""
+    if not _SAFE_WORKFLOW_TOKEN.fullmatch(workflow_version):
+        raise ValueError(f"unsafe workflow_version for publish path: {workflow_version!r}")
+    if not _SAFE_WORKFLOW_TOKEN.fullmatch(job_id):
+        raise ValueError(f"unsafe job_id for publish path: {job_id!r}")
+    if "nodes" not in ui_workflow or "links" not in ui_workflow:
+        raise ValueError("expected ComfyUI UI workflow format")
+
+    publish_dir.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(ui_workflow, indent=2, ensure_ascii=False) + "\n"
+    job_path = publish_dir / f"{workflow_version}__{job_id}.json"
+    running_path = publish_dir / f"_RUNNING__{workflow_version}.json"
+    job_path.write_text(payload, encoding="utf-8")
+    running_path.write_text(payload, encoding="utf-8")
+    return job_path

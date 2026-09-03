@@ -6,17 +6,21 @@ using Microsoft.EntityFrameworkCore;
 namespace GuideAntsApi.Services.Bootstrap;
 
 /// <summary>
-/// Re-submits API-owned lifecycle policy after the executor restarts, and repairs
-/// a missing configured local llama model while the API process remains alive.
+/// Re-submits API-owned lifecycle policy after the executor restarts, repairs a
+/// missing configured local llama model, and re-applies when auxiliary engines
+/// (ASR/TTS/emb/image) drift from ServiceModes while the API process remains alive.
 /// </summary>
 public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
 {
-    private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan PollIntervalAligned = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PollIntervalNeedsPlan = TimeSpan.FromSeconds(5);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILocalAiStartupWarmupService _warmupService;
     private readonly ILocalAiWarmupOrchestrationClient _orchestrationClient;
+    private readonly ILocalAiDesiredStateBuilder _desiredStateBuilder;
+    private readonly ILocalAiRuntimeAlignmentVerifier _runtimeAlignmentVerifier;
     private readonly IConfiguration _configuration;
     private readonly ILogger<LocalAiRuntimeWatchdogHostedService> _logger;
 
@@ -26,6 +30,8 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
         IServiceScopeFactory scopeFactory,
         ILocalAiStartupWarmupService warmupService,
         ILocalAiWarmupOrchestrationClient orchestrationClient,
+        ILocalAiDesiredStateBuilder desiredStateBuilder,
+        ILocalAiRuntimeAlignmentVerifier runtimeAlignmentVerifier,
         ILocalAiStackHostResolver stackHostResolver,
         IConfiguration configuration,
         ILogger<LocalAiRuntimeWatchdogHostedService> logger)
@@ -33,6 +39,8 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
         _scopeFactory = scopeFactory;
         _warmupService = warmupService;
         _orchestrationClient = orchestrationClient;
+        _desiredStateBuilder = desiredStateBuilder;
+        _runtimeAlignmentVerifier = runtimeAlignmentVerifier;
         _stackHostResolver = stackHostResolver;
         _configuration = configuration;
         _logger = logger;
@@ -57,12 +65,15 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var needsPlan = false;
             try
             {
-                if (!_warmupService.IsWarmupInProgress
-                    && (await ExecutorHasNoApiPlanAsync(stoppingToken).ConfigureAwait(false)
-                        || (!await IsConfiguredDefaultLlamaLoadedAsync(stoppingToken).ConfigureAwait(false)
-                            && !await IsConfiguredDefaultLlamaFailedAsync(stoppingToken).ConfigureAwait(false))))
+                needsPlan = await ExecutorHasNoApiPlanAsync(stoppingToken).ConfigureAwait(false)
+                    || (!await IsConfiguredDefaultLlamaLoadedAsync(stoppingToken).ConfigureAwait(false)
+                        && !await IsConfiguredDefaultLlamaFailedAsync(stoppingToken).ConfigureAwait(false))
+                    || await AuxiliaryEnginesMisalignedAsync(stoppingToken).ConfigureAwait(false);
+
+                if (!_warmupService.IsWarmupInProgress && needsPlan)
                 {
                     _logger.LogInformation(
                         "Local AI executor needs current API lifecycle policy; submitting a complete plan.");
@@ -76,11 +87,17 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Local AI runtime watchdog warmup attempt failed.");
+                needsPlan = true;
             }
 
             try
             {
-                await Task.Delay(PollInterval, stoppingToken).ConfigureAwait(false);
+                // When Max (or any stack) is idle after recreate, re-check quickly so
+                // emb/ASR/TTS are commanded before skills treat the box as usable.
+                var delay = needsPlan || _warmupService.IsWarmupInProgress
+                    ? PollIntervalNeedsPlan
+                    : PollIntervalAligned;
+                await Task.Delay(delay, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -100,6 +117,54 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
     internal static bool ExecutorNeedsApiPlan(WarmupStatusDocument status) =>
         status.DesiredRevision == 0
             || string.Equals(status.ApplyStatus, "idle", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when embeddings/ASR/TTS/image engines disagree with ServiceModes.
+    /// Llama mismatches are handled separately so a warm Max aux stack is not
+    /// ignored while PC chat llama is intentionally idle/failed.
+    /// </summary>
+    private async Task<bool> AuxiliaryEnginesMisalignedAsync(CancellationToken cancellationToken)
+    {
+        string planJson;
+        try
+        {
+            planJson = await _desiredStateBuilder
+                .BuildPlanJsonAsync(cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Local AI watchdog could not build desired lifecycle plan.");
+            return false;
+        }
+
+        IReadOnlyList<LocalAiRuntimeAlignmentMismatch> mismatches;
+        try
+        {
+            mismatches = await _runtimeAlignmentVerifier
+                .FindMismatchesAsync(planJson, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Local AI watchdog could not verify auxiliary engine alignment.");
+            return false;
+        }
+
+        var auxMismatches = mismatches
+            .Where(static m => !string.Equals(m.ServiceId, LocalAiStackHostUrls.LlamaServiceId, StringComparison.Ordinal))
+            .ToList();
+        if (auxMismatches.Count == 0)
+        {
+            return false;
+        }
+
+        _logger.LogInformation(
+            "Local AI auxiliary engines misaligned with ServiceModes ({Count}): {Details}",
+            auxMismatches.Count,
+            string.Join("; ", auxMismatches.Select(static m => $"{m.ServiceId}: {m.Detail}")));
+        return true;
+    }
 
     private async Task<bool> IsConfiguredDefaultLlamaLoadedAsync(CancellationToken cancellationToken)
     {

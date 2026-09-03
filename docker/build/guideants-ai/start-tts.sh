@@ -64,5 +64,9 @@ export GA_TTS_LANG_CODE="${GA_TTS_LANG_CODE:-a}"
 export GA_TTS_SPEED="${GA_TTS_SPEED:-1.0}"
 export GA_TTS_WARMUP_TEXT="${GA_TTS_WARMUP_TEXT:-Hello.}"
 export GA_TTS_WARMUP_ON_LOAD="${GA_TTS_WARMUP_ON_LOAD:-true}"
+# Emit in-flight heartbeats while warmup/synthesize block on the engine.
+export GA_TTS_HEARTBEAT_SECONDS="${GA_TTS_HEARTBEAT_SECONDS:-10}"
+# Optional: set GGML_CUDA_DISABLE_GRAPHS=1 to silence ggml graph-capture thrash during
+# chatterbox autoregressive TTS (reduces log noise; may increase latency on ROCm — benchmark first).
 
 exec /opt/venv/bin/python /app/tts-service/tts_service.py

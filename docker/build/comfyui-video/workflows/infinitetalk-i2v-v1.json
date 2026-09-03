@@ -57,7 +57,7 @@
       "num_frames": "{{FRAMES}}",
       "fps": "{{FPS}}",
       "audio_scale": 1.0,
-      "audio_cfg_scale": 0.88,
+      "audio_cfg_scale": 2.0,
       "multi_audio_type": "para",
       "add_noise_floor": false,
       "smooth_transients": true
@@ -81,7 +81,7 @@
   "10": {
     "class_type": "WanVideoBlockSwap",
     "inputs": {
-      "blocks_to_swap": 7,
+      "blocks_to_swap": 0,
       "offload_img_emb": false,
       "offload_txt_emb": false,
       "use_non_blocking": true,

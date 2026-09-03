@@ -1,0 +1,1 @@
+{"task":"Ready","args":"-NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\dougl\\guideants-agent-pipe\\Start-MaxAgentPipe.ps1\" -Detach","token":true}

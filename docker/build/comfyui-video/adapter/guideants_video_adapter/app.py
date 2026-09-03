@@ -19,8 +19,8 @@ from .core import (
     ComfyTransport,
     DEFAULT_NEGATIVE_PROMPT,
     DEFAULT_POSITIVE_PROMPT,
+    IMAGE_EDIT_BF16_WORKFLOW_VERSION,
     IMAGE_GENERATE_WORKFLOW_VERSION,
-    IMAGE_WORKFLOW_VERSION,
     WORKFLOW_VERSION,
     validate_identifier,
 )
@@ -40,14 +40,6 @@ def build_service() -> AdapterService:
         workflow_path=_path_env(
             "VIDEO_WORKFLOW_PATH", "/opt/guideants-video/workflows/infinitetalk-i2v-v1.json"
         ),
-        image_workflow_path=_path_env(
-            "IMAGE_WORKFLOW_PATH",
-            "/opt/guideants/comfyui-video/workflows/qwen-image-edit-v1.json",
-        ),
-        image_edit_20_workflow_path=_path_env(
-            "IMAGE_EDIT_20_WORKFLOW_PATH",
-            "/opt/guideants/comfyui-video/workflows/qwen-image-edit-20-v1.json",
-        ),
         image_edit_bf16_workflow_path=_path_env(
             "IMAGE_EDIT_BF16_WORKFLOW_PATH",
             "/opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-v1.json",
@@ -59,6 +51,10 @@ def build_service() -> AdapterService:
         image_generate_workflow_path=_path_env(
             "IMAGE_GENERATE_WORKFLOW_PATH",
             "/opt/guideants/comfyui-video/workflows/qwen-image-bf16-v1.json",
+        ),
+        image_generate_20_workflow_path=_path_env(
+            "IMAGE_GENERATE_20_WORKFLOW_PATH",
+            "/opt/guideants/comfyui-video/workflows/qwen-image-generate-20-v1.json",
         ),
         v2v_workflow_path=_path_env(
             "VIDEO_V2V_WORKFLOW_PATH",
@@ -205,7 +201,7 @@ def create_app(service: AdapterService | None = None, admin_token: str | None = 
         source: Annotated[UploadFile, File()],
         prompt: Annotated[str, Form()],
         output_filename: Annotated[str, Form()],
-        workflow_version: Annotated[str, Form()] = IMAGE_WORKFLOW_VERSION,
+        workflow_version: Annotated[str, Form()] = IMAGE_EDIT_BF16_WORKFLOW_VERSION,
         negative_prompt: Annotated[str, Form()] = " ",
         parameters: Annotated[str, Form()] = "{}",
         mask: Annotated[UploadFile | None, File()] = None,

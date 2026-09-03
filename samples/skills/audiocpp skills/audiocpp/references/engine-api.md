@@ -24,7 +24,8 @@ Gateway-owned helpers (engines cannot do these over LAN alone):
 
 | Path | Purpose |
 |---|---|
-| `GET /health` | Gateway + upstream probe |
+| `GET /health` | Gateway liveness (wrappers HTTP + engines TCP). Does **not** wait on busy engines. |
+| `GET /ready` | Deep parallel probes; `state=busy` means listening but inference stalled HTTP health |
 | `POST /files` | Multipart upload → Max-local absolute `path` for path-based JSON fields |
 | `POST /admin/models/fetch` | HF download into `/models-local/skill/…` |
 | `POST /admin/private/start` | Spawn private `audiocpp_server` |

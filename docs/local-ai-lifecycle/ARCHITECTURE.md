@@ -42,6 +42,11 @@ An enabled local route without an API-owned model or bundle selection is a
 configuration error. Do not guess from disk, engine inventory, environment
 variables, or a prior successful load.
 
+A loaded wrapper whose engine has stopped completing inference is a **failed
+state**, not “healthy because `/ready` says loaded.” Detection, logging, recycle
+of the API-owned selection, and retry of an in-flight ASR utterance are specified
+in [asr-tts-engine-failed-state-requirements.md](asr-tts-engine-failed-state-requirements.md).
+
 ## Endpoint topology (holistic stack hosts)
 
 Each local AI capability is owned by **one stack host URL**. That same URL is

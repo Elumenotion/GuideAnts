@@ -20,7 +20,7 @@ Workflows: `qwen-image-edit-bf16-v1`, `qwen-image-edit-bf16-inpaint-v1`
 `image_tool.py` edit/inpaint ignore CLI sampler overrides and always send this profile
 (whiteboard / background AC-I1).
 
-## Generate BF16 (`qwen-image-bf16-v1`)
+## Generate (`qwen-image-v1`, BF16 weights)
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|

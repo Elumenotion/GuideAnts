@@ -1,9 +1,9 @@
-# Raw audiocpp_server engine API (via Max LAN gateway)
+﻿# Raw audiocpp_server engine API (via Max LAN gateway)
 
 Ground truth: GuideAnts `docker/build/guideants-ai/audiocpp-skill-gateway/skill_gateway.py`
-and audio.cpp `app/server`. This is the **full** engine surface — not a curated subset.
+and audio.cpp `app/server`. This is the **full** engine surface â€” not a curated subset.
 
-## PC sandbox → Max raw gateway
+## PC sandbox â†’ Max raw gateway
 
 ```text
 AUDIOCPP_SKILL_BASE_URL=http://<max-lan-ip>:8112/audiocpp-skill
@@ -14,9 +14,9 @@ The gateway is a **transparent reverse proxy** to `audiocpp_server`:
 
 | Client path | Upstream (inside Max AI container) |
 |---|---|
-| `{BASE}/asr/{any}` | `127.0.0.1:18082/{any}` — wrapper ASR engine |
-| `{BASE}/tts/{any}` | `127.0.0.1:18084/{any}` — wrapper TTS engine |
-| `{BASE}/private/{any}` | `127.0.0.1:18099/{any}` — skill-spawned private engine |
+| `{BASE}/asr/{any}` | `127.0.0.1:18082/{any}` â€” wrapper ASR engine |
+| `{BASE}/tts/{any}` | `127.0.0.1:18084/{any}` â€” wrapper TTS engine |
+| `{BASE}/private/{any}` | `127.0.0.1:18099/{any}` â€” skill-spawned private engine |
 
 Auth header on every call: `X-Audiocpp-Skill-Token`.
 
@@ -24,9 +24,10 @@ Gateway-owned helpers (engines cannot do these over LAN alone):
 
 | Path | Purpose |
 |---|---|
-| `GET /health` | Gateway + upstream probe |
-| `POST /files` | Multipart upload → Max-local absolute `path` for path-based JSON fields |
-| `POST /admin/models/fetch` | HF download into `/models-local/skill/…` |
+| `GET /health` | Gateway liveness (wrappers HTTP + engines TCP). Does **not** wait on busy engines. |
+| `GET /ready` | Deep parallel probes; `state=busy` means listening but inference stalled HTTP health |
+| `POST /files` | Multipart upload â†’ Max-local absolute `path` for path-based JSON fields |
+| `POST /admin/models/fetch` | HF download into `/models-local/skill/â€¦` |
 | `POST /admin/private/start` | Spawn private `audiocpp_server` |
 | `GET /admin/private/status` | Private engine status |
 | `POST /admin/private/stop` | Stop private engine |
@@ -34,7 +35,7 @@ Gateway-owned helpers (engines cannot do these over LAN alone):
 Skill scripts (`engine_tool.py`, `fetch_model.py`, `spawn_engine.py`, `diarize.py`)
 use this automatically when `AUDIOCPP_SKILL_BASE_URL` is set.
 
-Do **not** curl `127.0.0.1:18082/18084/18099` from a PC sandbox — those exist only
+Do **not** curl `127.0.0.1:18082/18084/18099` from a PC sandbox â€” those exist only
 inside the Max AI container. Use `{BASE}/asr|tts|private/...` instead.
 
 ## Full engine endpoints (proxied as-is)
@@ -45,12 +46,12 @@ prefix. Typical surface:
 ### `GET /health`
 Liveness when models are loaded (`lazy_load: false`).
 
-### `POST /v1/audio/speech` → raw WAV
+### `POST /v1/audio/speech` â†’ raw WAV
 
 ```json
 {
-  "model": "<engine model id — required>",
-  "input": "<text — required>",
+  "model": "<engine model id â€” required>",
+  "input": "<text â€” required>",
   "voice": "<builtin or preset id>",
   "voice_ref": "<absolute path on Max>",
   "reference_text": "<optional>",
@@ -74,7 +75,7 @@ Remote: stage with `/files`, then `POST /asr/v1/audio/transcriptions`.
 ### `POST /v1/tasks/run`
 
 Generic tasks (diarization, VAD). Same path-based audio field. Remote: stage then
-`POST /private/v1/tasks/run`. Raw engine does **not** resample —
+`POST /private/v1/tasks/run`. Raw engine does **not** resample â€”
 `sortformer_diar` needs 16 kHz mono WAV.
 
 ### `GET /v1/audio/voices?model=<id>`
@@ -86,7 +87,7 @@ Example: `GET http://max:8112/audiocpp-skill/tts/v1/models` with the skill token
 ## Private engine (`spawn_engine.py` / `/admin/private/*`)
 
 Written on Max; mirrors wrapper `build_server_config_json`. After start, call the
-engine through `{BASE}/private/...` — not a sandbox loopback URL.
+engine through `{BASE}/private/...` â€” not a sandbox loopback URL.
 
 ## Product path (unchanged)
 

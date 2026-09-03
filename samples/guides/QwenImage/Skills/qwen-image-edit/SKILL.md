@@ -23,6 +23,11 @@ QWEN_IMAGE_SKILL_BASE_URL=http://<max-lan-ip>:8189/qwen-image-skill
 QWEN_IMAGE_SKILL_TOKEN=<same as Max GA_QWEN_IMAGE_SKILL_TOKEN>
 ```
 
+## Sampler profile (locked — tested Lightning)
+
+Always use the CLI defaults. Do **not** pass `--steps`, `--cfg`, or `--lora-strength`.
+`image_tool.py` forces `steps=4 cfg=1 lora_strength=1` (AC-I1 / BF16 overlay profile).
+
 ## Preflight
 
 ```bash
@@ -35,8 +40,7 @@ Requires `image_edit_bf16_ready`.
 
 ```bash
 python3 Output/Skills/qwen-image-edit/scripts/image_tool.py edit \
-  Output/uploads/source.png "prompt…" -o Output/edit.png \
-  [--workflow qwen-image-edit-bf16-v1] [--megapixels 1.6] [--steps 4 --cfg 1]
+  Output/uploads/source.png "prompt…" -o Output/edit.png
 ```
 
 Source paths must stay under the notebook (e.g. `Output/uploads/…`).

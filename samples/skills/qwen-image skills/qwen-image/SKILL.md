@@ -15,7 +15,7 @@ family when the user needs **Qwen Image 2512 BF16** generate, edit, or inpaint v
 the ComfyUI-video adapter on Max.
 
 **PC sandbox → Max gateway.** Skills run on the workstation; the comfyui-video
-container runs on Max (`guideants-video-stack`, LAN `192.168.0.111`, port `8189`).
+container runs on Max (`guideants-video-stack`); the gateway endpoint and token come from the guide Environment (`QWEN_IMAGE_SKILL_BASE_URL`, `QWEN_IMAGE_SKILL_TOKEN`).
 Do **not** use `127.0.0.1` — that is the PC, not Max.
 
 ## When to use product SD tools instead
@@ -23,12 +23,20 @@ Do **not** use `127.0.0.1` — that is the PC, not Max.
 If the request is a simple notebook image with no Qwen-specific need, use GuideAnts'
 built-in SD image tools — not these skills.
 
-## Max gateway (192.168.0.111)
+## Max gateway (env-configured)
+
+The scripts read `QWEN_IMAGE_SKILL_BASE_URL` and `QWEN_IMAGE_SKILL_TOKEN` from the
+guide Environment automatically — do **not** hardcode or export them inline.
+
+Verify before running:
 
 ```bash
-export QWEN_IMAGE_SKILL_BASE_URL=http://192.168.0.111:8189/qwen-image-skill
-export QWEN_IMAGE_SKILL_TOKEN=7c4e91a2b8d03f5e6a1c9d0e2f4b6a8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2
+printenv QWEN_IMAGE_SKILL_BASE_URL >/dev/null && printenv QWEN_IMAGE_SKILL_TOKEN >/dev/null && echo "env ok" || echo "env missing"
 ```
+
+If either is missing, stop and ask the user to set it in the guide's Environment
+variables. Never scan the LAN or guess Max's IP.
+
 
 Max stack: `GA_COMFYUI_VIDEO_PORT=8189`, `GA_QWEN_IMAGE_SKILL_TOKEN` in
 `guideants-video-stack/.env`. Header: `X-Qwen-Image-Skill-Token`.
@@ -36,8 +44,6 @@ Max stack: `GA_COMFYUI_VIDEO_PORT=8189`, `GA_QWEN_IMAGE_SKILL_TOKEN` in
 ## Probe first
 
 ```bash
-export QWEN_IMAGE_SKILL_BASE_URL=http://192.168.0.111:8189/qwen-image-skill
-export QWEN_IMAGE_SKILL_TOKEN=7c4e91a2b8d03f5e6a1c9d0e2f4b6a8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2
 python3 Output/Skills/qwen-image/scripts/probe.py
 python3 Output/Skills/qwen-image/scripts/preflight.py --for probe
 ```

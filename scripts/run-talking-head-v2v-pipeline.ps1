@@ -6,13 +6,13 @@ param(
     [string]$OutputStem = "v2v-august16-office-full-11",
     [int]$Width = 416,
     [int]$Height = 256,
-    [int]$Steps = 14,
+    [int]$Steps = 4,
     [double]$Cfg = 1.0,
     [int]$Fps = 25,
     # -1 = pick a random seed before submit (adapter rejects negative seeds)
     [long]$Seed = -1,
-    [string]$PositivePrompt = "A professional presenter speaks naturally to camera, relaxed head movement, subtle head turns, expressive eyes, small posture shifts, warm restrained smile",
-    [string]$NegativePrompt = "blur, distortion, extra limbs, deformed face, subtitles, low quality, dramatic gestures, overacting, wild motion",
+    [string]$PositivePrompt = "A friendly professional trainer telling a story on a webcam",
+    [string]$NegativePrompt = "jerky movements, fast motion, startled expressions",
     [string]$VideoHost = "http://127.0.0.1:8189",
     [string]$ScriptAgentToken = "local-script-agent-test-token",
     [int]$JobTimeoutSeconds = 3600,
@@ -267,21 +267,27 @@ Copy-Item -LiteralPath $GenHost -Destination (Join-Path $ArtifactDir $GenName) -
 
 "3+4. CorridorKey foreground unmixing and composite to ${OutputWidth}x${OutputHeight}" | Tee-Object -FilePath $LogPath -Append
 $corridorScript = Join-Path $PSScriptRoot "run-corridorkey-composite.py"
-& python.exe $corridorScript `
-    --source $GenHost `
-    --plate $Background `
-    --output $FinalHost `
-    --master-output $MasterHost `
-    --corridorkey-root $CorridorKey `
-    --device $CorridorKeyDevice `
-    --width $OutputWidth `
-    --height $OutputHeight `
-    --background-blur-sigma $BackgroundBlurSigma `
-    --foreground-sharpen-amount $ForegroundSharpenAmount `
-    --foreground-sharpen-sigma $ForegroundSharpenSigma 2>&1 |
-    Tee-Object -FilePath $LogPath -Append
-if ($LASTEXITCODE -ne 0) {
-    throw "run-corridorkey-composite.py failed (exit $LASTEXITCODE)"
+. (Join-Path $PSScriptRoot "Invoke-CorridorKeyCompositeLog.ps1")
+# Composite progress: Invoke-CorridorKeyCompositeLog.ps1 — never 2>&1 before Tee-Object.
+$corridorExitCode = Invoke-CorridorKeyCompositeLog `
+    -FilePath "python.exe" `
+    -ArgumentList @(
+        $corridorScript,
+        "--source", $GenHost,
+        "--plate", $Background,
+        "--output", $FinalHost,
+        "--master-output", $MasterHost,
+        "--corridorkey-root", $CorridorKey,
+        "--device", $CorridorKeyDevice,
+        "--width", "$OutputWidth",
+        "--height", "$OutputHeight",
+        "--background-blur-sigma", "$BackgroundBlurSigma",
+        "--foreground-sharpen-amount", "$ForegroundSharpenAmount",
+        "--foreground-sharpen-sigma", "$ForegroundSharpenSigma"
+    ) `
+    -LogPath $LogPath
+if ($corridorExitCode -ne 0) {
+    throw "run-corridorkey-composite.py failed (exit $corridorExitCode)"
 }
 if (-not (Test-Path -LiteralPath $MasterHost -PathType Leaf)) {
     throw "Missing lossless master $MasterHost"

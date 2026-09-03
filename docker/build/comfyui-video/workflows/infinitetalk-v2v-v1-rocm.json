@@ -72,7 +72,7 @@
       "num_frames": "{{FRAMES}}",
       "fps": "{{FPS}}",
       "audio_scale": 1.0,
-      "audio_cfg_scale": 0.88,
+      "audio_cfg_scale": 2.0,
       "multi_audio_type": "para",
       "add_noise_floor": false,
       "smooth_transients": true

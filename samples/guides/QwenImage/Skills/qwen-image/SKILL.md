@@ -55,5 +55,9 @@ Quote probe/preflight evidence when blocked. Deliverables are PNGs under `Output
 
 Honest limits: cold BF16 UNet load can take many minutes; single-host queue; no UI picker.
 
+Generate uses API id `qwen-image-v1` + `image_generate_ready`. Edit/inpaint always use
+tested Lightning (`steps=4 cfg=1 lora_strength=1`). Do not invent 20-step sampler settings
+for edit/inpaint.
+
 See `references/cold-start-vram.md` for VRAM coexistence with InfiniteTalk and the
 failure handoff at `artifacts/qwen-image-edit/FAILURE-HANDOFF-20260812.md`.

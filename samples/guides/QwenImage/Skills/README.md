@@ -42,7 +42,7 @@ Auth header: `X-Qwen-Image-Skill-Token`.
 | Skill | What it does |
 |-------|----------------|
 | [`qwen-image`](qwen-image/) | Umbrella probe + routing |
-| [`qwen-image-generate`](qwen-image-generate/) | Text → PNG (`qwen-image-bf16-v1`) |
+| [`qwen-image-generate`](qwen-image-generate/) | Text → PNG (`qwen-image-v1`, BF16 weights) |
 | [`qwen-image-edit`](qwen-image-edit/) | Image + prompt → PNG (`qwen-image-edit-bf16-v1`) |
 | [`qwen-image-inpaint`](qwen-image-inpaint/) | Source + mask + prompt → PNG (inpaint workflow) |
 
@@ -55,7 +55,8 @@ Auth header: `X-Qwen-Image-Skill-Token`.
 
 ## Precision policy
 
-BF16 only. No FP8 skills, defaults, or agent knobs.
+BF16 weights only on Max. Generate API id remains `qwen-image-v1` with
+`image_generate_ready` + `precision: bfloat16`. Do not invent FP8 skill paths.
 
 ## Limits
 

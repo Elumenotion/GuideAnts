@@ -29,15 +29,16 @@ do **not** scan the LAN, ping hosts, or guess Max's IP. Scripts use this automat
 | Result | `GET /v1/image/jobs/{id}/result` |
 | Stage file | `POST /files` |
 
-## Readiness flags (BF16 v1)
+## Readiness flags (live Max)
 
-| Flag | Workflow |
-|------|----------|
-| `image_generate_bf16_ready` | `qwen-image-bf16-v1` |
+| Flag | Workflow API id |
+|------|-----------------|
+| `image_generate_ready` | `qwen-image-v1` (BF16 weights; see `precision`) |
 | `image_edit_bf16_ready` | `qwen-image-edit-bf16-v1` |
 | `image_edit_bf16_inpaint_ready` | `qwen-image-edit-bf16-inpaint-v1` |
 
 When a flag is false, inspect adapter `missing` details — do not guess weights from disk.
+Do not require `image_generate_bf16_ready`; that flag is not advertised on this gateway.
 
 ## Auth
 

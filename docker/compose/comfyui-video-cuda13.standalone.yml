@@ -26,39 +26,30 @@ services:
       VIDEO_ADMIN_TOKEN: ${GA_COMFYUI_VIDEO_ADMIN_TOKEN:?Set GA_COMFYUI_VIDEO_ADMIN_TOKEN}
       VIDEO_MAX_CONCURRENT_JOBS: ${GA_COMFYUI_VIDEO_MAX_CONCURRENT_JOBS:-1}
       VIDEO_JOB_TIMEOUT_SECONDS: ${GA_COMFYUI_VIDEO_JOB_TIMEOUT_SECONDS:-3600}
+      VIDEO_CORRIDORKEY_ROOT: /opt/guideants/corridorkey-local/CorridorKey
+      VIDEO_COMPOSITE_SCRIPT: /opt/guideants/comfyui-video/scripts/run-corridorkey-composite.py
+      VIDEO_COMPOSITE_PYTHON: /opt/venv/bin/python3.12
+      VIDEO_COMPOSITE_DEVICE: cuda:0
+      VIDEO_COMPOSITE_FG_UPSCALER: basicvsrpp
+      VIDEO_BASICVSRPP_CHECKPOINT_DIR: /models/basicvsrpp
+      VIDEO_COMPOSITE_BACKGROUND_BLUR_SIGMA: "1.5"
+      VIDEO_COMPOSITE_FOREGROUND_SHARPEN_AMOUNT: "0"
+      VIDEO_COMPOSITE_FOREGROUND_SHARPEN_SIGMA: "0.8"
+      VIDEO_COMPOSITE_CK_STALL_SEC: "180"
       VIDEO_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1.json
       VIDEO_V2V_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/infinitetalk-v2v-v1.json
       IMAGE_EDIT_BF16_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
       IMAGE_EDIT_BF16_INPAINT_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
       IMAGE_GENERATE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-bf16-v1.json
+      IMAGE_GENERATE_20_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-generate-20-v1.json
       GA_QWEN_IMAGE_SKILL_TOKEN: ${GA_QWEN_IMAGE_SKILL_TOKEN:-local-qwen-image-skill-token}
     volumes:
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:?Set GA_CONTENT_FILES_HOST_PATH}
         target: /app/ContentFiles
       - type: bind
-        source: ../build/comfyui-video/workflows/infinitetalk-i2v-v1.json
-        target: /opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1.json
-        read_only: true
-      - type: bind
-        source: ../build/comfyui-video/workflows/infinitetalk-v2v-v1.json
-        target: /opt/guideants/comfyui-video/workflows/infinitetalk-v2v-v1.json
-        read_only: true
-      - type: bind
-        source: ../build/comfyui-video/workflows/qwen-image-edit-v1.json
-        target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-v1.json
-        read_only: true
-      - type: bind
-        source: ../build/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
-        target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-inpaint-v1.json
-        read_only: true
-      - type: bind
-        source: ../build/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
-        target: /opt/guideants/comfyui-video/workflows/qwen-image-edit-bf16-v1.json
-        read_only: true
-      - type: bind
-        source: ../build/comfyui-video/workflows/qwen-image-bf16-v1.json
-        target: /opt/guideants/comfyui-video/workflows/qwen-image-bf16-v1.json
+        source: ../build/comfyui-video/workflows
+        target: /opt/guideants/comfyui-video/workflows
         read_only: true
       - type: bind
         source: ../build/comfyui-video/qwen-image-skill-gateway
@@ -96,7 +87,7 @@ services:
       - type: volume
         source: comfyui_video_state
         target: /var/lib/guideants/comfyui-video
-    shm_size: 8gb
+    shm_size: 32gb
 volumes:
   comfyui_video_models:
   comfyui_video_cache:

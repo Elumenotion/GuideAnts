@@ -35,8 +35,8 @@ Families that take `voice_ref`: only with speaker consent.
 python3 Output/Skills/audiocpp-deferred-tts/scripts/preflight.py --for deferred-tts
 ```
 
-VRAM: a second engine competes with Max’s loaded TTS — ask the user to unload
-product TTS via Settings if needed. Never unload silently.
+VRAM: product emb/ASR/TTS normally stay loaded. A private second engine may
+compete — ask before unloading anything via Settings; never unload silently.
 
 ## Pattern
 

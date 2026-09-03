@@ -69,7 +69,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && python -m pip install -c /tmp/constraints/common.txt \
          -r /tmp/constraints/corridorkey-composite.txt \
     && OPENCV_IO_ENABLE_OPENEXR=1 python -c "import os; os.environ['OPENCV_IO_ENABLE_OPENEXR']='1'; import timm; import cv2; import numpy as np; assert cv2.imwrite('/tmp/t.exr', np.zeros((4,4,3), np.float32))" \
-    && python -m pip check
+    && python -m pip check \
+    && python3.12 -m venv /opt/venv-basicvsrpp \
+    && /opt/venv-basicvsrpp/bin/python -m pip install --upgrade "pip>=25.2,<26" "setuptools>=80,<82" "wheel>=0.45,<1" \
+    && printf '%s\n' "/opt/venv/lib/python3.12/site-packages" \
+         > /opt/venv-basicvsrpp/lib/python3.12/site-packages/_guideants_share_opt_venv.pth \
+    && /opt/venv-basicvsrpp/bin/python -m pip install -r /tmp/constraints/basicvsrpp.txt \
+    && XDG_CACHE_HOME=/tmp /opt/venv-basicvsrpp/bin/python -c "import mmengine" \
+    && /opt/venv-basicvsrpp/bin/python -m pip check
 
 FROM ${CUDA_BASE_IMAGE} AS deps-cuda13
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -91,6 +98,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
 RUN ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet
 COPY --from=pydeps-builder /opt/venv /opt/venv
+COPY --from=pydeps-builder /opt/venv-basicvsrpp /opt/venv-basicvsrpp
 COPY --from=source-builder /opt/ComfyUI /opt/ComfyUI
 
 FROM ${GA_COMFYUI_VIDEO_DEPS_IMAGE} AS final-cuda13
@@ -115,6 +123,7 @@ ENV FILE_STORAGE_ROOT=/app/ContentFiles \
     VIDEO_MODEL_MANIFEST=/opt/guideants/comfyui-video/catalog/manifest.json \
     VIDEO_MAX_CONCURRENT_JOBS=1 \
     VIDEO_JOB_TIMEOUT_SECONDS=3600 \
+    VIDEO_BASICVSRPP_VENV=/opt/venv-basicvsrpp \
     OPENCV_IO_ENABLE_OPENEXR=1
 RUN groupadd --gid 10001 guideants \
     && useradd --uid 10001 --gid guideants --create-home --shell /bin/bash guideants \
@@ -130,6 +139,7 @@ COPY scripts/ /opt/guideants/comfyui-video/scripts/
 COPY qwen-image-skill-gateway/ /opt/guideants/comfyui-video/qwen-image-skill-gateway/
 COPY source-lock.json /opt/guideants/comfyui-video/source-lock.json
 RUN chmod 0755 /usr/local/bin/ga-script-exec /opt/guideants/comfyui-video/scripts/*.py \
+      /opt/guideants/comfyui-video/scripts/exec-composite-telemetry.sh \
       /opt/guideants/comfyui-video/scripts/entrypoint.sh \
       /opt/guideants/comfyui-video/scripts/start-qwen-image-skill.sh \
     && chown -R guideants:guideants /app /opt/ComfyUI /opt/guideants/comfyui-video \

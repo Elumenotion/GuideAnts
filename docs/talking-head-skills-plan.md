@@ -45,8 +45,7 @@ Phases: `queued` → `uploading` / `waiting` / `sampling` → `compositing` → 
 
 | Skill | Role |
 |-------|------|
-| `talking-head` | Probe / preflight |
-| `talking-head-i2v` | Full job CLI |
+| `talking-head` | Probe, preflight, and job CLI (`scripts/video_tool.py`) |
 
 Env (PC guide Environment):
 

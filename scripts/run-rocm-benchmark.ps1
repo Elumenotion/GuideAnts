@@ -9,7 +9,7 @@ param(
     [string]$ExistingJobId = "",
     [int]$Width = 832,
     [int]$Height = 480,
-    [int]$Steps = 14,
+    [int]$Steps = 4,
     [double]$Cfg = 5.0,
     [switch]$FullRun,
     [int]$TimeoutHours = 6,

@@ -51,4 +51,5 @@ ambiguous or you need its probe.
 - **Stop what you spawn.** `spawn_engine.py stop` after private engines.
 - **Don't oversell.** Deliverables are files in `Output/` — not the voice picker
   or live phone path. Report what worked / what was blocked with evidence.
-- **Ask before anything disruptive.** Never silently unload Max TTS/ASR.
+- **Ask before anything disruptive.** Product emb/ASR/TTS normally stay loaded;
+  never silently unload them.

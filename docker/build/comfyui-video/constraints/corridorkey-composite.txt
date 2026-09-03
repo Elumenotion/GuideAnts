@@ -1,5 +1,5 @@
-# Python deps for CorridorKey composite inside the adapter venv.
 # Torch is owned by the ComfyUI stack; do not pin torch here.
+# mmengine belongs in /opt/venv-basicvsrpp (constraints/basicvsrpp.txt), not here.
 timm>=1.0.26,<2
 safetensors>=0.6.2,<1
 diffusers>=0.30,<1

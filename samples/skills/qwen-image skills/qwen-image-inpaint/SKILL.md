@@ -14,12 +14,20 @@ Source + mask + prompt → PNG. Mask: **white = editable**, **black = preserve**
 
 Workflow (required): `qwen-image-edit-bf16-inpaint-v1`
 
-## Max gateway (192.168.0.111)
+## Max gateway (env-configured)
+
+The scripts read `QWEN_IMAGE_SKILL_BASE_URL` and `QWEN_IMAGE_SKILL_TOKEN` from the
+guide Environment automatically — do **not** hardcode or export them inline.
+
+Verify before running:
 
 ```bash
-export QWEN_IMAGE_SKILL_BASE_URL=http://192.168.0.111:8189/qwen-image-skill
-export QWEN_IMAGE_SKILL_TOKEN=7c4e91a2b8d03f5e6a1c9d0e2f4b6a8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2
+printenv QWEN_IMAGE_SKILL_BASE_URL >/dev/null && printenv QWEN_IMAGE_SKILL_TOKEN >/dev/null && echo "env ok" || echo "env missing"
 ```
+
+If either is missing, stop and ask the user to set it in the guide's Environment
+variables. Never scan the LAN or guess Max's IP.
+
 
 ## Sampler profile (locked — tested Lightning)
 
@@ -40,8 +48,6 @@ This is the whiteboard / background profile that passed AC-I1. Never invent `ste
 ## Preflight
 
 ```bash
-export QWEN_IMAGE_SKILL_BASE_URL=http://192.168.0.111:8189/qwen-image-skill
-export QWEN_IMAGE_SKILL_TOKEN=7c4e91a2b8d03f5e6a1c9d0e2f4b6a8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2
 python3 Output/Skills/qwen-image-inpaint/scripts/preflight.py --for inpaint-bf16
 ```
 

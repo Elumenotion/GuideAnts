@@ -28,9 +28,20 @@ from skill_gateway_client import (
     using_skill_gateway,
 )
 
-GENERATE_WORKFLOW = "qwen-image-bf16-v1"
+# Live Max adapter generate API id (compose serves BF16 weights under this id).
+GENERATE_WORKFLOW = "qwen-image-v1"
 EDIT_WORKFLOW = "qwen-image-edit-bf16-v1"
 INPAINT_WORKFLOW = "qwen-image-edit-bf16-inpaint-v1"
+# Tested Lightning profile (harness + AC). Edit/inpaint always use this; generate
+# defaults match AC-G1 (full-quality generate only when user explicitly asks).
+LIGHTNING_STEPS = 4
+LIGHTNING_CFG = 1.0
+LIGHTNING_LORA_STRENGTH = 1.0
+LIGHTNING_DENOISE = 1.0
+LIGHTNING_SHIFT = 3.1
+LIGHTNING_MEGAPIXELS = 1.6
+GENERATE_WIDTH = 1328
+GENERATE_HEIGHT = 1328
 HEX_UUID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 DEFAULT_POLL_SECONDS = 5
 DEFAULT_JOB_TIMEOUT_SECONDS = 1800
@@ -181,29 +192,39 @@ def _materialize_result(job_id: str, destination: Path) -> dict[str, Any]:
 
 
 def _default_generate_params(args: argparse.Namespace) -> dict[str, Any]:
-    params: dict[str, Any] = {
+    return {
         "steps": args.steps,
         "cfg": args.cfg,
         "seed": args.seed,
-        "denoise": 1.0,
+        "denoise": LIGHTNING_DENOISE,
         "shift": args.shift,
         "megapixels": args.megapixels,
         "lora_strength": args.lora_strength,
         "width": args.width,
         "height": args.height,
     }
-    return params
+
+
+def _resolve_generate_workflow(value: str) -> str:
+    if value in (GENERATE_WORKFLOW, "qwen-image-bf16-v1"):
+        # qwen-image-bf16-v1 is a doc alias; Max only accepts qwen-image-v1.
+        return GENERATE_WORKFLOW
+    raise ImageToolError(
+        f"unsupported generate workflow: {value} (use {GENERATE_WORKFLOW})"
+    )
 
 
 def _default_edit_params(args: argparse.Namespace) -> dict[str, Any]:
+    # Edit/inpaint are locked to the tested Lightning profile. Sampler overrides
+    # are ignored so agents cannot invent steps=20 / lora_strength=0.
     return {
-        "steps": args.steps,
-        "cfg": args.cfg,
+        "steps": LIGHTNING_STEPS,
+        "cfg": LIGHTNING_CFG,
         "seed": args.seed,
-        "denoise": args.denoise,
-        "shift": args.shift,
-        "megapixels": args.megapixels,
-        "lora_strength": args.lora_strength,
+        "denoise": LIGHTNING_DENOISE,
+        "shift": LIGHTNING_SHIFT,
+        "megapixels": LIGHTNING_MEGAPIXELS,
+        "lora_strength": LIGHTNING_LORA_STRENGTH,
     }
 
 
@@ -212,7 +233,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
     submit = _submit_generate(
         args.prompt,
         output.name,
-        workflow=args.workflow,
+        workflow=_resolve_generate_workflow(args.workflow),
         parameters=_default_generate_params(args),
         negative_prompt=args.negative,
     )
@@ -284,14 +305,17 @@ def _add_common_job_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_edit_params(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--steps", type=int, default=4)
-    parser.add_argument("--cfg", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--denoise", type=float, default=1.0)
-    parser.add_argument("--shift", type=float, default=3.1)
-    parser.add_argument("--megapixels", type=float, default=1.6)
-    parser.add_argument("--lora-strength", type=float, default=1.0)
     parser.add_argument("--negative", default=" ")
+    # Kept for CLI compatibility; values are ignored — Lightning is mandatory.
+    parser.add_argument("--steps", type=int, default=LIGHTNING_STEPS, help=argparse.SUPPRESS)
+    parser.add_argument("--cfg", type=float, default=LIGHTNING_CFG, help=argparse.SUPPRESS)
+    parser.add_argument("--denoise", type=float, default=LIGHTNING_DENOISE, help=argparse.SUPPRESS)
+    parser.add_argument("--shift", type=float, default=LIGHTNING_SHIFT, help=argparse.SUPPRESS)
+    parser.add_argument("--megapixels", type=float, default=LIGHTNING_MEGAPIXELS, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--lora-strength", type=float, default=LIGHTNING_LORA_STRENGTH, help=argparse.SUPPRESS
+    )
 
 
 def main() -> None:
@@ -300,18 +324,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Qwen Image BF16 jobs via Max skill gateway")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_generate = sub.add_parser("generate", help="Text to PNG (qwen-image-bf16-v1)")
+    p_generate = sub.add_parser("generate", help=f"Text to PNG ({GENERATE_WORKFLOW})")
     p_generate.add_argument("prompt")
     p_generate.add_argument("-o", "--output", required=True)
     p_generate.add_argument("--workflow", default=GENERATE_WORKFLOW)
-    p_generate.add_argument("--width", type=int, default=1328)
-    p_generate.add_argument("--height", type=int, default=1328)
-    p_generate.add_argument("--steps", type=int, default=4)
-    p_generate.add_argument("--cfg", type=float, default=1.0)
+    p_generate.add_argument("--width", type=int, default=GENERATE_WIDTH)
+    p_generate.add_argument("--height", type=int, default=GENERATE_HEIGHT)
+    p_generate.add_argument("--steps", type=int, default=LIGHTNING_STEPS)
+    p_generate.add_argument("--cfg", type=float, default=LIGHTNING_CFG)
     p_generate.add_argument("--seed", type=int, default=0)
-    p_generate.add_argument("--shift", type=float, default=3.1)
-    p_generate.add_argument("--megapixels", type=float, default=1.6)
-    p_generate.add_argument("--lora-strength", type=float, default=1.0)
+    p_generate.add_argument("--shift", type=float, default=LIGHTNING_SHIFT)
+    p_generate.add_argument("--megapixels", type=float, default=LIGHTNING_MEGAPIXELS)
+    p_generate.add_argument("--lora-strength", type=float, default=LIGHTNING_LORA_STRENGTH)
     p_generate.add_argument("--negative", default=" ")
     _add_common_job_flags(p_generate)
 

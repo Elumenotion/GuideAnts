@@ -1,0 +1,58 @@
+---
+
+description: Composite jobs must use Invoke-CorridorKeyCompositeLog — never raw docker exec or 2>&1
+
+globs: "**/*.{ps1,sh,py}"
+
+alwaysApply: true
+
+---
+
+
+
+# Composite telemetry contract (enforced)
+
+
+
+Before creating or editing ANY script that runs `run-corridorkey-composite.py`:
+
+
+
+1. **PowerShell**: dot-source `scripts/Invoke-CorridorKeyCompositeLog.ps1` and call `Invoke-CorridorKeyCompositeLog`. No raw `docker exec ... run-corridorkey-composite.py`.
+
+2. **Bash**: invoke wrapper with `/bin/bash /opt/guideants/comfyui-video/scripts/exec-composite-telemetry.sh` (not `/bin/sh` — dash lacks `pipefail`).
+
+3. **Never** `2>&1 | Tee-Object`, `2>&1 | tee`, or `2>&1 | ForEach-Object` on composite output — MIOpen stderr corrupts stdout telemetry lines.
+
+4. **Stderr is preserved** on the docker exec stderr stream; Invoke-CorridorKeyCompositeLog logs it as `stderr: …`. Never redirect composite stderr to `/dev/null`.
+
+5. **On failure**: read `{output-stem}-progress.json` (`stage`, `failed_stage`, `error`, `exit_code`) and pipeline log tail before any retry.
+
+6. **Post-CK retry**: if `.corridorkey-{output-stem}/talking-head/Output/FG` has EXRs, rerun with `--clip-root` — do not redo CorridorKey.
+
+7. **Live progress**: `{output-stem}-progress.json`; host `*-pipeline.log` (UTF-8).
+
+
+
+After editing composite callers, run:
+
+`pwsh scripts/Test-CompositeTelemetryContract.ps1`
+
+
+
+Canonical spec: `run-corridorkey-composite.py` header, `composite.py`, `test_composite.py`.
+
+
+
+## Agent incident procedure
+
+
+
+Before diagnosing or retrying a failed composite:
+
+- Cite exit code + last `FATAL` / `stderr:` line from the pipeline log.
+
+- Read `*-progress.json` for `failed_stage` and `error`.
+
+- No GPU/OOM claims without VRAM numbers or OOM kill in logs.
+

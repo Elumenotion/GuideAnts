@@ -177,6 +177,32 @@ class WarmupOrchestratorTests(unittest.TestCase):
         drained = _aux_services_to_drain_before_llama_with_state(document, state={})
         self.assertIn("Embeddings", drained)
 
+    @mock.patch("warmup_orchestrator.llama_engine_loaded_aliases", return_value=[])
+    def test_max_aux_plan_llama_unload_does_not_need_gpu_drain_when_llama_idle(
+        self, _mock_aliases
+    ) -> None:
+        document = _sample_document_with_sections(
+            SpeechTranscription=WarmupServiceSection(enabled=True, model_id="asr-model"),
+            SpeechSynthesis=WarmupServiceSection(enabled=True, model_id="tts-model"),
+        )
+        document.services[SERVICE_LLAMA] = WarmupServiceSection(enabled=False)
+        commands = derive_plan_commands(document)
+        self.assertEqual(commands[SERVICE_LLAMA], "unload")
+        self.assertFalse(
+            warmup_orchestrator._llama_command_needs_gpu_drain(commands, document)
+        )
+
+    @mock.patch("warmup_orchestrator.llama_engine_loaded_aliases", return_value=["Local-Chat"])
+    def test_llama_unload_needs_gpu_drain_when_alias_is_loaded(self, _mock_aliases) -> None:
+        document = _sample_document_with_sections(
+            SpeechSynthesis=WarmupServiceSection(enabled=True, model_id="tts-model"),
+        )
+        document.services[SERVICE_LLAMA] = WarmupServiceSection(enabled=False)
+        commands = derive_plan_commands(document)
+        self.assertTrue(
+            warmup_orchestrator._llama_command_needs_gpu_drain(commands, document)
+        )
+
 
 class FakeEngine:
     """Records engine admin calls so tests can assert GPU drain order."""

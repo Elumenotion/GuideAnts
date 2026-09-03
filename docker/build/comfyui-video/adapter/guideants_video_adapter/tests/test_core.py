@@ -58,15 +58,59 @@ class FakeComfy:
     def __init__(self) -> None:
         self.base_url = "http://127.0.0.1:8188"
         self.submitted: dict | None = None
+        self.submit_kwargs: dict = {}
         self.prompt_id = "prompt-1"
         self.history_ready = threading.Event()
         self.interrupted = False
+        self.freed_memory = False
 
     def system_stats(self) -> dict:
         return {"devices": [{"name": "Fake GPU", "type": "cuda"}]}
 
     def object_info(self) -> dict:
-        return {"InfiniteTalk": {}}
+        return {
+            "LoadImage": {
+                "input": {"required": {"image": ["COMBO", {"options": []}]}},
+                "output": ["IMAGE", "MASK"],
+            },
+            "SaveImage": {
+                "input": {"required": {"filename_prefix": ["STRING"], "images": ["IMAGE"]}},
+                "output": [],
+            },
+            "CLIPTextEncode": {
+                "input": {
+                    "required": {
+                        "text": ["STRING", {"multiline": True}],
+                        "clip": ["CLIP"],
+                    }
+                },
+                "output": ["CONDITIONING"],
+            },
+            "TextEncodeQwenImageEditPlus": {
+                "input": {
+                    "required": {
+                        "prompt": ["STRING", {"multiline": True}],
+                        "clip": ["CLIP"],
+                        "vae": ["VAE"],
+                        "image1": ["IMAGE"],
+                    }
+                },
+                "output": ["CONDITIONING"],
+            },
+            "InfiniteTalk": {
+                "input": {
+                    "required": {
+                        "image": ["IMAGE"],
+                        "audio": ["AUDIO"],
+                        "width": ["INT"],
+                        "frames": ["INT"],
+                        "positive_prompt": ["STRING"],
+                        "negative_prompt": ["STRING"],
+                    }
+                },
+                "output": ["LATENT"],
+            },
+        }
 
     def upload(self, filename: str, data: bytes, content_type: str) -> str:
         assert data
@@ -76,6 +120,9 @@ class FakeComfy:
     def submit(self, workflow: dict, client_id: str, **kwargs: object) -> str:
         self.submitted = workflow
         self.submit_kwargs = kwargs
+        assert "ui_workflow" in kwargs
+        assert isinstance(kwargs["ui_workflow"], dict)
+        assert "nodes" in kwargs["ui_workflow"]
         return self.prompt_id
 
     def history(self, prompt_id: str) -> dict:
@@ -96,6 +143,10 @@ class FakeComfy:
 
     def interrupt(self) -> None:
         self.interrupted = True
+
+    def free_memory(self, *, unload_models: bool = True) -> None:
+        self.freed_memory = True
+        self.free_unload_models = unload_models
 
 
 @pytest.fixture
@@ -131,13 +182,20 @@ def service(
     workflow.write_text(
         json.dumps(
             {
-                "1": {"inputs": {"image": "{{INPUT_IMAGE}}", "audio": "{{INPUT_AUDIO}}"}},
-                "2": {"inputs": {"width": "{{WIDTH}}", "frames": "{{FRAMES}}"}},
+                "1": {
+                    "class_type": "InfiniteTalk",
+                    "inputs": {"image": "{{INPUT_IMAGE}}", "audio": "{{INPUT_AUDIO}}"},
+                },
+                "2": {
+                    "class_type": "InfiniteTalk",
+                    "inputs": {"width": "{{WIDTH}}", "frames": "{{FRAMES}}"},
+                },
                 "3": {
+                    "class_type": "InfiniteTalk",
                     "inputs": {
                         "positive_prompt": "{{POSITIVE_PROMPT}}",
                         "negative_prompt": "{{NEGATIVE_PROMPT}}",
-                    }
+                    },
                 },
             }
         ),
@@ -151,6 +209,7 @@ def service(
     composite_script.write_text("# stub\n", encoding="utf-8")
     monkeypatch.setenv("VIDEO_CORRIDORKEY_ROOT", str(corridor_root))
     monkeypatch.setenv("VIDEO_COMPOSITE_SCRIPT", str(composite_script))
+    monkeypatch.setenv("COMFY_JOB_WORKFLOWS_DIR", str(tmp_path / "guideants-jobs"))
 
     def fake_composite(
         *,
@@ -262,6 +321,21 @@ def test_resolve_workflow_parameters_rejects_audio_longer_than_frame_limit(
 def test_validate_parameters_rejects_frames_above_max() -> None:
     with pytest.raises(AdapterError, match="frames must be between"):
         validate_parameters({"frames": 7201})
+
+
+def test_capabilities_reports_tested_composite_profile(
+    service: tuple[AdapterService, FakeComfy],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _comfy = service
+    monkeypatch.setenv("VIDEO_COMPOSITE_FG_UPSCALER", "basicvsrpp")
+    monkeypatch.setenv("VIDEO_COMPOSITE_WIDTH", "1280")
+    monkeypatch.setenv("VIDEO_COMPOSITE_HEIGHT", "720")
+    caps = adapter.capabilities()
+    assert caps["fg_upscaler"] == "basicvsrpp"
+    assert caps["composite_width"] == 1280
+    assert caps["composite_height"] == 720
+    assert "infinitetalk-i2v-v1" in caps["workflow_versions"]
 
 
 def test_v1_rejects_video_and_reports_image_only(
@@ -400,6 +474,7 @@ def test_job_uses_private_directory_and_materializes_result(
     assert result.read_bytes() == b"fake-mp4"
     assert completed.seed == 0
     assert completed.progress.get("phase") == "completed"
+    assert comfy.freed_memory is False
     assert comfy.submitted is not None
     assert comfy.submitted["2"]["inputs"]["width"] == 832
     assert comfy.submitted["2"]["inputs"]["frames"] == 150
@@ -411,7 +486,7 @@ def test_image_edit_job_materializes_png(
     service: tuple[AdapterService, FakeComfy], tmp_path: Path
 ) -> None:
     adapter, comfy = service
-    image_workflow = adapter.image_workflow_path
+    image_workflow = adapter.image_edit_bf16_workflow_path
     image_workflow.write_text(
         json.dumps(
             {
@@ -428,7 +503,7 @@ def test_image_edit_job_materializes_png(
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_bytes(b"qwen")
     manifest = json.loads(adapter.manifest_path.read_text(encoding="utf-8"))
-    manifest["bundles"]["qwen-image-edit-v1"] = {
+    manifest["bundles"]["qwen-image-edit-bf16-v1"] = {
         "artifacts": [
             {
                 "path": "diffusion_models/qwen_edit.safetensors",
@@ -465,7 +540,7 @@ def test_image_edit_job_materializes_png(
         "image/png",
         "complete the scene",
         "edited.png",
-        "qwen-image-edit-v1",
+        "qwen-image-edit-bf16-v1",
         {"steps": 4, "cfg": 1.0, "denoise": 0.85, "shift": 3.1, "megapixels": 1.6, "lora_strength": 1.0},
     )
     comfy.history_ready.set()
@@ -481,6 +556,15 @@ def test_image_edit_job_materializes_png(
     assert comfy.submitted is not None
     assert comfy.submitted["1"]["inputs"]["prompt"] == "complete the scene"
     assert comfy.submitted["2"]["inputs"]["steps"] == 4
+    assert "ui_workflow" in comfy.submit_kwargs
+    published = adapter.job_workflows_dir / f"qwen-image-edit-bf16-v1__{job.id}.json"
+    running = adapter.job_workflows_dir / "_RUNNING__qwen-image-edit-bf16-v1.json"
+    assert published.is_file()
+    assert running.is_file()
+    ui = json.loads(published.read_text(encoding="utf-8"))
+    assert ui["nodes"]
+    prompt_node = next(n for n in ui["nodes"] if n["type"] == "TextEncodeQwenImageEditPlus")
+    assert "complete the scene" in prompt_node["widgets_values"]
     comfy.history = original_history
 
 
@@ -494,7 +578,7 @@ def test_validate_image_parameters_accepts_quality_controls() -> None:
             "megapixels": 2.0,
             "lora_strength": 0.5,
         },
-        workflow_version="qwen-image-edit-20-v1",
+        workflow_version="qwen-image-edit-bf16-v1",
     )
     assert params["steps"] == 20
     assert params["cfg"] == 4.0
@@ -504,12 +588,11 @@ def test_validate_image_parameters_accepts_quality_controls() -> None:
     assert params["lora_strength"] == 0.5
 
 
-def test_image_edit_20_defaults_when_parameters_omitted() -> None:
-    params = validate_image_parameters({}, workflow_version="qwen-image-edit-20-v1")
-    assert params["steps"] == 20
-    assert params["cfg"] == 4.0
-    assert params["denoise"] == 1.0
-    assert params["megapixels"] == 1.6
+def test_image_edit_rejects_retired_fp8_workflows() -> None:
+    with pytest.raises(AdapterError, match="unsupported workflow_version"):
+        validate_image_parameters({}, workflow_version="qwen-image-edit-v1")
+    with pytest.raises(AdapterError, match="unsupported workflow_version"):
+        validate_image_parameters({}, workflow_version="qwen-image-edit-20-v1")
 
 
 def test_image_edit_bf16_uses_lightning_defaults() -> None:
@@ -579,7 +662,7 @@ def test_image_edit_bf16_rejects_unknown_workflow() -> None:
 
 
 def test_image_generate_defaults_include_square_canvas() -> None:
-    params = validate_image_parameters({}, workflow_version="qwen-image-bf16-v1")
+    params = validate_image_parameters({}, workflow_version="qwen-image-v1")
     assert params["width"] == 1328
     assert params["height"] == 1328
     assert params["steps"] == 4
@@ -588,7 +671,7 @@ def test_image_generate_defaults_include_square_canvas() -> None:
 def test_image_generate_accepts_width_and_height() -> None:
     params = validate_image_parameters(
         {"width": 1664, "height": 928},
-        workflow_version="qwen-image-bf16-v1",
+        workflow_version="qwen-image-v1",
     )
     assert params["width"] == 1664
     assert params["height"] == 928
@@ -596,16 +679,38 @@ def test_image_generate_accepts_width_and_height() -> None:
 
 def test_image_generate_rejects_non_multiple_of_eight_canvas() -> None:
     with pytest.raises(AdapterError, match="width must be a multiple of 8"):
-        validate_image_parameters({"width": 1329}, workflow_version="qwen-image-bf16-v1")
+        validate_image_parameters({"width": 1329}, workflow_version="qwen-image-v1")
     with pytest.raises(AdapterError, match="height must be a multiple of 8"):
-        validate_image_parameters({"height": 930}, workflow_version="qwen-image-bf16-v1")
+        validate_image_parameters({"height": 930}, workflow_version="qwen-image-v1")
+
+
+def test_image_generate_20_defaults_match_reference() -> None:
+    params = validate_image_parameters({}, workflow_version="qwen-image-generate-20-v1")
+    assert params["width"] == 1328
+    assert params["height"] == 1328
+    assert params["steps"] == 20
+    assert params["cfg"] == 2.5
+    assert "lora_strength" not in params
+
+
+def test_image_generate_20_rejects_lightning_only_params() -> None:
+    with pytest.raises(AdapterError, match="lora_strength are not valid"):
+        validate_image_parameters(
+            {"lora_strength": 0.0},
+            workflow_version="qwen-image-generate-20-v1",
+        )
+    with pytest.raises(AdapterError, match="megapixels are not valid"):
+        validate_image_parameters(
+            {"megapixels": 1.6},
+            workflow_version="qwen-image-generate-20-v1",
+        )
 
 
 def test_image_edit_rejects_width_and_height() -> None:
-    with pytest.raises(AdapterError, match="width only valid for qwen-image-bf16-v1"):
-        validate_image_parameters({"width": 1664}, workflow_version="qwen-image-edit-v1")
-    with pytest.raises(AdapterError, match="height only valid for qwen-image-bf16-v1"):
-        validate_image_parameters({"height": 928}, workflow_version="qwen-image-edit-20-v1")
+    with pytest.raises(AdapterError, match="width only valid for generate workflows"):
+        validate_image_parameters({"width": 1664}, workflow_version="qwen-image-edit-bf16-v1")
+    with pytest.raises(AdapterError, match="height only valid for generate workflows"):
+        validate_image_parameters({"height": 928}, workflow_version="qwen-image-edit-bf16-inpaint-v1")
 
 
 def test_image_generate_job_materializes_png(
@@ -664,7 +769,7 @@ def test_image_generate_job_materializes_png(
     job = adapter.submit_image_generate_job(
         "a futuristic CPU on a motherboard",
         "generated.png",
-        "qwen-image-bf16-v1",
+        "qwen-image-v1",
         {"steps": 4, "cfg": 1.0},
     )
     comfy.history_ready.set()
@@ -682,6 +787,10 @@ def test_image_generate_job_materializes_png(
     assert comfy.submitted["2"]["inputs"]["steps"] == 4
     assert comfy.submitted["2"]["inputs"]["width"] == 1328
     assert comfy.submitted["2"]["inputs"]["height"] == 1328
+    assert "ui_workflow" in comfy.submit_kwargs
+    published = adapter.job_workflows_dir / f"qwen-image-v1__{job.id}.json"
+    assert published.is_file()
+    assert (adapter.job_workflows_dir / "_RUNNING__qwen-image-v1.json").is_file()
 
 
 def test_readiness_fails_clearly_when_comfy_is_unavailable(

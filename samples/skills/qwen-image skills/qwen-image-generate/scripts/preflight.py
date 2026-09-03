@@ -5,7 +5,10 @@ Prints one JSON verdict:
 
   {"scenario": ..., "open": bool, "blockers": [...], "warnings": [...], "evidence": {...}}
 
-Scenarios: generate-bf16 | edit-bf16 | inpaint-bf16 | probe
+Scenarios: generate | edit-bf16 | inpaint-bf16 | probe
+
+Max generate API id is `qwen-image-v1` with flag `image_generate_ready`
+(BF16 weights via compose; capabilities also report precision=bfloat16).
 """
 from __future__ import annotations
 
@@ -22,9 +25,13 @@ from skill_gateway_client import (
 )
 
 SCENARIO_FLAGS = {
-    "generate-bf16": ("image_generate_bf16_ready", "qwen-image-bf16-v1"),
+    "generate": ("image_generate_ready", "qwen-image-v1"),
     "edit-bf16": ("image_edit_bf16_ready", "qwen-image-edit-bf16-v1"),
     "inpaint-bf16": ("image_edit_bf16_inpaint_ready", "qwen-image-edit-bf16-inpaint-v1"),
+}
+# Stale skill docs may still say generate-bf16 — same check as generate.
+SCENARIO_ALIASES = {
+    "generate-bf16": "generate",
 }
 
 
@@ -84,25 +91,27 @@ def run_preflight(scenario: str) -> dict:
         }
 
     evidence["capabilities"] = {
-        "image_generate_bf16_ready": caps.get("image_generate_bf16_ready"),
+        "image_generate_ready": caps.get("image_generate_ready"),
         "image_edit_bf16_ready": caps.get("image_edit_bf16_ready"),
         "image_edit_bf16_inpaint_ready": caps.get("image_edit_bf16_inpaint_ready"),
+        "precision": caps.get("precision"),
         "workflow_versions": caps.get("workflow_versions"),
     }
 
-    if scenario == "probe":
-        for name, (flag, _workflow) in SCENARIO_FLAGS.items():
+    resolved = SCENARIO_ALIASES.get(scenario, scenario)
+    if resolved == "probe":
+        for _name, (flag, _workflow) in SCENARIO_FLAGS.items():
             if caps.get(flag) is not True:
                 blockers.extend(missing_from_capabilities(caps, flag))
         open_ok = not blockers
     else:
-        flag, workflow = SCENARIO_FLAGS[scenario]
+        flag, workflow = SCENARIO_FLAGS[resolved]
         evidence["workflow"] = workflow
         blockers.extend(missing_from_capabilities(caps, flag))
         open_ok = not blockers
 
     return {
-        "scenario": scenario,
+        "scenario": resolved,
         "open": open_ok,
         "blockers": blockers,
         "warnings": warnings,
@@ -117,7 +126,7 @@ def main() -> None:
         "--for",
         dest="scenario",
         required=True,
-        choices=["generate-bf16", "edit-bf16", "inpaint-bf16", "probe"],
+        choices=["generate", "generate-bf16", "edit-bf16", "inpaint-bf16", "probe"],
     )
     args = parser.parse_args()
     if using_skill_gateway():

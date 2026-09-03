@@ -1,61 +1,38 @@
-# Talking-head skills
+# Talking-head skill
 
-Experimental GuideAnts skills that reach InfiniteTalk **i2v** talking-head
-workflows on Max **without GuideAntsApi / ServiceModes changes**.
+PC sandbox → Max talking-head gateway. **One skill:** [`talking-head`](talking-head/).
+Deliverable is a **1280×720 MP4** from **one** `video_tool.py i2v` job
+(InfiniteTalk 416×256 → CorridorKey @ 416×234 → BasicVSR++ FG → 720p). V2V is
+not a skill.
 
-**Default deployment is a PC sandbox talking to Max** over the talking-head skill
-gateway — a token-gated transparent reverse proxy to the video adapter inside the
-comfyui-video container. Do not call `127.0.0.1:8189` or `:8190` from a PC sandbox.
-
-Deliverables land in `Output/` as **MP4** files (avatar + audio + background →
-composited delivery). V2V is not a skill surface.
-
-## Required Environment (PC → Max)
+## Environment (guide Environment only)
 
 ```text
 TALKING_HEAD_SKILL_BASE_URL=http://<max-lan-ip>:8189/talking-head-skill
 TALKING_HEAD_SKILL_TOKEN=<same as Max GA_TALKING_HEAD_SKILL_TOKEN>
 ```
 
-On Max `.env` set `GA_TALKING_HEAD_SKILL_TOKEN`. The comfyui-video stack publishes
-port `8189` on `0.0.0.0` for LAN access.
-
-If the vars are missing in the guide Environment, **stop and ask the user** to configure
-them. Never scan the network or guess Max's LAN IP — the operator supplies the URL.
-
-### Gateway path map
-
-| Path | Meaning |
-|------|---------|
-| `{BASE}/v1/capabilities` | Adapter readiness (`ready`, `composite_ready`, …) |
-| `{BASE}/v1/talking-head/jobs` | Submit i2v job (multipart: source, audio, background) |
-| `{BASE}/v1/talking-head/jobs/{id}` | Job status |
-| `{BASE}/v1/talking-head/jobs/{id}/cancel` | Cancel job |
-| `{BASE}/v1/talking-head/jobs/{id}/result` | Download MP4 |
-| `{BASE}/files` | Stage upload on Max (optional) |
+Do not hardcode these in skill commands. If missing, stop and ask the user. Never
+scan the LAN.
 
 Auth header: `X-Talking-Head-Skill-Token`.
 
-## Skills (v1, i2v only)
+| Path | Meaning |
+|------|---------|
+| `{BASE}/v1/capabilities` | Probe (`ready`, `composite_ready`, `fg_upscaler`, canvas) |
+| `{BASE}/v1/talking-head/jobs` | Submit (only via `video_tool.py`) |
+| `{BASE}/v1/talking-head/jobs/{id}` | Status |
+| `{BASE}/v1/talking-head/jobs/{id}/cancel` | Cancel (user-asked only) |
+| `{BASE}/v1/talking-head/jobs/{id}/result` | Download MP4 |
 
-| Skill | What it does |
-|-------|----------------|
-| [`talking-head`](talking-head/) | Umbrella probe + routing |
-| [`talking-head-i2v`](talking-head-i2v/) | Avatar + audio + background → MP4 (`infinitetalk-i2v-v1`) |
+CWD is the notebook output directory. Commands in SKILL.md are literal
+(`Skills/talking-head/scripts/…`, `-o talking-head.mp4`).
 
-No V2V skill. Do not submit video-driver jobs from this pack.
+## Rules
 
-## Common rules
-
-- Run preflight/probe first; trust it over these docs.
-- Paths must stay inside the notebook (`Output/…`, `Output/uploads/…`).
-- Jobs are long-running; default poll budget is **3600s**.
-- Seed `-1` means the CLI picks a random int **before** submit; always log the resolved seed.
-- Quiet poll telemetry: log state/progress key changes + seed, plus a 60s heartbeat — not every transport poll.
-- Report honestly what worked and what was blocked with preflight evidence.
-
-## Limits
-
-- Single-host job queue; InfiniteTalk + CorridorKey composite is heavy.
-- Background plate is required for i2v delivery.
-- Do not invent Comfy graphs or call ComfyUI `/prompt` directly from skills.
+- Preflight before submit; trust blockers over this README.
+- Tested sampler: CLI defaults only (416×256, 4, cfg 1, 25 fps, `seed=-1`).
+- `parameters` is one JSON form field inside `video_tool.py`. Do not POST by hand.
+- `i2v` submits and exits. Poll `status` on later sandbox calls. Do not wait in one script.
+- Do not call ComfyUI `/free`. Do not stack jobs. Do not cancel CK frame 0.
+- Tested 10.56s clips already ran 1626–3341s. Wall time scales with audio-derived frames.

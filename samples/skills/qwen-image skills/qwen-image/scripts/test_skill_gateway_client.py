@@ -42,14 +42,14 @@ class SkillGatewayClientTests(unittest.TestCase):
         os.environ["QWEN_IMAGE_SKILL_TOKEN"] = "secret"
         response = mock.Mock()
         response.read.return_value = json.dumps(
-            {"image_generate_bf16_ready": True}
+            {"image_generate_ready": True, "precision": "bfloat16"}
         ).encode("utf-8")
         response.__enter__ = mock.Mock(return_value=response)
         response.__exit__ = mock.Mock(return_value=False)
         urlopen.return_value = response
 
         caps = client.fetch_capabilities()
-        self.assertTrue(caps["image_generate_bf16_ready"])
+        self.assertTrue(caps["image_generate_ready"])
         request = urlopen.call_args[0][0]
         self.assertEqual(request.get_method(), "GET")
         self.assertTrue(request.full_url.endswith("/v1/capabilities"))

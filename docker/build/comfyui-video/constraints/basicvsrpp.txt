@@ -1,0 +1,3 @@
+# BasicVSR++ only. Installed into /opt/venv-basicvsrpp, never into /opt/venv.
+# CorridorKey / ComfyUI torch is visible via _guideants_share_opt_venv.pth.
+mmengine>=0.10.7,<1

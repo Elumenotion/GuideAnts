@@ -26,28 +26,38 @@ from .comfy_telemetry import (
     queue_state_for_prompt,
     should_log_progress,
 )
-from .composite import CompositeError, composite_ready, run_corridorkey_composite
+from .composite import (
+    CompositeError,
+    composite_progress_kwargs,
+    composite_ready,
+    run_corridorkey_composite,
+)
+from .workflow_ui import api_prompt_to_ui_workflow, publish_job_ui_workflow
 
 API_VERSION = "v1"
 WORKFLOW_VERSION = "infinitetalk-i2v-v1"
 V2V_WORKFLOW_VERSION = "infinitetalk-v2v-v1"
-IMAGE_WORKFLOW_VERSION = "qwen-image-edit-v1"
-IMAGE_EDIT_20_WORKFLOW_VERSION = "qwen-image-edit-20-v1"
 IMAGE_EDIT_BF16_WORKFLOW_VERSION = "qwen-image-edit-bf16-v1"
 IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION = "qwen-image-edit-bf16-inpaint-v1"
 IMAGE_GENERATE_WORKFLOW_VERSION = "qwen-image-v1"
+IMAGE_GENERATE_20_WORKFLOW_VERSION = "qwen-image-generate-20-v1"
+IMAGE_GENERATE_WORKFLOW_FILE = "qwen-image-bf16-v1.json"
+IMAGE_GENERATE_WORKFLOW_VERSIONS = frozenset(
+    {
+        IMAGE_GENERATE_WORKFLOW_VERSION,
+        IMAGE_GENERATE_20_WORKFLOW_VERSION,
+    }
+)
 IMAGE_EDIT_WORKFLOW_VERSIONS = frozenset(
     {
-        IMAGE_WORKFLOW_VERSION,
-        IMAGE_EDIT_20_WORKFLOW_VERSION,
         IMAGE_EDIT_BF16_WORKFLOW_VERSION,
         IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION,
     }
 )
-IMAGE_BUNDLE = "qwen-image-edit-v1"
-IMAGE_EDIT_20_BUNDLE = "qwen-image-edit-20-v1"
 IMAGE_EDIT_BF16_BUNDLE = "qwen-image-edit-bf16-v1"
-IMAGE_GENERATE_BUNDLE = "qwen-image-v1"
+IMAGE_GENERATE_BUNDLE = "qwen-image-bf16-v1"
+IMAGE_GENERATE_20_BUNDLE = "qwen-image-bf16-v1"
+IMAGE_GENERATE_ONLY_PARAMETERS = frozenset({"lora_strength", "megapixels"})
 TERMINAL_STATES = frozenset({"completed", "failed", "cancelled"})
 ALLOWED_PARAMETERS: dict[str, tuple[type, float | int, float | int]] = {
     "width": (int, 256, 1920),
@@ -63,18 +73,12 @@ DEFAULT_PARAMETERS: dict[str, int | float] = {
     "height": 480,
     "fps": 25,
     "frames": 125,
-    "steps": 14,
+    "steps": 4,
     "seed": 0,
     "cfg": 5.0,
 }
-DEFAULT_POSITIVE_PROMPT = (
-    "A professional presenter speaks naturally to camera, relaxed head movement, "
-    "subtle head turns, expressive eyes, small posture shifts, warm restrained smile"
-)
-DEFAULT_NEGATIVE_PROMPT = (
-    "blur, distortion, extra limbs, deformed face, subtitles, low quality, "
-    "dramatic gestures, overacting, wild motion"
-)
+DEFAULT_POSITIVE_PROMPT = "A friendly professional trainer telling a story on a webcam"
+DEFAULT_NEGATIVE_PROMPT = "jerky movements, fast motion, startled expressions"
 MAX_PROMPT_CHARS = 4000
 IMAGE_ALLOWED_PARAMETERS: dict[str, tuple[type, float | int, float | int]] = {
     "steps": (int, 1, 50),
@@ -98,16 +102,6 @@ IMAGE_DEFAULT_PARAMETERS: dict[str, int | float] = {
     "lora_strength": 1.0,
 }
 IMAGE_WORKFLOW_DEFAULTS: dict[str, dict[str, int | float]] = {
-    IMAGE_WORKFLOW_VERSION: dict(IMAGE_DEFAULT_PARAMETERS),
-    IMAGE_EDIT_20_WORKFLOW_VERSION: {
-        "steps": 20,
-        "seed": 0,
-        "cfg": 4.0,
-        "denoise": 1.0,
-        "shift": 3.1,
-        "megapixels": 1.6,
-        "lora_strength": 1.0,
-    },
     IMAGE_EDIT_BF16_WORKFLOW_VERSION: dict(IMAGE_DEFAULT_PARAMETERS),
     IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION: dict(IMAGE_DEFAULT_PARAMETERS),
     IMAGE_GENERATE_WORKFLOW_VERSION: {
@@ -115,9 +109,19 @@ IMAGE_WORKFLOW_DEFAULTS: dict[str, dict[str, int | float]] = {
         "width": 1328,
         "height": 1328,
     },
+    IMAGE_GENERATE_20_WORKFLOW_VERSION: {
+        "steps": 20,
+        "seed": 0,
+        "cfg": 2.5,
+        "denoise": 1.0,
+        "shift": 3.1,
+        "width": 1328,
+        "height": 1328,
+    },
 }
 MAX_SOURCE_BYTES = 100 * 1024 * 1024
 MAX_AUDIO_BYTES = 50 * 1024 * 1024
+DEFAULT_COMFY_JOB_WORKFLOWS_DIR = "/opt/ComfyUI/user/default/workflows/guideants-jobs"
 ALLOWED_INPUT_TYPES = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -257,16 +261,24 @@ def validate_parameters(raw: dict[str, Any]) -> dict[str, int | float]:
 def validate_image_parameters(
     raw: dict[str, Any],
     *,
-    workflow_version: str = IMAGE_WORKFLOW_VERSION,
+    workflow_version: str = IMAGE_EDIT_BF16_WORKFLOW_VERSION,
 ) -> dict[str, int | float]:
     unknown = sorted(set(raw) - set(IMAGE_ALLOWED_PARAMETERS))
     if unknown:
         raise AdapterError(f"unsupported workflow parameters: {', '.join(unknown)}", 422)
-    if workflow_version != IMAGE_GENERATE_WORKFLOW_VERSION:
+    if workflow_version not in IMAGE_GENERATE_WORKFLOW_VERSIONS:
         size_params = sorted(set(raw) & IMAGE_GENERATE_SIZE_PARAMETERS)
         if size_params:
+            allowed = ", ".join(sorted(IMAGE_GENERATE_WORKFLOW_VERSIONS))
             raise AdapterError(
-                f"{', '.join(size_params)} only valid for {IMAGE_GENERATE_WORKFLOW_VERSION}",
+                f"{', '.join(size_params)} only valid for generate workflows ({allowed})",
+                422,
+            )
+    if workflow_version == IMAGE_GENERATE_20_WORKFLOW_VERSION:
+        lightning_only = sorted(set(raw) & IMAGE_GENERATE_ONLY_PARAMETERS)
+        if lightning_only:
+            raise AdapterError(
+                f"{', '.join(lightning_only)} are not valid for {IMAGE_GENERATE_20_WORKFLOW_VERSION}",
                 422,
             )
     defaults = IMAGE_WORKFLOW_DEFAULTS.get(workflow_version)
@@ -436,9 +448,19 @@ class ComfyTransport:
             raise AdapterError("ComfyUI upload response did not contain a name")
         return name
 
-    def submit(self, workflow: dict[str, Any], client_id: str) -> str:
-        body = json.dumps({"prompt": workflow, "client_id": client_id}).encode()
-        payload = json.loads(self._request("POST", "/prompt", body, "application/json"))
+    def submit(
+        self,
+        workflow: dict[str, Any],
+        client_id: str,
+        *,
+        ui_workflow: dict[str, Any] | None = None,
+    ) -> str:
+        body: dict[str, Any] = {"prompt": workflow, "client_id": client_id}
+        if ui_workflow is not None:
+            body["extra_data"] = {"extra_pnginfo": {"workflow": ui_workflow}}
+        payload = json.loads(
+            self._request("POST", "/prompt", json.dumps(body).encode(), "application/json")
+        )
         prompt_id = payload.get("prompt_id")
         if not isinstance(prompt_id, str) or not prompt_id:
             raise AdapterError("ComfyUI prompt response did not contain prompt_id")
@@ -452,6 +474,10 @@ class ComfyTransport:
 
     def interrupt(self) -> None:
         self._request("POST", "/interrupt", b"{}", "application/json")
+
+    def free_memory(self, *, unload_models: bool = True) -> None:
+        body = json.dumps({"unload_models": unload_models, "free_memory": True}).encode()
+        self._request("POST", "/free", body, "application/json")
 
     def download_output(self, descriptor: dict[str, Any]) -> bytes:
         allowed = {"filename", "subfolder", "type"}
@@ -562,11 +588,10 @@ class AdapterService:
         manifest_path: Path,
         comfy: ComfyTransport,
         poll_interval: float = 1.0,
-        image_workflow_path: Path | None = None,
-        image_edit_20_workflow_path: Path | None = None,
         image_edit_bf16_workflow_path: Path | None = None,
         image_edit_bf16_inpaint_workflow_path: Path | None = None,
         image_generate_workflow_path: Path | None = None,
+        image_generate_20_workflow_path: Path | None = None,
         v2v_workflow_path: Path | None = None,
     ) -> None:
         self.jobs_root = jobs_root
@@ -575,12 +600,6 @@ class AdapterService:
         self.v2v_workflow_path = v2v_workflow_path or (
             workflow_path.parent / f"{V2V_WORKFLOW_VERSION}.json"
         )
-        self.image_workflow_path = image_workflow_path or (
-            workflow_path.parent / f"{IMAGE_WORKFLOW_VERSION}.json"
-        )
-        self.image_edit_20_workflow_path = image_edit_20_workflow_path or (
-            workflow_path.parent / f"{IMAGE_EDIT_20_WORKFLOW_VERSION}.json"
-        )
         self.image_edit_bf16_workflow_path = image_edit_bf16_workflow_path or (
             workflow_path.parent / f"{IMAGE_EDIT_BF16_WORKFLOW_VERSION}.json"
         )
@@ -588,13 +607,18 @@ class AdapterService:
             workflow_path.parent / f"{IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION}.json"
         )
         self.image_generate_workflow_path = image_generate_workflow_path or (
-            workflow_path.parent / f"{IMAGE_GENERATE_WORKFLOW_VERSION}.json"
+            workflow_path.parent / IMAGE_GENERATE_WORKFLOW_FILE
+        )
+        self.image_generate_20_workflow_path = image_generate_20_workflow_path or (
+            workflow_path.parent / f"{IMAGE_GENERATE_20_WORKFLOW_VERSION}.json"
         )
         self.image_edit_workflow_paths = {
-            IMAGE_WORKFLOW_VERSION: self.image_workflow_path,
-            IMAGE_EDIT_20_WORKFLOW_VERSION: self.image_edit_20_workflow_path,
             IMAGE_EDIT_BF16_WORKFLOW_VERSION: self.image_edit_bf16_workflow_path,
             IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION: self.image_edit_bf16_inpaint_workflow_path,
+        }
+        self.image_generate_workflow_paths = {
+            IMAGE_GENERATE_WORKFLOW_VERSION: self.image_generate_workflow_path,
+            IMAGE_GENERATE_20_WORKFLOW_VERSION: self.image_generate_20_workflow_path,
         }
         self.manifest_path = manifest_path
         self.comfy = comfy
@@ -602,7 +626,39 @@ class AdapterService:
         self.jobs: dict[str, Job] = {}
         self.installations: dict[str, Installation] = {}
         self._lock = threading.RLock()
+        self.job_workflows_dir = Path(
+            os.getenv("COMFY_JOB_WORKFLOWS_DIR", DEFAULT_COMFY_JOB_WORKFLOWS_DIR)
+        )
         jobs_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def _submit_rendered_workflow(
+        self,
+        job: Job,
+        workflow: dict[str, Any],
+        workflow_version: str,
+    ) -> str:
+        """Convert, publish to guideants-jobs, and submit with UI metadata for Comfy."""
+        object_info = self.comfy.object_info()
+        workflow_label = f"{workflow_version}__{job.id}"
+        filename = f"guideants-jobs/{workflow_label}.json"
+        try:
+            ui_workflow = api_prompt_to_ui_workflow(
+                workflow,
+                object_info,
+                workflow_id=workflow_label,
+                filename=filename,
+            )
+            publish_job_ui_workflow(
+                self.job_workflows_dir, workflow_version, job.id, ui_workflow
+            )
+        except ValueError as exc:
+            raise AdapterError(f"failed to publish ComfyUI job workflow: {exc}", 500) from exc
+        except OSError as exc:
+            raise AdapterError(
+                f"failed to write ComfyUI job workflow under {self.job_workflows_dir}: {exc}",
+                500,
+            ) from exc
+        return self.comfy.submit(workflow, job.id, ui_workflow=ui_workflow)
 
     def _update_job_progress(self, job: Job, *, log: bool = True, **updates: Any) -> None:
         with self._lock:
@@ -632,24 +688,6 @@ class AdapterService:
         if not self._bundle_ready(WORKFLOW_VERSION):
             missing.append("models")
         return self._comfy_readiness(missing, self.v2v_workflow_path)
-
-    def image_readiness(self) -> tuple[bool, dict[str, Any]]:
-        return self._image_edit_readiness(
-            IMAGE_WORKFLOW_VERSION,
-            self.image_workflow_path,
-            IMAGE_BUNDLE,
-            "image_workflow",
-            "image_models",
-        )
-
-    def image_edit_20_readiness(self) -> tuple[bool, dict[str, Any]]:
-        return self._image_edit_readiness(
-            IMAGE_EDIT_20_WORKFLOW_VERSION,
-            self.image_edit_20_workflow_path,
-            IMAGE_EDIT_20_BUNDLE,
-            "image_edit_20_workflow",
-            "image_edit_20_models",
-        )
 
     def image_edit_bf16_readiness(self) -> tuple[bool, dict[str, Any]]:
         return self._image_edit_readiness(
@@ -692,6 +730,14 @@ class AdapterService:
             missing.append("image_generate_models")
         return self._comfy_readiness(missing, self.image_generate_workflow_path)
 
+    def image_generate_20_readiness(self) -> tuple[bool, dict[str, Any]]:
+        missing: list[str] = []
+        if not self.image_generate_20_workflow_path.is_file():
+            missing.append("image_generate_20_workflow")
+        if not self._bundle_ready(IMAGE_GENERATE_20_BUNDLE):
+            missing.append("image_generate_20_models")
+        return self._comfy_readiness(missing, self.image_generate_20_workflow_path)
+
     def _comfy_readiness(
         self, missing: list[str], workflow_path: Path
     ) -> tuple[bool, dict[str, Any]]:
@@ -728,22 +774,20 @@ class AdapterService:
 
     def capabilities(self) -> dict[str, Any]:
         ready, details = self.readiness()
-        image_ready, image_details = self.image_readiness()
-        image_edit_20_ready, image_edit_20_details = self.image_edit_20_readiness()
         image_edit_bf16_ready, image_edit_bf16_details = self.image_edit_bf16_readiness()
         image_edit_bf16_inpaint_ready, image_edit_bf16_inpaint_details = (
             self.image_edit_bf16_inpaint_readiness()
         )
         image_generate_ready, image_generate_details = self.image_generate_readiness()
+        image_generate_20_ready, image_generate_20_details = self.image_generate_20_readiness()
         v2v_ready, v2v_details = self.v2v_readiness()
         composite_ok, composite_missing = composite_ready()
         device = (
             details.get("device")
-            or image_details.get("device")
-            or image_edit_20_details.get("device")
             or image_edit_bf16_details.get("device")
             or image_edit_bf16_inpaint_details.get("device")
             or image_generate_details.get("device")
+            or image_generate_20_details.get("device")
             or v2v_details.get("device")
             or {}
         )
@@ -753,11 +797,10 @@ class AdapterService:
             "workflow_versions": [
                 WORKFLOW_VERSION,
                 V2V_WORKFLOW_VERSION,
-                IMAGE_WORKFLOW_VERSION,
-                IMAGE_EDIT_20_WORKFLOW_VERSION,
                 IMAGE_EDIT_BF16_WORKFLOW_VERSION,
                 IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION,
                 IMAGE_GENERATE_WORKFLOW_VERSION,
+                IMAGE_GENERATE_20_WORKFLOW_VERSION,
             ],
             "image_parameters": sorted(IMAGE_ALLOWED_PARAMETERS),
             "input_kinds": ["image", "video"],
@@ -769,11 +812,13 @@ class AdapterService:
             "ready": ready,
             "v2v_ready": v2v_ready,
             "composite_ready": composite_ok,
-            "image_ready": image_ready,
-            "image_edit_20_ready": image_edit_20_ready,
+            "fg_upscaler": os.getenv("VIDEO_COMPOSITE_FG_UPSCALER", "lanczos").strip().lower(),
+            "composite_width": int(os.getenv("VIDEO_COMPOSITE_WIDTH", "1280")),
+            "composite_height": int(os.getenv("VIDEO_COMPOSITE_HEIGHT", "720")),
             "image_edit_bf16_ready": image_edit_bf16_ready,
             "image_edit_bf16_inpaint_ready": image_edit_bf16_inpaint_ready,
             "image_generate_ready": image_generate_ready,
+            "image_generate_20_ready": image_generate_20_ready,
             "composite_missing": composite_missing,
         }
 
@@ -1023,7 +1068,7 @@ class AdapterService:
                 video_name=source_name if is_v2v else None,
             )
             self._update_job_progress(job, phase="submitting", message="submitting ComfyUI prompt")
-            job.prompt_id = self.comfy.submit(workflow, job.id)
+            job.prompt_id = self._submit_rendered_workflow(job, workflow, workflow_version)
             listener = ComfyProgressListener(
                 self.comfy.base_url,
                 job.id,
@@ -1072,13 +1117,23 @@ class AdapterService:
                             job,
                             phase="compositing",
                             message="CorridorKey composite with background plate",
+                            step=None,
+                            max_steps=None,
+                            percent=None,
+                            last_event="composite_start",
                         )
                         try:
+                            # step/max_steps/percent come from parse_composite_telemetry_line
+                            # parsing run-corridorkey-composite.py stdout (frames=N/M lines).
                             run_corridorkey_composite(
                                 source=green_path,
                                 plate=plate_path,
                                 output=delivery_path,
                                 master_output=master_path,
+                                on_progress=lambda updates, current_job=job: self._update_job_progress(
+                                    current_job,
+                                    **composite_progress_kwargs(updates),
+                                ),
                             )
                         except CompositeError as exc:
                             raise AdapterError(str(exc), exc.status_code) from exc
@@ -1137,18 +1192,18 @@ class AdapterService:
         elif mask is not None:
             raise AdapterError("mask is only valid for the BF16 inpaint workflow", 422)
         parameters = validate_image_parameters(parameters, workflow_version=workflow_version)
-        if workflow_version == IMAGE_EDIT_20_WORKFLOW_VERSION:
-            ready, details = self.image_edit_20_readiness()
-        elif workflow_version == IMAGE_EDIT_BF16_WORKFLOW_VERSION:
-            ready, details = self.image_edit_bf16_readiness()
-        elif workflow_version == IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION:
+        if workflow_version == IMAGE_EDIT_BF16_INPAINT_WORKFLOW_VERSION:
             ready, details = self.image_edit_bf16_inpaint_readiness()
         else:
-            ready, details = self.image_readiness()
+            ready, details = self.image_edit_bf16_readiness()
         if not ready:
             raise AdapterError(f"image backend is not ready: {details['missing']}", 503)
         workflow_path = self.image_edit_workflow_paths[workflow_version]
-        job = Job(id=uuid.uuid4().hex, output_filename=output_filename)
+        job = Job(
+            id=uuid.uuid4().hex,
+            output_filename=output_filename,
+            workflow_version=workflow_version,
+        )
         job_dir = self.jobs_root / job.id
         job_dir.mkdir(mode=0o700)
         (job_dir / f"source{ALLOWED_INPUT_TYPES[source_type]}").write_bytes(source)
@@ -1166,6 +1221,7 @@ class AdapterService:
                 negative_prompt,
                 parameters,
                 workflow_path,
+                workflow_version,
                 mask,
                 mask_type,
             ),
@@ -1182,6 +1238,7 @@ class AdapterService:
         negative_prompt: str,
         parameters: dict[str, int | float],
         workflow_path: Path,
+        workflow_version: str,
         mask: bytes | None,
         mask_type: str | None,
     ) -> None:
@@ -1212,7 +1269,7 @@ class AdapterService:
                 },
             )
             self._update_job_progress(job, phase="submitting", message="submitting ComfyUI prompt")
-            job.prompt_id = self.comfy.submit(workflow, job.id)
+            job.prompt_id = self._submit_rendered_workflow(job, workflow, workflow_version)
             listener = ComfyProgressListener(
                 self.comfy.base_url,
                 job.id,
@@ -1269,7 +1326,7 @@ class AdapterService:
         parameters: dict[str, Any],
         negative_prompt: str = " ",
     ) -> Job:
-        if workflow_version != IMAGE_GENERATE_WORKFLOW_VERSION:
+        if workflow_version not in IMAGE_GENERATE_WORKFLOW_VERSIONS:
             raise AdapterError(f"unsupported workflow_version: {workflow_version}", 422)
         if not prompt.strip():
             raise AdapterError("prompt must be non-empty", 422)
@@ -1277,17 +1334,25 @@ class AdapterService:
         parameters = validate_image_parameters(
             parameters, workflow_version=workflow_version
         )
-        ready, details = self.image_generate_readiness()
+        if workflow_version == IMAGE_GENERATE_20_WORKFLOW_VERSION:
+            ready, details = self.image_generate_20_readiness()
+        else:
+            ready, details = self.image_generate_readiness()
         if not ready:
             raise AdapterError(f"image generate backend is not ready: {details['missing']}", 503)
-        job = Job(id=uuid.uuid4().hex, output_filename=output_filename)
+        workflow_path = self.image_generate_workflow_paths[workflow_version]
+        job = Job(
+            id=uuid.uuid4().hex,
+            output_filename=output_filename,
+            workflow_version=workflow_version,
+        )
         job_dir = self.jobs_root / job.id
         job_dir.mkdir(mode=0o700)
         with self._lock:
             self.jobs[job.id] = job
         threading.Thread(
             target=self._image_generate_job_worker,
-            args=(job, prompt, negative_prompt, parameters),
+            args=(job, prompt, negative_prompt, parameters, workflow_version, workflow_path),
             daemon=True,
         ).start()
         return job
@@ -1298,12 +1363,14 @@ class AdapterService:
         prompt: str,
         negative_prompt: str,
         parameters: dict[str, int | float],
+        workflow_version: str,
+        workflow_path: Path,
     ) -> None:
         job.state = "running"
         self._update_job_progress(job, phase="running", message="starting image generate job")
         listener: ComfyProgressListener | None = None
         try:
-            template = json.loads(self.image_generate_workflow_path.read_text(encoding="utf-8"))
+            template = json.loads(workflow_path.read_text(encoding="utf-8"))
             workflow = render_workflow(
                 template,
                 "",
@@ -1315,7 +1382,7 @@ class AdapterService:
                 },
             )
             self._update_job_progress(job, phase="submitting", message="submitting ComfyUI prompt")
-            job.prompt_id = self.comfy.submit(workflow, job.id)
+            job.prompt_id = self._submit_rendered_workflow(job, workflow, workflow_version)
             listener = ComfyProgressListener(
                 self.comfy.base_url,
                 job.id,

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using FluentAssertions;
 using GuideAntsApi.Options;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
@@ -99,6 +100,83 @@ public sealed class SpeechTranscriptionServiceDeepTests
         var act = async () => await service.TranscribeAudioWithDurationAsync(content, "rec.wav", "audio/wav");
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Local ASR API failed*");
+    }
+
+    [TestMethod]
+    public async Task TranscribeLocalAsr_Recycles_OnHttp500_ThenRetriesSameBytes()
+    {
+        var calls = 0;
+        var handler = new StubHandler(_ =>
+        {
+            calls++;
+            if (calls == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent("{\"error\":\"transcription_failed\"}", Encoding.UTF8, "application/json")
+                };
+            }
+
+            return Json("{\"text\":\"after recycle\",\"durationSeconds\":3}");
+        });
+        using var httpClient = new HttpClient(handler);
+        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        recovery
+            .Setup(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = CreateService(
+            httpClient,
+            LocalProviderSection,
+            localServiceHostsOptions: new LocalServiceHostsOptions { SpeechTranscriptionBaseUrl = "http://asr:80" },
+            localSpeechEngineRecovery: recovery.Object);
+
+        await using var content = new MemoryStream(new byte[64]);
+        var result = await service.TranscribeAudioWithDurationAsync(content, "rec.wav", "audio/wav");
+
+        result.Text.Should().Be("after recycle");
+        calls.Should().Be(2);
+        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task TranscribeLocalAsr_DoesNotRecycle_OnHttp400()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("bad request", Encoding.UTF8, "text/plain")
+        });
+        using var httpClient = new HttpClient(handler);
+        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        var service = CreateService(
+            httpClient,
+            LocalProviderSection,
+            localServiceHostsOptions: new LocalServiceHostsOptions { SpeechTranscriptionBaseUrl = "http://asr:80" },
+            localSpeechEngineRecovery: recovery.Object);
+
+        await using var content = new MemoryStream(new byte[64]);
+        var act = async () => await service.TranscribeAudioWithDurationAsync(content, "rec.wav", "audio/wav");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*BadRequest*");
+        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task TranscribeLocalAsr_EmptyTextOnHttp200_DoesNotRecycle()
+    {
+        var handler = new StubHandler(_ => Json("{\"text\":\"\",\"durationSeconds\":1}"));
+        using var httpClient = new HttpClient(handler);
+        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        var service = CreateService(
+            httpClient,
+            LocalProviderSection,
+            localServiceHostsOptions: new LocalServiceHostsOptions { SpeechTranscriptionBaseUrl = "http://asr:80" },
+            localSpeechEngineRecovery: recovery.Object);
+
+        await using var content = new MemoryStream(new byte[64]);
+        var result = await service.TranscribeAudioWithDurationAsync(content, "rec.wav", "audio/wav");
+
+        result.Text.Should().BeEmpty();
+        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -281,7 +359,8 @@ public sealed class SpeechTranscriptionServiceDeepTests
         IDictionary<string, string?>? configurationValues = null,
         string? modelId = null,
         string? requestPresetJson = null,
-        int maxFileSizeMB = 500)
+        int maxFileSizeMB = 500,
+        ILocalAiStartupWarmupService? localSpeechEngineRecovery = null)
     {
         var speechOptionsMonitor = new StaticOptionsMonitor<AzureSpeechServiceOptions>(
             azureOptions ?? new AzureSpeechServiceOptions { Endpoint = "https://speech.example.com", ApiKey = "k" });
@@ -331,7 +410,8 @@ public sealed class SpeechTranscriptionServiceDeepTests
             resolvedVideoService,
             resolver,
             configuration,
-            NullLogger<SpeechTranscriptionService>.Instance);
+            NullLogger<SpeechTranscriptionService>.Instance,
+            localSpeechEngineRecovery);
     }
 
     private static HttpResponseMessage Json(string body) =>

@@ -173,17 +173,80 @@ async def proxy_adapter(path: str, request: Request) -> Response:
 
 @APP.get("/health")
 def health(_: None = Depends(auth_dependency)) -> dict[str, Any]:
+    """Gateway liveness. Does not wait on a busy adapter."""
+    import socket
+    from urllib.parse import urlparse
+
     upstream = adapter_url()
-    caps = probe_url(f"{upstream}/v1/capabilities")
+    parsed = urlparse(upstream)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8190
+    listening = False
+    try:
+        with socket.create_connection((host, port), timeout=0.25):
+            listening = True
+    except OSError:
+        listening = False
     return {
         "status": "ok",
         "service": "talking-head-raw-gateway",
         "api_version": "1",
         "ts": utc_now_iso(),
-        "adapter": {"upstream": upstream, **probe_url(f"{upstream}/health")},
-        "capabilities": caps,
+        "adapter": {
+            "upstream": upstream,
+            "listening": listening,
+            "state": "listening" if listening else "down",
+        },
         "stagingRoot": str(staging_root()),
-        "note": "All /v1/* paths are transparent proxies to the ComfyUI-video adapter.",
+        "note": (
+            "Liveness only. Busy InfiniteTalk jobs can stall adapter HTTP /health. "
+            "Use GET /ready for deep probes."
+        ),
+    }
+
+
+@APP.get("/ready")
+def ready(_: None = Depends(auth_dependency)) -> dict[str, Any]:
+    import socket
+    from urllib.parse import urlparse
+
+    upstream = adapter_url()
+    adapter = probe_url(f"{upstream}/health", timeout=0.5)
+    caps = probe_url(f"{upstream}/v1/capabilities", timeout=0.5)
+    parsed = urlparse(upstream)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8190
+    listening = False
+    try:
+        with socket.create_connection((host, port), timeout=0.25):
+            listening = True
+    except OSError:
+        listening = False
+
+    if adapter.get("reachable"):
+        state = "up"
+    elif listening:
+        state = "busy"
+        adapter = {
+            **adapter,
+            "reachable": True,
+            "state": "busy",
+            "busy": True,
+            "error": adapter.get("error") or "health timed out while adapter port is listening",
+        }
+    else:
+        state = "down"
+
+    return {
+        "status": "ok" if state in {"up", "busy"} else "degraded",
+        "ready": state in {"up", "busy"},
+        "busy": state == "busy",
+        "service": "talking-head-raw-gateway",
+        "api_version": "1",
+        "ts": utc_now_iso(),
+        "adapter": {"upstream": upstream, "listening": listening, "state": state, **adapter},
+        "capabilities": caps,
+        "note": "state=busy means the adapter is listening but HTTP health did not answer in time.",
     }
 
 

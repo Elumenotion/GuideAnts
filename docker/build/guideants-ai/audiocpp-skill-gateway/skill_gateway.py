@@ -21,11 +21,13 @@ Auth: X-Audiocpp-Skill-Token == GA_AUDIOCPP_SKILL_TOKEN.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -33,9 +35,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile
@@ -56,6 +60,11 @@ PRIVATE_STATE: dict[str, Any] = {
     "meta": None,
 }
 
+# Gateway→engine proxy in-flight (skills bypass wrappers; wrappers.busy stays false
+# unless we surface this). Keyed by requestId.
+IN_FLIGHT_LOCK = threading.Lock()
+IN_FLIGHT: dict[str, dict[str, Any]] = {}
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -70,6 +79,23 @@ def env_int(name: str, default: int) -> int:
         return value if value > 0 else default
     except ValueError:
         return default
+
+
+def log_event(event: str, **fields: Any) -> None:
+    payload = {"event": event, "ts": utc_now_iso()}
+    payload.update(fields)
+    print(json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
+
+
+def proxy_heartbeat_interval_seconds() -> float:
+    raw = (os.getenv("GA_AUDIOCPP_SKILL_HEARTBEAT_SECONDS") or "").strip()
+    if not raw:
+        return 10.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 10.0
+    return value if value > 0 else 10.0
 
 
 def require_token() -> str:
@@ -140,6 +166,56 @@ def wrapper_asr_health_url() -> str:
     return f"http://{host}:{port}/health"
 
 
+def wrapper_base_url(route: str) -> str | None:
+    if route == "asr":
+        return wrapper_asr_health_url().rsplit("/", 1)[0]
+    if route == "tts":
+        return wrapper_tts_health_url().rsplit("/", 1)[0]
+    return None
+
+
+def proxy_timeout_seconds() -> float:
+    return float(env_int("GA_AUDIOCPP_SKILL_PROXY_TIMEOUT_SECONDS", 300))
+
+
+def report_wrapper_engine_failure(route: str, *, reason: str, request_id: str) -> None:
+    """Ask the owning wrapper to kill/restart audiocpp_server. HTTP timeout does not stop GPU work."""
+    base = wrapper_base_url(route)
+    if not base:
+        return
+    url = f"{base}/admin/report-engine-failure"
+    body = json.dumps({"reason": reason, "requestId": request_id}, ensure_ascii=True).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            payload = response.read().decode("utf-8", errors="replace")
+            status_code = int(response.status)
+        log_event(
+            "audiocpp_skill_proxy_engine_recycle",
+            route=route,
+            reason=reason,
+            requestId=request_id,
+            target=url,
+            statusCode=status_code,
+            body=payload[:500],
+        )
+    except Exception as exc:
+        log_event(
+            "audiocpp_skill_proxy_engine_recycle_failed",
+            route=route,
+            reason=reason,
+            requestId=request_id,
+            target=url,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+
+
 def resolve_binary() -> str:
     override = (os.getenv("GA_TTS_SERVER_PATH") or os.getenv("GA_ASR_SERVER_PATH") or "").strip()
     candidates = ([override] if override else []) + ["/usr/local/bin/audiocpp_server"]
@@ -171,9 +247,220 @@ def probe_url(url: str, timeout: float = 3.0) -> dict[str, Any]:
         return {"reachable": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
-def private_health_ok(port: int, timeout: float = 3.0) -> bool:
-    probe = probe_url(f"{private_engine_url(port)}/health", timeout=timeout)
-    return bool(probe.get("reachable") and probe.get("status") == 200)
+def tcp_listening(host: str, port: int, timeout: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def host_port_from_url(url: str) -> tuple[str, int]:
+    parsed = urlparse(url if "://" in url else f"http://{url}")
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return host, int(port)
+
+
+def probe_upstream(
+    url: str,
+    *,
+    timeout: float = 0.5,
+    expect_busy_on_timeout: bool = True,
+) -> dict[str, Any]:
+    """Probe an upstream without treating inference stall as downtime.
+
+    audiocpp_server is effectively single-request while synthesizing/transcribing.
+    Its HTTP /health can hang until that work finishes. A listening TCP socket
+    plus a health timeout means busy — not down.
+    """
+    host, port = host_port_from_url(url)
+    listening = tcp_listening(host, port)
+    if not listening:
+        return {
+            "reachable": False,
+            "state": "down",
+            "listening": False,
+            "error": f"tcp connect failed to {host}:{port}",
+        }
+
+    http = probe_url(url, timeout=timeout)
+    if http.get("reachable"):
+        body = http.get("body")
+        busy = False
+        if isinstance(body, dict) and body.get("busy") is True:
+            busy = True
+        return {
+            **http,
+            "listening": True,
+            "state": "busy" if busy else "up",
+            "busy": busy,
+        }
+
+    if expect_busy_on_timeout:
+        return {
+            "reachable": True,
+            "listening": True,
+            "state": "busy",
+            "busy": True,
+            "error": http.get("error") or "health probe timed out while port is listening",
+        }
+    return {**http, "listening": True, "state": "down", "busy": False}
+
+
+def probe_many(targets: dict[str, str], *, timeout: float = 0.5) -> dict[str, dict[str, Any]]:
+    results: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=max(1, len(targets))) as pool:
+        futures = {
+            pool.submit(probe_upstream, url, timeout=timeout): name
+            for name, url in targets.items()
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                results[name] = future.result()
+            except Exception as exc:
+                results[name] = {
+                    "reachable": False,
+                    "state": "down",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+    return results
+
+
+def private_health_ok(port: int, timeout: float = 0.5) -> bool:
+    probe = probe_upstream(f"{private_engine_url(port)}/health", timeout=timeout)
+    return probe.get("state") in {"up", "busy"}
+
+
+def listening_summary(url: str) -> dict[str, Any]:
+    host, port = host_port_from_url(url)
+    listening = tcp_listening(host, port)
+    return {
+        "upstream": url,
+        "listening": listening,
+        "state": "listening" if listening else "down",
+    }
+
+
+def summarize_proxy_work(path: str, body: bytes) -> dict[str, Any]:
+    """Extract operator-visible work fields from proxied engine JSON bodies."""
+    work: dict[str, Any] = {"path": path or "/"}
+    lowered = (path or "").lower()
+    if "audio/speech" in lowered:
+        work["kind"] = "speech"
+    elif "audio/transcriptions" in lowered:
+        work["kind"] = "transcription"
+    elif "tasks/run" in lowered:
+        work["kind"] = "task"
+    else:
+        work["kind"] = "other"
+    if not body:
+        return work
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return work
+    if not isinstance(payload, dict):
+        return work
+    model = payload.get("model")
+    if isinstance(model, str) and model.strip():
+        work["model"] = model.strip()
+    voice = payload.get("voice")
+    if isinstance(voice, str) and voice.strip():
+        work["voice"] = voice.strip()
+    if payload.get("voice_ref"):
+        work["hasVoiceRef"] = True
+    text = payload.get("input")
+    if isinstance(text, str):
+        work["inputChars"] = len(text)
+        work["inputWords"] = len(text.split())
+    audio = payload.get("audio")
+    if isinstance(audio, str) and audio.strip():
+        work["hasAudio"] = True
+    request = payload.get("request")
+    if isinstance(request, dict) and request.get("audio"):
+        work["hasAudio"] = True
+    return work
+
+
+def track_proxy_start(request_id: str, *, route: str, method: str, work: dict[str, Any]) -> None:
+    with IN_FLIGHT_LOCK:
+        IN_FLIGHT[request_id] = {
+            "requestId": request_id,
+            "route": route,
+            "method": method,
+            "startedAtUtc": utc_now_iso(),
+            "startedMono": time.monotonic(),
+            "work": work,
+            "recoveryRequested": False,
+        }
+
+
+def track_proxy_finish(request_id: str) -> None:
+    with IN_FLIGHT_LOCK:
+        IN_FLIGHT.pop(request_id, None)
+
+
+def in_flight_for(route: str) -> dict[str, Any]:
+    now = time.monotonic()
+    with IN_FLIGHT_LOCK:
+        items = [dict(item) for item in IN_FLIGHT.values() if item.get("route") == route]
+    oldest_ms = None
+    if items:
+        started = [float(item["startedMono"]) for item in items if item.get("startedMono") is not None]
+        if started:
+            oldest_ms = int((now - min(started)) * 1000)
+    return {"count": len(items), "requests": items[:8], "oldestAgeMs": oldest_ms}
+
+
+def mark_recovery_requested(request_id: str) -> bool:
+    with IN_FLIGHT_LOCK:
+        item = IN_FLIGHT.get(request_id)
+        if item is None or item.get("recoveryRequested"):
+            return False
+        item["recoveryRequested"] = True
+        return True
+
+
+def apply_gateway_in_flight(
+    route: str,
+    *,
+    engine: dict[str, Any],
+    wrapper: dict[str, Any] | None = None,
+) -> None:
+    """Mark product engines busy when this gateway is driving inference."""
+    snap = in_flight_for(route)
+    count = int(snap["count"])
+    if count <= 0:
+        return
+    stalled = snap.get("oldestAgeMs") is not None and int(snap["oldestAgeMs"]) >= int(proxy_timeout_seconds() * 1000)
+    engine["busy"] = True
+    engine["gatewayInFlight"] = count
+    engine["oldestInFlightAgeMs"] = snap.get("oldestAgeMs")
+    if stalled:
+        engine["failed"] = True
+        engine["state"] = "failed"
+    elif engine.get("listening") or engine.get("state") in {"listening", "up", "busy"}:
+        engine["state"] = "busy"
+    if wrapper is None:
+        return
+    wrapper["busy"] = True
+    wrapper["gatewayInFlight"] = count
+    wrapper["oldestInFlightAgeMs"] = snap.get("oldestAgeMs")
+    if stalled:
+        wrapper["failed"] = True
+        wrapper["state"] = "failed"
+    elif wrapper.get("state") in {None, "up", "listening"}:
+        wrapper["state"] = "busy"
+    body = wrapper.get("body")
+    if isinstance(body, dict):
+        wrapper["body"] = {
+            **body,
+            "busy": True,
+            "gatewayInFlight": count,
+            **({"failed": True} if stalled else {}),
+        }
 
 
 def pid_alive(pid: int) -> bool:
@@ -235,7 +522,36 @@ def list_repo_files(repo: str, revision: str, token: str | None) -> list[dict[st
     return [entry for entry in entries if entry.get("type") == "file"]
 
 
-async def proxy_engine(base: str, path: str, request: Request) -> Response:
+def _proxy_engine_sync(
+    req: urllib.request.Request,
+    timeout: float,
+) -> tuple[int, bytes, str, dict[str, str]]:
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as upstream:
+            content_type = upstream.headers.get("Content-Type", "application/octet-stream")
+            payload = upstream.read()
+            response_headers: dict[str, str] = {}
+            for name in ("Content-Disposition", "X-Request-Id"):
+                if upstream.headers.get(name):
+                    response_headers[name] = upstream.headers.get(name)
+            return int(upstream.status), payload, content_type, response_headers
+    except urllib.error.HTTPError as exc:
+        detail = exc.read()
+        content_type = (
+            exc.headers.get("Content-Type", "application/octet-stream")
+            if exc.headers
+            else "application/octet-stream"
+        )
+        return int(exc.code), detail, content_type, {}
+
+
+async def proxy_engine(
+    base: str,
+    path: str,
+    request: Request,
+    *,
+    route: str,
+) -> Response:
     """Transparent reverse proxy: method, query, headers, body → engine."""
     query = request.url.query
     target = f"{base.rstrip('/')}/{path.lstrip('/')}"
@@ -262,28 +578,140 @@ async def proxy_engine(base: str, path: str, request: Request) -> Response:
             continue
         headers[key] = value
 
-    req = urllib.request.Request(target, data=body if body else None, method=request.method, headers=headers)
-    timeout = float(os.getenv("GA_AUDIOCPP_SKILL_PROXY_TIMEOUT_SECONDS", "3600") or "3600")
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    work = summarize_proxy_work(path or "/", body)
+    req = urllib.request.Request(
+        target,
+        data=body if body else None,
+        method=request.method,
+        headers=headers,
+    )
+    timeout = proxy_timeout_seconds()
+    started = time.perf_counter()
+    track_proxy_start(request_id, route=route, method=request.method, work=work)
+    log_event(
+        "audiocpp_skill_proxy_start",
+        requestId=request_id,
+        route=route,
+        method=request.method,
+        path=path or "/",
+        bodyBytes=len(body),
+        target=target,
+        timeoutSeconds=timeout,
+        inFlight=in_flight_for(route)["count"],
+        **{k: v for k, v in work.items() if k != "path"},
+    )
+
+    stop = asyncio.Event()
+    interval = proxy_heartbeat_interval_seconds()
+
+    async def _heartbeat() -> None:
+        while True:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+                return
+            except asyncio.TimeoutError:
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+                log_event(
+                    "audiocpp_skill_proxy_heartbeat",
+                    requestId=request_id,
+                    route=route,
+                    method=request.method,
+                    path=path or "/",
+                    elapsedMs=elapsed_ms,
+                    inFlight=in_flight_for(route)["count"],
+                    **{k: v for k, v in work.items() if k != "path"},
+                )
+                if elapsed_ms >= int(timeout * 1000) and mark_recovery_requested(request_id):
+                    log_event(
+                        "audiocpp_skill_proxy_stalled",
+                        requestId=request_id,
+                        route=route,
+                        elapsedMs=elapsed_ms,
+                        timeoutSeconds=timeout,
+                    )
+                    await asyncio.to_thread(
+                        report_wrapper_engine_failure,
+                        route,
+                        reason="proxy_stalled",
+                        request_id=request_id,
+                    )
+
+    beat_task = asyncio.create_task(_heartbeat(), name=f"audiocpp-proxy-{request_id}")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as upstream:
-            content_type = upstream.headers.get("Content-Type", "application/octet-stream")
-            payload = upstream.read()
-            response_headers = {}
-            for name in ("Content-Disposition", "X-Request-Id"):
-                if upstream.headers.get(name):
-                    response_headers[name] = upstream.headers.get(name)
-            return Response(
-                content=payload,
-                status_code=upstream.status,
-                media_type=content_type,
-                headers=response_headers,
+        status_code, payload, content_type, response_headers = await asyncio.to_thread(
+            _proxy_engine_sync,
+            req,
+            timeout,
+        )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        if status_code >= 400:
+            log_event(
+                "audiocpp_skill_proxy_failed",
+                requestId=request_id,
+                route=route,
+                method=request.method,
+                path=path or "/",
+                statusCode=status_code,
+                latencyMs=latency_ms,
+                responseBytes=len(payload),
+                **{k: v for k, v in work.items() if k != "path"},
             )
-    except urllib.error.HTTPError as exc:
-        detail = exc.read()
-        content_type = exc.headers.get("Content-Type", "application/octet-stream") if exc.headers else "application/octet-stream"
-        return Response(content=detail, status_code=exc.code, media_type=content_type)
+            if status_code == 503 and mark_recovery_requested(request_id):
+                await asyncio.to_thread(
+                    report_wrapper_engine_failure,
+                    route,
+                    reason="engine_http_503",
+                    request_id=request_id,
+                )
+        else:
+            log_event(
+                "audiocpp_skill_proxy_success",
+                requestId=request_id,
+                route=route,
+                method=request.method,
+                path=path or "/",
+                statusCode=status_code,
+                latencyMs=latency_ms,
+                responseBytes=len(payload),
+                **{k: v for k, v in work.items() if k != "path"},
+            )
+        response_headers = dict(response_headers)
+        response_headers.setdefault("X-Request-Id", request_id)
+        return Response(
+            content=payload,
+            status_code=status_code,
+            media_type=content_type,
+            headers=response_headers,
+        )
     except Exception as exc:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        log_event(
+            "audiocpp_skill_proxy_failed",
+            requestId=request_id,
+            route=route,
+            method=request.method,
+            path=path or "/",
+            latencyMs=latency_ms,
+            errorType=type(exc).__name__,
+            error=str(exc),
+            **{k: v for k, v in work.items() if k != "path"},
+        )
+        if mark_recovery_requested(request_id):
+            await asyncio.to_thread(
+                report_wrapper_engine_failure,
+                route,
+                reason=f"proxy_{type(exc).__name__}",
+                request_id=request_id,
+            )
         raise HTTPException(status_code=502, detail=f"upstream error: {exc}") from exc
+    finally:
+        track_proxy_finish(request_id)
+        stop.set()
+        try:
+            await beat_task
+        except Exception:
+            pass
 
 
 class FetchRequest(BaseModel):
@@ -329,33 +757,125 @@ class PrivateStartRequest(BaseModel):
 
 @APP.get("/health")
 def health(_: None = Depends(auth_dependency)) -> dict[str, Any]:
-    private_port = PRIVATE_STATE.get("port") or private_engine_port()
+    """Gateway liveness. Never waits on busy audiocpp_server inference.
+
+    Wrapper HTTP probes stay (FastAPI snapshots remain responsive under engine
+    load and expose catalogEntryId for skills). Engine checks are TCP-only.
+    Deep engine HTTP probes belong on GET /ready.
+    """
+    private_port = int(PRIVATE_STATE.get("port") or private_engine_port())
+    asr_up = asr_engine_url()
+    tts_up = tts_engine_url()
+    private_up = private_engine_url(private_port)
+    wrapper_probes = probe_many(
+        {
+            "asr": wrapper_asr_health_url(),
+            "tts": wrapper_tts_health_url(),
+        },
+        timeout=0.5,
+    )
+    engines = {
+        "asr": {"base": "/asr", **listening_summary(asr_up)},
+        "tts": {"base": "/tts", **listening_summary(tts_up)},
+        "private": {"base": "/private", **listening_summary(private_up)},
+    }
+    wrappers = {
+        "asr": {"base": "/asr", **wrapper_probes.get("asr", {})},
+        "tts": {"base": "/tts", **wrapper_probes.get("tts", {})},
+    }
+    apply_gateway_in_flight("asr", engine=engines["asr"], wrapper=wrappers["asr"])
+    apply_gateway_in_flight("tts", engine=engines["tts"], wrapper=wrappers["tts"])
+    apply_gateway_in_flight("private", engine=engines["private"])
     return {
         "status": "ok",
         "service": "audiocpp-raw-gateway",
         "api_version": "2",
         "ts": utc_now_iso(),
-        "engines": {
-            "asr": {"base": "/asr", "upstream": asr_engine_url(), **probe_url(f"{asr_engine_url()}/health")},
-            "tts": {"base": "/tts", "upstream": tts_engine_url(), **probe_url(f"{tts_engine_url()}/health")},
-            "private": {
-                "base": "/private",
-                "upstream": private_engine_url(int(private_port)),
-                **probe_url(f"{private_engine_url(int(private_port))}/health"),
-            },
-        },
-        "wrappers": {
-            "asr": probe_url(wrapper_asr_health_url()),
-            "tts": probe_url(wrapper_tts_health_url()),
-        },
+        "engines": engines,
+        "wrappers": wrappers,
         "modelsRoot": str(models_root()),
-        "note": "All /asr/*, /tts/*, /private/* paths are transparent proxies to audiocpp_server.",
+        "note": (
+            "Liveness: wrappers are HTTP-probed (fast); engines are TCP listen "
+            "checks only. Busy engines often stop answering HTTP /health while "
+            "inference runs — that is not downtime. Gateway in-flight proxy work "
+            "marks engines/wrappers busy even when wrappers are bypassed. Use "
+            "GET /ready for deep engine probes that classify busy vs down."
+        ),
+    }
+
+
+@APP.get("/ready")
+def ready(_: None = Depends(auth_dependency)) -> dict[str, Any]:
+    """Deep readiness with short parallel probes. Busy != down."""
+    private_port = int(PRIVATE_STATE.get("port") or private_engine_port())
+    targets = {
+        "engineAsr": f"{asr_engine_url()}/health",
+        "engineTts": f"{tts_engine_url()}/health",
+        "enginePrivate": f"{private_engine_url(private_port)}/health",
+        "wrapperAsr": wrapper_asr_health_url(),
+        "wrapperTts": wrapper_tts_health_url(),
+    }
+    probes = probe_many(targets, timeout=0.5)
+    # Gateway may be driving the engine while wrapper HTTP still says idle.
+    for route, key in (("asr", "engineAsr"), ("tts", "engineTts"), ("private", "enginePrivate")):
+        snap = in_flight_for(route)
+        if snap["count"] <= 0:
+            continue
+        probe = probes.get(key) or {}
+        probe["busy"] = True
+        probe["gatewayInFlight"] = snap["count"]
+        probe["oldestInFlightAgeMs"] = snap.get("oldestAgeMs")
+        stalled = snap.get("oldestAgeMs") is not None and int(snap["oldestAgeMs"]) >= int(
+            proxy_timeout_seconds() * 1000
+        )
+        if stalled:
+            probe["failed"] = True
+            probe["state"] = "failed"
+        elif probe.get("listening") or probe.get("state") in {"up", "busy", "listening"}:
+            probe["state"] = "busy"
+        probes[key] = probe
+        wrapper_key = "wrapperAsr" if route == "asr" else ("wrapperTts" if route == "tts" else None)
+        if wrapper_key and wrapper_key in probes:
+            wrap = probes[wrapper_key]
+            wrap["busy"] = True
+            wrap["gatewayInFlight"] = snap["count"]
+            wrap["oldestInFlightAgeMs"] = snap.get("oldestAgeMs")
+            wrap["state"] = "failed" if stalled else "busy"
+            if stalled:
+                wrap["failed"] = True
+            body = wrap.get("body")
+            if isinstance(body, dict):
+                wrap["body"] = {
+                    **body,
+                    "busy": True,
+                    "gatewayInFlight": snap["count"],
+                    **({"failed": True} if stalled else {}),
+                }
+    states = [probe.get("state") for probe in probes.values()]
+    any_failed = any(state == "failed" for state in states)
+    any_up = any(state in {"up", "busy"} for state in states) and not any_failed
+    any_busy = any(state == "busy" for state in states) or any(
+        in_flight_for(route)["count"] > 0 for route in ("asr", "tts", "private")
+    )
+    return {
+        "status": "failed" if any_failed else ("ok" if any_up else "degraded"),
+        "ready": bool(any_up and not any_failed),
+        "busy": any_busy,
+        "failed": any_failed,
+        "service": "audiocpp-raw-gateway",
+        "api_version": "2",
+        "ts": utc_now_iso(),
+        "probes": probes,
+        "note": (
+            "state=busy means inference is in flight. state=failed means in-flight "
+            "work exceeded the proxy timeout and the owning wrapper must recycle the engine."
+        ),
     }
 
 
 @APP.get("/admin/upstream")
 def admin_upstream(_: None = Depends(auth_dependency)) -> dict[str, Any]:
-    return health()
+    return ready()
 
 
 @APP.post("/files")
@@ -380,19 +900,19 @@ async def stage_file(
 @APP.api_route("/asr", methods=PROXY_METHODS)
 @APP.api_route("/asr/{path:path}", methods=PROXY_METHODS)
 async def proxy_asr(request: Request, path: str = "", _: None = Depends(auth_dependency)) -> Response:
-    return await proxy_engine(asr_engine_url(), path, request)
+    return await proxy_engine(asr_engine_url(), path, request, route="asr")
 
 
 @APP.api_route("/tts", methods=PROXY_METHODS)
 @APP.api_route("/tts/{path:path}", methods=PROXY_METHODS)
 async def proxy_tts(request: Request, path: str = "", _: None = Depends(auth_dependency)) -> Response:
-    return await proxy_engine(tts_engine_url(), path, request)
+    return await proxy_engine(tts_engine_url(), path, request, route="tts")
 
 
 @APP.api_route("/private", methods=PROXY_METHODS)
 @APP.api_route("/private/{path:path}", methods=PROXY_METHODS)
 async def proxy_private(request: Request, path: str = "", _: None = Depends(auth_dependency)) -> Response:
-    return await proxy_engine(private_engine_url(), path, request)
+    return await proxy_engine(private_engine_url(), path, request, route="private")
 
 
 @APP.post("/admin/models/fetch")

@@ -84,6 +84,9 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle));
 
+        public Task RecycleSharedSpeechEnginesAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
         public async Task SyncDesiredAndApplyAsync(
             WarmupDesiredBuildOptions? options = null,
             bool waitForCompletion = false,

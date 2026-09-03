@@ -92,7 +92,8 @@ engine; the request still goes to `AUDIOCPP_SKILL_BASE_URL`.)
 
 Ground rules:
 
-- Prefer asking the user to unload Max TTS first if VRAM is tight (Settings).
+- Product emb/ASR/TTS normally stay loaded on Max. Only ask before unloading
+  via Settings if a private second engine truly cannot fit (never unload silently).
 - Script budget ~5 minutes; poll `status` / re-run `fetch_model.py` to resume.
 - Always `stop` the private engine when done.
 
