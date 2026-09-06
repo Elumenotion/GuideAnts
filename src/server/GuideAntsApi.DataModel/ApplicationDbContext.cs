@@ -360,9 +360,12 @@ namespace GuideAntsApi.DataModel
 
             // Ensure NotebookId presence aligns with FileKind
             // Notebook = 1, Project = 0 per enum
+            // Notebook events must carry NotebookId; Project events may carry it
+            // optionally (e.g. PublishedToProject / CopiedToNotebook track the source
+            // or destination notebook).
             modelBuilder.Entity<FileLineageEvent>()
                 .ToTable(t => t.HasCheckConstraint("CK_FileLineageEvent_NotebookId",
-                    "(FileKind = 1 AND NotebookId IS NOT NULL) OR (FileKind = 0 AND NotebookId IS NULL)"));
+                    "FileKind = 0 OR (FileKind = 1 AND NotebookId IS NOT NULL)"));
 
             // ------------------------------------------------------------
             // Configure relationships with restricted delete behavior

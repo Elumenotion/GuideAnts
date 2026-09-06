@@ -1899,7 +1899,7 @@ namespace AntRunner.Chat
                         Logger.LogError("No request builder found for {ToolName}", toolName);
                         return new ToolOutput()
                         {
-                            Output = $"Error: {toolName} is not a valid tool.",
+                            Output = $"ERROR: {toolName} is not a valid tool.",
                             ToolCallId = requiredOutput.Id
                         };
                     });

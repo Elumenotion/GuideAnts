@@ -557,53 +557,6 @@ export function useConversationActions(
       dispatch({ type: 'ADD_MESSAGE', payload: userMessage });
       dispatch({ type: 'ADD_MESSAGE', payload: placeholderAssistant });
 
-      const rollbackOptimisticSend = () => {
-        // REMOVE_LAST_TURN pops trailing messages through the last user message —
-        // exactly the placeholder + user message added above.
-        dispatch({ type: 'REMOVE_LAST_TURN' });
-        const snapshot = sendStreamStateRef.current?.snapshot;
-        dispatch({ type: 'SET_DRAFT', payload: snapshot?.draft ?? content });
-        dispatch({ type: 'SET_ATTACHMENTS', payload: snapshot?.pendingAttachments ?? attList });
-        dispatch({ type: 'SET_STREAMING_MODE', payload: { mode: 'at-rest' } });
-        // A Stop click during the runtime preflight (window between the
-        // optimistic dispatches above and this rollback) sets _isCancelling
-        // true; undo that here so it can't leak into the next send attempt.
-        dispatch({ type: 'SET_CANCELLING', payload: false });
-        clearPendingStop();
-        setActiveStreamTurnId?.(null);
-        clearSendStreamState();
-      };
-
-      if (assistant?.id) {
-        try {
-          const runtimeStatus = await checkRuntimeStatus(projectId, notebookId, assistant.id, inflightRuntimeChecksRef.current, runtimeReadyCacheRef.current);
-          if (!runtimeStatus) {
-            rollbackOptimisticSend();
-            return;
-          }
-          if (runtimeStatus.state !== 'ready') {
-            if (runtimeStatus.state === 'failed' || runtimeStatus.state === 'invalid') {
-              showToast({
-                type: 'error',
-                title: runtimeStatus.state === 'invalid' ? 'Incompatible Local Models' : 'Local Runtime Error',
-                message: getRuntimeBlockingMessage(runtimeStatus)
-              });
-            }
-            rollbackOptimisticSend();
-            return;
-          }
-        } catch (error: any) {
-          console.error('Failed to check local runtime status:', error);
-          showToast({
-            type: 'error',
-            title: 'Runtime Error',
-            message: `Failed to check model runtime status: ${error.message}`
-          });
-          rollbackOptimisticSend();
-          return;
-        }
-      }
-
       // Send exclusively owns token appends for this turn.
       abortObserverStream();
 
@@ -793,15 +746,23 @@ export function useConversationActions(
         }
 
         console.error('Send message failed', error);
-        // Known preflight rejection: no draft restore either way (undo is the only
-        // restore path) -- only decide the attachment chips from the persistence oracle.
+        // Known preflight rejection. Composer decision uses the SAME turnId persistence
+        // oracle as every other terminal path: a server 409 for a not-ready runtime arrives
+        // AFTER the server has created the turn + user message (and emitted turn_created),
+        // so a known turnId means the input was CONSUMED into the transcript and the draft
+        // stays empty (undo recovers it). No turnId means the send was rejected before any
+        // turn was persisted -> roll the optimistic turn back and restore the draft + chips
+        // so the user's text is not silently dropped (this is the compensation for removing
+        // the client-side checkRuntimeStatus preflight, which used to bail before the POST).
+        const persistedOnSend = Boolean(streamTurn.current ?? sendStreamStateRef.current?.turnId);
         const preflightSnapshot = sendStreamStateRef.current?.snapshot;
-        if (preflightSnapshot) {
-          if (streamTurn.current) {
-            dispatch({ type: 'CLEAR_ATTACHMENTS' });
-          } else {
-            dispatch({ type: 'SET_ATTACHMENTS', payload: preflightSnapshot.pendingAttachments });
-          }
+        if (!persistedOnSend && preflightSnapshot) {
+          dispatch({ type: 'REMOVE_LAST_TURN' });
+          dispatch({ type: 'SET_DRAFT', payload: preflightSnapshot.draft });
+          dispatch({ type: 'SET_ATTACHMENTS', payload: preflightSnapshot.pendingAttachments });
+          dispatch({ type: 'SET_STREAMING_MODE', payload: { mode: 'at-rest' } });
+        } else if (preflightSnapshot) {
+          dispatch({ type: 'CLEAR_ATTACHMENTS' });
         }
         runtimeReadyCacheRef.current.clear();
         clearPendingStop();

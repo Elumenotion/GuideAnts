@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Shared helpers for remote ComfyUI-video adapter access via GPU host gateway.
+"""Shared helpers for remote ComfyUI-video adapter access via Max gateway.
 
-When TALKING_HEAD_SKILL_BASE_URL is set, skills talk to the GPU host LAN raw gateway
+When TALKING_HEAD_SKILL_BASE_URL is set, skills talk to the Max LAN raw gateway
 instead of loopback adapter ports. The gateway is a transparent reverse proxy:
 
   {BASE}/v1/capabilities
@@ -41,7 +41,7 @@ def gateway_env_missing_hint() -> str:
     return (
         "Ask the user to set TALKING_HEAD_SKILL_BASE_URL and TALKING_HEAD_SKILL_TOKEN "
         "in the guide's Environment variables. Do not scan the LAN, ping hosts, or "
-        "guess the GPU host's IP — the operator supplies the URL. Do not call 127.0.0.1:8189 "
+        "guess Max's IP — the operator supplies the URL. Do not call 127.0.0.1:8189 "
         "or :8190 from a PC sandbox."
     )
 
@@ -68,7 +68,7 @@ def gateway_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
         sys.stderr.write(
             "TALKING_HEAD_SKILL_BASE_URL is set but TALKING_HEAD_SKILL_TOKEN is missing. "
             "Ask the user to set TALKING_HEAD_SKILL_TOKEN in the guide's Environment "
-            "variables (same value as the GPU host GA_TALKING_HEAD_SKILL_TOKEN).\n"
+            "variables (same value as Max GA_TALKING_HEAD_SKILL_TOKEN).\n"
         )
         sys.exit(1)
     headers["X-Talking-Head-Skill-Token"] = token
@@ -143,7 +143,7 @@ def gateway_download(path: str, *, timeout: float = 3600.0) -> bytes:
 
 
 def stage_file(local_path: str, *, timeout: float = 600.0) -> str:
-    """Upload a local file to the GPU host staging; return absolute GPU host-side path."""
+    """Upload a local file to Max staging; return absolute Max-side path."""
     from pathlib import Path
 
     path = Path(local_path)

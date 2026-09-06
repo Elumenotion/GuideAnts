@@ -192,60 +192,21 @@ public static class NotebookConversationsEndpoints
                     .ResolveActiveAssistantIdAsync(dbContext, request.AssistantName, CancellationToken.None);
             }
 
-            // Preflight local runtime readiness (do not link to client disconnect; streaming setup must still run)
+            // Preflight local runtime readiness. This endpoint must NOT start or wait on a
+            // model load: loading is owned by the LlamaRuntimeModal (via /llama-runtime/load).
+            // A not-ready state is reported as a 409 with the live runtimeStatus so the client
+            // can restore the draft and surface the dialog (e.g. after an AI container restart
+            // where no dialog is currently showing).
             var runtimeStatus = await runtimeService.GetRuntimeStatusAsync(notebookId, targetAssistantId, CancellationToken.None);
-            if (runtimeStatus.State != "ready" && runtimeStatus.RequiredModels.Any(m => m.RuntimeConfig != null))
+            if (runtimeStatus.State != "ready"
+                && (runtimeStatus.RequiredModels.Any(m => m.RuntimeConfig != null)
+                    || string.Equals(runtimeStatus.State, "invalid", StringComparison.OrdinalIgnoreCase)))
             {
-                // Auto-reload on model switching: if the required local llama
-                // model is not loaded, start (or join) the notebook runtime load
-                // operation and wait for completion before streaming.
-                var loadOperation = await runtimeService
-                    .StartLoadOperationAsync(notebookId, targetAssistantId, CancellationToken.None);
-
-                if (!string.Equals(loadOperation.State, "ready", StringComparison.OrdinalIgnoreCase))
+                return Results.Conflict(new
                 {
-                    var timeoutAt = DateTime.UtcNow.AddMinutes(15);
-                    while (DateTime.UtcNow < timeoutAt)
-                    {
-                        var current = await runtimeService.GetOperationStatusAsync(
-                            notebookId,
-                            loadOperation.OperationId,
-                            CancellationToken.None);
-
-                        if (current is not null)
-                        {
-                            loadOperation = current;
-                        }
-
-                        if (string.Equals(loadOperation.State, "ready", StringComparison.OrdinalIgnoreCase))
-                        {
-                            break;
-                        }
-
-                        if (IsTerminalFailedState(loadOperation.State))
-                        {
-                            return Results.Conflict(new
-                            {
-                                error = "Local model load failed.",
-                                runtimeStatus,
-                                operation = loadOperation
-                            });
-                        }
-
-                        await Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None);
-                    }
-                }
-
-                runtimeStatus = await runtimeService.GetRuntimeStatusAsync(notebookId, targetAssistantId, CancellationToken.None);
-                if (runtimeStatus.State != "ready")
-                {
-                    return Results.Conflict(new
-                    {
-                        error = "Local models are not ready.",
-                        runtimeStatus,
-                        operation = loadOperation
-                    });
-                }
+                    error = "Local models are not ready.",
+                    runtimeStatus
+                });
             }
 
             try
@@ -444,11 +405,6 @@ public static class NotebookConversationsEndpoints
     public record RenameConversationRequest(string Title);
     public record EditMessageRequest(string Content);
 
-    private static bool IsTerminalFailedState(string? state)
-    {
-        return string.Equals(state, "failed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(state, "invalid", StringComparison.OrdinalIgnoreCase);
-    }
 
     private static string ConvertConversationToMarkdown(NotebookConversationWithMessagesDto conversation)
     {

@@ -1,26 +1,50 @@
-# Workflows (talking-head i2v)
+# Workflows — talking-head i2v path
 
-| Workflow id | Skill | Use |
-|-------------|-------|-----|
-| `infinitetalk-i2v-v1` | `talking-head-i2v` | Avatar + audio + background → composited MP4 |
+| Workflow id | Submit with |
+|-------------|-------------|
+| `infinitetalk-i2v-v1` | `talking-head/scripts/video_tool.py i2v` |
 
-V2V (`infinitetalk-v2v-v1`) may exist on the adapter host for host harnesses; it is
-**not** a skill surface. Do not route agents to V2V from this pack.
+That id is the adapter/skill contract. The generate graph is
+**LongCat-Video-Avatar-1.5** (Whisper-large-v3 audio, DMD 8-step distill). V2V is
+not a skill surface. Do not mutate workflow JSON.
 
-Skills must not mutate workflow JSON on disk.
+## Stages (one adapter job)
 
-## Seeing them in ComfyUI
+| Stage | What runs | Size |
+|-------|-----------|------|
+| Generate | LongCat-Video-Avatar-1.5 i2v, lossless green | 416×256 |
+| Prepare | Crop to 16:9; plate focus-blur σ=1.5 | 416×234 FG |
+| Key | CorridorKey at native LQ | 416×234 |
+| Upscale | BasicVSR++ 4× on **keyed FG only** | 1664×936 |
+| Composite | Fit FG over plate; H.264 MP4 | 1280×720 |
 
-On the GPU host, open ComfyUI and use **Workflows**:
+Avatar/FG are not blurred. FG sharpen is 0.
 
-| Folder | Contents |
-|--------|----------|
-| `guideants/` | Template graphs (UI format; placeholders) |
-| `guideants-jobs/` | Exact **rendered** graph for each submitted job (`{workflow}__{jobId}.json`) plus `_RUNNING__{workflow}.json` |
+Progress: `sampling` during i2v, then `compositing` (CorridorKey frames, `basicvsrpp fg`
+windows, encode). **Frame 0 of CorridorKey is often 30s–4 min** (MIOpen; red first
+frame **216s**), then **~2.6s/frame** (`frame_elapsed_s: 2.6` on gray-t). Do not
+cancel that window.
 
-Load a `guideants-jobs/*.json` file (UI format) to inspect the graph that is / was running.
+`video_tool.py i2v` submits and exits. Poll `status` on later sandbox calls
+(`sleep 60 && … status <job_id>`). A sandbox script is killed after about 10
+minutes; these jobs last much longer. InfiniteTalk 4-step **10.56s / 264-frame**
+clips already ran **1626s** (gray-t), **2273s** (blue-t two-arms; CK 973s, VSR
+402s), **3114s** (AC-T3 service), **3341s** (blue-shirt). LongCat-Video-Avatar-1.5
+is 8-step distill; sampling will exceed those generate times. Frame count is audio
+seconds × 25 (max 7200), where the adapter sees the PADDED .wav duration
+(see parameters.md `--audio-pad`). Keep polling until `completed` or `failed`. There is no
+3600s job deadline.
 
-## Job shape
+## After submit
 
-One adapter job owns generate + CorridorKey composite. Client submits once, polls
-`/v1/talking-head/jobs/{id}`, then downloads `/result` as MP4.
+```text
+GET  /v1/talking-head/jobs/{jobId}          status (jobId is 32 hex chars)
+POST /v1/talking-head/jobs/{jobId}/cancel   only if the user asks to cancel
+GET  /v1/talking-head/jobs/{jobId}/result   MP4 (video_tool does this)
+```
+
+`video_tool.py i2v` writes `{stem}-run-meta.json` at submit (`seed`, `seedMode`,
+`jobId`, `workflow`, `outputPath`). `result` updates that file after download.
+
+ComfyUI `guideants-jobs/` shows the **generate** graph only. CK/VSR are
+`run-corridorkey-composite.py`, not Comfy nodes.

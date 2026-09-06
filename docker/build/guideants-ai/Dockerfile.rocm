@@ -145,7 +145,7 @@ RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/ga-script-exec /tmp/ga-script-exec.c
 # hipSPARSELt, ...) — none of which llama.cpp/sd.cpp/audio.cpp actually link against.
 # That one layer alone is ~22GB and is why the rocm flavor was ~38GB vs. ~8-14GB for
 # every other flavor. See below for the actual (verified via `ldd`) minimal set.
-FROM ghcr.io/ggml-org/llama.cpp:server-rocm AS llama-rocm-upstream
+FROM ghcr.io/ggml-org/llama.cpp:server-rocm-b10615 AS llama-rocm-upstream
 
 FROM ubuntu:24.04 AS runtime-rocm-base
 ARG GA_UBUNTU_MIRROR_URL

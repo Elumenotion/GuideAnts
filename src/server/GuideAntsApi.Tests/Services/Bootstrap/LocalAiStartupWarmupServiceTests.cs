@@ -2,6 +2,7 @@ using FluentAssertions;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Bootstrap;
+using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Tests.TestUtils;
@@ -56,7 +57,8 @@ public sealed class LocalAiStartupWarmupServiceTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -136,7 +138,8 @@ public sealed class LocalAiStartupWarmupServiceTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -203,7 +206,8 @@ public sealed class LocalAiStartupWarmupServiceTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -342,7 +346,8 @@ public sealed class LocalAiStartupWarmupServiceTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -459,7 +464,8 @@ public sealed class LocalAiStartupWarmupServiceTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -523,7 +529,8 @@ public sealed class LocalAiStartupWarmupServiceTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var service = new LocalAiStartupWarmupService(
             configuration,

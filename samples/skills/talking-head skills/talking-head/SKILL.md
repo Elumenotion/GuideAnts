@@ -1,6 +1,6 @@
 ---
 name: talking-head
-description: "Probe the GPU host InfiniteTalk talking-head readiness via the skill gateway and route to talking-head-i2v. Use when the user needs avatar+audio+background → MP4, or when readiness is unclear."
+description: "Make a talking-head MP4 on Max: avatar + audio + plate → 416×256 LongCat-Video-Avatar-1.5, CorridorKey @ 416×234, BasicVSR++ FG, 1280×720. Submit with video_tool.py, then poll status on later sandbox calls."
 metadata:
   guideants:
     enabled: true
@@ -8,56 +8,130 @@ metadata:
     requires_toolsets: [sandbox]
 ---
 
-# Talking-head (umbrella)
+# Talking-head
 
-Paths — fixed layout, do not probe or re-derive. The sandbox CWD is the
-notebook's **output directory**. This skill's scripts live under
-`Skills/talking-head/scripts/` relative to it. Write deliverables with
-**bare filenames** (e.g. `-o clip.mp4`); never prefix with `Output/`.
+This is the only talking-head skill. Avatar + audio + background plate → **1280×720 MP4**.
 
-Product notebook tools do not cover InfiniteTalk talking-head delivery. Use this
-family when the user needs **avatar + audio + background → composited MP4** via
-the ComfyUI-video adapter on the GPU host (`infinitetalk-i2v-v1`).
+One adapter job: LongCat-Video-Avatar-1.5 at 416×256 → crop 416×234 → CorridorKey @ native →
+BasicVSR++ 4× on keyed FG → 720p. Plate blur σ=1.5 before CK; FG sharpen 0.
 
-**PC sandbox → GPU host gateway.** Skills run on the workstation; the comfyui-video
-container runs on the GPU host (`guideants-video-stack`, port `8189`).
-Do **not** use `127.0.0.1` — that is the PC, not the GPU host.
+The adapter workflow id is still `infinitetalk-i2v-v1`. Do not invent a different
+workflow name. Generation inside that graph is LongCat-Video-Avatar-1.5 (Whisper-large-v3,
+8-step DMD distill).
 
-V2V is not exposed by this pack.
+Sandbox CWD is the notebook **output directory**. Scripts:
+`Skills/talking-head/scripts/`. Write the MP4 with a **bare filename**
+(`-o talking-head.mp4`). Never prefix `-o` with `Output/`.
 
-## GPU host gateway (env-configured)
+Do not invent a POST. `scripts/video_tool.py` submits: files `source` / `audio` /
+`background`; form field `parameters` is **one JSON object**. Do not pass
+`--width` `--height` `--steps` `--cfg` `--fps` unless the user explicitly asks to
+deviate. Do not call ComfyUI `/free`. Do not start a second job while this one runs.
+Do not cancel CorridorKey frame 0. V2V is not available.
 
-```bash
-export TALKING_HEAD_SKILL_BASE_URL=http://<gpu-host-lan-ip>:8189/talking-head-skill
-export TALKING_HEAD_SKILL_TOKEN=<token: GA_TALKING_HEAD_SKILL_TOKEN from the GPU host stack .env>
-```
+## Environment
 
-GPU host stack: `GA_COMFYUI_VIDEO_PORT=8189`, `GA_TALKING_HEAD_SKILL_TOKEN` in
-`guideants-video-stack/.env`. Header: `X-Talking-Head-Skill-Token`.
-
-## Probe first
+Scripts read `TALKING_HEAD_SKILL_BASE_URL` and `TALKING_HEAD_SKILL_TOKEN` from the
+guide Environment. Do **not** hardcode or `export` them inline.
 
 ```bash
-export TALKING_HEAD_SKILL_BASE_URL=http://<gpu-host-lan-ip>:8189/talking-head-skill
-export TALKING_HEAD_SKILL_TOKEN=<token: GA_TALKING_HEAD_SKILL_TOKEN from the GPU host stack .env>
-python3 Skills/talking-head/scripts/probe.py
-python3 Skills/talking-head/scripts/preflight.py --for probe
+printenv TALKING_HEAD_SKILL_BASE_URL >/dev/null && printenv TALKING_HEAD_SKILL_TOKEN >/dev/null && echo "env ok" || echo "env missing"
 ```
 
-## Route to a task skill
+If either is missing, stop and ask the user to set them. Never scan the LAN.
 
-| User wants… | Skill |
-|-------------|-------|
-| Avatar + audio + background → MP4 | `talking-head-i2v` |
-| Unclear / “is the GPU host ready?” | stay here; run probe |
+Contract: `references/parameters.md`. Stages and measured times: `references/workflows.md`.
+
+## How long this takes (measured)
+
+A sandbox script call is killed after about **10 minutes**. These jobs last much
+longer than that. **`i2v` submits and exits.** You poll `status` on later calls.
+
+The adapter sets `frames` from audio duration at 25 fps (max 7200). Times below
+are **InfiniteTalk 4-step** clips at **10.56s / 264 frames**. LongCat-Video-Avatar-1.5
+is **8-step** distill on a larger DiT; sampling will take longer than this table.
+Keep polling until `state` is `completed` or `failed`.
+
+| Log | jobId prefix | elapsed |
+|-----|--------------|---------|
+| `ac-t3-gray-t-…-plateblur-pipeline.log` | `a217a4bd` | **1626s** |
+| `ac-t3-blue-t-two-arms-…-plateblur-pipeline.log` | `faf6d5a4` | **2273s** (CK 973s, VSR 402s) |
+| `ac-t3-service-pipeline.log` | `902fc149` | **3114s** |
+| `ac-t3-blue-shirt-pipeline.log` | — | **3341s** |
+
+That is already 27–56 minutes **for ten seconds of audio** on the old generator.
+After CK frame 0, telemetry is **~2.6s/frame** (`frame_elapsed_s: 2.6`). Frame 0
+itself is often 30s–4 min (red first frame **216s**). More audio → more frames →
+longer wall time. An 80s wav is 2000 frames. Do not treat an hour as finished or
+stuck.
+
+## 1. Preflight
+
+```bash
+python3 Skills/talking-head/scripts/preflight.py --for i2v
+```
+
+Open when: gateway up, `ready`, `composite_ready`, `infinitetalk-i2v-v1` listed.
+Do not fail because `fg_upscaler` / canvas keys are absent. If those keys **are**
+present, they must be `basicvsrpp` and 1280×720. If `open` is false, quote blockers
+and stop. If `ready` is false after the LongCat weight install, the bundle is still
+downloading; quote blockers and stop.
+
+## 2. Submit (returns immediately)
+
+Inputs must be inside the notebook. Use the paths the user actually has.
+
+```bash
+python3 Skills/talking-head/scripts/video_tool.py i2v \
+  --avatar uploads/avatar.png \
+  --audio uploads/voice.wav \
+  --background uploads/plate.png \
+  -o talking-head.mp4
+```
+
+CLI defaults (do not add flags): `width=416 height=256 steps=8 cfg=1 fps=25 seed=-1 audio-pad=0.5`.
+The input .wav is padded with 0.5 s of digital silence head + tail (written as
+`<output-stem>-padded-audio.wav` inside the notebook) before upload; frames = padded
+seconds × 25 (e.g. 51.404 s audio -> 52.404 s -> 1310 frames).
+Stderr logs `seed=` and `jobId=`. Stdout is one JSON object (`jobId`, `seed`,
+`outputPath`, `runMetaPath`). Writes `talking-head-run-meta.json`. This call does
+**not** wait for the MP4.
+
+## 3. Poll on later sandbox calls
+
+One wait + one status per call. Do not loop until done inside a single script.
+
+```bash
+sleep 60 && python3 Skills/talking-head/scripts/video_tool.py status <job_id>
+```
+
+`job_id` is 32 lowercase hex characters. Read `state` (and `progress.phase` /
+`message` when present):
+
+- `queued` / `uploading` / `waiting` / `sampling` / `compositing` → wait ~60s, poll again
+- `completed` → download
+- `failed` / `cancelled` → stop and quote `error`. Do **not** call `i2v` again.
+  That redoes LongCat generation and discards `green.mkv`. Post-CorridorKey failures
+  retry from saved EXRs (`--clip-root`) inside the adapter; keep polling while
+  `state` is still `compositing`. Terminal `failed` after that retry is a stop.
+
+Tell the user the phase and any frame counts from status. CorridorKey frame 0
+can sit with no new frames for minutes. That is compile, not a hang. Do not
+cancel. Do not submit again.
+
+## 4. Download
+
+```bash
+python3 Skills/talking-head/scripts/video_tool.py result <job_id> -o talking-head.mp4
+```
+
+Cancel only if the user asks:
+
+```bash
+python3 Skills/talking-head/scripts/video_tool.py cancel <job_id>
+```
 
 ## Reporting
 
-Quote probe/preflight evidence when blocked. Deliverables are MP4s written to the CWD (bare filenames).
-
-Honest limits: cold InfiniteTalk load and CorridorKey composite can take many minutes;
-single-host queue; no UI picker; no V2V skill.
-
-See `references/parameters.md` and `references/workflows.md`.
-
-ComfyUI Workflows browser: `guideants/` (templates) and `guideants-jobs/` (submitted graphs).
+`jobId`, resolved `seed`, last `state`/`phase`, output path when downloaded,
+preflight evidence if blocked. Delivery is 1280×720 H.264.
