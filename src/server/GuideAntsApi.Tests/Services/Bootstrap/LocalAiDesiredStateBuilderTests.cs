@@ -3,6 +3,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.Bootstrap;
+using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Tests.TestUtils;
@@ -60,7 +61,8 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var planJson = await builder.BuildPlanJsonAsync();
 
@@ -90,7 +92,8 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var planJson = await builder.BuildPlanJsonAsync(
             new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true });
@@ -127,7 +130,8 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var planJson = await builder.BuildPlanJsonAsync();
 
@@ -157,7 +161,8 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var planJson = await builder.BuildPlanJsonAsync();
 
@@ -187,7 +192,8 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(CreateBundleSettingsService()),
-            modeResolver);
+            modeResolver,
+            new NotebookChatAliasState());
 
         var act = () => builder.BuildPlanJsonAsync();
 
@@ -241,7 +247,8 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(settings, dbOptions),
-            new FakeServiceModeResolver());
+            new FakeServiceModeResolver(),
+            new NotebookChatAliasState());
 
         var planJson = await builder.BuildPlanJsonAsync();
 
@@ -261,7 +268,8 @@ public sealed class LocalAiDesiredStateBuilderTests
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(),
-            modeResolver.Object);
+            modeResolver.Object,
+            new NotebookChatAliasState());
 
         var act = () => builder.BuildPlanJsonAsync();
 

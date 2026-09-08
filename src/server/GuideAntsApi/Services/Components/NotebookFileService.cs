@@ -950,14 +950,14 @@ using var scope = CreateDbScope();
         }
 
         // Record lineage: project side (CopiedToNotebook)
-        // Cannot include notebookId due to CK_FileLineageEvent_NotebookId constraint
+        // Include notebookId to track which notebook the file was copied to
         await _lineageService.RecordAsync(
             FileKind.Project,
             projectId,
             contentFile.Id,
             verNum,
             FileLineageAction.CopiedToNotebook,
-            null, // Must be null for FileKind.Project
+            notebookId, // Track which notebook the file was copied to
             version.StoragePath ?? string.Empty);
 
         // Record lineage: notebook side (Created)

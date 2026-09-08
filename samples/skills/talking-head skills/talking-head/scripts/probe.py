@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deployment probe for talking-head i2v skills via GPU host gateway."""
+"""Deployment probe for talking-head i2v skills via Max gateway."""
 from __future__ import annotations
 
 import json
@@ -25,16 +25,16 @@ def main() -> None:
             "route_remote_skill_gateway": {
                 "open": bool(gateway.get("open")),
                 "note": (
-                    "PC sandbox → GPU host /talking-head-skill with TALKING_HEAD_SKILL_BASE_URL + "
-                    "TALKING_HEAD_SKILL_TOKEN. If missing, ask the user to set them in the "
-                    "guide's Environment variables — do not scan the LAN or guess the GPU host's IP."
+                    "PC sandbox → Max /talking-head-skill with TALKING_HEAD_SKILL_BASE_URL + "
+                    "TALKING_HEAD_SKILL_TOKEN from the guide Environment. Submit only via this "
+                    "skill's scripts/video_tool.py — do not invent a POST."
                 ),
                 "evidence": gateway,
             },
         },
         "scenarios": scenarios,
         "routing": {
-            "avatar_audio_background_to_mp4": "talking-head-i2v",
+            "avatar_audio_background_to_mp4": "talking-head",
         },
     }
     print(json.dumps(report, separators=(",", ":")))

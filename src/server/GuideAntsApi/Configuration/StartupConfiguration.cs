@@ -115,6 +115,7 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IBundleDefinitionProjectionService, GuideAntsApi.Services.Bootstrap.BundleDefinitionProjectionService>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IImageGenerationBundleDefinitionBootstrapper, GuideAntsApi.Services.Bootstrap.ImageGenerationBundleDefinitionBootstrapper>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
+        services.AddSingleton<GuideAntsApi.Services.LlamaCpp.INotebookChatAliasState, GuideAntsApi.Services.LlamaCpp.NotebookChatAliasState>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiDesiredStateBuilder, GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStackHostResolver, GuideAntsApi.Services.Bootstrap.LocalAiStackHostResolver>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.LocalAiWarmupPlanSplitter>();

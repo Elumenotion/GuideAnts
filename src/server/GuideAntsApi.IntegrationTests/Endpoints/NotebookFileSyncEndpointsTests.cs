@@ -91,7 +91,7 @@ public class NotebookFileSyncEndpointsTests
         using (var scope = _factory.Services.CreateScope())
         {
             var syncService = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Components.INotebookFileSyncService>();
-            await syncService.SyncNotebookAsync(notebook.Id);
+            await syncService.ReconcileNotebookAsync(notebook.Id);
         }
         var list1 = await _client.GetFromJsonAsync<List<NotebookFileDto>>($"/api/projects/{proj.Id}/notebooks/{notebook.Id}/files");
         
@@ -111,7 +111,7 @@ public class NotebookFileSyncEndpointsTests
         using (var scope = _factory.Services.CreateScope())
         {
             var syncService = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Components.INotebookFileSyncService>();
-            await syncService.SyncNotebookAsync(notebook.Id);
+            await syncService.ReconcileNotebookAsync(notebook.Id);
         }
         var list2 = await _client.GetFromJsonAsync<List<NotebookFileDto>>($"/api/projects/{proj.Id}/notebooks/{notebook.Id}/files");
 
@@ -128,7 +128,7 @@ public class NotebookFileSyncEndpointsTests
         using (var scope = _factory.Services.CreateScope())
         {
             var syncService = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Components.INotebookFileSyncService>();
-            await syncService.SyncNotebookAsync(notebook.Id);
+            await syncService.ReconcileNotebookAsync(notebook.Id);
         }
         var list3 = await _client.GetFromJsonAsync<List<NotebookFileDto>>($"/api/projects/{proj.Id}/notebooks/{notebook.Id}/files");
 
@@ -165,7 +165,7 @@ public class NotebookFileSyncEndpointsTests
         {
             using var scope = _factory.Services.CreateScope();
             var syncService = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Components.INotebookFileSyncService>();
-            await syncService.SyncNotebookImmediateAsync(notebook.Id);
+            await syncService.ReconcileNotebookImmediateAsync(notebook.Id);
         }));
         await Task.WhenAll(syncTasks);
 
@@ -208,7 +208,7 @@ public class NotebookFileSyncEndpointsTests
             using (var scope = _factory.Services.CreateScope())
             {
                 var syncService = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Components.INotebookFileSyncService>();
-                await syncService.SyncNotebookAsync(notebook.Id);
+                await syncService.ReconcileNotebookAsync(notebook.Id);
             }
 
             // Should be skipped, so no files
@@ -224,7 +224,7 @@ public class NotebookFileSyncEndpointsTests
         using (var scope = _factory.Services.CreateScope())
         {
             var syncService = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Components.INotebookFileSyncService>();
-            await syncService.SyncNotebookAsync(notebook.Id);
+            await syncService.ReconcileNotebookAsync(notebook.Id);
         }
 
         var list2 = await _client.GetFromJsonAsync<List<NotebookFileDto>>($"/api/projects/{proj.Id}/notebooks/{notebook.Id}/files");

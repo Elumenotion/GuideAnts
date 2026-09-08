@@ -24,6 +24,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     private readonly IChatModelResolver _chatModelResolver;
     private readonly ILocalAiStartupWarmupService _localAiWarmupService;
     private readonly ILocalAiWarmupService _localAiWarmup;
+    private readonly INotebookChatAliasState _notebookChatAliasState;
     private readonly ILogger<NotebookModelRuntimeService> _logger;
 
     // Singleton state for operations. In a multi-node deployment, this would need to be distributed.
@@ -41,6 +42,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         IChatModelResolver chatModelResolver,
         ILocalAiStartupWarmupService localAiWarmupService,
         ILocalAiWarmupService localAiWarmup,
+        INotebookChatAliasState notebookChatAliasState,
         ILogger<NotebookModelRuntimeService> logger)
     {
         _context = context;
@@ -50,6 +52,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         _chatModelResolver = chatModelResolver;
         _localAiWarmupService = localAiWarmupService;
         _localAiWarmup = localAiWarmup;
+        _notebookChatAliasState = notebookChatAliasState;
         _logger = logger;
     }
 
@@ -308,6 +311,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     // Return to default routed warmup via GuideAntsApi policy
                     // (SyncDesiredAndApplyAsync). ga-admin executes aux drain/restore;
                     // this path does not unload individual aliases via _llamaClient.
+                    _notebookChatAliasState.ClearActiveChatAlias();
                     await _localAiWarmup.SyncDesiredAndApplyAsync(
                         waitForCompletion: true,
                         cancellationToken: CancellationToken.None).ConfigureAwait(false);
@@ -424,6 +428,14 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     throw new TimeoutException(
                         $"Timed out waiting for local models to report loaded. Missing: {string.Join(", ", missingRouterIds)}");
                 }
+            }
+
+            // Record the notebook-scoped chat alias so subsequent lifecycle applies
+            // (recycle, routed warmup restore) keep llama enabled with this alias
+            // instead of tearing it down via a ChatDefaults-only plan.
+            foreach (var id in requiredRouterIds)
+            {
+                _notebookChatAliasState.SetActiveChatAlias(id);
             }
 
             op.State = "loading";

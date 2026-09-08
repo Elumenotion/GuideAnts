@@ -264,11 +264,11 @@ switch ($Backend) {
 
 # Upstream llama.cpp server images copied into each backend's deps image.
 $llamaCppImageByBackend = @{
-    cpu    = 'ghcr.io/ggml-org/llama.cpp:server'
-    cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
-    rocm   = 'ghcr.io/ggml-org/llama.cpp:server-rocm'
-    slim   = 'ghcr.io/ggml-org/llama.cpp:server'
-    vulkan = 'ghcr.io/ggml-org/llama.cpp:server-vulkan'
+    cpu    = 'ghcr.io/ggml-org/llama.cpp:server-b10615'
+    cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-b10615'
+    rocm   = 'ghcr.io/ggml-org/llama.cpp:server-rocm-b10615'
+    slim   = 'ghcr.io/ggml-org/llama.cpp:server-b10615'
+    vulkan = 'ghcr.io/ggml-org/llama.cpp:server-vulkan-b10615'
 }
 
 # Build a unique tag per build, and also maintain a stable backend-specific latest tag.

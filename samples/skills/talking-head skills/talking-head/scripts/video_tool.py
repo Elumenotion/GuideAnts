@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
-"""Talking-head i2v CLI via GPU host skill gateway (ComfyUI-video adapter).
+"""Talking-head i2v CLI via Max skill gateway (ComfyUI-video adapter).
 
 Stdlib-only. Requires TALKING_HEAD_SKILL_BASE_URL + TALKING_HEAD_SKILL_TOKEN.
 Paths must stay inside the notebook root (.guideants/notebook.json).
 
-Quiet poll telemetry: print only on progress-key / state change + 60s heartbeat;
-always include seed. No per-poll transport spam.
+`i2v` submits and exits. A GuideAnts sandbox script call is killed at about
+10 minutes (`SCRIPT_EXECUTION_TIMEOUT_SECONDS`, default 600). Do not wait for
+the MP4 in this process. Poll `status` on later sandbox calls; `result` when
+state is completed.
+
+Submit is generate-only parameters (416×256 / 8 / cfg 1, LongCat-Video-Avatar-1.5).
+Max composite is CorridorKey @ 416×234, BasicVSR++ on keyed FG, 1280×720 MP4 —
+host env, not CLI.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import mimetypes
 import os
 import random
 import re
 import sys
 import tempfile
-import time
 import urllib.error
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -33,15 +38,13 @@ from skill_gateway_client import (
 
 I2V_WORKFLOW = "infinitetalk-i2v-v1"
 HEX_UUID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
-DEFAULT_POLL_SECONDS = 5
-DEFAULT_JOB_TIMEOUT_SECONDS = 3600
-HEARTBEAT_SECONDS = 60
 DEFAULT_WIDTH = 416
 DEFAULT_HEIGHT = 256
-DEFAULT_STEPS = 4
+DEFAULT_STEPS = 8
 DEFAULT_CFG = 1.0
 DEFAULT_FPS = 25
 DEFAULT_SEED = -1
+DEFAULT_AUDIO_PAD = 0.5
 
 
 class VideoToolError(RuntimeError):
@@ -70,29 +73,6 @@ def _notebook_root(working_directory: Path) -> Path:
     )
 
 
-def _normalize_sandbox_path(
-    value: str | os.PathLike[str],
-    directory: Path,
-    root: Path,
-) -> str:
-    text = os.fspath(value).replace("\\", "/")
-    output_dir = root / "Output"
-    try:
-        directory.resolve().relative_to(output_dir.resolve())
-    except ValueError:
-        return os.fspath(value)
-    normalized = text.lstrip("./").lstrip("/")
-    if normalized.lower().startswith("output/"):
-        stripped = normalized[7:]
-        print(
-            "warning: path starts with Output/ but sandbox CWD is already Output/; "
-            f"using {stripped!r} instead",
-            file=sys.stderr,
-        )
-        return stripped
-    return os.fspath(value)
-
-
 def resolve_notebook_path(
     value: str | os.PathLike[str],
     working_directory: str | os.PathLike[str] | None = None,
@@ -101,8 +81,7 @@ def resolve_notebook_path(
 ) -> Path:
     directory = _working_directory(str(working_directory) if working_directory else None)
     root = _notebook_root(directory)
-    supplied_text = _normalize_sandbox_path(value, directory, root)
-    supplied = Path(supplied_text)
+    supplied = Path(value)
     candidate = supplied if supplied.is_absolute() else directory / supplied
     try:
         resolved = candidate.resolve(strict=must_exist)
@@ -127,53 +106,46 @@ def resolve_seed(seed: int) -> tuple[int, str]:
     return seed, "explicit"
 
 
+_ALLOWED_UPLOAD_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+}
+
+
+def _pad_wav_silence(src: Path, seconds: float, destination: Path) -> None:
+    """Prepend and append `seconds` of digital silence to a PCM WAV.
+
+    Stdlib-only. Preserves channels/sampwidth/framerate. The padded
+    file is written next to the output MP4 so it stays inside the
+    notebook root (upload paths must not escape it).
+    """
+    if seconds < 0:
+        raise VideoToolError("--audio-pad must be >= 0")
+    with wave.open(str(src), "rb") as w_in:
+        params = w_in.getparams()
+        data = w_in.readframes(params.nframes)
+    pad_frames = int(params.framerate * seconds)
+    silence = b"\x00" * (pad_frames * params.nchannels * params.sampwidth)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(destination), "wb") as w_out:
+        w_out.setnchannels(params.nchannels)
+        w_out.setsampwidth(params.sampwidth)
+        w_out.setframerate(params.framerate)
+        w_out.writeframes(silence + data + silence)
+
+
 def _read_file(path: Path) -> tuple[str, bytes, str]:
-    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    if content_type == "audio/x-wav":
-        content_type = "audio/wav"
+    content_type = _ALLOWED_UPLOAD_TYPES.get(path.suffix.lower())
+    if content_type is None:
+        allowed = ", ".join(sorted(_ALLOWED_UPLOAD_TYPES))
+        raise VideoToolError(f"unsupported file type {path.suffix!r}; allowed: {allowed}")
     return path.name, path.read_bytes(), content_type
-
-
-def _progress_log_key(job: dict[str, Any]) -> tuple[Any, ...]:
-    progress = job.get("progress") or {}
-    return (
-        str(job.get("state", "")).lower(),
-        progress.get("phase"),
-        progress.get("message"),
-        progress.get("node_class"),
-        progress.get("step"),
-        progress.get("max_steps"),
-        progress.get("queue_position"),
-        progress.get("seed") if progress.get("seed") is not None else job.get("seed"),
-    )
-
-
-def _format_progress_line(job: dict[str, Any], seed: int | None, *, heartbeat: bool = False) -> str:
-    state = str(job.get("state", "")).lower() or "unknown"
-    progress = job.get("progress") or {}
-    phase = progress.get("phase") or state
-    message = progress.get("message") or phase
-    parts = [f"state={state}", f"phase={phase}", str(message)]
-    step = progress.get("step")
-    max_steps = progress.get("max_steps")
-    if isinstance(step, int) and isinstance(max_steps, int) and max_steps > 0:
-        percent = progress.get("percent")
-        if isinstance(percent, (int, float)):
-            parts.append(f"progress={step}/{max_steps} ({percent}%)")
-        else:
-            parts.append(f"progress={step}/{max_steps}")
-    queue_position = progress.get("queue_position")
-    if isinstance(queue_position, int):
-        parts.append(f"queue_position={queue_position}")
-    effective_seed = progress.get("seed")
-    if effective_seed is None:
-        effective_seed = job.get("seed")
-    if effective_seed is None:
-        effective_seed = seed
-    if effective_seed is not None:
-        parts.append(f"seed={effective_seed}")
-    prefix = "[talking-head heartbeat]" if heartbeat else "[talking-head]"
-    return f"{prefix} {' | '.join(parts)}"
 
 
 def _submit_i2v(
@@ -208,38 +180,6 @@ def _submit_i2v(
     return json.loads(body.decode("utf-8"))
 
 
-def _poll_job(
-    job_id: str,
-    *,
-    seed: int,
-    timeout_seconds: int,
-    poll_seconds: int,
-) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout_seconds
-    last_key: tuple[Any, ...] | None = None
-    last_log_at = 0.0
-    while True:
-        raw = gateway_request(f"/v1/talking-head/jobs/{job_id}", timeout=60)
-        job = json.loads(raw.decode("utf-8"))
-        state = str(job.get("state", "")).lower()
-        key = _progress_log_key(job)
-        now = time.monotonic()
-        if key != last_key:
-            print(_format_progress_line(job, seed), file=sys.stderr)
-            last_key = key
-            last_log_at = now
-        elif now - last_log_at >= HEARTBEAT_SECONDS:
-            print(_format_progress_line(job, seed, heartbeat=True), file=sys.stderr)
-            last_log_at = now
-        if state == "completed":
-            return job
-        if state in {"failed", "cancelled"}:
-            raise VideoToolError(f"job ended in state '{state}': {job.get('error')}")
-        if now >= deadline:
-            raise VideoToolError(f"timed out waiting for job {job_id} after {timeout_seconds}s")
-        time.sleep(poll_seconds)
-
-
 def _materialize_result(job_id: str, destination: Path) -> dict[str, Any]:
     if destination.suffix.lower() != ".mp4":
         raise VideoToolError("output path must end in .mp4")
@@ -260,7 +200,15 @@ def _materialize_result(job_id: str, destination: Path) -> dict[str, Any]:
     }
 
 
-def _write_run_meta(output: Path, *, seed: int, seed_mode: str, job_id: str, workflow: str) -> Path:
+def _write_run_meta(
+    output: Path,
+    *,
+    seed: int,
+    seed_mode: str,
+    job_id: str,
+    workflow: str,
+    audio_pad_seconds: float = 0.0,
+) -> Path:
     meta_path = output.with_name(f"{output.stem}-run-meta.json")
     meta = {
         "seed": seed,
@@ -268,6 +216,7 @@ def _write_run_meta(output: Path, *, seed: int, seed_mode: str, job_id: str, wor
         "jobId": job_id,
         "workflow": workflow,
         "outputPath": str(output),
+        "audioPadSeconds": audio_pad_seconds,
     }
     meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     return meta_path
@@ -280,6 +229,22 @@ def cmd_i2v(args: argparse.Namespace) -> None:
     output = resolve_notebook_path(args.output, must_exist=False)
     if output.suffix.lower() != ".mp4":
         raise VideoToolError("output path must end in .mp4")
+
+    audio_pad_applied = False
+    if args.audio_pad != 0:
+        if audio.suffix.lower() != ".wav":
+            raise VideoToolError(
+                "--audio-pad only supports .wav (tested clip is 24 kHz PCM s16)"
+            )
+        padded = output.parent / f"{output.stem}-padded-audio.wav"
+        _pad_wav_silence(audio, args.audio_pad, padded)
+        audio = padded
+        audio_pad_applied = True
+        print(
+            f"[talking-head] audio pad: {args.audio_pad}s head+tail "
+            f"-> {padded.name}",
+            file=sys.stderr,
+        )
 
     seed, seed_mode = resolve_seed(args.seed)
     print(f"[talking-head] seed={seed} seed_mode={seed_mode}", file=sys.stderr)
@@ -305,20 +270,27 @@ def cmd_i2v(args: argparse.Namespace) -> None:
     )
     job_id = _job_id(str(submit.get("jobId")))
     print(f"[talking-head] submitted jobId={job_id} seed={seed}", file=sys.stderr)
-    _poll_job(
-        job_id,
-        seed=seed,
-        timeout_seconds=args.timeout,
-        poll_seconds=args.poll_seconds,
-    )
-    result = _materialize_result(job_id, output)
     meta_path = _write_run_meta(
-        output, seed=seed, seed_mode=seed_mode, job_id=job_id, workflow=args.workflow
+        output,
+        seed=seed,
+        seed_mode=seed_mode,
+        job_id=job_id,
+        workflow=args.workflow,
+        audio_pad_seconds=args.audio_pad if audio_pad_applied else 0.0,
     )
-    result["seed"] = seed
-    result["seedMode"] = seed_mode
-    result["runMetaPath"] = str(meta_path)
-    print(json.dumps(result, separators=(",", ":")))
+    print(
+        json.dumps(
+            {
+                "jobId": job_id,
+                "seed": seed,
+                "seedMode": seed_mode,
+                "outputPath": str(output),
+                "runMetaPath": str(meta_path),
+                "state": submit.get("state"),
+            },
+            separators=(",", ":"),
+        )
+    )
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -337,16 +309,31 @@ def cmd_result(args: argparse.Namespace) -> None:
     job_id = _job_id(args.job_id)
     output = resolve_notebook_path(args.output, must_exist=False)
     result = _materialize_result(job_id, output)
+    meta_path = output.with_name(f"{output.stem}-run-meta.json")
+    meta: dict[str, Any] = {}
+    if meta_path.is_file():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["jobId"] = job_id
+    meta["outputPath"] = str(output)
+    meta["bytes"] = result["bytes"]
+    meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    result["runMetaPath"] = str(meta_path)
+    if "seed" in meta:
+        result["seed"] = meta["seed"]
+    if "seedMode" in meta:
+        result["seedMode"] = meta["seedMode"]
     print(json.dumps(result, separators=(",", ":")))
 
 
 def main() -> None:
     if not using_skill_gateway():
         require_gateway()
-    parser = argparse.ArgumentParser(description="Talking-head i2v jobs via GPU host skill gateway")
+    parser = argparse.ArgumentParser(
+        description="Talking-head i2v jobs via Max skill gateway. i2v submits and exits."
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_i2v = sub.add_parser("i2v", help="Avatar + audio + background → MP4 (infinitetalk-i2v-v1)")
+    p_i2v = sub.add_parser("i2v", help="Submit avatar + audio + background; print jobId and exit")
     p_i2v.add_argument("--avatar", required=True)
     p_i2v.add_argument("--audio", required=True)
     p_i2v.add_argument("--background", required=True)
@@ -358,10 +345,15 @@ def main() -> None:
     p_i2v.add_argument("--cfg", type=float, default=DEFAULT_CFG)
     p_i2v.add_argument("--fps", type=int, default=DEFAULT_FPS)
     p_i2v.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    p_i2v.add_argument(
+        "--audio-pad",
+        type=float,
+        default=DEFAULT_AUDIO_PAD,
+        help="seconds of silence prepended and appended to the input "
+             "audio before upload (.wav only; 0 disables)",
+    )
     p_i2v.add_argument("--positive", default=None)
     p_i2v.add_argument("--negative", default=None)
-    p_i2v.add_argument("--timeout", type=int, default=DEFAULT_JOB_TIMEOUT_SECONDS)
-    p_i2v.add_argument("--poll-seconds", type=int, default=DEFAULT_POLL_SECONDS)
 
     p_status = sub.add_parser("status", help="Poll job state")
     p_status.add_argument("job_id")

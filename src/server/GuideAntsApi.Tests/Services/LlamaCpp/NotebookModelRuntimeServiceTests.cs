@@ -81,6 +81,7 @@ public class NotebookModelRuntimeServiceTests
             _mockChatModelResolver.Object,
             _mockLocalAiWarmupService.Object,
             _mockLocalAiWarmup.Object,
+            new NotebookChatAliasState(),
             _mockLogger.Object);
     }
 
@@ -487,6 +488,7 @@ public class NotebookModelRuntimeServiceTests
             _mockChatModelResolver.Object,
             _mockLocalAiWarmupService.Object,
             _mockLocalAiWarmup.Object,
+            new NotebookChatAliasState(),
             _mockLogger.Object);
 
         var notebookId = Guid.NewGuid();

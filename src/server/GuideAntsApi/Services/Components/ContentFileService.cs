@@ -845,7 +845,7 @@ if (!File.Exists(sourcePath))
         var originNotebookFile = await context.NotebookFiles.FindAsync(originNotebookFileId);
         var notebookId = originNotebookFile?.NotebookId;
         await _lineageService.RecordAsync(
-            FileKind.Project, projectId, contentFile.Id, 1, FileLineageAction.PublishedToProject, null, storagePath);
+            FileKind.Project, projectId, contentFile.Id, 1, FileLineageAction.PublishedToProject, notebookId, storagePath);
 
         // Index flag ignored – indexing handled by BackgroundJobs after markdown extraction
 
@@ -942,7 +942,7 @@ if (!File.Exists(sourcePath))
         var originNotebookFile = await context.NotebookFiles.FindAsync(originNotebookFileId);
         var notebookId = originNotebookFile?.NotebookId;
         await _lineageService.RecordAsync(
-            FileKind.Project, projectId, contentFile.Id, newVersionNumber, FileLineageAction.PublishedToProject, null, storagePath);
+            FileKind.Project, projectId, contentFile.Id, newVersionNumber, FileLineageAction.PublishedToProject, notebookId, storagePath);
 
         // Index flag ignored – indexing handled by BackgroundJobs after markdown extraction
 

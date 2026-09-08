@@ -6,6 +6,12 @@ Prints one JSON verdict:
   {"scenario": ..., "open": bool, "blockers": [...], "warnings": [...], "evidence": {...}}
 
 Scenarios: i2v | probe
+
+Tested path blockers: ready, composite_ready, infinitetalk-i2v-v1
+(API id; generate graph is LongCat-Video-Avatar-1.5).
+If capabilities includes fg_upscaler / composite_width / composite_height, those
+must match basicvsrpp and 1280x720. Missing keys are the tested Max adapter;
+do not treat absence as failure.
 """
 from __future__ import annotations
 
@@ -21,6 +27,11 @@ from skill_gateway_client import (
     using_skill_gateway,
 )
 
+TESTED_WORKFLOW = "infinitetalk-i2v-v1"
+TESTED_UPSCALER = "basicvsrpp"
+TESTED_WIDTH = 1280
+TESTED_HEIGHT = 720
+
 
 def missing_flag(caps: dict, flag: str) -> list[str]:
     if caps.get(flag) is True:
@@ -33,6 +44,27 @@ def missing_flag(caps: dict, flag: str) -> list[str]:
     details = caps.get("details")
     if isinstance(details, dict) and details.get("missing"):
         blockers.extend(str(item) for item in details["missing"])
+    return blockers
+
+
+def tested_path_blockers(caps: dict) -> list[str]:
+    blockers: list[str] = []
+    versions = caps.get("workflow_versions")
+    if not isinstance(versions, list) or TESTED_WORKFLOW not in versions:
+        blockers.append(f"{TESTED_WORKFLOW} is not in workflow_versions")
+    upscaler = caps.get("fg_upscaler")
+    if upscaler is not None and upscaler != TESTED_UPSCALER:
+        blockers.append(
+            f"fg_upscaler is {upscaler!r}; tested path requires {TESTED_UPSCALER}"
+        )
+    width = caps.get("composite_width")
+    height = caps.get("composite_height")
+    if width is not None or height is not None:
+        if width != TESTED_WIDTH or height != TESTED_HEIGHT:
+            blockers.append(
+                f"composite canvas is {width}x{height}; tested path is "
+                f"{TESTED_WIDTH}x{TESTED_HEIGHT}"
+            )
     return blockers
 
 
@@ -85,12 +117,16 @@ def run_preflight(scenario: str) -> dict:
         "composite_ready": caps.get("composite_ready"),
         "composite_missing": caps.get("composite_missing"),
         "workflow_versions": caps.get("workflow_versions"),
+        "fg_upscaler": caps.get("fg_upscaler"),
+        "composite_width": caps.get("composite_width"),
+        "composite_height": caps.get("composite_height"),
     }
 
     if scenario in {"i2v", "probe"}:
-        evidence["workflow"] = "infinitetalk-i2v-v1"
+        evidence["workflow"] = TESTED_WORKFLOW
         blockers.extend(missing_flag(caps, "ready"))
         blockers.extend(missing_flag(caps, "composite_ready"))
+        blockers.extend(tested_path_blockers(caps))
 
     open_ok = not blockers
     return {

@@ -172,7 +172,7 @@ RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/ga-script-exec /tmp/ga-script-exec.c
 # =============================================================================
 # Vulkan backend (runtime base + python deps builder + dependency image)
 # =============================================================================
-FROM ghcr.io/ggml-org/llama.cpp:server-vulkan AS runtime-vulkan-base
+FROM ghcr.io/ggml-org/llama.cpp:server-vulkan-b10615 AS runtime-vulkan-base
 ARG GA_UBUNTU_MIRROR_URL
 ENV DEBIAN_FRONTEND=noninteractive
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \

@@ -43,15 +43,18 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
     private readonly IConfiguration _configuration;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IServiceModeResolver _serviceModeResolver;
+    private readonly INotebookChatAliasState _notebookChatAliasState;
 
     public LocalAiDesiredStateBuilder(
         IConfiguration configuration,
         IServiceScopeFactory scopeFactory,
-        IServiceModeResolver serviceModeResolver)
+        IServiceModeResolver serviceModeResolver,
+        INotebookChatAliasState notebookChatAliasState)
     {
         _configuration = configuration;
         _scopeFactory = scopeFactory;
         _serviceModeResolver = serviceModeResolver;
+        _notebookChatAliasState = notebookChatAliasState;
     }
 
     public async Task<string> BuildPlanJsonAsync(
@@ -88,6 +91,20 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
         var alias = !string.IsNullOrWhiteSpace(aliasOverride)
             ? aliasOverride
             : await ResolveConfiguredDefaultRouterAliasAsync(cancellationToken).ConfigureAwait(false);
+
+        // Fallback: a notebook/assistant-scoped chat load may have put a local llama
+        // alias up even though ChatDefaults points at a cloud model. Lifecycle applies
+        // (ASR/TTS recycle, routed warmup restore) must not emit llama.enabled=false in
+        // that case - doing so unloads a model that is actively in use (defect: the
+        // "model not loaded" screen while inference is running).
+        if (string.IsNullOrWhiteSpace(alias))
+        {
+            var activeChatAlias = _notebookChatAliasState.ActiveChatAlias;
+            if (!string.IsNullOrWhiteSpace(activeChatAlias))
+            {
+                alias = activeChatAlias;
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(alias))
         {

@@ -288,64 +288,11 @@ describe('useConversationActions', () => {
       });
     });
 
-    it('returns when runtime check is deduplicated (null)', async () => {
-      vi.mocked(checkRuntimeStatus).mockResolvedValue(null);
-      const { actions } = mountActions();
-
-      await act(async () => {
-        await actions.sendMessage('hello');
-      });
-
-      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
-    });
-
-    it('shows toast when runtime is failed', async () => {
-      vi.mocked(checkRuntimeStatus).mockResolvedValue({ state: 'failed' });
-      const { actions, deps } = mountActions();
-
-      await act(async () => {
-        await actions.sendMessage('hello');
-      });
-
-      expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
-        title: 'Local Runtime Error',
-      }));
-      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
-    });
-
-    it('shows toast when runtime is invalid', async () => {
-      vi.mocked(checkRuntimeStatus).mockResolvedValue({ state: 'invalid' });
-      const { actions, deps } = mountActions();
-
-      await act(async () => {
-        await actions.sendMessage('hello');
-      });
-
-      expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
-        title: 'Incompatible Local Models',
-      }));
-      expect(getRuntimeBlockingMessage).toHaveBeenCalled();
-    });
-
-    it('shows toast when runtime check throws', async () => {
-      vi.mocked(checkRuntimeStatus).mockRejectedValue(new Error('check failed'));
-      const { actions, deps } = mountActions();
-
-      await act(async () => {
-        await actions.sendMessage('hello');
-      });
-
-      expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({
-        title: 'Runtime Error',
-        message: expect.stringContaining('check failed'),
-      }));
-    });
-
-    it('renders the user message optimistically before the runtime check resolves', async () => {
-      let resolveCheck!: (v: unknown) => void;
-      vi.mocked(checkRuntimeStatus).mockImplementation(
-        () => new Promise((res) => { resolveCheck = res; }) as any,
-      );
+    it('posts immediately after the optimistic render (no client runtime preflight)', async () => {
+      // The send path no longer calls checkRuntimeStatus: the server gates runtime
+      // readiness inside POST /messages (auto-load + poll, or a 409 not-ready). The POST
+      // must fire right after the optimistic dispatches -- even for an assistant with a
+      // local-model id -- so a slow llama-router /models call cannot delay the send.
       const { actions, dispatch } = mountActions();
 
       let sendPromise!: Promise<void>;
@@ -359,67 +306,65 @@ describe('useConversationActions', () => {
           payload: expect.objectContaining({ role: 'user', content: 'hello' }),
         }));
       });
-      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+      expect(checkRuntimeStatus).not.toHaveBeenCalled();
+      expect(api.projects.notebooks.conversations.sendMessageStream).toHaveBeenCalledTimes(1);
 
       await act(async () => {
-        resolveCheck({ state: 'ready' });
         await sendPromise;
       });
     });
 
-    it('does not discard a Stop click that lands during the runtime preflight window', async () => {
-      // Regression test: SET_STREAMING_MODE (which drives isStreaming, and
-      // therefore the Stop button's visibility) fires before checkRuntimeStatus
-      // resolves. If the SET_CANCELLING/clearPendingStop reset still ran AFTER
-      // the runtime check (the old ordering), a Stop click issued in that window
-      // would be silently wiped before the turn id ever arrived.
-      let resolveCheck!: (v: unknown) => void;
-      vi.mocked(checkRuntimeStatus).mockImplementation(
-        () => new Promise((res) => { resolveCheck = res; }) as any,
+    it('does not discard a Stop click that lands before turn_created', async () => {
+      // Regression test: a Stop click can land while the POST is still in flight, before
+      // the server has emitted turn_created (no turn id yet). It must queue via
+      // pendingStopRef/SET_CANCELLING and be re-issued as a server cancel once the turn id
+      // arrives. (In the app, turn_created reaches onTurnIdAssigned via handleStreamingEvent;
+      // the unit test invokes that seam directly since handleStreamingEvent is a vi.fn here.)
+      let sendPromise!: Promise<void>;
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
+        () => new Promise<void>(() => {}),
       );
       const { actions, dispatch } = mountActions();
 
-      let sendPromise!: Promise<void>;
       act(() => {
         sendPromise = actions.sendMessage('hello');
       });
 
-      // Optimistic dispatches (and isStreaming flipping true) have landed;
-      // checkRuntimeStatus is still pending.
       await vi.waitFor(() => {
-        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_MESSAGE' }));
+        expect(api.projects.notebooks.conversations.sendMessageStream).toHaveBeenCalled();
       });
-      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
 
-      // User clicks Stop while the preflight is still in flight. No real turn
-      // id exists yet (getActiveStreamTurnId/activeStreamTurnId are both
-      // null), so this only queues pendingStopRef via SET_CANCELLING.
+      // User clicks Stop while no turn id exists yet. It only queues pendingStopRef.
       act(() => {
         actions.cancelStream();
       });
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
       expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
 
-      await act(async () => {
-        resolveCheck({ state: 'ready' });
-        await sendPromise;
-      });
-
-      // The real turn id arrives later via the turn_created SSE event.
+      // The turn id arrives (turn_created -> onTurnIdAssigned in the app).
       act(() => {
         actions.onTurnIdAssigned('turn-real');
       });
 
-      // If clearPendingStop() had run after the (now-resolved) runtime check,
-      // as it used to, pendingStopRef would already be false here and this
-      // would never fire.
-      expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
-        PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-real',
-      );
+      // The queued stop must now be re-issued against the real turn.
+      await vi.waitFor(() => {
+        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
+          PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-real',
+        );
+      });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: false });
     });
 
-    it('rolls back the optimistic messages when the runtime check reports not ready', async () => {
-      vi.mocked(checkRuntimeStatus).mockResolvedValue({ state: 'failed' } as any);
+    it('rolls back the optimistic turn and restores the draft on a 409 not-ready before turn_created', async () => {
+      // Compensation for removing the client runtime preflight: when the server rejects
+      // the send with a not-ready 409 before turn_created arrives, nothing was persisted.
+      // The composer must roll back the optimistic turn and restore draft + chips (undo has
+      // nothing to undo here), and surface the runtime error via the 409 body.
+      const error = Object.assign(new Error('conflict'), {
+        status: 409,
+        body: { runtimeStatus: { state: 'failed' } },
+      });
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockRejectedValue(error);
       const { actions, dispatch } = mountActions();
 
       await act(async () => {
@@ -431,53 +376,61 @@ describe('useConversationActions', () => {
       expect(types).toContain('REMOVE_LAST_TURN');
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'hello' });
       expect(dispatch).toHaveBeenCalledWith({ type: 'SET_STREAMING_MODE', payload: { mode: 'at-rest' } });
-      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+      // The 409 body's runtimeStatus still drives the runtime error surface.
+      expect(dispatchRuntimeStatusWindowEvent).toHaveBeenCalledWith('asst-1', { state: 'failed' });
     });
 
-    it('resets SET_CANCELLING on rollback so a Stop-then-not-ready sequence cannot leak into the next send', async () => {
-      // A Stop click can flip _isCancelling true while the runtime check is
-      // still pending (see the preflight-window test above). If the check
-      // then reports not-ready, rollbackOptimisticSend must reset
-      // SET_CANCELLING back to false itself rather than leaving it for a
-      // future send to clean up.
-      let resolveCheck!: (v: unknown) => void;
-      vi.mocked(checkRuntimeStatus).mockImplementation(
-        () => new Promise((res) => { resolveCheck = res; }) as any,
+    it('clears chips (no draft restore) on a 409 not-ready after turn_created', async () => {
+      // If the server persisted the turn (turn_created arrived) and then the load failed
+      // with a 409, the input is CONSUMED into the transcript -- the draft stays empty
+      // (undo recovers it), matching every other terminal path's persistence oracle.
+      // The stream is held open (no immediate reject) so turn_created can land first.
+      let eventCb!: (event: { type: string; data: any }) => void;
+      let rejectStream!: (err: any) => void;
+      let sendPromise!: Promise<void>;
+      const error = Object.assign(new Error('conflict'), {
+        status: 409,
+        body: { runtimeStatus: { state: 'failed' } },
+      });
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
+        (...args) => {
+          eventCb = (args as any)[4];
+          return new Promise<void>((_, rej) => { rejectStream = rej; });
+        },
       );
       const { actions, dispatch } = mountActions();
 
-      let sendPromise!: Promise<void>;
       act(() => {
         sendPromise = actions.sendMessage('hello');
       });
 
       await vi.waitFor(() => {
-        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_MESSAGE' }));
+        expect(api.projects.notebooks.conversations.sendMessageStream).toHaveBeenCalled();
       });
-
+      // turn_created sets streamTurn.current (the persistence oracle).
       act(() => {
-        actions.cancelStream();
+        eventCb({ type: 'turn_created', data: { turnId: 'turn-real' } });
       });
-      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
-
-      const cancellingTrueIndex = dispatch.mock.calls.findIndex(
-        (c) => c[0].type === 'SET_CANCELLING' && c[0].payload === true,
-      );
-
       await act(async () => {
-        resolveCheck({ state: 'failed' });
+        rejectStream(error);
         await sendPromise;
       });
 
-      const cancellingFalseAfterRollback = dispatch.mock.calls
-        .slice(cancellingTrueIndex + 1)
-        .some((c) => c[0].type === 'SET_CANCELLING' && c[0].payload === false);
-      expect(cancellingFalseAfterRollback).toBe(true);
+      const types = dispatch.mock.calls.map((c) => c[0].type);
+      expect(types).toContain('CLEAR_ATTACHMENTS');
+      expect(types).not.toContain('REMOVE_LAST_TURN');
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'hello' });
     });
 
-    it('rolls back when the runtime check throws', async () => {
-      vi.mocked(checkRuntimeStatus).mockRejectedValue(Object.assign(new Error('boom'), { status: 500 }));
-      const { actions, dispatch, deps } = mountActions();
+    it('restores the draft on a 400 model-not-loaded error before turn_created', async () => {
+      // A 400 'model is not loaded' from the model call means no turn was persisted
+      // either -> the composer must restore the draft, not strand it.
+      const error = Object.assign(new Error('bad request'), {
+        status: 400,
+        body: { message: 'the server does not have a model loaded' },
+      });
+      vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockRejectedValue(error);
+      const { actions, dispatch } = mountActions();
 
       await act(async () => {
         await actions.sendMessage('hello');
@@ -485,9 +438,11 @@ describe('useConversationActions', () => {
 
       const types = dispatch.mock.calls.map((c) => c[0].type);
       expect(types).toContain('REMOVE_LAST_TURN');
-      expect(deps.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Runtime Error' }));
-      expect(api.projects.notebooks.conversations.sendMessageStream).not.toHaveBeenCalled();
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'hello' });
+      expect(dispatchRuntimeStatusWindowEvent).toHaveBeenCalledWith('asst-1', { state: 'requires_load' });
     });
+
+
 
     it('handles 409 ROUTING_MODEL_NOT_READY', async () => {
       const error = Object.assign(new Error('conflict'), {
