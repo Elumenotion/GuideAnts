@@ -518,15 +518,17 @@ def build_longcat_workflow(
         else:
             # trim removes LONGCAT_OVERLAP frames, so a full window adds WINDOW-OVERLAP
             n = min(LONGCAT_WINDOW, total_frames - emitted + LONGCAT_OVERLAP)
-            # snap DOWN to 4k+1 frames: the audio rearrange groups features by 4
-            # and requires (n-1) % 4 == 0. The old extend-the-tail branch could
-            # re-snap back to n == LONGCAT_OVERLAP (zero new frames), which made
-            # the loop never terminate for some totals (e.g. 1283).
+            # snap to 4k+1 frames: the audio rearrange groups features by 4 and
+            # requires (n-1) % 4 == 0; a non-conforming tail crashes the sampler
             n = ((n - 1) // 4) * 4 + 1
             if n <= LONGCAT_OVERLAP:
-                # degenerate tail: emit a minimal valid window so the loop
-                # always makes progress (n=1 -> one new frame)
-                n = 1
+                # remaining audio is nearly covered; extend this window to cover it
+                # (4k+1 guaranteed, over-shoot is trimmed later)
+                n = ((total_frames - emitted + LONGCAT_OVERLAP - 1) // 4) * 4 + 1 + 4
+                if n > LONGCAT_WINDOW:
+                    n = LONGCAT_WINDOW
+                # re-snap after clamp
+                n = ((n - 1) // 4) * 4 + 1
             windows.append(n)
             emitted += n - LONGCAT_OVERLAP
         idx += 1
@@ -598,11 +600,8 @@ def build_longcat_workflow(
             "ref_frame_index": 10,
             "ref_mask_frame_range": 3,
         }
-        # ref_latent is the identity anchor for EVERY window (matches the official
-        # reference workflow: every continuation window keeps the encoded source
-        # as ref_latent). Without it, windows 2+ condition only on the previous
-        # (already-drifted) overlap, so blur/exposure drift compounds per window.
-        ext_inputs["ref_latent"] = ["22", 0]
+        if w_i == 0:
+            ext_inputs["ref_latent"] = ["22", 0]
         prompt[b] = {"class_type": "WanVideoLongCatAvatarExtendEmbeds", "inputs": ext_inputs}
         prompt[s] = {
             "class_type": "WanVideoSamplerv2",
@@ -644,14 +643,11 @@ def build_longcat_workflow(
                 },
             }
             decode_outputs.append([g, 0])
-        # DRIFT FIX: ExtendEmbeds computes audio_start = (frames_processed - overlap)
-        # * stride, which is correct only when frames_processed equals the
-        # cumulative EMITTED content-frame count. Counting the full decode
-        # (n_frames) made each window's audio window start 13 frames too early per
-        # prior window, so lip sync drifted linearly and the final windows padded
-        # from the audio's first frame. `emitted` tracks exactly the content count
-        # (window k starts at audio sample emitted*stride), so feed that in.
-        frames_processed = emitted
+        # Example-verified accounting: ExtendEmbeds computes
+        # audio_start = (frames_processed - overlap) * stride, so frames_processed
+        # must equal the CUMULATIVE DECODED frame count (each window's full decode
+        # including the regenerated overlap), not the new-frame delta.
+        frames_processed += n_frames
         prev_latent = [s, 0]
 
     current = decode_outputs[0]

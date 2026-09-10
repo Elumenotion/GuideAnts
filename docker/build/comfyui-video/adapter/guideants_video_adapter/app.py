@@ -56,6 +56,9 @@ def build_service() -> AdapterService:
             "IMAGE_GENERATE_20_WORKFLOW_PATH",
             "/opt/guideants/comfyui-video/workflows/qwen-image-generate-20-v1.json",
         ),
+        longcat_workflow_path=_path_env(
+            "LONGCAT_WORKFLOW_PATH", "/opt/guideants/comfyui-video/workflows/longcat-avatar-v1.json"
+        ),
         v2v_workflow_path=_path_env(
             "VIDEO_V2V_WORKFLOW_PATH",
             "/opt/guideants/comfyui-video/workflows/infinitetalk-v2v-v1.json",

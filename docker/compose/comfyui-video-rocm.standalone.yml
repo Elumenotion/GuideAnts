@@ -10,7 +10,7 @@ services:
     security_opt:
       - seccomp:unconfined
     ports:
-      - "127.0.0.1:${GA_COMFYUI_VIDEO_PORT:-8189}:80"
+      - "${GA_COMFYUI_VIDEO_PORT:-8189}:80"
     environment:
       VIDEO_GPU_BACKEND: rocm
       VIDEO_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/infinitetalk-i2v-v1-rocm.json
@@ -20,6 +20,7 @@ services:
       IMAGE_GENERATE_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-bf16-v1.json
       IMAGE_GENERATE_20_WORKFLOW_PATH: /opt/guideants/comfyui-video/workflows/qwen-image-generate-20-v1.json
       GA_QWEN_IMAGE_SKILL_TOKEN: ${GA_QWEN_IMAGE_SKILL_TOKEN:-local-qwen-image-skill-token}
+      GA_TALKING_HEAD_SKILL_TOKEN: 
       HIP_VISIBLE_DEVICES: ${GA_COMFYUI_VIDEO_HIP_VISIBLE_DEVICES:-0}
       HSA_ENABLE_DXG_DETECTION: "1"
       HSA_ENABLE_SDMA: "0"
@@ -56,6 +57,8 @@ services:
       VIDEO_COMPOSITE_CK_STALL_SEC: "180"
       VIDEO_COMPOSITE_BVSRPP_FIRST_WINDOW_STALL_SEC: "300"
       MIOPEN_LOG_LEVEL: "0"
+      MIOPEN_FIND_MODE: ${GA_MIOPEN_FIND_MODE:-2}
+      MIOPEN_FIND_ENFORCE: ${GA_MIOPEN_FIND_ENFORCE:-1}
     volumes:
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:?Set GA_CONTENT_FILES_HOST_PATH}
@@ -87,6 +90,14 @@ services:
       - type: bind
         source: ../build/comfyui-video/qwen-image-skill-gateway
         target: /opt/guideants/comfyui-video/qwen-image-skill-gateway
+        read_only: true
+      - type: bind
+        source: ../build/comfyui-video/talking-head-skill-gateway
+        target: /opt/guideants/comfyui-video/talking-head-skill-gateway
+        read_only: true
+      - type: bind
+        source: C:\repos\GuideAnts\artifacts\tools\CorridorKey
+        target: /opt/guideants/corridorkey-local/CorridorKey
         read_only: true
       - type: bind
         source: ../build/comfyui-video/catalog/manifest.json

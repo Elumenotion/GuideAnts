@@ -7,7 +7,8 @@ Prints one JSON verdict:
 
 Scenarios: i2v | probe
 
-Tested path blockers: ready, composite_ready, infinitetalk-i2v-v1.
+Tested path blockers: ready, composite_ready, infinitetalk-i2v-v1
+(API id; generate graph is LongCat-Video-Avatar-1.5).
 If capabilities includes fg_upscaler / composite_width / composite_height, those
 must match basicvsrpp and 1280x720. Missing keys are the tested Max adapter;
 do not treat absence as failure.

@@ -36,14 +36,18 @@ but not the tested clip.
 | Part | Value |
 |------|--------|
 | `output_filename` | **basename only** of `-o` (e.g. `talking-head.mp4`). Must end in `.mp4`. A path here is rejected. |
-| `workflow_version` | `infinitetalk-i2v-v1` |
+| `workflow_version` | `infinitetalk-i2v-v1` (API id; graph is LongCat-Video-Avatar-1.5) |
 | `parameters` | **one JSON object string**, not separate `width=` fields |
 
-Tested `parameters` JSON (CLI defaults; do not pass `--width`/`--height`/`--steps`/`--cfg`/`--fps` unless the user explicitly asks to deviate):
+CLI defaults (do not pass `--width`/`--height`/`--steps`/`--cfg`/`--fps` unless the
+user explicitly asks to deviate):
 
 ```json
-{"width":416,"height":256,"steps":4,"cfg":1.0,"fps":25,"seed":<int>}
+{"width":416,"height":256,"steps":8,"cfg":1.0,"fps":25,"seed":<int>}
 ```
+
+`steps=8` / `cfg=1` is the LongCat-Video-Avatar-1.5 DMD distill path. Do not pass
+`steps=4`; that was InfiniteTalk LightX2V.
 
 - `seed=-1` on the CLI → tool picks `0..2^31-1` **before** submit and logs `seed=`.
 - Do **not** put `frames` in `parameters`. The adapter derives frame count from audio duration.
@@ -75,4 +79,5 @@ sampling or compositing.
 
 ## Workflow graph (not CLI)
 
-`audio_cfg_scale=2.0` is in the InfiniteTalk graph. Do not invent a CLI flag for it.
+`audio_cfg_scale=1.0` is in the LongCat-Video-Avatar-1.5 graph. Do not invent a
+CLI flag for it.

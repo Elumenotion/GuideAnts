@@ -1,0 +1,130 @@
+{
+  "2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "{{INPUT_AUDIO}}"
+    }
+  },
+  "3": {
+    "class_type": "WanVideoVAELoader",
+    "inputs": {
+      "model_name": "Wan2_1_VAE_bf16.safetensors",
+      "precision": "bf16",
+      "use_cpu_cache": false,
+      "verbose": false
+    }
+  },
+  "6": {
+    "class_type": "WhisperModelLoader",
+    "inputs": {
+      "model": "whisper-large-v3.safetensors",
+      "base_precision": "fp16",
+      "load_device": "main_device"
+    }
+  },
+  "9": {
+    "class_type": "WanVideoLoraSelect",
+    "inputs": {
+      "lora": "WanVideo/LongCat-Avatar-15_dmd_distill_lora_rank128_bf16.safetensors",
+      "strength": 0.9,
+      "low_mem_load": false,
+      "merge_loras": false
+    }
+  },
+  "10": {
+    "class_type": "WanVideoBlockSwap",
+    "inputs": {
+      "blocks_to_swap": 25,
+      "offload_img_emb": false,
+      "offload_txt_emb": false,
+      "use_non_blocking": true,
+      "vace_blocks_to_swap": 0,
+      "prefetch_blocks": 1,
+      "block_swap_debug": false
+    }
+  },
+  "11": {
+    "class_type": "WanVideoModelLoader",
+    "inputs": {
+      "model": "WanVideo/LongCat/LongCat-Avatar-15_bf16.safetensors",
+      "base_precision": "bf16",
+      "quantization": "disabled",
+      "load_device": "offload_device",
+      "attention_mode": "sdpa",
+      "block_swap_args": [
+        "10",
+        0
+      ],
+      "lora": [
+        "9",
+        0
+      ],
+      "rms_norm_function": "default"
+    }
+  },
+  "12": {
+    "class_type": "WanVideoTextEncodeCached",
+    "inputs": {
+      "model_name": "umt5-xxl-enc-bf16.safetensors",
+      "precision": "bf16",
+      "positive_prompt": "{{POSITIVE_PROMPT}}",
+      "negative_prompt": "{{NEGATIVE_PROMPT}}",
+      "quantization": "disabled",
+      "use_disk_cache": true,
+      "device": "gpu"
+    }
+  },
+  "20": {
+    "class_type": "WanVideoSchedulerv2",
+    "inputs": {
+      "scheduler": "longcat_distill_euler",
+      "steps": "{{STEPS}}",
+      "denoise": 1.0,
+      "start_step": 0,
+      "end_step": -1,
+      "beta_schedule": "linear",
+      "shift": 12
+    }
+  },
+  "21": {
+    "class_type": "ImageResizeKJv2",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "width": "{{WIDTH}}",
+      "height": "{{HEIGHT}}",
+      "upscale_method": "lanczos",
+      "keep_proportion": "crop",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 16,
+      "device": "cpu"
+    }
+  },
+  "22": {
+    "class_type": "WanVideoEncode",
+    "inputs": {
+      "vae": [
+        "3",
+        0
+      ],
+      "image": [
+        "21",
+        0
+      ],
+      "enable_vae_tiling": false,
+      "tile_x": 272,
+      "tile_y": 272,
+      "tile_stride_x": 144,
+      "tile_stride_y": 128
+    }
+  },
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{INPUT_IMAGE}}"
+    }
+  }
+}

@@ -73,6 +73,36 @@
           "path": "loras/WanVideo/lightx2v_I2V_14B_480p_cfg_step_distill_rank32_bf16.safetensors",
           "size": 373424368,
           "sha256": "f501375c1a4e34533fa1c08360059f8f849ebddd829ff5853e551c3fea991368"
+        },
+        {
+          "id": "longcat-avatar-15",
+          "repository": "Kijai/WanVideo_comfy",
+          "revision": "8260d429d19fd7a72304cad059160b95d843913f",
+          "file": "LongCat/LongCat-Avatar-15_bf16.safetensors",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/8260d429d19fd7a72304cad059160b95d843913f/LongCat/LongCat-Avatar-15_bf16.safetensors",
+          "path": "diffusion_models/WanVideo/LongCat/LongCat-Avatar-15_bf16.safetensors",
+          "size": 31706036736,
+          "sha256": "7186e134eb6e9ca6346f8db8b981bfe13fc725fa1bb9f0ad007ed29690d10349"
+        },
+        {
+          "id": "longcat-avatar-15-dmd-lora",
+          "repository": "Kijai/WanVideo_comfy",
+          "revision": "8260d429d19fd7a72304cad059160b95d843913f",
+          "file": "LongCat/LongCat-Avatar-15_dmd_distill_lora_rank128_bf16.safetensors",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/8260d429d19fd7a72304cad059160b95d843913f/LongCat/LongCat-Avatar-15_dmd_distill_lora_rank128_bf16.safetensors",
+          "path": "loras/WanVideo/LongCat-Avatar-15_dmd_distill_lora_rank128_bf16.safetensors",
+          "size": 1261613536,
+          "sha256": "fe8f66e2c9e7dffb910311c71a5e5927678439a23e83fd291b49870d1bca6157"
+        },
+        {
+          "id": "whisper-large-v3",
+          "repository": "meituan-longcat/LongCat-Video-Avatar-1.5",
+          "revision": "92016c71d5d318d0f5d84e4db30015a571484ab6",
+          "file": "whisper-large-v3/model.safetensors",
+          "url": "https://huggingface.co/meituan-longcat/LongCat-Video-Avatar-1.5/resolve/92016c71d5d318d0f5d84e4db30015a571484ab6/whisper-large-v3/model.safetensors",
+          "path": "audio_encoders/whisper-large-v3.safetensors",
+          "size": 3087130976,
+          "sha256": "a8e94b85976e5864ba3e9525c7e6c83b2a1eca42d4b797a0c7c24d778e40fd95"
         }
       ]
     },

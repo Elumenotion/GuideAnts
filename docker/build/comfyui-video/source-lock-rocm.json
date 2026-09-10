@@ -20,11 +20,12 @@
     {"name": "ComfyUI-KJNodes", "repository": "https://github.com/kijai/ComfyUI-KJNodes.git", "commit": "073efb07419f56cc714e099a82e49fbc23ad9263"},
     {"name": "ComfyUI-VideoHelperSuite", "repository": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git", "commit": "4ee72c065db22c9d96c2427954dc69e7b908444b"},
     {"name": "ComfyUI-MelBandRoFormer", "repository": "https://github.com/kijai/ComfyUI-MelBandRoFormer.git", "commit": "92c86854e6654f4aacc97484471af95c98ea16d4", "license": "UNRESOLVED"},
-    {"name": "InfiniteTalk", "repository": "https://github.com/MeiGen-AI/InfiniteTalk.git", "commit": "50aa0a94184315407a991ae804d9b58d6d311ba8", "embedded": false, "purpose": "upstream model and algorithm provenance; ComfyUI integration is provided by WanVideoWrapper"}
+    {"name": "InfiniteTalk", "repository": "https://github.com/MeiGen-AI/InfiniteTalk.git", "commit": "50aa0a94184315407a991ae804d9b58d6d311ba8", "embedded": false, "purpose": "v2v workflow provenance; ComfyUI integration is provided by WanVideoWrapper"},
+    {"name": "LongCat-Video-Avatar-1.5", "repository": "https://huggingface.co/meituan-longcat/LongCat-Video-Avatar-1.5", "commit": "92016c71d5d318d0f5d84e4db30015a571484ab6", "embedded": false, "purpose": "upstream i2v talking-head generation weights; ComfyUI integration is provided by WanVideoWrapper"}
   ],
   "workflow": {
     "id": "infinitetalk-i2v-v1",
-    "revision": 4,
+    "revision": 6,
     "path": "workflows/infinitetalk-i2v-v1-rocm.json"
   },
   "v2vWorkflow": {

@@ -407,6 +407,13 @@ def run_corridorkey_composite(
         env.setdefault("HIP_VISIBLE_DEVICES", os.getenv("HIP_VISIBLE_DEVICES", "0"))
         # Do not inherit garbage_collection_threshold / max_split_size_mb / expandable_segments.
         env["PYTORCH_HIP_ALLOC_CONF"] = "backend:native"
+        # AMD/ROCm MIOpen fix (gfx1151): the default solver search can request a
+        # ~4.8 GiB GEMM workspace that hits the 1 GiB cap and the process is
+        # SIGKILLed (exit -9) during the BasicVSR++/fit GEMMs. FAST find mode
+        # picks dynamic kernels with small workspaces. Container env from the
+        # compose file (MIOPEN_FIND_MODE / MIOPEN_FIND_ENFORCE via .env) wins.
+        env.setdefault("MIOPEN_FIND_MODE", "2")
+        env.setdefault("MIOPEN_FIND_ENFORCE", "1")
         try:
             # Stream stdout — do NOT replace with subprocess.run(capture_output=True).
             process = subprocess.Popen(

@@ -29,8 +29,14 @@
   "5": {
     "class_type": "WanVideoClipVisionEncode",
     "inputs": {
-      "clip_vision": ["4", 0],
-      "image_1": ["1", 0],
+      "clip_vision": [
+        "4",
+        0
+      ],
+      "image_1": [
+        "1",
+        0
+      ],
       "strength_1": 1.0,
       "strength_2": 1.0,
       "crop": "center",
@@ -51,13 +57,19 @@
   "7": {
     "class_type": "MultiTalkWav2VecEmbeds",
     "inputs": {
-      "wav2vec_model": ["6", 0],
-      "audio_1": ["2", 0],
+      "wav2vec_model": [
+        "6",
+        0
+      ],
+      "audio_1": [
+        "2",
+        0
+      ],
       "normalize_loudness": true,
       "num_frames": "{{FRAMES}}",
       "fps": "{{FPS}}",
       "audio_scale": 1.0,
-      "audio_cfg_scale": 2.0,
+      "audio_cfg_scale": 1.0,
       "multi_audio_type": "para",
       "add_noise_floor": false,
       "smooth_transients": true
@@ -86,7 +98,7 @@
       "offload_txt_emb": false,
       "use_non_blocking": true,
       "vace_blocks_to_swap": 0,
-      "prefetch_blocks": 3,
+      "prefetch_blocks": 0,
       "block_swap_debug": false
     }
   },
@@ -98,9 +110,18 @@
       "quantization": "fp8_e4m3fn",
       "load_device": "main_device",
       "attention_mode": "sdpa",
-      "block_swap_args": ["10", 0],
-      "lora": ["9", 0],
-      "multitalk_model": ["8", 0],
+      "block_swap_args": [
+        "10",
+        0
+      ],
+      "lora": [
+        "9",
+        0
+      ],
+      "multitalk_model": [
+        "8",
+        0
+      ],
       "rms_norm_function": "default"
     }
   },
@@ -119,16 +140,25 @@
   "13": {
     "class_type": "WanVideoImageToVideoMultiTalk",
     "inputs": {
-      "vae": ["3", 0],
+      "vae": [
+        "3",
+        0
+      ],
       "width": "{{WIDTH}}",
       "height": "{{HEIGHT}}",
       "frame_window_size": 81,
       "motion_frame": 9,
       "force_offload": false,
       "colormatch": "disabled",
-      "start_image": ["1", 0],
+      "start_image": [
+        "1",
+        0
+      ],
+      "clip_embeds": [
+        "5",
+        0
+      ],
       "tiled_vae": false,
-      "clip_embeds": ["5", 0],
       "mode": "infinitetalk",
       "output_path": ""
     }
@@ -136,36 +166,57 @@
   "14": {
     "class_type": "WanVideoSampler",
     "inputs": {
-      "model": ["11", 0],
-      "image_embeds": ["13", 0],
+      "model": [
+        "11",
+        0
+      ],
+      "image_embeds": [
+        "13",
+        0
+      ],
       "steps": "{{STEPS}}",
       "cfg": "{{CFG}}",
-      "shift": 8.0,
+      "shift": 11.0,
       "seed": "{{SEED}}",
       "force_offload": false,
       "scheduler": "dpm++_sde",
       "riflex_freq_index": 0,
-      "text_embeds": ["12", 0],
+      "text_embeds": [
+        "12",
+        0
+      ],
       "denoise_strength": 1.0,
       "batched_cfg": false,
       "rope_function": "comfy",
       "start_step": 0,
       "end_step": -1,
       "add_noise_to_samples": true,
-      "multitalk_embeds": ["7", 0]
+      "multitalk_embeds": [
+        "7",
+        0
+      ]
     }
   },
   "15": {
     "class_type": "WanVideoPassImagesFromSamples",
     "inputs": {
-      "samples": ["14", 0]
+      "samples": [
+        "14",
+        0
+      ]
     }
   },
   "16": {
     "class_type": "VHS_VideoCombine",
     "inputs": {
-      "images": ["15", 0],
-      "audio": ["7", 1],
+      "images": [
+        "15",
+        0
+      ],
+      "audio": [
+        "7",
+        1
+      ],
       "frame_rate": "{{FPS}}",
       "loop_count": 0,
       "filename_prefix": "infinitetalk",
@@ -174,7 +225,7 @@
       "coder": "1",
       "context": "1",
       "gop_size": 1,
-      "slices": "16",
+      "slices": 16,
       "slicecrc": "1",
       "pix_fmt": "rgba64le",
       "save_metadata": true,

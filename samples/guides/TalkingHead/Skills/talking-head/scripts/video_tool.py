@@ -9,8 +9,9 @@ Paths must stay inside the notebook root (.guideants/notebook.json).
 the MP4 in this process. Poll `status` on later sandbox calls; `result` when
 state is completed.
 
-Submit is generate-only parameters (416×256 / 4 / cfg 1). Max composite is
-CorridorKey @ 416×234, BasicVSR++ on keyed FG, 1280×720 MP4 — host env, not CLI.
+Submit is generate-only parameters (416×256 / 8 / cfg 1, LongCat-Video-Avatar-1.5).
+Max composite is CorridorKey @ 416×234, BasicVSR++ on keyed FG, 1280×720 MP4 —
+host env, not CLI.
 """
 from __future__ import annotations
 
@@ -38,7 +39,7 @@ I2V_WORKFLOW = "infinitetalk-i2v-v1"
 HEX_UUID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 DEFAULT_WIDTH = 416
 DEFAULT_HEIGHT = 256
-DEFAULT_STEPS = 4
+DEFAULT_STEPS = 8
 DEFAULT_CFG = 1.0
 DEFAULT_FPS = 25
 DEFAULT_SEED = -1

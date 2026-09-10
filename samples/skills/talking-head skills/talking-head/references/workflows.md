@@ -1,16 +1,18 @@
-# Workflows — tested talking-head i2v path
+# Workflows — talking-head i2v path
 
 | Workflow id | Submit with |
 |-------------|-------------|
 | `infinitetalk-i2v-v1` | `talking-head/scripts/video_tool.py i2v` |
 
-V2V is not a skill surface. Do not mutate workflow JSON.
+That id is the adapter/skill contract. The generate graph is
+**LongCat-Video-Avatar-1.5** (Whisper-large-v3 audio, DMD 8-step distill). V2V is
+not a skill surface. Do not mutate workflow JSON.
 
 ## Stages (one adapter job)
 
 | Stage | What runs | Size |
 |-------|-----------|------|
-| Generate | InfiniteTalk i2v, lossless green | 416×256 |
+| Generate | LongCat-Video-Avatar-1.5 i2v, lossless green | 416×256 |
 | Prepare | Crop to 16:9; plate focus-blur σ=1.5 | 416×234 FG |
 | Key | CorridorKey at native LQ | 416×234 |
 | Upscale | BasicVSR++ 4× on **keyed FG only** | 1664×936 |
@@ -25,10 +27,12 @@ cancel that window.
 
 `video_tool.py i2v` submits and exits. Poll `status` on later sandbox calls
 (`sleep 60 && … status <job_id>`). A sandbox script is killed after about 10
-minutes; these jobs last much longer. Tested **10.56s / 264-frame** clips already
-ran **1626s** (gray-t), **2273s** (blue-t two-arms; CK 973s, VSR 402s), **3114s**
-(AC-T3 service), **3341s** (blue-shirt). Frame count is audio seconds × 25 (max
-7200). Keep polling until `completed` or `failed`. There is no 3600s job deadline.
+minutes; these jobs last much longer. InfiniteTalk 4-step **10.56s / 264-frame**
+clips already ran **1626s** (gray-t), **2273s** (blue-t two-arms; CK 973s, VSR
+402s), **3114s** (AC-T3 service), **3341s** (blue-shirt). LongCat-Video-Avatar-1.5
+is 8-step distill; sampling will exceed those generate times. Frame count is audio
+seconds × 25 (max 7200). Keep polling until `completed` or `failed`. There is no
+3600s job deadline.
 
 ## After submit
 
