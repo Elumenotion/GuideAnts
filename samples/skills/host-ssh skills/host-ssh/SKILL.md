@@ -1,14 +1,16 @@
 ---
 name: host-ssh
-description: "Run PowerShell on a GuideAnts SSH machine (Windows OpenSSH) via the machine registry in the guide Environment. Use when the user needs host OS tasks — drives, dotnet, Playwright, processes — not file I/O on paths already visible in the workspace file list."
-metadata:
-  guideants:
-    enabled: true
-    display_order: 45
-    requires_toolsets: [sandbox]
+description: >-
+  Run PowerShell on Windows hosts or a POSIX shell on macOS/Linux hosts over
+  SSH, via the machine registry in the guide Environment (GA_SSH_MACHINES).
+  Use when the user needs host OS tasks — drives, dotnet, Playwright,
+  processes, SSH into their laptop or desktop — not file I/O on paths
+  already visible in the workspace file list. Per-machine "os" field or
+  auto-detection (uname -s) picks the command style; hosts resolve
+  IPv4-first; paramiko fallback used when sshpass is unavailable.
 ---
 
-# Host SSH (Windows PowerShell)
+# Host SSH (Windows PowerShell + macOS/Linux POSIX shell)
 
 ## Sandbox paths — authoritative, do not discover
 
@@ -33,8 +35,8 @@ from CWD. If a path is in the list, the file exists — **trust the list**.
 
 Host setup (OpenSSH, guide Environment variables) is in the operator README bundled with
 this skill or `samples/skills/host-ssh skills/README.md` on the repo. Missing
-`GA_HOST_SSH_*` env vars → stop and tell the user to set them in the guide editor; do
-not scan or guess credentials.
+`GA_HOST_SSH_*` env vars → stop and tell the user to set them in the guide editor;
+do not scan or guess credentials.
 
 ## Machines — the guide Environment is the source of truth
 
@@ -46,9 +48,10 @@ default (named `host`).
 
 ```json
 [
-  {"name": "office", "host": "host.docker.internal", "default": true,
+  {"name": "office", "host": "host.docker.internal", "default": true, "os": "windows",
    "share": {"unc": "\\\\FILESERVER\\content", "user": "DOMAIN\\GuideAnts", "drive": "R"}},
-  {"name": "gpu", "host": "192.168.1.50"}
+  {"name": "laptop", "host": "192.168.1.60", "os": "mac"},
+  {"name": "gpu", "host": "192.168.1.50", "os": "linux"}
 ]
 ```
 
@@ -58,6 +61,35 @@ sessions** (Windows isolates sessions). Use the mapped drive (default **`R:`**) 
 commands; the skill re-maps it from `share.unc` each time. `share.password`, when
 present, is a secret; it falls back to `GA_HOST_SSH_SHARE_PASSWORD`, then
 `GA_HOST_SSH_PASSWORD`.
+
+## Windows vs macOS/Linux targets (per-machine `os`)
+
+Each machine record accepts an optional `"os"` field: `"windows"`, `"mac"`, or
+`"linux"` (aliases: `win`, `macos`, `darwin`, `posix`, `unix`).
+
+| Target `os` | Remote command style |
+|---|---|
+| `windows` | `powershell.exe -NoProfile -NonInteractive -EncodedCommand <b64>` (UTF-16LE base64, + share bootstrap) |
+| `mac` / `linux` | plain POSIX shell text via the login shell (zsh on macOS) — no encoding, no share bootstrap (SMB drive mapping is Windows-only) |
+
+When `"os"` is absent it is **auto-detected once** (`uname -s`; empty output means
+Windows) and cached in `/tmp/ga_host_ssh_os_cache.json` for 10 minutes — delete that
+file to force re-detection. Hosts resolve **IPv4-first** (AF_INET lookup / `ssh -4`)
+because `host.docker.internal` can resolve to an unroutable IPv6 address from the
+sandbox.
+
+macOS targets need **Remote Login** enabled (System Settings → General → Sharing →
+Remote Login), plus **"Allow full disk access for remote users"** so SSH can read
+Desktop/Documents/Downloads; otherwise macOS TCC blocks those reads (`probe` reports
+`documents: DENIED`). Apple's guide: [Turn on Remote Login]
+(https://support.apple.com/guide/mac-help/turn-on-remote-login-mchlp1066/mac)
+
+When sshpass cannot be installed (no root in the sandbox), use the paramiko
+variant — identical CLI, pure-Python SSH from `pylibs/`:
+
+```bash
+PYTHONPATH=pylibs:Skills/host-ssh/scripts python3 Skills/host-ssh/scripts/host_ssh_pylibs.py probe --all
+```
 
 ## Capability profile (verified 2026-09-01) — read before choosing commands
 
@@ -74,6 +106,9 @@ regression. Do not use these, and do not burn round-trips discovering this**:
 | Filesystem / `Get-PSDrive -PSProvider FileSystem` | ok |
 | `dotnet`, `docker` | ok on both |
 | `nvidia-smi` | ok on OfficeDesktop, **absent on Max** |
+
+(Windows targets. macOS/Linux have no WMI; `probe` reports their fs/tool state
+directly.)
 
 Consequences:
 
@@ -108,17 +143,27 @@ of `$env:COMPUTERNAME`).
 **Default:** file edits on a mounted repo = sandbox heredoc. SSH = run commands on the
 machine OS, not to patch source files.
 
-## Run PowerShell on a machine
+## Run a command on a machine (PowerShell or POSIX shell)
 
-Scripts send PowerShell via **`-EncodedCommand`** (pipes and quotes survive Windows
-OpenSSH). **Always use `run -` + bash heredoc** for anything non-trivial — never inline
-Python, never nested quote gymnastics, never hand-rolled `ssh`/`sshpass`.
+Windows targets get PowerShell via **`-EncodedCommand`** (pipes and quotes survive
+Windows OpenSSH). **Always use `run -` + bash heredoc** for anything non-trivial — never
+inline Python, never nested quote gymnastics, never hand-rolled `ssh`/`sshpass`. On
+mac/linux targets the script text is sent verbatim to the login shell (zsh on macOS) —
+same heredoc discipline, POSIX syntax.
 
 ```bash
 python3 Skills/host-ssh/scripts/host_ssh.py run - <<'PS'
 Set-Location C:\repos\repo\src\server
 dotnet build RepoApi\RepoApi.csproj -v q --nologo
 PS
+```
+
+On mac/linux targets, write POSIX shell instead (same heredoc pattern):
+
+```bash
+python3 Skills/host-ssh/scripts/host_ssh.py run --machine laptop - <<'SH'
+ls -lah ~/Documents
+SH
 ```
 
 Target a specific machine (names from `machines`):
@@ -171,7 +216,7 @@ arguments (the platform collapses `\\` → `\` and corrupts the file).
 
 | Variable | Purpose |
 |----------|---------|
-| `GA_HOST_SSH_USER` | Local account on each machine (e.g. `GuideAnts`) |
+| `GA_HOST_SSH_USER` | Local account on each machine (e.g. `GuideAnts`); on a Mac: the account short name |
 | `GA_HOST_SSH_PASSWORD` | Password (**secret** in guide editor) |
 | `GA_SSH_MACHINES` | JSON machine registry (see above) |
 
@@ -182,14 +227,10 @@ Legacy share variables (default machine only):
 
 | Variable | Purpose |
 |----------|---------|
-| `GA_HOST_SSH_SHARE_UNC` | UNC behind `R:` (e.g. `\\FILESERVER\\content`) |
-| `GA_HOST_SSH_SHARE_USER` | Share account (e.g. `DOMAIN\\GuideAnts`) |
+| `GA_HOST_SSH_SHARE_UNC` | UNC behind `R:` (e.g. `\\FILESERVER\content`) |
+| `GA_HOST_SSH_SHARE_USER` | Share account (e.g. `DOMAIN\GuideAnts`) |
 | `GA_HOST_SSH_SHARE_PASSWORD` | Share password (**secret**); defaults to `GA_HOST_SSH_PASSWORD` |
 | `GA_HOST_SSH_SHARE_DRIVE` | Drive letter (default **`R`**) |
-
-The skill normalizes stored UNC values to canonical form and reports share
-connect/map failures on stdout (system error 67 = bad UNC, 71 = SMB session table
-full on the machine) instead of swallowing them.
 
 Quick check (optional, one line — **not** a gate before work):
 
@@ -204,10 +245,13 @@ If SSH fails, report the error verbatim and point the operator at README trouble
 - **Trust the file list.** No path discovery commands.
 - **Know the machines.** `host_ssh.py machines` — do not invent hosts or IPs.
 - **Never `cd`** in the same script as `Skills/…` paths.
-- **Heredoc first** for SSH PowerShell and for file writes on mounts.
+- **Heredoc first** for SSH commands and for file writes on mounts.
 - **Never** print or log `GA_HOST_SSH_PASSWORD` (or any share password).
 - **Probe, do not guess capabilities.** `host_ssh.py probe --all` reports what the
   account can actually do (the denied set is by design; see the capability table).
+- **Declare or detect `os`.** `run`/`probe` pick PowerShell vs POSIX shell from the
+  per-machine `os` field; auto-detection caches in `/tmp` — delete the cache file
+  after a machine's OS changes.
 - **Never** run `preflight.py` unless the user explicitly asks for diagnostics — it is
   not part of the normal workflow.
 
