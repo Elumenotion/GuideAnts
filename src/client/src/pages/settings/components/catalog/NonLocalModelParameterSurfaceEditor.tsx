@@ -1,6 +1,5 @@
 import type { NonLocalParameterSurface } from '../../parameterSurface';
 import {
-  parseReasoningChoicesJson,
   providerSupportsRowOwnedRequestShaping,
   validateOptionalJsonObject,
   validateReasoningChoicesJson,
@@ -25,7 +24,6 @@ export function NonLocalModelParameterSurfaceEditor({
 }: NonLocalModelParameterSurfaceEditorProps) {
   const samplingError = validateSamplingParametersJson(value.samplingParametersJson);
   const reasoningError = validateReasoningChoicesJson(value.reasoningChoicesJson);
-  const reasoningChoicesText = parseReasoningChoicesJson(value.reasoningChoicesJson).join(', ');
   const supportsRequestShaping = providerSupportsRowOwnedRequestShaping(provider);
   const thinkingError = supportsRequestShaping
     ? validateOptionalJsonObject(value.thinkingControlJson, 'Thinking control JSON')
@@ -55,20 +53,15 @@ export function NonLocalModelParameterSurfaceEditor({
       </div>
 
       <div className="space-y-2">
-        <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Reasoning Choices</label>
+        <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">
+          Reasoning Choices JSON
+        </label>
         <input
           type="text"
-          value={reasoningChoicesText}
-          onChange={(event) => {
-            const choices = event.target.value
-              .split(',')
-              .map((choice) => choice.trim())
-              .filter((choice) => choice.length > 0);
-            onChange({
-              reasoningChoicesJson: choices.length === 0 ? '' : JSON.stringify(choices),
-            });
-          }}
-          placeholder="none, low, medium, high"
+          value={value.reasoningChoicesJson}
+          onChange={(event) => onChange({ reasoningChoicesJson: event.target.value })}
+          spellCheck={false}
+          placeholder='["none", "low", "medium", "high"]'
           className={`w-full rounded border px-3 py-2 font-mono text-sm text-gray-900 focus:outline-none focus:ring-1 ${
             reasoningError
               ? 'border-red-400 focus:border-red-500 focus:ring-red-500'
@@ -76,7 +69,7 @@ export function NonLocalModelParameterSurfaceEditor({
           }`}
         />
         <p className="text-[11px] text-gray-500">
-          Comma-separated values saved to the model row as ReasoningChoicesJson.
+          JSON array of non-empty strings saved to the model row as ReasoningChoicesJson.
         </p>
         {reasoningError ? <p className="text-xs text-red-700">{reasoningError}</p> : null}
       </div>
