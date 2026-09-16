@@ -153,22 +153,26 @@ recreate_compose_service_with_image() {
   local service_name="$2"
   local image_tag="$3"
   local override_path="$docker_root/.build-webapi-ui-image.override.yml"
+  local image_platform
+  local exit_code=0
+
+  image_platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image_tag")"
 
   cat > "$override_path" <<EOF
 services:
   ${service_name}:
     image: ${image_tag}
+    platform: ${image_platform}
     pull_policy: never
 EOF
 
   (
-    cd "$docker_root"
+    cd "$docker_root" || exit
     compose_args=(compose -p "$COMPOSE_PROJECT_NAME")
     compose_args+=("${COMPOSE_FILE_ARGS[@]}")
     compose_args+=(-f "$override_path" up -d --no-deps --force-recreate --pull never "$service_name")
     docker "${compose_args[@]}"
-  )
-  local exit_code=$?
+  ) || exit_code=$?
   rm -f "$override_path"
   return "$exit_code"
 }
