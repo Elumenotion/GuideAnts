@@ -660,7 +660,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             TurnIndex = 1,
             AssistantName = "Guide",
             Instructions = "where am i?",
-            Status = "streaming",
+            Status = "pending_client_tool",
             Created = now,
             LastUpdated = now
         };
@@ -800,6 +800,87 @@ public sealed class PublishedOpenAiWireHandlersTests
             Times.Never);
     }
 
+    [DataTestMethod]
+    [DataRow("pending_client_tool", true)]
+    [DataRow("streaming", true)]
+    [DataRow("completed", false)]
+    [DataRow("cancelled", false)]
+    public async Task Tool_result_resolvers_accept_only_pending_turn_statuses(string status, bool accepted)
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        var project = new Project { Id = Guid.NewGuid(), Title = "Project", Slug = "project-tool-status" };
+        var notebook = new Notebook { Id = notebookId, ProjectId = project.Id, Project = project, Title = "Notebook", Slug = "notebook-tool-status" };
+        var conversation = new NotebookConversation { Id = conversationId, NotebookId = notebookId, Notebook = notebook, Title = "Conversation", Created = now };
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        db.NotebookConversations.Add(conversation);
+        db.ConversationTurns.Add(new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = conversationId,
+            NotebookConversation = conversation,
+            TurnIndex = 1,
+            AssistantName = "Guide",
+            Instructions = "where am i?",
+            Status = status,
+            Created = now,
+            LastUpdated = now
+        });
+        db.NotebookConversationMessages.Add(new NotebookConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = conversationId,
+            NotebookConversation = conversation,
+            Role = ChatRole.User,
+            Content = "where am i?",
+            TurnIndex = 1,
+            MessageSequence = 1,
+            ExternalUserIdentity = "user",
+            Created = now
+        });
+        db.NotebookConversationMessages.Add(new NotebookConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = conversationId,
+            NotebookConversation = conversation,
+            Role = ChatRole.Assistant,
+            Content = string.Empty,
+            TurnIndex = 1,
+            MessageSequence = 2,
+            AssistantName = "Guide",
+            ToolCalls = "[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"run_shell\",\"arguments\":{\"command\":\"pwd\"}}}]",
+            IsStreaming = false,
+            Created = now.AddSeconds(1)
+        });
+        await db.SaveChangesAsync();
+
+        var context = CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user");
+        var toolResults = new[] { new WireToolResultContinuation.AnthropicToolResult("call_1", "run_shell", "D:/repos/GuideAnts") };
+
+        var openAi = await WireToolResultContinuation.ResolvePendingToolResultConversationAsync(context, db, toolResults, CancellationToken.None);
+        var anthropic = await WireToolResultContinuation.ResolveAnthropicToolResultConversationAsync(context, db, toolResults, CancellationToken.None);
+
+        if (accepted)
+        {
+            openAi.ErrorResult.Should().BeNull();
+            openAi.ConversationId.Should().Be(conversationId);
+            anthropic.ErrorResult.Should().BeNull();
+            anthropic.ConversationId.Should().Be(conversationId);
+        }
+        else
+        {
+            openAi.ConversationId.Should().BeNull();
+            (await ExecuteResultAsync(openAi.ErrorResult!)).Body.Should().Contain("tool_results_not_pending");
+            anthropic.ConversationId.Should().BeNull();
+            (await ExecuteResultAsync(anthropic.ErrorResult!)).Body.Should().Contain("no longer pending");
+        }
+    }
+
     [TestMethod]
     public async Task PostResponsesAsync_Returns_function_call_output_when_pending_client_tool()
     {
@@ -917,7 +998,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             TurnIndex = 1,
             AssistantName = "Guide",
             Instructions = "where am i?",
-            Status = "streaming",
+            Status = "pending_client_tool",
             Created = now,
             LastUpdated = now
         };
@@ -1555,7 +1636,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             TurnIndex = 1,
             AssistantName = "Guide",
             Instructions = "where am i?",
-            Status = "streaming",
+            Status = "pending_client_tool",
             Created = now,
             LastUpdated = now
         };
