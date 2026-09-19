@@ -179,7 +179,7 @@ internal static async Task<(Guid? ConversationId, IResult? ErrorResult)> Resolve
         .Select(t => new { t.Status })
         .FirstOrDefaultAsync(ct);
 
-    if (turn == null || !string.Equals(turn.Status, "streaming", StringComparison.OrdinalIgnoreCase))
+    if (turn == null || !IsAwaitingToolResults(turn.Status))
     {
         return (null, OpenAiWireErrorResults.Create(
             StatusCodes.Status400BadRequest,
@@ -437,7 +437,7 @@ internal static async Task<(Guid? ConversationId, IResult? ErrorResult)> Resolve
         .Select(t => new { t.Status })
         .FirstOrDefaultAsync(ct);
 
-    if (turn == null || !string.Equals(turn.Status, "streaming", StringComparison.OrdinalIgnoreCase))
+    if (turn == null || !IsAwaitingToolResults(turn.Status))
     {
         return (null, WireResponseSerializer.CreateAnthropicError(
             StatusCodes.Status400BadRequest,
@@ -482,6 +482,12 @@ internal static async Task<(Guid? ConversationId, IResult? ErrorResult)> Resolve
 
     return (pendingAssistant.NotebookConversationId, null);
 }
+
+// A turn paused for client tools persists as "pending_client_tool"; "streaming" is still
+// accepted for turns that were saved before that status existed.
+private static bool IsAwaitingToolResults(string? status) =>
+    string.Equals(status, "pending_client_tool", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(status, "streaming", StringComparison.OrdinalIgnoreCase);
 
 internal static async Task AppendAnthropicToolResultsAsync(
     ApplicationDbContext db,

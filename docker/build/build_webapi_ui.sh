@@ -69,6 +69,7 @@ get_compose_context_for_container() {
   local repo_root="$3"
   local project_name="guideants"
   local config_files=""
+  local working_dir=""
   local label_json cfg resolved state_file compose_file override_file docker_directory compose_root
   local -a resolved_files=()
 
@@ -79,6 +80,7 @@ get_compose_context_for_container() {
 
   project_name="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$container_name" 2>/dev/null || true)"
   config_files="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$container_name" 2>/dev/null || true)"
+  working_dir="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$container_name" 2>/dev/null || true)"
   if [[ -z "$project_name" ]]; then
     project_name="guideants"
   fi
@@ -113,6 +115,7 @@ get_compose_context_for_container() {
           compose_root="$repo_root/$docker_directory"
         fi
         config_files="$compose_root/$compose_file"
+        working_dir="$compose_root"
         if [[ -n "$override_file" ]]; then
           config_files="$config_files,$compose_root/$override_file"
         fi
@@ -142,6 +145,9 @@ get_compose_context_for_container() {
   fi
 
   COMPOSE_PROJECT_NAME="$project_name"
+  # The project directory decides which .env compose loads (GA_DB_NAME, secrets, ...).
+  # Without it compose falls back to the first file's folder and silently uses defaults.
+  COMPOSE_PROJECT_DIR="$working_dir"
   COMPOSE_FILE_ARGS=()
   for resolved in "${resolved_files[@]}"; do
     COMPOSE_FILE_ARGS+=(-f "$resolved")
@@ -153,22 +159,29 @@ recreate_compose_service_with_image() {
   local service_name="$2"
   local image_tag="$3"
   local override_path="$docker_root/.build-webapi-ui-image.override.yml"
+  local image_platform
+  local exit_code=0
+
+  image_platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image_tag")"
 
   cat > "$override_path" <<EOF
 services:
   ${service_name}:
     image: ${image_tag}
+    platform: ${image_platform}
     pull_policy: never
 EOF
 
   (
-    cd "$docker_root"
+    cd "$docker_root" || exit
     compose_args=(compose -p "$COMPOSE_PROJECT_NAME")
+    if [[ -n "${COMPOSE_PROJECT_DIR:-}" ]]; then
+      compose_args+=(--project-directory "$COMPOSE_PROJECT_DIR")
+    fi
     compose_args+=("${COMPOSE_FILE_ARGS[@]}")
     compose_args+=(-f "$override_path" up -d --no-deps --force-recreate --pull never "$service_name")
     docker "${compose_args[@]}"
-  )
-  local exit_code=$?
+  ) || exit_code=$?
   rm -f "$override_path"
   return "$exit_code"
 }
@@ -305,6 +318,7 @@ if [[ "$NO_RECREATE" != "true" && ( "$USE_RUNNING_COMPOSE_STACK" == "true" || -f
     recreate_compose_service_with_image "$DOCKER_ROOT" "$SERVICE_NAME" "$LATEST_IMAGE_TAG"
   else
     COMPOSE_PROJECT_NAME="guideants"
+    COMPOSE_PROJECT_DIR="$DOCKER_ROOT"
     COMPOSE_FILE_ARGS=(-f "$COMPOSE_FILE")
     recreate_compose_service_with_image "$DOCKER_ROOT" "$SERVICE_NAME" "$LATEST_IMAGE_TAG"
   fi
