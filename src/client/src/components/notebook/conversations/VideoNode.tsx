@@ -10,12 +10,12 @@ import {
 } from 'lexical';
 import { Transformer } from '@lexical/markdown';
 import { api } from '../../../services/api';
+import { getCachedMediaUrl, setCachedMediaUrl } from '../../../utils/authenticatedMediaCache';
 import { API_BASE_URL } from '../../../config/apiConfig';
 import { ImageNodeContext } from './ImageNode';
 import { safeDecodeURIComponent } from '../../../utils/urlEncoding';
 
 // Cache for authenticated media URLs => blob object URLs (lives for app session)
-const authenticatedBlobCache = new Map<string, string>();
 
 const AuthenticatedVideo: React.FC<{ src: string; width?: 'inherit' | number; height?: 'inherit' | number; poster?: string }>
  = ({ src, width, height, poster }) => {
@@ -152,7 +152,7 @@ const AuthenticatedVideo: React.FC<{ src: string; width?: 'inherit' | number; he
 
   const loadAuthenticatedMedia = (mediaUrl: string) => {
     const effectiveUrl = toApiUrl(mediaUrl);
-    const cached = authenticatedBlobCache.get(effectiveUrl);
+    const cached = getCachedMediaUrl(effectiveUrl);
     if (cached) {
       setObjectUrl(cached);
       setIsLoading(false);
@@ -161,7 +161,7 @@ const AuthenticatedVideo: React.FC<{ src: string; width?: 'inherit' | number; he
     setIsLoading(true);
     api.utils.getAuthenticatedUrl(effectiveUrl)
       .then(result => {
-        authenticatedBlobCache.set(effectiveUrl, result.objectUrl);
+        setCachedMediaUrl(effectiveUrl, result.objectUrl);
         setObjectUrl(result.objectUrl);
         setError(null);
       })

@@ -156,13 +156,17 @@ public sealed class ApplicationSettingsConfigurationProvider(
 
                 {
 
-                    // Do not hydrate unknown DB sections into live runtime configuration.
+                    // Unregistered sections are hydrated too: the DB is the source of
 
-                    // This prevents non-registry settings (for example legacy ServiceRouting rows)
+                    // truth for settings. Keys fall back to the flat {SectionName}:{Key}
 
-                    // from silently overriding environment/appsettings values.
+                    // shape (see FlattenSection) so any DB setting is applied, never skipped.
 
-                    continue;
+                    // Secret decryption is registry-only (secrets must be declared as
+
+                    // section properties); unregistered sections are plain values.
+
+                    FlattenSection(sectionName, jsonObject, null);
 
                 }
 

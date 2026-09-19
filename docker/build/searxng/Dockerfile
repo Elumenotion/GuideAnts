@@ -18,8 +18,9 @@ RUN pip install --no-cache-dir \
         async-timeout==5.0.1 \
         babel==2.18.0 \
         blinker==1.9.0 \
-        certifi==2026.2.25 \
+        certifi==2026.7.22 \
         click==8.3.2 \
+        curl_cffi==0.16.3 \
         Flask==3.1.3 \
         flask-babel==4.0.0 \
         granian==2.7.3 \
@@ -34,12 +35,12 @@ RUN pip install --no-cache-dir \
         isodate==0.7.2 \
         itsdangerous==2.2.0 \
         Jinja2==3.1.6 \
-        lxml==6.0.3 \
-        markdown-it-py==4.0.0 \
+        lxml==6.1.3 \
+        markdown-it-py==4.2.0 \
         MarkupSafe==3.0.3 \
         mdurl==0.1.2 \
-        msgspec==0.21.0 \
-        Pygments==2.20.0 \
+        msgspec==0.21.1 \
+        Pygments==2.21.0 \
         python-dateutil==2.9.0.post0 \
         python-socks==2.8.1 \
         pytz==2026.1.post1 \
@@ -49,8 +50,8 @@ RUN pip install --no-cache-dir \
         shellingham==1.5.4 \
         six==1.17.0 \
         sniffio==1.3.1 \
-        typer==0.24.1 \
-        typing_extensions==4.15.0 \
+        typer==0.27.2 \
+        typing_extensions==4.16.0 \
         valkey==6.1.1 \
         Werkzeug==3.1.8 \
         whitenoise==6.12.0 \

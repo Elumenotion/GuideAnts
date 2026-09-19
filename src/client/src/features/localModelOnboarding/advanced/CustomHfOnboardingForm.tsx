@@ -20,14 +20,20 @@ export function CustomHfOnboardingForm({ value, onChange, inventory }: CustomHfO
   return (
     <div className="space-y-4">
       <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-        Custom Hugging Face install requires explicit revision, complete artifact group, alias, target directory, alias
-        preset, and model chat behavior. Nothing is inferred from runtime profiles.
+        Custom Hugging Face install: pick a model artifact group and router alias. The revision is resolved from the
+        browse, and the alias preset, target directory, and model chat behavior are optional.
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="space-y-1">
-          <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Catalog model ID</label>
+          <label
+            htmlFor="custom-hf-catalog-model-id"
+            className="block text-xs font-medium uppercase tracking-wide text-gray-600"
+          >
+            Catalog model ID
+          </label>
           <input
+            id="custom-hf-catalog-model-id"
             type="text"
             value={value.catalogModelId}
             onChange={(event) => onChange({ catalogModelId: event.target.value })}
@@ -36,8 +42,14 @@ export function CustomHfOnboardingForm({ value, onChange, inventory }: CustomHfO
           />
         </div>
         <div className="space-y-1">
-          <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Display name</label>
+          <label
+            htmlFor="custom-hf-display-name"
+            className="block text-xs font-medium uppercase tracking-wide text-gray-600"
+          >
+            Display name
+          </label>
           <input
+            id="custom-hf-display-name"
             type="text"
             value={value.catalogDisplayName}
             onChange={(event) => onChange({ catalogDisplayName: event.target.value })}
@@ -47,8 +59,14 @@ export function CustomHfOnboardingForm({ value, onChange, inventory }: CustomHfO
       </div>
 
       <div className="space-y-1">
-        <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Router alias</label>
+        <label
+          htmlFor="custom-hf-router-alias"
+          className="block text-xs font-medium uppercase tracking-wide text-gray-600"
+        >
+          Router alias
+        </label>
         <input
+          id="custom-hf-router-alias"
           type="text"
           value={value.llamaRouterModelId}
           onChange={(event) => onChange({ llamaRouterModelId: event.target.value })}
@@ -86,8 +104,14 @@ export function CustomHfOnboardingForm({ value, onChange, inventory }: CustomHfO
       />
 
       <div className="space-y-1">
-        <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Target directory</label>
+        <label
+          htmlFor="custom-hf-target-directory"
+          className="block text-xs font-medium uppercase tracking-wide text-gray-600"
+        >
+          Target directory
+        </label>
         <input
+          id="custom-hf-target-directory"
           type="text"
           value={value.llamaHuggingFaceTargetDirectory}
           onChange={(event) => onChange({ llamaHuggingFaceTargetDirectory: event.target.value })}

@@ -37,16 +37,26 @@ function serverDraftKey(
   });
 }
 
-function parseOptionalPositiveInt(raw: string): number | null {
+/**
+ * Parse a managed field (ctx-size / cache-ram).
+ * Blank means "no key" (null -> container default). Any non-blank value must be
+ * a whole integer: -1 is a valid sentinel in llama-server, so negative values
+ * are legal here. Garbage is reported to the caller instead of being silently
+ * dropped on save.
+ */
+function parseManagedIntField(
+  raw: string,
+  fieldName: string,
+): { value: number | null; error: string | null } {
   const trimmed = raw.trim();
   if (!trimmed) {
-    return null;
+    return { value: null, error: null };
   }
   const value = Number(trimmed);
-  if (!Number.isInteger(value) || value <= 0) {
-    return null;
+  if (!Number.isInteger(value)) {
+    return { value: null, error: `${fieldName} must be an integer. -1 means the llama-server default; leave blank to remove the key.` };
   }
-  return value;
+  return { value, error: null };
 }
 
 function resolveManagedDrafts(
@@ -126,6 +136,14 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
       [cacheRamDraft, ctxSizeDraft],
     );
     const validationErrors = useMemo(() => validateAliasPresetRows(rows), [rows]);
+    const ctxSizeError = useMemo(
+      () => parseManagedIntField(ctxSizeDraft, 'Context size').error,
+      [ctxSizeDraft],
+    );
+    const cacheRamError = useMemo(
+      () => parseManagedIntField(cacheRamDraft, 'Prompt cache RAM').error,
+      [cacheRamDraft],
+    );
 
     const handlePresetRowsChange = useCallback((nextRows: PresetKeyValue[]) => {
       setRows(withStablePresetRowIds(nextRows.filter((row) => !isManagedPresetKey(row.key))));
@@ -142,6 +160,11 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
           if (validationErrors.length > 0) {
             throw new Error(validationErrors[0] ?? 'Fix preset validation errors before saving.');
           }
+          const ctxSize = parseManagedIntField(ctxSizeDraft, 'Context size');
+          const cacheRam = parseManagedIntField(cacheRamDraft, 'Prompt cache RAM');
+          if (ctxSize.error || cacheRam.error) {
+            throw new Error(ctxSize.error ?? cacheRam.error ?? 'Fix preset validation errors before saving.');
+          }
 
           await api.settings.putLlamaRouterEntry(alias, {
             alias,
@@ -150,12 +173,12 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
             preset: effectivePreset,
             // WYSIWYG: removed rows must leave the INI, not survive via merge.
             presetMode: 'replace',
-            contextSize: parseOptionalPositiveInt(ctxSizeDraft),
-            cacheRamMib: parseOptionalPositiveInt(cacheRamDraft),
+            contextSize: ctxSize.value,
+            cacheRamMib: cacheRam.value,
           });
         },
       }),
-      [alias, cacheRamDraft, ctxSizeDraft, effectivePreset, fallbackMmprojPath, fallbackModelPath, routerEntry, validationErrors],
+      [alias, cacheRamDraft, ctxSizeDraft, effectivePreset, fallbackMmprojPath, fallbackModelPath, routerEntry, validationErrors, ctxSizeError, cacheRamError],
     );
 
     return (
@@ -179,7 +202,9 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
               className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm"
               placeholder="e.g. 131072"
               spellCheck={false}
+              aria-invalid={ctxSizeError ? true : undefined}
             />
+            {ctxSizeError ? <p className="text-xs text-red-700">{ctxSizeError}</p> : null}
           </label>
           <label className="space-y-1 text-sm text-gray-700">
             <span className="text-xs font-medium uppercase tracking-wide text-gray-600">Prompt cache RAM (MiB)</span>
@@ -191,7 +216,9 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
               className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm"
               placeholder="optional"
               spellCheck={false}
+              aria-invalid={cacheRamError ? true : undefined}
             />
+            {cacheRamError ? <p className="text-xs text-red-700">{cacheRamError}</p> : null}
           </label>
         </div>
 

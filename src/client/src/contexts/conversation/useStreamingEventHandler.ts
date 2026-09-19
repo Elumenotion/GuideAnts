@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import type { MessageDto, StreamingMessage, StreamingToolActivity } from '../../types/conversation';
 import type { ActionType, ExtendedConversationState, SendStreamState } from './types';
+import { invalidateNotebookMediaCache } from '../../utils/authenticatedMediaCache';
 
 interface StreamingEventDeps {
   loadNotebookFiles: () => Promise<void>;
@@ -138,6 +139,15 @@ export function useStreamingEventHandler(
             return;
           }
           deps.setActiveStreamTurnId?.(null);
+          // A turn may have re-emitted existing notebook files (same path, new bytes).
+          // Bump the notebook's media-cache revision so cells that (re)fetch get the new
+          // bytes; cells that already rendered keep their unrevoked blobs and keep showing
+          // the version they loaded (see utils/authenticatedMediaCache).
+          invalidateNotebookMediaCache(
+            deps.projectId,
+            deps.notebookId,
+            event.data?.filesCreated ?? event.data?.filesModified
+          );
           // Conversation state only: finalize the streamed cell. Composer terminal state
           // (draft/attachments/snapshot) is owned by the action layer's onComplete, which the
           // transport invokes for this same terminal event — so no render-captured state.* is

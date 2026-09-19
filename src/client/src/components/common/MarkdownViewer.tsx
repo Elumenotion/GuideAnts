@@ -7,6 +7,7 @@ import rehypeRaw from 'rehype-raw';
 import MermaidRenderer from './MermaidRenderer';
 import PreviewContainer from './PreviewContainer';
 import { api } from '@/services/api';
+import { getCachedMediaUrl, setCachedMediaUrl } from '@/utils/authenticatedMediaCache';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { encodeMarkdownLinkSpaces } from '@/utils/markdownLinkEncoding';
 import { safeDecodeURIComponent } from '@/utils/urlEncoding';
@@ -171,7 +172,6 @@ const ExternalLink: React.FC<{ href?: string; children: React.ReactNode }> = ({ 
 };
 
 // Cache for authenticated image/video/audio URLs => blob object URLs
-const authenticatedBlobCache = new Map<string, string>();
 
 const AuthenticatedContent: React.FC<{
     src?: string;
@@ -345,7 +345,7 @@ const AuthenticatedContent: React.FC<{
 
         if ((elementType === 'img' || elementType === 'video' || elementType === 'audio') && url) {
             const effectiveUrl = toApiUrl(url);
-            const cached = authenticatedBlobCache.get(effectiveUrl);
+            const cached = getCachedMediaUrl(effectiveUrl);
             if (cached) {
                 setObjectUrl(cached);
                 setIsLoading(false);
@@ -362,7 +362,7 @@ const AuthenticatedContent: React.FC<{
                 api.utils.getAuthenticatedUrl(effectiveUrl)
                     .then(result => {
                         if (cancelled) return;
-                        authenticatedBlobCache.set(effectiveUrl, result.objectUrl);
+                        setCachedMediaUrl(effectiveUrl, result.objectUrl);
                         setObjectUrl(result.objectUrl);
                         setError(null);
                         setIsLoading(false);

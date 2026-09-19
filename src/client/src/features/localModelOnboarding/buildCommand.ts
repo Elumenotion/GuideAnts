@@ -59,9 +59,11 @@ function normalizeDisplayOrder(value: string | undefined): number | undefined {
 }
 
 function isExplicitCustomInstall(draft: LocalModelOnboardingDraft): boolean {
-  return draft.huggingFaceModelFiles.length > 0
-    && draft.huggingFaceResolvedRevision.trim().length > 0
-    && draft.huggingFaceRouterPresetRows.some((row) => row.key.trim().length > 0);
+  // A custom Hugging Face install is fully specified once the operator has
+  // picked the model artifact group and the router alias. The resolved
+  // revision comes from the HF browse (no user input), and an empty alias
+  // preset is valid: the runtime registers the alias with model-only extras.
+  return draft.huggingFaceModelFiles.length > 0 && draft.routerModelId.trim().length > 0;
 }
 
 function buildModelChatBehaviorProviderConfig(draft: LocalModelOnboardingDraft): Record<string, unknown> {
@@ -185,19 +187,16 @@ export function buildLocalModelOnboardingRequest(
   }
 
   if (isExplicitCustomInstall(draft)) {
-    const resolvedRevision = draft.huggingFaceResolvedRevision.trim();
+    // Empty object (not undefined) so the server still registers the alias
+    // with replace-mode extras; the runtime treats it as a model-only entry.
     const routerPreset = presetRecordFromRows(draft.huggingFaceRouterPresetRows);
-    if (Object.keys(routerPreset).length === 0) {
-      throw new Error('Alias preset is required for custom Hugging Face install.');
-    }
-
     request.install = {
       source: 'huggingface',
       routerModelId,
       presetMode: draft.huggingFacePresetMode,
       huggingFace: {
         repository,
-        resolvedRevision,
+        resolvedRevision: draft.huggingFaceResolvedRevision.trim() || 'main',
         modelFiles: draft.huggingFaceModelFiles,
         mmprojFiles: draft.huggingFaceMmprojFiles,
         targetDirectory,
@@ -210,6 +209,6 @@ export function buildLocalModelOnboardingRequest(
   }
 
   throw new Error(
-    'Complete custom Hugging Face fields: revision, artifact group, alias preset, alias, and model chat behavior.'
+    'Complete the custom Hugging Face install: pick a model artifact group and a router alias in the provider configuration step.'
   );
 }

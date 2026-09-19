@@ -96,8 +96,9 @@ public sealed class HuggingFaceRepositoryBrowserTests
 
         await browser.ListFilesAsync("/Owner/", "/Repo/");
 
-        handler.Captured.Should().ContainSingle();
+        handler.Captured.Should().HaveCount(2);
         handler.Captured[0].Uri.Should().Be("https://huggingface.co/api/models/Owner/Repo/tree/main?recursive=true");
+        handler.Captured[1].Uri.Should().Be("https://huggingface.co/api/models/Owner/Repo/revision/main");
     }
 
     [TestMethod]
@@ -217,8 +218,51 @@ public sealed class HuggingFaceRepositoryBrowserTests
 
         var listing = await browser.ListFilesAsync("owner", "repo");
 
-        handler.Captured.Should().HaveCount(2);
+        // Two tree pages plus the best-effort revision-resolve call.
+        handler.Captured.Should().HaveCount(3);
         listing.Files.Select(f => f.Path).Should().BeEquivalentTo("page1.gguf", "page2.gguf");
+        listing.ResolvedRevision.Should().Be("main");
+    }
+
+    [TestMethod]
+    public async Task ListFilesAsync_ResolvesRevisionShaFromRevisionEndpoint()
+    {
+        var handler = new CapturingHandler(request =>
+        {
+            var uri = request.RequestUri!.ToString();
+            if (uri.Contains("/revision/main"))
+            {
+                return Json("{\"sha\":\"8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a\"}");
+            }
+            return Json("[ { \"type\":\"file\", \"path\":\"m.gguf\", \"size\": 1 } ]");
+        });
+        var browser = CreateBrowser(handler);
+
+        var listing = await browser.ListFilesAsync("owner", "repo");
+
+        listing.ResolvedRevision.Should().Be("8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a");
+    }
+
+    [TestMethod]
+    public async Task ListFilesAsync_FallsBackToMainWhenRevisionResolveFails()
+    {
+        var handler = new CapturingHandler(request =>
+        {
+            var uri = request.RequestUri!.ToString();
+            if (uri.Contains("/revision/main"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = new StringContent("nope")
+                };
+            }
+            return Json("[ ]");
+        });
+        var browser = CreateBrowser(handler);
+
+        var listing = await browser.ListFilesAsync("owner", "repo");
+
+        listing.ResolvedRevision.Should().Be("main");
     }
 
     private static async Task<HuggingFaceBrowseException> CatchAsync(Func<Task> action)

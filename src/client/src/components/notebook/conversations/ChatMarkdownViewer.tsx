@@ -1,10 +1,21 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FaTimes } from 'react-icons/fa';
 import MermaidRenderer from '../../common/MermaidRenderer';
 import { api } from '../../../services/api';
+import { getCachedMediaUrl, getMediaCacheKey, setCachedMediaUrl, invalidateNotebookMediaCache } from '../../../utils/authenticatedMediaCache';
+
+/**
+ * @deprecated Use invalidateNotebookMediaCache (utils/authenticatedMediaCache).
+ * Kept for API compatibility: the old per-URL matching could never match the
+ * CWD-relative paths the server stores in turnFilesCreated/Modified, so it now
+ * bumps the notebook revision when any paths are passed.
+ */
+export function invalidateImageCacheForPaths(paths: string[], projectId?: string, notebookId?: string) {
+    invalidateNotebookMediaCache(projectId, notebookId, paths);
+}
 import { API_BASE_URL, getApiHost } from '../../../config/apiConfig';
 import ImageFullscreenViewer from './ImageFullscreenViewer';
 import { encodeMarkdownLinkSpaces } from '../../../utils/markdownLinkEncoding';
@@ -358,39 +369,10 @@ const ExternalLink: React.FC<{ href?: string; children: React.ReactNode }> = ({ 
     );
 };
 
-// Cache for authenticated image URLs => blob object URLs (lives for app session)
-const authenticatedBlobCache = new Map<string, string>();
-
-/**
- * Invalidate cache entries for specific file paths.
- * Call this when files are modified to ensure fresh versions are fetched.
- * 
- * NOTE: We intentionally do NOT revoke the blob URLs because previous cells
- * may still have <img> elements using those URLs. Revoking would break their display.
- * The old blobs will be garbage collected when no longer referenced.
- */
-export function invalidateImageCacheForPaths(paths: string[], projectId?: string, notebookId?: string) {
-    if (!paths.length || !projectId || !notebookId) return;
-    
-    const apiBase = (API_BASE_URL || '').replace(/\/$/, '');
-    
-    for (const path of paths) {
-        // Build the URL pattern that would be cached
-        const encodedPath = encodeURIComponent(safeDecodeURIComponent(path));
-        const urlPattern = `${apiBase}/projects/${projectId}/notebooks/${notebookId}/files/content?path=${encodedPath}`;
-        
-        // Remove from cache but don't revoke - previous cells still need the blob
-        authenticatedBlobCache.delete(urlPattern);
-        
-        // Also check for URLs with query params (e.g., ?m=timestamp)
-        for (const cachedUrl of authenticatedBlobCache.keys()) {
-            if (cachedUrl.startsWith(urlPattern + '&') || cachedUrl.startsWith(urlPattern + '?')) {
-                authenticatedBlobCache.delete(cachedUrl);
-            }
-        }
-    }
-}
-
+// Session cache for authenticated media blob URLs. Shared with the Lexical media
+// nodes (ImageNode/AudioNode/VideoNode) and the global MarkdownViewer via
+// utils/authenticatedMediaCache, keyed by URL + per-notebook revision so a turn that
+// re-emits a file never poisons the cache for the version already on screen.
 // Component to handle authenticated URLs for images, links, video, and audio
 const AuthenticatedContent: React.FC<{ 
     src?: string; 
@@ -500,11 +482,24 @@ const AuthenticatedContent: React.FC<{
     };
 
     const url = normalizeUrl(resolveUrl(cleanedSource));
+    // The cache key includes the notebook's media revision. When a turn re-emits a file
+    // the revision is bumped (SSE complete / turnFilesModified), the key changes, and the
+    // fetch effect below re-runs so THIS element gets the fresh bytes. Cells whose parent
+    // is not re-rendered keep their stable key and keep displaying the version they loaded.
+    const mediaCacheKey = url ? getMediaCacheKey(url) : url;
     const [objectUrl, setObjectUrl] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [retryCount, setRetryCount] = useState(0);
     const wasStreamingRef = useRef(isStreaming);
+    // The resolved URL this element already loaded a blob for. Once loaded, the element
+    // keeps showing that version even if the notebook's media revision is later bumped by
+    // a turn that re-emits the file — that is what lets the previous cell keep its version
+    // on re-render while a newly mounted cell (fresh ref) fetches the fresh bytes.
+    const loadedUrlRef = useRef<string | null>(null);
+    // URL of an in-flight fetch for this element: a re-render mid-fetch (e.g. the revision
+    // bump committing while the first fetch is still resolving) must not start a second fetch.
+    const inFlightUrlRef = useRef<string | null>(null);
 
     // Turn end is the authoritative moment to fetch notebook files. Retries that
     // fail mid-stream are hidden by the streaming placeholder; reset on completion.
@@ -557,6 +552,8 @@ const AuthenticatedContent: React.FC<{
 
     useEffect(() => {
         if (!url || !isAuthenticatedUrl) {
+            loadedUrlRef.current = null;
+            inFlightUrlRef.current = null;
             setObjectUrl(url || null);
             return;
         }
@@ -565,6 +562,18 @@ const AuthenticatedContent: React.FC<{
             // Notebook files may not exist until the turn completes — defer fetch so
             // we don't exhaust retries behind the streaming "coming up" placeholder.
             if (isStreaming) {
+                return;
+            }
+
+            // Already rendered for this URL: keep the loaded blob. Re-rendering after a
+            // later turn (isStreaming flip, parent re-render with a bumped revision)
+            // must not swap this cell to a newer version of the same file.
+            if (loadedUrlRef.current === url) {
+                return;
+            }
+
+            // A fetch for this URL is already resolving: don't start a second one.
+            if (inFlightUrlRef.current === url) {
                 return;
             }
 
@@ -599,7 +608,7 @@ const AuthenticatedContent: React.FC<{
         return () => {
             // Do not revoke cached object URLs—they may be reused by other mounts
         };
-    }, [url, isAuthenticatedUrl, elementType, retryCount, isStreaming]);
+    }, [url, isAuthenticatedUrl, elementType, retryCount, isStreaming, mediaCacheKey]);
 
     const toApiUrl = (originalUrl: string): string => {
         try {
@@ -615,8 +624,8 @@ const AuthenticatedContent: React.FC<{
 
     const loadAuthenticatedMedia = (mediaUrl: string, fetchAttempt: number = 0) => {
         const effectiveUrl = toApiUrl(mediaUrl);
-        // If we've already fetched this media once, reuse cached blob URL
-        const cached = authenticatedBlobCache.get(effectiveUrl);
+        // If we've already fetched this media at the current revision, reuse cached blob URL
+        const cached = getCachedMediaUrl(effectiveUrl);
         if (cached) {
             setObjectUrl(cached);
             setIsLoading(false);
@@ -624,9 +633,12 @@ const AuthenticatedContent: React.FC<{
         }
 
         setIsLoading(true);
+        inFlightUrlRef.current = mediaUrl;
         api.utils.getAuthenticatedUrl(effectiveUrl)
             .then(result => {
-                authenticatedBlobCache.set(effectiveUrl, result.objectUrl);
+                setCachedMediaUrl(effectiveUrl, result.objectUrl);
+                inFlightUrlRef.current = null;
+                loadedUrlRef.current = mediaUrl;
                 setObjectUrl(result.objectUrl);
                 setError(null); // Clear any previous errors
                 setIsLoading(false);
@@ -651,6 +663,7 @@ const AuthenticatedContent: React.FC<{
                 if (isLikelyMalformedUrl(mediaUrl) && retryCount < 3) {
                     setError(null);
                 } else {
+                    inFlightUrlRef.current = null;
                     setError(err.message);
                 }
                 setIsLoading(false);
@@ -874,15 +887,18 @@ export default function ChatMarkdownViewer({ text, className = '', isFullScreen 
   const combinedClass = `${className} select-text max-w-full overflow-hidden`.trim();
 
   // Invalidate cache for modified/created files before rendering
-  // This ensures that when an assistant overwrites an image, the new version is fetched
-  useEffect(() => {
+  // This ensures that when an assistant overwrites an image, the new version is fetched.
+  // useLayoutEffect (not useEffect): the bump must land BEFORE media children's passive
+  // fetch effects run on the same commit, so a freshly mounted cell fetches exactly once,
+  // at the current revision (no mount-time double fetch from a mid-flight key change).
+  useLayoutEffect(() => {
     if (projectId && notebookId) {
       const pathsToInvalidate = [
         ...(turnFilesModified || []),
         ...(turnFilesCreated || [])
       ];
       if (pathsToInvalidate.length > 0) {
-        invalidateImageCacheForPaths(pathsToInvalidate, projectId, notebookId);
+        invalidateNotebookMediaCache(projectId, notebookId, pathsToInvalidate);
       }
     }
   }, [turnFilesModified, turnFilesCreated, projectId, notebookId]);

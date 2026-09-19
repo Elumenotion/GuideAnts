@@ -173,7 +173,7 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
 # needed because nothing in this image links against them.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gnupg libnuma1 \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg libnuma1 ripgrep \
     && curl -sL https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - \
     && printf "deb [arch=amd64] https://repo.radeon.com/rocm/apt/%s/ noble main" "$ROCM_VERSION" \
         | tee /etc/apt/sources.list.d/rocm.list \

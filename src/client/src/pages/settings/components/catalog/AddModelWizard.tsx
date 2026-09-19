@@ -27,6 +27,8 @@ import { NonLocalModelParameterSurfaceEditor } from './NonLocalModelParameterSur
 import {
   localModelOnboardingProgressStep,
 } from '../../../../features/localModelOnboarding/status';
+import { validateLocalModelOnboardingDraft } from '../../../../features/localModelOnboarding/validateDraft';
+import { mapSettingsAddModelStateToOnboardingDraft } from '../../../../features/localModelOnboarding/mapDraft';
 import { useLocalModelOnboardingOperation } from '../../../../features/localModelOnboarding/useOperationPolling';
 import { LlamaLocalModelOnboardingPanel } from '../../../../features/localModelOnboarding/curated/LlamaLocalModelOnboardingPanel';
 import type { LocalModelOnboardingMode } from '../../../../features/localModelOnboarding/curated/types';
@@ -326,6 +328,20 @@ export function AddModelWizard({
           ? 'lg'
           : 'md';
   const canContinueFromProvider = value.provider.trim().length > 0;
+  // Live validation for the provider-configuration step so an incomplete
+  // install is caught where its fields actually are (Step 3), not as a
+  // banner on the read-only review step (Step 4).
+  const providerConfigError = useMemo(() => {
+    if (value.provider !== 'llama-cpp' || llamaOnboardingMode === 'curated') {
+      return null;
+    }
+    const errors = validateLocalModelOnboardingDraft(
+      mapSettingsAddModelStateToOnboardingDraft(value)
+    );
+    return errors.length > 0 ? errors[0] : null;
+  }, [llamaOnboardingMode, value]);
+  const canContinueFromProviderConfig = providerConfigError === null;
+
   const canContinueFromCatalog = useMemo(() => {
     if (value.provider === 'llama-cpp' && llamaOnboardingMode === 'curated') {
       return true;
@@ -466,7 +482,12 @@ export function AddModelWizard({
               </TextActionButton>
             ) : null}
             {step === 'providerConfig' ? (
-              <TextActionButton tone="primary" onClick={() => setStep('review')} title="Continue">
+              <TextActionButton
+                tone="primary"
+                disabled={!canContinueFromProviderConfig}
+                onClick={() => setStep('review')}
+                title="Continue"
+              >
                 Continue
               </TextActionButton>
             ) : null}
@@ -581,6 +602,11 @@ export function AddModelWizard({
 
       {step === 'providerConfig' ? (
         <div className="space-y-4">
+          {providerConfigError ? (
+            <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {providerConfigError}
+            </div>
+          ) : null}
           {value.provider === 'llama-cpp' ? (
             <LlamaLocalModelOnboardingPanel
               mode={llamaOnboardingMode}

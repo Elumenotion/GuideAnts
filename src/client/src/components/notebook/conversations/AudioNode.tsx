@@ -10,12 +10,12 @@ import {
 } from 'lexical';
 import { Transformer } from '@lexical/markdown';
 import { api } from '../../../services/api';
+import { getCachedMediaUrl, setCachedMediaUrl } from '../../../utils/authenticatedMediaCache';
 import { API_BASE_URL } from '../../../config/apiConfig';
 import { ImageNodeContext } from './ImageNode';
 import { safeDecodeURIComponent } from '../../../utils/urlEncoding';
 
 // Cache for authenticated media URLs => blob object URLs (lives for app session)
-const authenticatedBlobCache = new Map<string, string>();
 
 const AuthenticatedAudio: React.FC<{ src: string }> = ({ src }) => {
   const { projectId, notebookId, resolveProjectFilePath, basePath } = useContext(ImageNodeContext);
@@ -151,7 +151,7 @@ const AuthenticatedAudio: React.FC<{ src: string }> = ({ src }) => {
 
   const loadAuthenticatedMedia = (mediaUrl: string) => {
     const effectiveUrl = toApiUrl(mediaUrl);
-    const cached = authenticatedBlobCache.get(effectiveUrl);
+    const cached = getCachedMediaUrl(effectiveUrl);
     if (cached) {
       setObjectUrl(cached);
       setIsLoading(false);
@@ -160,7 +160,7 @@ const AuthenticatedAudio: React.FC<{ src: string }> = ({ src }) => {
     setIsLoading(true);
     api.utils.getAuthenticatedUrl(effectiveUrl)
       .then(result => {
-        authenticatedBlobCache.set(effectiveUrl, result.objectUrl);
+        setCachedMediaUrl(effectiveUrl, result.objectUrl);
         setObjectUrl(result.objectUrl);
         setError(null);
       })

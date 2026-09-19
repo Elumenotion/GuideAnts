@@ -47,7 +47,7 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl \
+        ca-certificates curl ripgrep \
         libbz2-1.0 libffi8 libgdbm6 liblzma5 libncursesw6 \
         libreadline8 libsqlite3-0 libssl3 zlib1g libuuid1 tk \
     && rm -rf /var/lib/apt/lists/*

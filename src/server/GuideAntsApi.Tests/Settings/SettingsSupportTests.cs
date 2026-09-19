@@ -143,7 +143,7 @@ public sealed class SettingsSupportTests
     }
 
     [TestMethod]
-    public async Task ValidateImportDefinition_AcceptsCanonicalDefinition()
+    public void ValidateImportDefinition_AcceptsCanonicalDefinition()
     {
         var definition = new ImageGenerationBundleDefinitionDto(
             "bundle-a",
