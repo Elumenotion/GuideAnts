@@ -143,18 +143,6 @@ export default function PublicGuide() {
           </div>
         </div>
       </header>
-      <Link 
-        to="https://www.guideants.ai/get-started.html"
-        className="flex items-center justify-center py-2 px-3 bg-blue-50 border-b border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors"
-      >
-        <span className="text-blue-700 text-sm text-center">
-          <strong>Want to create your own guide?</strong>{' '}
-          <span className="text-blue-600 underline font-semibold">
-            Get started with free credits now!
-          </span>
-        </span>
-      </Link>
-
       {/* Chat Component */}
       <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
         <div className="bg-white rounded-lg shadow-md p-6">
@@ -162,7 +150,7 @@ export default function PublicGuide() {
             ref: chatRef, 
             className: 'theme-guideants',
             'pub-id': guideData.id,
-            'api-base-url': API_BASE_URL.replace(/\/api$/, '')
+            'api-base-url': API_BASE_URL.replace(/\/api$/, '') || window.location.origin
           })}
         </div>
       </main>

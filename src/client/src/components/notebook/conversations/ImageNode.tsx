@@ -12,6 +12,7 @@ import {
   Transformer,
 } from '@lexical/markdown';
 import { api } from '../../../services/api';
+import { getCachedMediaUrl, setCachedMediaUrl } from '../../../utils/authenticatedMediaCache';
 import { API_BASE_URL, getApiHost } from '../../../config/apiConfig';
 import { safeDecodeURIComponent } from '../../../utils/urlEncoding';
 
@@ -28,7 +29,6 @@ export const ImageNodeContext = createContext<ImageNodeContextValue>({});
 export const ImageNodeContextProvider = ImageNodeContext.Provider;
 
 // Cache for authenticated image URLs => blob object URLs (lives for app session)
-const authenticatedBlobCache = new Map<string, string>();
 
 // Component to handle authenticated image URLs
 const AuthenticatedImage: React.FC<{ 
@@ -209,7 +209,7 @@ const AuthenticatedImage: React.FC<{
     const loadAuthenticatedImage = (imageUrl: string, fetchAttempt: number = 0) => {
         const effectiveUrl = toApiUrl(imageUrl);
         // If we've already fetched this image once, reuse cached blob URL
-        const cached = authenticatedBlobCache.get(effectiveUrl);
+        const cached = getCachedMediaUrl(effectiveUrl);
         if (cached) {
             setObjectUrl(cached);
             setIsLoading(false);
@@ -219,7 +219,7 @@ const AuthenticatedImage: React.FC<{
         setIsLoading(true);
         api.utils.getAuthenticatedUrl(effectiveUrl)
             .then(result => {
-                authenticatedBlobCache.set(effectiveUrl, result.objectUrl);
+                setCachedMediaUrl(effectiveUrl, result.objectUrl);
                 setObjectUrl(result.objectUrl);
                 setError(null); // Clear any previous errors
                 setIsLoading(false);

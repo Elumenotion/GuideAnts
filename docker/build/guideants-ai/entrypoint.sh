@@ -401,6 +401,8 @@ render_nginx_config() {
     local template="/etc/nginx/nginx.conf.template"
     local output="/etc/nginx/nginx.conf"
     local limit="${GA_NGINX_ASR_CLIENT_MAX_BODY_SIZE:-300m}"
+    # Same knob the ScriptExecutionAgent and the webapi honor (SCRIPT_EXECUTION__TimeoutSeconds).
+    local sandbox_timeout="${SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}"
 
     if [ ! -f "$template" ]; then
         echo "Missing nginx template: $template" >&2
@@ -412,7 +414,13 @@ render_nginx_config() {
         exit 1
     fi
 
-    sed "s|__GA_NGINX_ASR_CLIENT_MAX_BODY_SIZE__|${limit}|g" "$template" > "$output"
+    if ! [[ "$sandbox_timeout" =~ ^[0-9]+$ ]]; then
+        echo "Invalid SCRIPT_EXECUTION_TIMEOUT_SECONDS: $sandbox_timeout (expected integer seconds)" >&2
+        exit 1
+    fi
+
+    sed -e "s|__GA_NGINX_ASR_CLIENT_MAX_BODY_SIZE__|${limit}|g" \
+        -e "s|__GA_NGINX_SANDBOX_PROXY_TIMEOUT__|${sandbox_timeout}s|g" "$template" > "$output"
 }
 
 render_nginx_config

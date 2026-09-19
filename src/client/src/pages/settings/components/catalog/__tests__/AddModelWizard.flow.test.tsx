@@ -16,6 +16,7 @@ vi.mock('../../../../../services/api', () => ({
       getLlamaCatalog: vi.fn(),
       getLlamaCatalogQuants: vi.fn(),
       getLlamaOperationStatus: vi.fn(),
+      browseHuggingFaceRepository: vi.fn(),
       chatDefaults: {
         get: vi.fn(),
         update: vi.fn(),
@@ -434,6 +435,21 @@ describe('AddModelWizard flow', () => {
 
   it('shows llama install source on the review step in advanced mode', async () => {
     const user = userEvent.setup();
+    vi.mocked(api.settings.browseHuggingFaceRepository).mockResolvedValue({
+      repository: 'unsloth/Qwen3.6-9B-GGUF',
+      gated: false,
+      tokenUsed: false,
+      files: [
+        {
+          path: 'Qwen3.6-9B-Q5_K_M.gguf',
+          size: 5000,
+          category: 'gguf',
+          quantLabel: 'Q5_K_M',
+          sharded: false,
+        },
+      ],
+      resolvedRevision: '8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a',
+    } as any);
 
     render(
       <AddModelWizard
@@ -445,10 +461,36 @@ describe('AddModelWizard flow', () => {
     expect(screen.getByText(/2 of 4 - Provider configuration/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /Custom Hugging Face/i }));
+
+    await user.type(screen.getByLabelText(/catalog model id/i), 'qwen3.6-local');
+    await user.type(screen.getByLabelText(/router alias/i), 'qwen3.6-local');
+    await user.type(screen.getByPlaceholderText(/Qwen3\.6-35B-A3B-GGUF/i), 'unsloth/Qwen3.6-9B-GGUF');
+    await user.click(screen.getByRole('button', { name: /browse repository/i }));
+    await waitFor(() =>
+      expect(api.settings.browseHuggingFaceRepository).toHaveBeenCalled()
+    );
+
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(screen.getByText(/Install Source:/i)).toBeInTheDocument();
     expect(screen.getByText('huggingface')).toBeInTheDocument();
+  });
+
+  it('keeps Continue disabled with an inline reason until the custom install is complete', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AddModelWizard
+        {...baseProps}
+        providerPreselect="llama-cpp"
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /Custom Hugging Face/i }));
+
+    const continueButton = screen.getByRole('button', { name: 'Continue' });
+    expect(continueButton).toBeDisabled();
+    expect(screen.getByText(/Catalog Model ID is required/i)).toBeInTheDocument();
   });
 
   it('renders anthropic provider configuration fields', async () => {

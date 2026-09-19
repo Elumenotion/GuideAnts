@@ -57,7 +57,13 @@ public sealed class CustomInstallResolver : ICustomInstallResolver
                 remediation: "Open Connections → Hugging Face and save a token before retrying.");
         }
 
-        var routerPreset = RouterPresetValidator.ValidateAndNormalize(explicitInput.RouterPreset);
+        // An empty preset is valid for custom installs: the runtime writes the
+        // router alias with model-only extras (upsert_router_entry accepts an
+        // empty preset map). Only validate keys/values the operator actually
+        // supplied.
+        var routerPreset = explicitInput.RouterPreset is { Count: > 0 }
+            ? RouterPresetValidator.ValidateAndNormalize(explicitInput.RouterPreset)
+            : new System.Collections.Generic.Dictionary<string, string>();
 
         var mmprojFiles = explicitInput.MmprojFiles?.Where(p => !string.IsNullOrWhiteSpace(p)).ToList()
             ?? new List<string>();

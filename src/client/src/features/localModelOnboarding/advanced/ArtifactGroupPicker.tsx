@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { api } from '../../../services/api';
 import type { HuggingFaceRepositoryFileDto } from '../../../types/settings';
 import { RepositoryFilePicker } from '../../../pages/settings/editors/common';
@@ -60,6 +60,12 @@ export function ArtifactGroupPicker({
   const [listingFiles, setListingFiles] = useState<HuggingFaceRepositoryFileDto[]>([]);
   const groups = useMemo(() => buildGgufArtifactGroups(listingFiles), [listingFiles]);
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? null;
+  // Kept in a ref (not derived from the memo) so the picker's auto-select
+  // onChange can resolve the group's files synchronously. During a browse the
+  // picker fires onBrowseResolved and its auto-select onChange in the same
+  // tick, before a re-render commits listingFiles — reading the stale memo
+  // here would resolve to [] and silently clear the selected files.
+  const latestFilesRef = useRef<HuggingFaceRepositoryFileDto[]>([]);
 
   return (
     <div className="space-y-3">
@@ -88,13 +94,21 @@ export function ArtifactGroupPicker({
         }}
         onChange={(values) => {
           const nextGroupId = values['custom.modelGroup'] ?? '';
-          const group = groups.find((entry) => entry.id === nextGroupId);
+          const freshGroups = buildGgufArtifactGroups(latestFilesRef.current);
+          const group = freshGroups.find((entry) => entry.id === nextGroupId);
           if (nextGroupId !== selectedGroupId) {
             onSelectedGroupChange(nextGroupId, group?.files ?? []);
           }
           onSelectedMmprojChange(values['custom.mmproj'] ?? '');
         }}
-        onBrowseResolved={(listing) => setListingFiles(listing.files)}
+        onBrowseResolved={(listing) => {
+          latestFilesRef.current = listing.files;
+          setListingFiles(listing.files);
+          const resolved = listing.resolvedRevision?.trim();
+          if (resolved && resolved !== resolvedRevision) {
+            onResolvedRevisionChange(resolved);
+          }
+        }}
         serviceOrigin="llamaCpp"
         repoInputHint='Paste the owner/repo shown at the top of the Hugging Face model page.'
         disabled={disabled}
@@ -102,16 +116,14 @@ export function ArtifactGroupPicker({
 
       <div className="space-y-1">
         <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Resolved revision</label>
-        <input
-          type="text"
-          value={resolvedRevision}
-          onChange={(event) => onResolvedRevisionChange(event.target.value)}
-          disabled={disabled}
-          className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm"
-          placeholder="commit SHA from Hugging Face"
-          spellCheck={false}
-        />
-        <p className="text-[11px] text-gray-500">Required. Custom install does not infer revision from browse metadata.</p>
+        <div className="rounded border border-gray-200 bg-white px-3 py-2 font-mono text-sm text-gray-700">
+          {resolvedRevision
+            ? `${resolvedRevision.slice(0, 12)}…`
+            : 'main'}
+        </div>
+        <p className="text-[11px] text-gray-500">
+          Resolved from the Hugging Face browse; downloads are pinned to this commit.
+        </p>
       </div>
 
       {selectedGroup ? (

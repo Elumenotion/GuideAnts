@@ -14,7 +14,8 @@ public sealed record HuggingFaceRepositoryListing(
     bool Gated,
     bool TokenUsed,
     string? ModelCardUrl,
-    IReadOnlyList<HuggingFaceRepositoryFile> Files);
+    IReadOnlyList<HuggingFaceRepositoryFile> Files,
+    string? ResolvedRevision = null);
 
 /// <summary>
 /// One file in an HF repository, categorized for the Add Model wizard.
@@ -217,12 +218,77 @@ public sealed class HuggingFaceRepositoryBrowser : IHuggingFaceRepositoryBrowser
                 : null;
         }
 
+        var resolvedRevision = await ResolveRevisionShaAsync(
+            ownerClean, repoClean, "main", token, cancellationToken).ConfigureAwait(false)
+            ?? "main";
+
         return new HuggingFaceRepositoryListing(
             Repository: repoFull,
             Gated: false,
             TokenUsed: tokenUsed,
             ModelCardUrl: $"https://huggingface.co/{ownerClean}/{repoClean}",
-            Files: files);
+            Files: files,
+            ResolvedRevision: resolvedRevision);
+    }
+
+    /// <summary>
+    /// Resolves a branch / tag reference to its commit SHA via the HF revision
+    /// endpoint. Best-effort: returns null on any failure so a browse of the
+    /// file tree is not blocked by a separate metadata call.
+    /// </summary>
+    private async Task<string?> ResolveRevisionShaAsync(
+        string ownerClean,
+        string repoClean,
+        string revision,
+        string? token,
+        CancellationToken cancellationToken)
+    {
+        var url = $"https://huggingface.co/api/models/{Uri.EscapeDataString(ownerClean)}/{Uri.EscapeDataString(repoClean)}/revision/{Uri.EscapeDataString(revision)}";
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.UserAgent.Add(new ProductInfoHeaderValue("GuideAnts", "1.0"));
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            if (!string.IsNullOrEmpty(token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "HF revision resolve failed for {Repo} revision={Revision}. status={Status}",
+                    $"{ownerClean}/{repoClean}",
+                    revision,
+                    (int)response.StatusCode);
+                return null;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("sha", out var shaEl)
+                && shaEl.ValueKind == JsonValueKind.String)
+            {
+                var sha = shaEl.GetString();
+                if (!string.IsNullOrWhiteSpace(sha))
+                {
+                    return sha.Trim();
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                "HF revision resolve errored for {Repo} revision={Revision}: {Error}",
+                $"{ownerClean}/{repoClean}",
+                revision,
+                ex.Message);
+            return null;
+        }
     }
 
     private static HuggingFaceRepositoryFile BuildFile(string path, long? size)

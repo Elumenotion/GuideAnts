@@ -61,7 +61,7 @@ describe('LlamaCppAddForm', () => {
   it('renders custom explicit HF form by default', () => {
     render(<LlamaCppAddForm {...makeAddProps()} />);
     expect(screen.getByTestId('artifact-group-picker')).toBeInTheDocument();
-    expect(screen.getByText(/Custom Hugging Face install requires explicit revision/i)).toBeInTheDocument();
+    expect(screen.getByText(/Custom Hugging Face install: pick a model artifact group and router alias/i)).toBeInTheDocument();
   });
 
   it('renders attach form for existing alias source', () => {

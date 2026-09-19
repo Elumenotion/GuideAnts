@@ -254,7 +254,9 @@ public sealed class SandboxWireJwtService : ISandboxWireJwtService
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = signingKey,
             ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero,
+            // 30s skew tolerance: mint and validate share one process/clock, but a transient host
+            // NTP step (observed 2026-09-08, ~2s) must not 401 a just-minted token (IDX10222).
+            ClockSkew = TimeSpan.FromSeconds(30),
         };
     }
 }

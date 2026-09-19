@@ -689,6 +689,13 @@ export interface HuggingFaceRepositoryListingDto {
   tokenUsed: boolean;
   modelCardUrl?: string | null;
   files: HuggingFaceRepositoryFileDto[];
+  /**
+   * Commit SHA the server resolved for the revision it listed (currently
+   * always `main`). Populated by the browse endpoint so install flows can
+   * pin downloads without asking the operator for a SHA. May be null when
+   * the server could not resolve the revision.
+   */
+  resolvedRevision?: string | null;
 }
 
 /**

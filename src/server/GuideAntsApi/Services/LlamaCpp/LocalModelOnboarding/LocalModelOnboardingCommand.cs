@@ -105,12 +105,15 @@ public sealed record LocalModelOnboardingCommand(
             targetDirectory = (install.HuggingFace?.TargetDirectory ?? string.Empty).Trim();
         }
 
+        // A custom install is identified by explicit model files + a resolved
+        // revision. The router preset is optional: null or empty means
+        // "register the alias with model-only extras" (the runtime accepts an
+        // empty preset map), so it must not gate explicit-install detection.
         LocalModelOnboardingExplicitHuggingFaceCommand? explicitHuggingFace = null;
         var hf = install.HuggingFace;
         if (string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
             && hf?.ModelFiles is { Count: > 0 }
-            && !string.IsNullOrWhiteSpace(hf.ResolvedRevision)
-            && hf.RouterPreset is not null)
+            && !string.IsNullOrWhiteSpace(hf.ResolvedRevision))
         {
             explicitHuggingFace = new LocalModelOnboardingExplicitHuggingFaceCommand(
                 Repository: (hf.Repository ?? string.Empty).Trim(),
@@ -119,7 +122,7 @@ public sealed record LocalModelOnboardingCommand(
                 MmprojFiles: hf.MmprojFiles?.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToList()
                     ?? new List<string>(),
                 TargetDirectory: (hf.TargetDirectory ?? string.Empty).Trim(),
-                RouterPreset: hf.RouterPreset);
+                RouterPreset: hf.RouterPreset ?? new Dictionary<string, string>());
         }
 
         return new LocalModelOnboardingCommand(

@@ -293,4 +293,86 @@ describe('AliasPresetSavePanel', () => {
       );
     });
   });
+
+  it('saves -1 as the prompt cache RAM sentinel instead of silently clearing it', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.putLlamaRouterEntry).mockResolvedValue(undefined as never);
+    const panelRef = createRef<AliasPresetSavePanelHandle>();
+
+    render(
+      <AliasPresetSavePanel
+        ref={panelRef}
+        alias="Qwen3.8-27B-GGUF"
+        routerEntry={{ ...mtpRouterEntry, alias: 'Qwen3.8-27B-GGUF' }}
+        fallbackPreset={{}}
+      />,
+    );
+
+    const ramInput = screen.getByPlaceholderText('optional');
+    await user.click(ramInput);
+    await user.type(ramInput, '-1');
+
+    await panelRef.current?.saveRouterPreset();
+
+    await waitFor(() => {
+      expect(api.settings.putLlamaRouterEntry).toHaveBeenCalledWith(
+        'Qwen3.8-27B-GGUF',
+        expect.objectContaining({
+          cacheRamMib: -1,
+          preset: expect.objectContaining({ 'cache-ram': '-1' }),
+        }),
+      );
+    });
+    expect(screen.queryByText(/must be an integer/)).not.toBeInTheDocument();
+  });
+
+  it('reports non-integer prompt cache RAM inline and does not save it', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.putLlamaRouterEntry).mockResolvedValue(undefined as never);
+    const panelRef = createRef<AliasPresetSavePanelHandle>();
+
+    render(
+      <AliasPresetSavePanel
+        ref={panelRef}
+        alias="Qwen3.8-27B-GGUF"
+        routerEntry={{ ...mtpRouterEntry, alias: 'Qwen3.8-27B-GGUF' }}
+        fallbackPreset={{}}
+      />,
+    );
+
+    const ramInput = screen.getByPlaceholderText('optional');
+    await user.click(ramInput);
+    await user.type(ramInput, 'banana');
+
+    expect(screen.getByText(/Prompt cache RAM must be an integer/)).toBeInTheDocument();
+
+    const save = panelRef.current?.saveRouterPreset();
+    await expect(save).rejects.toThrow(/Prompt cache RAM must be an integer/);
+    expect(api.settings.putLlamaRouterEntry).not.toHaveBeenCalled();
+  });
+
+  it('reports non-integer context size inline and does not save it', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.putLlamaRouterEntry).mockResolvedValue(undefined as never);
+    const panelRef = createRef<AliasPresetSavePanelHandle>();
+
+    render(
+      <AliasPresetSavePanel
+        ref={panelRef}
+        alias="Qwen3.8-27B-GGUF"
+        routerEntry={{ ...mtpRouterEntry, alias: 'Qwen3.8-27B-GGUF' }}
+        fallbackPreset={{}}
+      />,
+    );
+
+    const ctxInput = screen.getByPlaceholderText('e.g. 131072');
+    await user.click(ctxInput);
+    await user.type(ctxInput, '1.5');
+
+    expect(screen.getByText(/Context size must be an integer/)).toBeInTheDocument();
+
+    const save = panelRef.current?.saveRouterPreset();
+    await expect(save).rejects.toThrow(/Context size must be an integer/);
+    expect(api.settings.putLlamaRouterEntry).not.toHaveBeenCalled();
+  });
 });

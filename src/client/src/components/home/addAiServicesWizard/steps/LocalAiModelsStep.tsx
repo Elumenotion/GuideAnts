@@ -11,6 +11,8 @@ import {
 } from '../../../../features/localModelOnboarding/status';
 import { LlamaLocalModelOnboardingPanel } from '../../../../features/localModelOnboarding/curated/LlamaLocalModelOnboardingPanel';
 import type { LocalModelOnboardingMode } from '../../../../features/localModelOnboarding/curated/types';
+import { validateLocalModelOnboardingDraft } from '../../../../features/localModelOnboarding/validateDraft';
+import { mapSettingsAddModelStateToOnboardingDraft } from '../../../../features/localModelOnboarding/mapDraft';
 import { CustomHfOnboardingForm } from '../../../../features/localModelOnboarding/advanced/CustomHfOnboardingForm';
 import { AttachAliasOnboardingForm } from '../../../../features/localModelOnboarding/advanced/AttachAliasOnboardingForm';
 import { stripPresetRowMetadata } from '../../../../features/localModelOnboarding/routerPreset';
@@ -234,6 +236,16 @@ export function LocalAiModelsStep({
     }
   };
 
+  const advancedFormError = useMemo(() => {
+    if (onboardingMode === 'curated') {
+      return null;
+    }
+    const errors = validateLocalModelOnboardingDraft(
+      mapSettingsAddModelStateToOnboardingDraft(advancedForm)
+    );
+    return errors.length > 0 ? errors[0] : null;
+  }, [advancedForm, onboardingMode]);
+
   const advancedFormNode = useMemo(() => (
     <div className="space-y-4 rounded border border-gray-200 bg-gray-50 p-4">
       {onboardingMode === 'existingAlias' ? (
@@ -274,10 +286,16 @@ export function LocalAiModelsStep({
         </div>
       ) : null}
 
+      {advancedFormError ? (
+        <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {advancedFormError}
+        </div>
+      ) : null}
+
       <button
         type="button"
         onClick={() => void handleInstall()}
-        disabled={submitting}
+        disabled={submitting || advancedFormError !== null}
         className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
       >
         {submitting ? (
@@ -289,6 +307,8 @@ export function LocalAiModelsStep({
     </div>
   ), [
     advancedForm,
+    advancedFormError,
+    handleInstall,
     installError,
     installModelError,
     inventory,

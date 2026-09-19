@@ -71,6 +71,41 @@ describe('buildLocalModelOnboardingRequest', () => {
     expect(request.install?.source).toBe('huggingface');
     expect(request.install?.huggingFace?.mmprojFiles).toEqual([]);
   });
+
+  it('succeeds with a blank alias preset (runtime registers model-only alias)', () => {
+    const request = buildLocalModelOnboardingRequest({
+      ...explicitCustomDraft,
+      huggingFaceRouterPresetRows: [],
+    });
+    expect(request.install?.huggingFace?.routerPreset).toEqual({});
+  });
+
+  it('succeeds without a user-supplied revision and pins to main', () => {
+    const request = buildLocalModelOnboardingRequest({
+      ...explicitCustomDraft,
+      huggingFaceResolvedRevision: '',
+    });
+    expect(request.install?.huggingFace?.resolvedRevision).toBe('main');
+  });
+
+  it('throws only for missing artifact group or alias on custom install', () => {
+    const missingGroup = validateLocalModelOnboardingDraft({
+      ...explicitCustomDraft,
+      huggingFaceModelFiles: [],
+      huggingFaceArtifactGroupId: '',
+    });
+    expect(missingGroup).toEqual([
+      'Complete the custom Hugging Face install: pick a model artifact group and a router alias in the provider configuration step.',
+    ]);
+
+    const missingAlias = validateLocalModelOnboardingDraft({
+      ...explicitCustomDraft,
+      routerModelId: '',
+    });
+    expect(missingAlias).toEqual([
+      'Router alias is required for Hugging Face install.',
+    ]);
+  });
 });
 
 describe('selectAttachableAliases', () => {

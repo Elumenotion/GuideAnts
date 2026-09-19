@@ -1094,11 +1094,19 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
                     if (!sseCt.IsCancellationRequested)
                     {
+                        // Include the turn's file changes so the client can bump its media
+                        // cache revision live (old cells keep their loaded blobs; cells that
+                        // re-fetch get fresh bytes without a hard refresh).
                         await ConversationStreamEventWriter.WriteTerminalAsync(
                             writer,
                             new StreamingEvent(
                                 StreamingEventTypes.Complete,
-                                JsonSerializer.Serialize(new { turnId = context.DbTurn.Id }, JsonOptions)),
+                                JsonSerializer.Serialize(new
+                                {
+                                    turnId = context.DbTurn.Id,
+                                    filesCreated = output?.NewFiles,
+                                    filesModified = output?.ModifiedFiles
+                                }, JsonOptions)),
                             TimeSpan.FromSeconds(2),
                             CancellationToken.None).ConfigureAwait(false);
                     }
