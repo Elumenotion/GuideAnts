@@ -302,12 +302,16 @@ public static class SettingsLlamaEndpoints
         .Produces(StatusCodes.Status404NotFound);
 
         llamaGroup.MapGet("/router/entries", async (
+            ApplicationDbContext db,
+            ILlamaStackAdminClientProvider stackAdminClients,
             ILlamaRuntimeAdminClient adminClient,
             CancellationToken cancellationToken) =>
         {
             try
             {
-                var entries = await adminClient.GetRouterEntriesAsync(cancellationToken).ConfigureAwait(false);
+                var entryClient = await ResolveRouterEntriesClientAsync(
+                        db, stackAdminClients, adminClient, null, cancellationToken).ConfigureAwait(false);
+                var entries = await entryClient.GetRouterEntriesAsync(cancellationToken).ConfigureAwait(false);
                 var mapped = entries.Entries
                     .Select(e => new LlamaRouterEntryDto(
                         Alias: e.Alias,
@@ -337,8 +341,9 @@ public static class SettingsLlamaEndpoints
         llamaGroup.MapPut("/router/entries/{alias}", async (
             string alias,
             [FromBody] LlamaRouterEntryPutRequest request,
-            ILlamaRuntimeAdminClient adminClient,
             ApplicationDbContext db,
+            ILlamaStackAdminClientProvider stackAdminClients,
+            ILlamaRuntimeAdminClient adminClient,
             CancellationToken cancellationToken) =>
         {
             if (!string.Equals(alias.Trim(), request.Alias.Trim(), StringComparison.Ordinal))
@@ -348,10 +353,16 @@ public static class SettingsLlamaEndpoints
 
             try
             {
+                // The model determines the machine that runs it: the router entry is
+                // written on the catalog row's own stack (row-owned stackBaseUrl), not on
+                // the deployment's default stack.
+                var entryClient = await ResolveRouterEntriesClientAsync(
+                    db, stackAdminClients, adminClient, alias, cancellationToken).ConfigureAwait(false);
+
                 // Catalog editor Save is WYSIWYG: omitted preset keys must be deleted.
                 // Older clients still send presetMode=merge, which preserves removals.
                 var replaceRequest = request with { PresetMode = "replace" };
-                var result = await adminClient.PutRouterEntryAsync(replaceRequest, cancellationToken).ConfigureAwait(false);
+                var result = await entryClient.PutRouterEntryAsync(replaceRequest, cancellationToken).ConfigureAwait(false);
                 await UpdateRouterPresetSnapshotAsync(db, replaceRequest, cancellationToken).ConfigureAwait(false);
                 // INI write is the recovery path when llama-server is down. Do not 502
                 // the catalog editor after a successful commit just because reload failed.
@@ -409,6 +420,50 @@ public static class SettingsLlamaEndpoints
         .ProducesProblem(StatusCodes.Status502BadGateway);
 
         llamaGroup.MapSettingsLlamaInstallationEndpoints();
+    }
+
+    /// <summary>
+    /// Resolves the admin client whose router INI owns <paramref name="alias"/>: the
+    /// catalog row whose routerModelId is the alias (the model determines the machine
+    /// that runs it), targeting that row's own stack when it has one; otherwise the
+    /// deployment's default admin client. Rows that are not llama-cpp or that carry no
+    /// RuntimeConfigJson keep the default client, matching prior behavior.
+    /// </summary>
+    private static async Task<ILlamaRuntimeAdminClient> ResolveRouterEntriesClientAsync(
+        ApplicationDbContext db,
+        ILlamaStackAdminClientProvider stackAdminClients,
+        ILlamaRuntimeAdminClient defaultClient,
+        string? alias,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(alias))
+        {
+            var model = await db.Models
+                .AsNoTracking()
+                .Where(m => m.Provider == "llama-cpp")
+                .FirstOrDefaultAsync(m => m.RuntimeConfigJson != null && m.RuntimeConfigJson.Contains(alias), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (model is not null)
+            {
+                try
+                {
+                    var localRuntime = LocalRuntimeConfigurationParser.Parse(model.ModelId, model.RuntimeConfigJson!);
+                    if (localRuntime.RouterModelId.Equals(alias, StringComparison.Ordinal))
+                    {
+                        return stackAdminClients.GetClientForStack(localRuntime.StackBaseUrl, localRuntime.StackApiKey)
+                            ?? defaultClient;
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // Malformed RuntimeConfigJson falls back to the default client (status
+                    // quo for that row); the row's validation surfaces it elsewhere.
+                }
+            }
+        }
+
+        return defaultClient;
     }
 
     private static async Task UpdateRouterPresetSnapshotAsync(

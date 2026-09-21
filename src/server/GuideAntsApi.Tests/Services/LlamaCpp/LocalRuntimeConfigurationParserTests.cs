@@ -64,4 +64,65 @@ public sealed class LocalRuntimeConfigurationParserTests
         legacy.RouterContextSize.Should().Be(8192);
         legacy.RouterCacheRamMib.Should().Be(1024);
     }
+
+    [TestMethod]
+    public void Parse_AcceptsRowOwnedStackAndRoundTrips()
+    {
+        const string json = """{"routerModelId":"Qwen3.6-27B-MTP-GGUF","stackBaseUrl":"http://192.0.2.1:8112","stackApiKey":"secret"}""";
+
+        var parsed = LocalRuntimeConfigurationParser.Parse("qwen3.6-27b-max", json);
+
+        parsed.RouterModelId.Should().Be("Qwen3.6-27B-MTP-GGUF");
+        parsed.StackBaseUrl.Should().Be("http://192.0.2.1:8112");
+        parsed.StackApiKey.Should().Be("secret");
+        parsed.UsesGlobalStack.Should().BeFalse();
+        LocalRuntimeConfigurationParser.SerializeCanonical(parsed)
+            .Should().Be(json);
+    }
+
+    [TestMethod]
+    public void Parse_LegacySingleFieldShapeTargetsGlobalStack()
+    {
+        const string json = """{"routerModelId":"qwen-router"}""";
+
+        var parsed = LocalRuntimeConfigurationParser.Parse("qwen3.5-27b", json);
+
+        parsed.StackBaseUrl.Should().BeEmpty();
+        parsed.StackApiKey.Should().BeEmpty();
+        parsed.UsesGlobalStack.Should().BeTrue();
+        LocalRuntimeConfigurationParser.SerializeCanonical(parsed).Should().Be(json);
+    }
+
+    [TestMethod]
+    public void Parse_Throws_WhenStackBaseUrlHasTrailingSlash()
+    {
+        const string json = """{"routerModelId":"qwen-router","stackBaseUrl":"http://192.0.2.1:8112/"}""";
+
+        Action act = () => LocalRuntimeConfigurationParser.Parse("m", json);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*trailing '/'*");
+    }
+
+    [TestMethod]
+    public void Parse_Throws_WhenStackBaseUrlIsRelative()
+    {
+        const string json = """{"routerModelId":"qwen-router","stackBaseUrl":"guideants-ai:80"}""";
+
+        Action act = () => LocalRuntimeConfigurationParser.Parse("m", json);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*absolute http(s) URL*");
+    }
+
+    [TestMethod]
+    public void Parse_Throws_WhenStackBaseUrlIsNonHttp()
+    {
+        const string json = """{"routerModelId":"qwen-router","stackBaseUrl":"file:///models"}""";
+
+        Action act = () => LocalRuntimeConfigurationParser.Parse("m", json);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*absolute http(s) URL*");
+    }
 }

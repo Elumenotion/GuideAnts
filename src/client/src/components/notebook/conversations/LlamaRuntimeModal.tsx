@@ -98,15 +98,11 @@ export const LlamaRuntimeModal: React.FC<LlamaRuntimeModalProps> = ({
                 </div>
               )}
 
-              {status.loadedModels && status.loadedModels.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="text-sm font-medium text-slate-900 mb-2">Models to unload:</h4>
-                  <ul className="list-disc pl-5 text-sm text-slate-600">
-                    {status.loadedModels.map((m: any) => (
-                      <li key={m.modelId}>{m.displayName}</li>
-                    ))}
-                  </ul>
-                </div>
+              {status.requiredModels && status.requiredModels.length > 0 && (
+                <p className="text-xs text-slate-500 mt-3">
+                  Loading evicts unneeded models within each instance that serves the models above;
+                  models loaded on other instances are not affected.
+                </p>
               )}
             </div>
           )}

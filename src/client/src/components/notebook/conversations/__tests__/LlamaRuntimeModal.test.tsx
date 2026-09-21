@@ -35,7 +35,7 @@ describe('LlamaRuntimeModal', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('shows required and loaded models with load action', async () => {
+  it('shows required models with load action and within-instance eviction note', async () => {
     const user = userEvent.setup();
     render(
       <LlamaRuntimeModal
@@ -49,7 +49,14 @@ describe('LlamaRuntimeModal', () => {
 
     expect(screen.getByText('Local Models Required')).toBeInTheDocument();
     expect(screen.getByText('Llama 3 8B')).toBeInTheDocument();
-    expect(screen.getByText('Old Model')).toBeInTheDocument();
+    // Loaded models are no longer listed as a global "to unload" set: eviction is
+    // per-instance and internal to the load operation (per-instance plan design).
+    expect(screen.queryByText('Old Model')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Loading evicts unneeded models within each instance that serves the models above; models loaded on other instances are not affected.'
+      )
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Load Models' }));
     expect(onStartLoad).toHaveBeenCalledTimes(1);

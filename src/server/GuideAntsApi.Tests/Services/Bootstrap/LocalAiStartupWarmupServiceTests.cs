@@ -58,7 +58,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
             modeResolver,
-            new NotebookChatAliasState());
+            new NotebookChatAliasState(),
+            new LocalAiStackHostResolver(configuration),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>.Instance);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -139,7 +141,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
             modeResolver,
-            new NotebookChatAliasState());
+            new NotebookChatAliasState(),
+            new LocalAiStackHostResolver(configuration),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>.Instance);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -207,7 +211,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
             modeResolver,
-            new NotebookChatAliasState());
+            new NotebookChatAliasState(),
+            new LocalAiStackHostResolver(configuration),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>.Instance);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -347,7 +353,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
             modeResolver,
-            new NotebookChatAliasState());
+            new NotebookChatAliasState(),
+            new LocalAiStackHostResolver(configuration),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>.Instance);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -465,7 +473,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
             modeResolver,
-            new NotebookChatAliasState());
+            new NotebookChatAliasState(),
+            new LocalAiStackHostResolver(configuration),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>.Instance);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
@@ -530,7 +540,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             configuration,
             new ServiceScopeFactoryStub(settingsMock.Object),
             modeResolver,
-            new NotebookChatAliasState());
+            new NotebookChatAliasState(),
+            new LocalAiStackHostResolver(configuration),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>.Instance);
 
         var service = new LocalAiStartupWarmupService(
             configuration,

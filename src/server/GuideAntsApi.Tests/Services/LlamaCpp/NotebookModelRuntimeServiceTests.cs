@@ -21,6 +21,8 @@ public class NotebookModelRuntimeServiceTests
     private Mock<IChatModelResolver> _mockChatModelResolver = null!;
     private Mock<ILocalAiStartupWarmupService> _mockLocalAiWarmupService = null!;
     private Mock<ILocalAiWarmupService> _mockLocalAiWarmup = null!;
+    private Mock<ILocalAiStackHostResolver> _mockStackHostResolver = null!;
+    private Mock<ILlamaStackRuntimeClientProvider> _mockStackClientProvider = null!;
     private Mock<ILogger<NotebookModelRuntimeService>> _mockLogger = null!;
     private IMemoryCache _cache = null!;
     private ApplicationDbContext _context = null!;
@@ -65,6 +67,28 @@ public class NotebookModelRuntimeServiceTests
                 It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        _mockStackHostResolver = new Mock<ILocalAiStackHostResolver>();
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBases())
+            .Returns(new List<string> { "http://localhost:8080" });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBasesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string> { "http://localhost:8080" });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredInstancesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<LocalAiInstance>
+            {
+                new(LocalAiStackHostResolver.CanonicalInstanceKey("http://localhost:8080"), "http://localhost:8080")
+            });
+        _mockStackHostResolver
+            .Setup(r => r.GetStackBaseForService(It.IsAny<string>()))
+            .Returns<string?>(id => string.Equals(id, "llama", StringComparison.Ordinal)
+                ? "http://localhost:8080"
+                : null);
+        _mockStackClientProvider = new Mock<ILlamaStackRuntimeClientProvider>();
+        _mockStackClientProvider
+            .Setup(p => p.GetClientForStack(It.IsAny<string?>(), It.IsAny<string?>()))
+            .Returns(_mockLlamaClient.Object);
         _mockLogger = new Mock<ILogger<NotebookModelRuntimeService>>();
         _cache = new MemoryCache(new MemoryCacheOptions());
 
@@ -73,16 +97,7 @@ public class NotebookModelRuntimeServiceTests
             .Options;
         _context = new ApplicationDbContext(options);
 
-        _service = new NotebookModelRuntimeService(
-            _context,
-            _mockLlamaClient.Object,
-            _cache,
-            new LlamaRuntimeCoordinator(),
-            _mockChatModelResolver.Object,
-            _mockLocalAiWarmupService.Object,
-            _mockLocalAiWarmup.Object,
-            new NotebookChatAliasState(),
-            _mockLogger.Object);
+        _service = CreateService(_cache);
     }
 
     [TestCleanup]
@@ -480,16 +495,7 @@ public class NotebookModelRuntimeServiceTests
     {
         // Arrange
         var limitedCache = new MemoryCache(new MemoryCacheOptions { SizeLimit = 100 });
-        var serviceWithLimitedCache = new NotebookModelRuntimeService(
-            _context,
-            _mockLlamaClient.Object,
-            limitedCache,
-            new LlamaRuntimeCoordinator(),
-            _mockChatModelResolver.Object,
-            _mockLocalAiWarmupService.Object,
-            _mockLocalAiWarmup.Object,
-            new NotebookChatAliasState(),
-            _mockLogger.Object);
+        var serviceWithLimitedCache = CreateService(limitedCache);
 
         var notebookId = Guid.NewGuid();
         var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
@@ -534,6 +540,24 @@ public class NotebookModelRuntimeServiceTests
         }
     }
 
+
+    private NotebookModelRuntimeService CreateService(IMemoryCache cache)
+    {
+        return new NotebookModelRuntimeService(
+            _context,
+            _mockLlamaClient.Object,
+            cache,
+            new LlamaRuntimeCoordinator(),
+            _mockChatModelResolver.Object,
+            _mockLocalAiWarmupService.Object,
+            _mockLocalAiWarmup.Object,
+            new NotebookChatAliasState(),
+            _mockStackHostResolver.Object,
+            _mockStackClientProvider.Object,
+            new StubScopeFactory(),
+            _mockLogger.Object);
+    }
+
     [TestMethod]
     public async Task StartLoadOperationAsync_DrainsAuxViaOrchestratorBeforeLlmLoad_AndRestoresAfter()
     {
@@ -553,10 +577,10 @@ public class NotebookModelRuntimeServiceTests
         });
         await _context.SaveChangesAsync();
 
-        // GuideAntsApi owns policy: aux drain/restore via lifecycle apply; bounded
-        // direct llama client calls for the multi-alias notebook delta (D7).
+        // GuideAntsApi owns policy: aux drain via lifecycle apply; bounded direct llama
+        // client calls for the per-instance notebook delta; the final plain desired-state
+        // apply is the only plan apply that touches other instances (rule 5).
         var callOrder = new List<string>();
-        string? restoreAliasOverride = null;
         _mockLocalAiWarmup
             .Setup(s => s.SyncDesiredAndApplyAsync(
                 It.IsAny<WarmupDesiredBuildOptions?>(),
@@ -568,10 +592,9 @@ public class NotebookModelRuntimeServiceTests
                 {
                     callOrder.Add("aux-drain");
                 }
-                else if (!string.IsNullOrEmpty(options?.LlamaRouterAliasOverride))
+                else if (options is null)
                 {
-                    restoreAliasOverride = options!.LlamaRouterAliasOverride;
-                    callOrder.Add("aux-restore");
+                    callOrder.Add("final-plain-apply");
                 }
                 else
                 {
@@ -628,13 +651,13 @@ public class NotebookModelRuntimeServiceTests
 
         var drainIndex = callOrder.IndexOf("aux-drain");
         var llmLoadIndex = callOrder.IndexOf("llm-load");
-        var restoreIndex = callOrder.IndexOf("aux-restore");
+        var finalApplyIndex = callOrder.IndexOf("final-plain-apply");
         Assert.IsTrue(drainIndex >= 0, "aux drain (ForceAuxiliaryIdle apply) missing");
         Assert.IsTrue(llmLoadIndex >= 0, "llm-load call missing");
-        Assert.IsTrue(restoreIndex >= 0, "aux restore (router alias override apply) missing");
+        Assert.IsTrue(finalApplyIndex >= 0, "final plain desired-state apply missing");
         Assert.IsTrue(drainIndex < llmLoadIndex, "aux drain did not happen before llama load");
-        Assert.IsTrue(llmLoadIndex < restoreIndex, "aux restore did not happen after llama load");
-        Assert.AreEqual("qwen-model", restoreAliasOverride, "restore apply must carry the primary router alias");
+        Assert.IsTrue(llmLoadIndex < finalApplyIndex, "final plain apply did not happen after llama load");
+        Assert.AreEqual(callOrder.Count - 1, finalApplyIndex, "final plain apply must be the last lifecycle call");
 
         _mockLocalAiWarmup.Verify(
             s => s.SyncDesiredAndApplyAsync(
@@ -644,10 +667,119 @@ public class NotebookModelRuntimeServiceTests
             Times.Once);
         _mockLocalAiWarmup.Verify(
             s => s.SyncDesiredAndApplyAsync(
-                It.Is<WarmupDesiredBuildOptions?>(o => o != null && o.LlamaRouterAliasOverride == "qwen-model"),
-                It.IsAny<bool>(),
+                (WarmupDesiredBuildOptions?)null,
+                true,
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
-}
 
+    [TestMethod]
+    public async Task StartLoadOperationAsync_RowOwnedInstance_LoadsOnlyThatInstance_OtherInstancesUntouched()
+    {
+        // Regression: the 2026-09-20 defect where a notebook load on the Max instance
+        // (via the plan) unloaded the global instance's default. With per-instance
+        // routing the load must touch only the instance that owns the required row.
+        var maxBase = "http://192.0.2.1:8112";
+        var maxLoaded = false;
+        var maxClient = new Mock<ILlamaServerRuntimeClient>();
+        maxClient
+            .Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+                new LlamaModelsResponse
+                {
+                    Data = maxLoaded
+                        ? new List<LlamaModelData>
+                        {
+                            new() { Id = "qwen-max", Status = new LlamaModelStatus { Value = "loaded" } }
+                        }
+                        : new List<LlamaModelData>()
+                });
+        maxClient
+            .Setup(c => c.LoadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((_, _) => maxLoaded = true)
+            .Returns(Task.CompletedTask);
+
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBases())
+            .Returns(new List<string> { "http://localhost:8080", maxBase });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBasesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string> { "http://localhost:8080", maxBase });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredInstancesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<LocalAiInstance>
+            {
+                new(LocalAiStackHostResolver.CanonicalInstanceKey("http://localhost:8080"), "http://localhost:8080"),
+                new(LocalAiStackHostResolver.CanonicalInstanceKey(maxBase), maxBase)
+            });
+        _mockStackClientProvider
+            .Setup(p => p.GetClientForStack(maxBase, It.IsAny<string?>()))
+            .Returns(maxClient.Object);
+
+        var notebookId = Guid.NewGuid();
+        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "max-model" };
+        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
+        _context.Assistants.Add(guide);
+        _context.Notebooks.Add(notebook);
+
+        // The global instance has its own default loaded; it must not be touched.
+        _mockLlamaClient
+            .Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaModelsResponse
+            {
+                Data = new List<LlamaModelData>
+                {
+                    new() { Id = "qwen-default", Status = new LlamaModelStatus { Value = "loaded" } }
+                }
+            });
+
+        _context.Models.Add(new Model
+        {
+            ModelId = "max-model",
+            Provider = "llama-cpp",
+            IsActive = true,
+            RuntimeConfigJson =
+                "{\"routerModelId\":\"qwen-max\",\"stackBaseUrl\":\"" + maxBase + "\"}"
+        });
+        await _context.SaveChangesAsync();
+
+        var op = await _service.StartLoadOperationAsync(notebookId);
+
+        ModelLoadOperationDto? final = null;
+        var timeoutAt = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < timeoutAt)
+        {
+            final = await _service.GetOperationStatusAsync(notebookId, op.OperationId);
+            if (final is not null && (final.State == "ready" || final.State == "failed"))
+            {
+                break;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.IsNotNull(final);
+        Assert.AreEqual("ready", final!.State, final.ErrorDetails);
+
+        // The row-owned instance loaded its model...
+        maxClient.Verify(c => c.LoadModelAsync("qwen-max", It.IsAny<CancellationToken>()), Times.Once);
+        // ...and the global instance's client was never asked to load or unload anything.
+        _mockLlamaClient.Verify(c => c.LoadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _mockLlamaClient.Verify(c => c.UnloadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>Minimal scope factory that resolves nothing (no row-owned DB reads).</summary>
+    private sealed class StubScopeFactory : Microsoft.Extensions.DependencyInjection.IServiceScopeFactory
+    {
+        public Microsoft.Extensions.DependencyInjection.IServiceScope CreateScope() => new StubScope();
+    }
+
+    private sealed class StubScope : Microsoft.Extensions.DependencyInjection.IServiceScope, IDisposable
+    {
+        private readonly Microsoft.Extensions.DependencyInjection.ServiceProvider _provider =
+            Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(
+                new Microsoft.Extensions.DependencyInjection.ServiceCollection());
+        public IServiceProvider ServiceProvider => _provider;
+        public void Dispose() => _provider.Dispose();
+    }
+}

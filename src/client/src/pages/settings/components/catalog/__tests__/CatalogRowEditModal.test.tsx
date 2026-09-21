@@ -222,4 +222,65 @@ describe('CatalogRowEditModal', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByText(/Save failed/i)).toBeInTheDocument();
   });
+
+  it('renders AI stack fields for llama-cpp rows and round-trips them into RuntimeConfigJson', async () => {
+    const user = userEvent.setup();
+    const stackedModel: SettingsModelDto = {
+      ...llamaModel,
+      modelId: 'llama/qwen-max',
+      runtimeConfigJson: JSON.stringify({
+        routerModelId: 'qwen-max-alias',
+        stackBaseUrl: 'http://192.0.2.1:8112',
+        stackApiKey: 'existing-key',
+      }),
+    };
+
+    render(
+      <CatalogRowEditModal
+        model={stackedModel}
+        orderedModels={[stackedModel]}
+        isOpen
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    // Pre-populated from the row's RuntimeConfigJson.
+    expect(screen.getByDisplayValue('http://192.0.2.1:8112')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('existing-key')).toBeInTheDocument();
+
+    // Clear and re-enter the stack URL; leave the key as-is.
+    const urlInput = screen.getByDisplayValue('http://192.0.2.1:8112');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'http://192.168.0.222:8112');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(api.settings.updateModel).toHaveBeenCalledWith(
+        'llama/qwen-max',
+        expect.objectContaining({
+          runtimeConfigJson: JSON.stringify({
+            routerModelId: 'qwen-max-alias',
+            stackBaseUrl: 'http://192.168.0.222:8112',
+            stackApiKey: 'existing-key',
+          }),
+        }),
+      );
+    });
+  });
+
+  it('omits AI stack fields for non-llama providers', () => {
+    render(
+      <CatalogRowEditModal
+        model={openAiModel}
+        orderedModels={[openAiModel]}
+        isOpen
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Stack base URL')).not.toBeInTheDocument();
+    expect(screen.queryByText('Stack API key')).not.toBeInTheDocument();
+  })
 });

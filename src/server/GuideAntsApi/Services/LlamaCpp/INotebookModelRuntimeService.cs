@@ -29,7 +29,8 @@ public interface INotebookModelRuntimeService
 
     /// <summary>
     /// Unloads the llama router models required for this notebook context, releasing memory
-    /// (workspace-wide within the shared llama-server).
+    /// on the instances this context loaded them on. Other instances are untouched (the
+    /// follow-up plan apply carries per-instance sections).
     /// </summary>
     Task<ModelLoadOperationDto> StartUnloadForNotebookContextAsync(
         Guid notebookId,

@@ -186,6 +186,26 @@ public static class StartupConfiguration
             PooledConnectionLifetime = TimeSpan.FromSeconds(30),
             PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15)
         });
+        // Row-owned llama stacks (multi-stack llama-cpp): named client with no
+        // fixed BaseAddress; LlamaStackRuntimeClientProvider sets it per stack.
+        services.AddHttpClient("llama-stack-runtime")
+            .SetHandlerLifetime(TimeSpan.FromMinutes(1))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromSeconds(30),
+                PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15)
+            });
+        services.AddSingleton<GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider, GuideAntsApi.Services.LlamaCpp.LlamaStackRuntimeClientProvider>();
+        // Row-owned llama stacks (multi-stack llama-cpp): named admin client with no
+        // fixed BaseAddress; LlamaStackAdminClientProvider derives {stack}/llama-admin per row.
+        services.AddHttpClient("llama-stack-admin")
+            .SetHandlerLifetime(TimeSpan.FromMinutes(1))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromSeconds(30),
+                PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15)
+            });
+        services.AddSingleton<GuideAntsApi.Services.LlamaCpp.ILlamaStackAdminClientProvider, GuideAntsApi.Services.LlamaCpp.LlamaStackAdminClientProvider>();
         services.AddHttpClient<ILlamaRuntimeAdminClient, LlamaRuntimeAdminClient>(client =>
         {
             var config = configuration.GetSection("LlamaCpp");

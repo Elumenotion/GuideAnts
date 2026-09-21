@@ -1272,4 +1272,64 @@ public sealed class LlamaCppChatClientTests
                 Error: null));
         }
     }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_PostsToRowOwnedStackEndpoint_WithStackKey()
+    {
+        Uri? capturedUri = null;
+        string? capturedAuth = null;
+        var handler = new StaticResponseHandler(httpRequest =>
+        {
+            capturedUri = httpRequest.RequestUri;
+            capturedAuth = httpRequest.Headers.Authorization?.ToString();
+            return JsonResponse("""{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""");
+        });
+
+        var client = CreateClient(
+            handler,
+            config: new LlamaCppConfig
+            {
+                BaseUrl = "http://192.0.2.1:8112/llama-cpp",
+                ApiKey = "stack-key",
+                TimeoutSeconds = 300
+            });
+        var request = new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, "hi")],
+            model: "qwen3.6-27b-max");
+
+        await client.GetCompletionAsync(request);
+
+        capturedUri!.ToString().Should().Be("http://192.0.2.1:8112/llama-cpp/v1/chat/completions");
+        capturedAuth.Should().Be("Bearer stack-key");
+    }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_SendsNoAuthorization_WhenStackHasNoKey()
+    {
+        Uri? capturedUri = null;
+        string? capturedAuth = null;
+        var handler = new StaticResponseHandler(httpRequest =>
+        {
+            capturedUri = httpRequest.RequestUri;
+            capturedAuth = httpRequest.Headers.Authorization?.ToString();
+            return JsonResponse("""{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""");
+        });
+
+        var client = CreateClient(
+            handler,
+            config: new LlamaCppConfig
+            {
+                BaseUrl = "http://192.0.2.1:8112/llama-cpp",
+                ApiKey = "",
+                TimeoutSeconds = 300
+            });
+        var request = new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, "hi")],
+            model: "qwen3.6-27b-max");
+
+        await client.GetCompletionAsync(request);
+
+        capturedUri!.ToString().Should().Be("http://192.0.2.1:8112/llama-cpp/v1/chat/completions");
+        capturedAuth.Should().BeNull();
+    }
 }

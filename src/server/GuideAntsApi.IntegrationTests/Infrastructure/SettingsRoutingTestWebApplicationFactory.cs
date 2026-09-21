@@ -87,6 +87,9 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
         public Task RecycleSharedSpeechEnginesAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
+        public Task EnsureLlamaStacksMatchDefaultAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
         public async Task SyncDesiredAndApplyAsync(
             WarmupDesiredBuildOptions? options = null,
             bool waitForCompletion = false,

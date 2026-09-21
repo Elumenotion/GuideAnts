@@ -77,13 +77,33 @@ function renderEditForm(
   }
 }
 
-function buildLlamaRuntimeConfigJson(model: SettingsModelDto): string {
+function buildLlamaRuntimeConfigJsonWithStack(
+  model: SettingsModelDto,
+  stackBaseUrl: string,
+  stackApiKey: string,
+): string {
   const parsed = parseCanonicalLocalRuntimeJson(model.runtimeConfigJson);
   if (!parsed?.routerModelId) {
     throw new Error(`Model '${model.modelId}' is missing routerModelId in RuntimeConfigJson.`);
   }
-  return JSON.stringify({ routerModelId: parsed.routerModelId });
+  const payload: Record<string, unknown> = { routerModelId: parsed.routerModelId };
+  const trimmedBaseUrl = stackBaseUrl.trim();
+  if (trimmedBaseUrl.length > 0) {
+    if (trimmedBaseUrl.endsWith('/')) {
+      throw new Error('Stack base URL must not include a trailing slash (configure the stack root, e.g. http://192.0.2.1:8112).');
+    }
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmedBaseUrl)) {
+      throw new Error('Stack base URL must be an absolute http(s) URL.');
+    }
+    payload.stackBaseUrl = trimmedBaseUrl;
+  }
+  const trimmedKey = stackApiKey.trim();
+  if (trimmedKey.length > 0) {
+    payload.stackApiKey = trimmedKey;
+  }
+  return JSON.stringify(payload);
 }
+
 
 export function CatalogRowEditModal({
   model,
@@ -98,6 +118,8 @@ export function CatalogRowEditModal({
   const [value, setValue] = useState<CatalogEditState | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stackBaseUrl, setStackBaseUrl] = useState('');
+  const [stackApiKey, setStackApiKey] = useState('');
   const llamaFormRef = useRef<LlamaCppEditFormHandle>(null);
 
   useEffect(() => {
@@ -105,11 +127,16 @@ export function CatalogRowEditModal({
       setValue(null);
       setError(null);
       setSaving(false);
+      setStackBaseUrl('');
+      setStackApiKey('');
       return;
     }
     setValue(createCatalogEditStateFromModel(model));
     setError(null);
     setSaving(false);
+    const parsed = parseCanonicalLocalRuntimeJson(model.runtimeConfigJson);
+    setStackBaseUrl(model.provider === 'llama-cpp' ? (parsed?.stackBaseUrl ?? '') : '');
+    setStackApiKey(model.provider === 'llama-cpp' ? (parsed?.stackApiKey ?? '') : '');
   }, [isOpen, model]);
 
   const submit = async () => {
@@ -124,7 +151,9 @@ export function CatalogRowEditModal({
       }
       const request = buildCatalogEditRequest(value, {
         runtimeConfigJson:
-          value.provider === 'llama-cpp' ? buildLlamaRuntimeConfigJson(model) : undefined,
+          value.provider === 'llama-cpp'
+            ? buildLlamaRuntimeConfigJsonWithStack(model, stackBaseUrl, stackApiKey)
+            : undefined,
       });
       await api.settings.updateModel(model.modelId, request);
       await onSaved();
@@ -223,6 +252,38 @@ export function CatalogRowEditModal({
               llamaFormRef,
             )}
           </div>
+
+          {value.provider === 'llama-cpp' ? (
+            <div className="border-t border-gray-200 pt-3">
+              <div className="text-sm font-medium text-gray-700">AI stack</div>
+              <p className="mt-1 text-xs text-gray-500">
+                Optional. Leave empty to use this deployment&apos;s default llama server. When set,
+                this model&apos;s chat calls and readiness probes target that stack&apos;s{' '}
+                <span className="font-mono">/llama-cpp</span> surface (stack root URL, no service
+                prefix).
+              </p>
+              <label className="mt-2 block text-sm text-gray-700">
+                Stack base URL
+                <input
+                  type="text"
+                  value={stackBaseUrl}
+                  onChange={(event) => setStackBaseUrl(event.target.value)}
+                  placeholder="http://192.0.2.1:8112"
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </label>
+              <label className="mt-2 block text-sm text-gray-700">
+                Stack API key
+                <input
+                  type="password"
+                  value={stackApiKey}
+                  onChange={(event) => setStackApiKey(event.target.value)}
+                  placeholder="Optional (local docker networks are keyless)"
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </label>
+            </div>
+          ) : null}
 
           {value.provider === 'llama-cpp' ? (
             <LlamaModelChatBehaviorEditor

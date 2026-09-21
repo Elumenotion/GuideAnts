@@ -42,6 +42,7 @@ export const LlamaCppEditForm = forwardRef<
     <LlamaInstalledSummary
       ref={ref}
       modelId={value.modelId}
+      runtimeConfigJson={value.runtimeConfigJson}
       onChanged={onDetailChanged}
       onOperationStarted={onOperationStarted}
     />

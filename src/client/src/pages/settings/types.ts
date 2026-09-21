@@ -96,6 +96,12 @@ export interface CatalogEditState {
   requestFieldsWhenToolsPresentJson: string;
   combineSystemAndDeveloperMessages: boolean;
   thoughtBlockPattern: string;
+  /**
+   * The row's RuntimeConfigJson (llama-cpp rows: routerModelId + optional
+   * row-owned stackBaseUrl/stackApiKey). Lets the edit form know which stack
+   * the model's parameters are written to.
+   */
+  runtimeConfigJson?: string;
 }
 
 /** Long-running local-model operations the settings page tracks page-level. */
@@ -118,4 +124,12 @@ export interface CanonicalLocalRuntimeConfig {
   parallelToolCalls?: boolean;
   routerContextSize?: number;
   routerCacheRamMib?: number;
+  /**
+   * Row-owned llama stack (multi-stack llama-cpp): the AI-stack root URL
+   * (no service prefix, e.g. http://192.0.2.1:8112). Absent/empty means
+   * the global LlamaCpp Base URL (the local AI container).
+   */
+  stackBaseUrl?: string;
+  /** Optional bearer key for the row-owned stack (local docker networks stay keyless). */
+  stackApiKey?: string;
 }

@@ -271,6 +271,16 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
       normalized.routerCacheRamMib = routerCacheRamMib;
     }
 
+    const stackBaseUrl = getCaseInsensitive(parsed, 'stackBaseUrl');
+    if (typeof stackBaseUrl === 'string' && stackBaseUrl.trim().length > 0) {
+      normalized.stackBaseUrl = stackBaseUrl.trim();
+    }
+
+    const stackApiKey = getCaseInsensitive(parsed, 'stackApiKey');
+    if (typeof stackApiKey === 'string' && stackApiKey.length > 0) {
+      normalized.stackApiKey = stackApiKey;
+    }
+
     return normalized;
   } catch {
     return null;
@@ -291,6 +301,7 @@ export function createCatalogEditStateFromModel(model: SettingsModelDto): Catalo
     requestFieldsWhenToolsPresentJson: model.requestFieldsWhenToolsPresentJson ?? '{}',
     combineSystemAndDeveloperMessages: model.combineSystemAndDeveloperMessages ?? true,
     thoughtBlockPattern: model.thoughtBlockPattern ?? '',
+    runtimeConfigJson: model.runtimeConfigJson ?? '',
   };
 }
 

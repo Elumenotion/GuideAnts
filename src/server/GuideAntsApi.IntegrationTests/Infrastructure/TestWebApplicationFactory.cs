@@ -214,6 +214,9 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
         public Task RecycleSharedSpeechEnginesAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
+        public Task EnsureLlamaStacksMatchDefaultAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
         public Task SyncDesiredAndApplyAsync(
             WarmupDesiredBuildOptions? options = null,
             bool waitForCompletion = false,
