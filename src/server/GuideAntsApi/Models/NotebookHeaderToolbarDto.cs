@@ -61,7 +61,8 @@ public sealed record NotebookToolbarChatDto(
     IReadOnlyList<NotebookToolbarModelOptionDto> ModelOptions,
     IReadOnlyList<string> Blockers,
     string? InProgressOperationId,
-    string? InProgressState);
+    string? InProgressState,
+    string? EffectiveModelSource = null);
 
 public sealed record NotebookChatReadinessDto(
     string? EffectiveModelId,

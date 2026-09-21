@@ -7,6 +7,7 @@ using AntRunner.Chat.OpenAI;
 using AntRunner.Chat.OpenRouter;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GuideAntsApi.Services.Conversations;
@@ -27,6 +28,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
     private readonly LlamaCppChatClientFactory _llamaCppFactory;
     private readonly IChatTargetResolver _chatTargetResolver;
     private readonly IChatTargetValidator _chatTargetValidator;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<RoutingChatCompletionClientFactory> _logger;
 
     public RoutingChatCompletionClientFactory(
@@ -41,6 +43,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         LlamaCppChatClientFactory llamaCppFactory,
         IChatTargetResolver chatTargetResolver,
         IChatTargetValidator chatTargetValidator,
+        IConfiguration configuration,
         ILogger<RoutingChatCompletionClientFactory>? logger = null)
     {
         _openAiPlatformChatFactory = openAiPlatformChatFactory ?? throw new ArgumentNullException(nameof(openAiPlatformChatFactory));
@@ -54,6 +57,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         _llamaCppFactory = llamaCppFactory ?? throw new ArgumentNullException(nameof(llamaCppFactory));
         _chatTargetResolver = chatTargetResolver ?? throw new ArgumentNullException(nameof(chatTargetResolver));
         _chatTargetValidator = chatTargetValidator ?? throw new ArgumentNullException(nameof(chatTargetValidator));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? NullLogger<RoutingChatCompletionClientFactory>.Instance;
     }
 
@@ -90,6 +94,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
             return _llamaCppFactory.CreateClientForProfile(
                 localRuntime.RouterModelId,
                 llamaProfile,
+                BuildLlamaCppConfigOverride(localRuntime),
                 httpClient);
         }
 
@@ -186,6 +191,28 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         return new ProviderChatBehavior(
             thinkingControl,
             hasExtraFields ? data.RequestFieldsWhenToolsPresent : null);
+    }
+
+    /// <summary>
+    /// Builds the per-call LlamaCpp config for a row-owned stack (multi-stack
+    /// llama-cpp). Returns null for rows that target the global LlamaCpp:BaseUrl —
+    /// the factory's configured profile then applies, byte-identical to the
+    /// pre-multi-stack behavior.
+    /// </summary>
+    private LlamaCppConfig? BuildLlamaCppConfigOverride(LocalRuntimeConfiguration localRuntime)
+    {
+        if (localRuntime.UsesGlobalStack)
+        {
+            return null;
+        }
+
+        var config = new LlamaCppConfig();
+        _configuration.GetSection("LlamaCpp").Bind(config);
+        // Row carries the stack root; the /llama-cpp prefix is a product decision
+        // (same doctrine as LocalServiceAdminRouting for the other local services).
+        config.BaseUrl = localRuntime.StackBaseUrl.TrimEnd('/') + "/llama-cpp";
+        config.ApiKey = localRuntime.StackApiKey;
+        return config;
     }
 
     private static LlamaCppRuntimeProfileData ToLlamaCppProfileData(RuntimeProfileData data)

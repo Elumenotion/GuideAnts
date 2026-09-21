@@ -25,6 +25,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     private readonly ILocalAiStartupWarmupService _localAiWarmupService;
     private readonly ILocalAiWarmupService _localAiWarmup;
     private readonly INotebookChatAliasState _notebookChatAliasState;
+    private readonly ILocalAiStackHostResolver _stackHostResolver;
+    private readonly ILlamaStackRuntimeClientProvider _stackClients;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<NotebookModelRuntimeService> _logger;
 
     // Singleton state for operations. In a multi-node deployment, this would need to be distributed.
@@ -43,6 +46,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         ILocalAiStartupWarmupService localAiWarmupService,
         ILocalAiWarmupService localAiWarmup,
         INotebookChatAliasState notebookChatAliasState,
+        ILocalAiStackHostResolver stackHostResolver,
+        ILlamaStackRuntimeClientProvider stackClients,
+        IServiceScopeFactory scopeFactory,
         ILogger<NotebookModelRuntimeService> logger)
     {
         _context = context;
@@ -53,6 +59,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         _localAiWarmupService = localAiWarmupService;
         _localAiWarmup = localAiWarmup;
         _notebookChatAliasState = notebookChatAliasState;
+        _stackHostResolver = stackHostResolver;
+        _stackClients = stackClients;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -95,72 +104,92 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             return status;
         }
 
-        // Check current router state
+        // Check current per-instance runtime state.
         try
         {
             // Runtime readiness is used as a hard preflight gate before chat dispatch.
-            // It must reflect live llama-router state, not the long-lived 5-minute cache,
+            // It must reflect live per-instance state, not the long-lived 5-minute cache,
             // otherwise we can return "ready" and then hit upstream 400 "model is not loaded".
-            var routerState = await GetRouterModelsAsync(useCache: false, cancellationToken);
-            var loadedRouterIds = routerState.Data
-                .Where(IsRouterModelLoaded)
-                .Select(d => NormalizeRouterModelId(d.Id))
-                .ToHashSet();
+            var instances = await GetInstanceSnapshotsAsync(useCache: false, cancellationToken);
+
+            var loadedByInstance = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var instance in instances)
+            {
+                loadedByInstance[instance.CanonicalKey] = instance.Snapshot.Data
+                    .Where(IsRouterModelLoaded)
+                    .Select(d => NormalizeRouterModelId(d.Id))
+                    .ToHashSet(StringComparer.Ordinal);
+            }
 
             var allModels = await GetLlamaModelsFromCatalogAsync(cancellationToken);
             status.LoadedModels = allModels
                 .Where(m => m.RuntimeConfig != null
                     && !string.IsNullOrWhiteSpace(m.RuntimeConfig.RouterModelId)
-                    && loadedRouterIds.Contains(NormalizeRouterModelId(m.RuntimeConfig.RouterModelId)))
+                    && instances.Any(i => loadedByInstance[i.CanonicalKey].Contains(NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId!))))
                 .ToList();
 
             var requiredRouterIds = requiredModels
                 .Where(m => m.RuntimeConfig != null && !string.IsNullOrWhiteSpace(m.RuntimeConfig.RouterModelId))
                 .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId!))
-                .ToHashSet();
+                .ToHashSet(StringComparer.Ordinal);
 
-            var failedRequiredModels = routerState.Data
-                .Where(m => requiredRouterIds.Contains(NormalizeRouterModelId(m.Id)) && IsRouterModelFailed(m))
-                .ToList();
-            if (failedRequiredModels.Count > 0)
+            // Per-instance failure: a required row's alias failed on the instance that owns it.
+            foreach (var requiredModel in requiredModels.Where(m => m.RuntimeConfig is not null))
             {
-                status.State = "failed";
-                foreach (var failedModel in failedRequiredModels)
+                var requiredRouterId = NormalizeRouterModelId(requiredModel.RuntimeConfig!.RouterModelId!);
+                var instanceKey = ResolveInstanceBase(requiredModel);
+                var failedRequiredModels = instances
+                    .Where(i => string.Equals(i.CanonicalKey, instanceKey, StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(i => i.Snapshot.Data)
+                    .Where(m => requiredRouterIds.Contains(NormalizeRouterModelId(m.Id)) && IsRouterModelFailed(m))
+                    .ToList();
+                if (failedRequiredModels.Count > 0)
                 {
-                    var failure = DescribeRouterModelFailure(failedModel);
-                    if (!string.IsNullOrWhiteSpace(failure))
+                    status.State = "failed";
+                    foreach (var failedModel in failedRequiredModels)
                     {
-                        status.Conflicts.Add(failure);
+                        var failure = DescribeRouterModelFailure(failedModel);
+                        if (!string.IsNullOrWhiteSpace(failure))
+                        {
+                            status.Conflicts.Add(failure);
+                        }
                     }
-                }
 
-                status.ActiveOperation = new ModelLoadOperationDto
-                {
-                    OperationId = ExternalLoadingOperationId,
-                    State = "failed",
-                    StartedAt = DateTime.UtcNow,
-                    CompletedAt = DateTime.UtcNow,
-                    ErrorDetails = status.Conflicts.FirstOrDefault()
-                        ?? "One or more required local models failed to load."
-                };
-                return status;
+                    status.ActiveOperation = new ModelLoadOperationDto
+                    {
+                        OperationId = ExternalLoadingOperationId,
+                        State = "failed",
+                        StartedAt = DateTime.UtcNow,
+                        CompletedAt = DateTime.UtcNow,
+                        ErrorDetails = status.Conflicts.FirstOrDefault()
+                            ?? "One or more required local models failed to load."
+                    };
+                    return status;
+                }
             }
 
-            // Treat "required models are already loaded" as the highest-priority truth.
-            // We intentionally prefer this over an in-flight operation marker because
-            // operation state can remain "loading" while auxiliary services are still
-            // warming up, and chat should not be blocked in that phase.
-            if (requiredRouterIds.IsSubsetOf(loadedRouterIds))
+            // Per-instance readiness: every required alias must be loaded on the instance
+            // that owns it. Instances are independent - one instance's load never
+            // satisfies another's requirement.
+            var requiredByInstance = GroupRequiredRouterIdsByInstance(requiredModels);
+            var isReady = requiredByInstance.All(pair =>
+                loadedByInstance.TryGetValue(pair.Key, out var loaded)
+                && pair.Value.IsSubsetOf(loaded));
+            if (isReady)
             {
+                // Treat "required models are already loaded" as the highest-priority truth.
+                // We intentionally prefer this over an in-flight operation marker because
+                // operation state can remain "loading" while auxiliary services are still
+                // warming up, and chat should not be blocked in that phase.
                 status.State = "ready";
             }
-            else if (IsExternalLoadInProgress(requiredRouterIds, routerState))
+            else if (IsExternalLoadInProgress(requiredByInstance, instances))
             {
                 status.State = "loading";
                 status.ActiveOperation = CreateExternalLoadingOperation(
                     _localAiWarmupService.IsWarmupInProgress
                         ? "loading"
-                        : ResolveExternalLoadPhase(routerState, requiredRouterIds));
+                        : ResolveExternalLoadPhase(instances, requiredByInstance));
             }
             else
             {
@@ -171,14 +200,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     status.State = "loading";
                     status.ActiveOperation = activeOp;
                 }
-                else if (IsExternalLoadInProgress(requiredRouterIds, routerState))
-                {
-                    status.State = "loading";
-                    status.ActiveOperation = CreateExternalLoadingOperation(
-                        _localAiWarmupService.IsWarmupInProgress
-                            ? "loading"
-                            : ResolveExternalLoadPhase(routerState, requiredRouterIds));
-                }
                 else
                 {
                     status.State = "requires_load";
@@ -187,9 +208,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get router state");
+            _logger.LogError(ex, "Failed to get per-instance router state");
             status.State = "failed";
-            status.Conflicts.Add("Failed to communicate with local llama server.");
+            status.Conflicts.Add("Failed to communicate with local llama servers.");
         }
 
         return status;
@@ -308,10 +329,26 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     op.State = "unloading";
                     InvalidateRouterModelsCache();
 
+                    // Forget this context's per-instance notebook aliases so the next
+                    // plan apply emits enabled:false for the instances it loaded on.
+                    List<ModelDto> requiredModels;
+                    try
+                    {
+                        requiredModels = await GetRequiredLlamaModelsAsync(notebook, assistantId, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        requiredModels = new List<ModelDto>();
+                    }
+
+                    foreach (var model in requiredModels.Where(m => m.RuntimeConfig is not null))
+                    {
+                        _notebookChatAliasState.ClearInstance(ResolveInstanceBase(model));
+                    }
+
                     // Return to default routed warmup via GuideAntsApi policy
-                    // (SyncDesiredAndApplyAsync). ga-admin executes aux drain/restore;
-                    // this path does not unload individual aliases via _llamaClient.
-                    _notebookChatAliasState.ClearActiveChatAlias();
+                    // (SyncDesiredAndApplyAsync). ga-admin executes the per-instance
+                    // unload on each instance the plan addresses.
                     await _localAiWarmup.SyncDesiredAndApplyAsync(
                         waitForCompletion: true,
                         cancellationToken: CancellationToken.None).ConfigureAwait(false);
@@ -346,15 +383,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             await _loadLock.WaitAsync();
             InvalidateRouterModelsCache();
 
-            var requiredRouterIds = requiredModels
-                .Where(m => m.RuntimeConfig != null && !string.IsNullOrWhiteSpace(m.RuntimeConfig.RouterModelId))
-                .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId!))
-                .ToHashSet();
-
-            var primaryRouterId = requiredRouterIds.OrderBy(id => id, StringComparer.Ordinal).First();
-
-            // Chat special case (D6): drain aux via INI+apply, then reconcile extra llama aliases
-            // directly because INI carries a single [llama].router_alias.
+            // Chat special case (D6): drain aux via INI+apply first.
             op.State = "unloading";
             await warmup.SyncDesiredAndApplyAsync(
                 new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true },
@@ -362,59 +391,93 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 CancellationToken.None).ConfigureAwait(false);
             drainedAuxForChat = true;
 
-            var routerStateAtStart = await GetRouterModelsAsync(useCache: false, CancellationToken.None);
-            var loadedRouterIds = routerStateAtStart.Data
-                .Where(IsRouterModelLoaded)
-                .Select(d => NormalizeRouterModelId(d.Id))
-                .ToHashSet();
+            // Per-instance reconcile (rule 4/5): on each instance that owns required
+            // rows, evict loaded-but-not-required aliases (within that instance only),
+            // load the missing ones, and verify. Other instances are untouched -
+            // the plan apply below carries their sections unchanged.
+            var requiredByInstance = GroupRequiredRouterIdsByInstance(requiredModels);
+            var requiredModelIds = requiredModels
+                .Where(m => m.RuntimeConfig != null && !string.IsNullOrWhiteSpace(m.RuntimeConfig.RouterModelId))
+                .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId!))
+                .ToHashSet(StringComparer.Ordinal);
 
-            var toUnload = loadedRouterIds.Except(requiredRouterIds).ToList();
-            var toLoad = requiredModels
-                .Where(m => m.RuntimeConfig != null
-                    && !string.IsNullOrWhiteSpace(m.RuntimeConfig.RouterModelId)
-                    && !loadedRouterIds.Contains(NormalizeRouterModelId(m.RuntimeConfig.RouterModelId)))
-                .ToList();
+            var instances = await GetInstanceSnapshotsAsync(useCache: false, CancellationToken.None);
+            var instanceByKey = instances
+                .ToDictionary(i => i.CanonicalKey, StringComparer.OrdinalIgnoreCase);
 
-            if (toUnload.Any())
+            foreach (var pair in requiredByInstance)
             {
-                op.State = "unloading";
-                foreach (var id in toUnload)
+                var requiredIds = pair.Value;
+                if (!instanceByKey.TryGetValue(pair.Key, out var instance))
                 {
-                    await using var _unloadLock = await _coordinator.AcquireAliasLockAsync(id, CancellationToken.None);
-                    await _llamaClient.UnloadModelAsync(id);
+                    throw new InvalidOperationException(
+                        $"Instance '{pair.Key}' is not in the configured stack universe.");
                 }
-            }
 
-            if (toLoad.Any())
-            {
-                op.State = "loading";
-                foreach (var model in toLoad)
+                var loadedIds = instance.Snapshot.Data
+                    .Where(IsRouterModelLoaded)
+                    .Select(d => NormalizeRouterModelId(d.Id))
+                    .ToHashSet(StringComparer.Ordinal);
+
+                var toUnload = loadedIds.Except(requiredModelIds).ToList();
+                if (toUnload.Count > 0)
                 {
-                    var routerModelId = NormalizeRouterModelId(model.RuntimeConfig!.RouterModelId!);
-                    await using var _loadAliasLock = await _coordinator.AcquireAliasLockAsync(routerModelId, CancellationToken.None);
-                    await _llamaClient.LoadModelAsync(routerModelId, CancellationToken.None);
+                    op.State = "unloading";
+                    foreach (var id in toUnload)
+                    {
+                        await using var _ = await _coordinator.AcquireAliasLockAsync(id, CancellationToken.None);
+                        await instance.Client.UnloadModelAsync(id, CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+
+                var toLoad = requiredModels
+                    .Where(m => m.RuntimeConfig != null
+                        && !string.IsNullOrWhiteSpace(m.RuntimeConfig.RouterModelId)
+                        && string.Equals(ResolveInstanceBase(m), pair.Key, StringComparison.OrdinalIgnoreCase)
+                        && !loadedIds.Contains(NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId!)))
+                    .ToList();
+                if (toLoad.Count > 0)
+                {
+                    op.State = "loading";
+                    foreach (var model in toLoad)
+                    {
+                        var routerModelId = NormalizeRouterModelId(model.RuntimeConfig!.RouterModelId!);
+                        await using var _ = await _coordinator.AcquireAliasLockAsync(routerModelId, CancellationToken.None);
+                        await instance.Client.LoadModelAsync(routerModelId, CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+
+                // Record the per-instance notebook alias so subsequent lifecycle applies
+                // keep this instance's section enabled with this alias.
+                foreach (var id in requiredIds)
+                {
+                    _notebookChatAliasState.SetActiveChatAliasForInstance(pair.Key, id);
                 }
             }
 
             op.State = "verifying";
-            if (requiredRouterIds.Count > 0)
+            if (requiredByInstance.Count > 0)
             {
                 var verifyStartedAt = DateTime.UtcNow;
                 var verifyTimeout = TimeSpan.FromMinutes(5);
                 var pollInterval = TimeSpan.FromSeconds(2);
                 var isReady = false;
-                List<string> missingRouterIds = [];
+                var missingByInstance = new List<string>();
 
                 while (DateTime.UtcNow - verifyStartedAt < verifyTimeout)
                 {
-                    var routerState = await GetRouterModelsAsync(useCache: false, CancellationToken.None);
-                    var loadedNow = routerState.Data
-                        .Where(IsRouterModelLoaded)
-                        .Select(d => NormalizeRouterModelId(d.Id))
-                        .ToHashSet();
-
-                    missingRouterIds = requiredRouterIds.Except(loadedNow).ToList();
-                    if (missingRouterIds.Count == 0)
+                    var freshInstances = await GetInstanceSnapshotsAsync(useCache: false, CancellationToken.None);
+                    missingByInstance = freshInstances
+                        .Where(i => requiredByInstance.TryGetValue(i.CanonicalKey, out var requiredIds)
+                            && !requiredIds.IsSubsetOf(i.Snapshot.Data
+                                .Where(IsRouterModelLoaded)
+                                .Select(d => NormalizeRouterModelId(d.Id))))
+                        .Select(i => $"{i.CanonicalKey}: {string.Join(", ",
+                            requiredByInstance[i.CanonicalKey].Except(i.Snapshot.Data
+                                .Where(IsRouterModelLoaded)
+                                .Select(d => NormalizeRouterModelId(d.Id))))}")
+                        .ToList();
+                    if (missingByInstance.Count == 0)
                     {
                         isReady = true;
                         break;
@@ -426,23 +489,18 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 if (!isReady)
                 {
                     throw new TimeoutException(
-                        $"Timed out waiting for local models to report loaded. Missing: {string.Join(", ", missingRouterIds)}");
+                        $"Timed out waiting for local models to report loaded. Missing: {string.Join("; ", missingByInstance)}");
                 }
             }
 
-            // Record the notebook-scoped chat alias so subsequent lifecycle applies
-            // (recycle, routed warmup restore) keep llama enabled with this alias
-            // instead of tearing it down via a ChatDefaults-only plan.
-            foreach (var id in requiredRouterIds)
-            {
-                _notebookChatAliasState.SetActiveChatAlias(id);
-            }
-
             op.State = "loading";
+            // Rule 5: the plain desired-state apply is the only plan apply that touches
+            // other instances. The builder now emits a section for every instance
+            // (default alias on the default's instance, notebook aliases on their
+            // instances, enabled:false elsewhere), so no alias override is needed.
             await warmup.SyncDesiredAndApplyAsync(
-                new WarmupDesiredBuildOptions { LlamaRouterAliasOverride = primaryRouterId },
                 waitForCompletion: true,
-                CancellationToken.None).ConfigureAwait(false);
+                cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
             op.State = "ready";
             op.CompletedAt = DateTime.UtcNow;
@@ -479,6 +537,79 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
             _loadLock.Release();
         }
+    }
+
+    /// <summary>
+    /// A live snapshot of every configured llama instance (global + row-owned).
+    /// </summary>
+    private sealed record InstanceSnapshot(string CanonicalKey, ILlamaServerRuntimeClient Client, LlamaModelsResponse Snapshot);
+
+    private async Task<List<InstanceSnapshot>> GetInstanceSnapshotsAsync(bool useCache, CancellationToken cancellationToken)
+    {
+        // Deduplicated by canonical identity: one physical box = one snapshot/client.
+        var instances = await _stackHostResolver.GetAllConfiguredInstancesAsync(cancellationToken).ConfigureAwait(false);
+        var globalCanonical = _stackHostResolver.GetStackBaseForService(LocalAiStackHostUrls.LlamaServiceId) is { } gb
+            ? LocalAiStackHostResolver.CanonicalInstanceKey(gb)
+            : null;
+        var snapshots = new List<InstanceSnapshot>(instances.Count);
+        foreach (var instance in instances)
+        {
+            var isGlobal = globalCanonical is not null
+                && string.Equals(instance.CanonicalKey, globalCanonical, StringComparison.OrdinalIgnoreCase);
+            var client = isGlobal
+                ? _llamaClient
+                : (_stackClients.GetClientForStack(instance.Base, stackApiKey: null) ?? _llamaClient);
+            LlamaModelsResponse snapshot;
+            if (useCache && isGlobal)
+            {
+                snapshot = await GetRouterModelsAsync(useCache: true, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                snapshot = await client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            snapshots.Add(new InstanceSnapshot(instance.CanonicalKey, client, snapshot));
+        }
+
+        return snapshots;
+    }
+
+    private string ResolveInstanceBase(ModelDto model)
+    {
+        // Key everything by CANONICAL identity (host resolved to IP:port) so a row base,
+        // a resolver base, and a snapshot key all share one identity even when the same
+        // physical box is configured under several host names. Rows without a row-owned
+        // stack target the global LlamaCpp:BaseUrl.
+        if (string.IsNullOrWhiteSpace(model.RuntimeConfig?.StackBaseUrl))
+        {
+            var globalBase = _stackHostResolver.GetStackBaseForService(LocalAiStackHostUrls.LlamaServiceId);
+            return globalBase is null
+                ? string.Empty
+                : LocalAiStackHostResolver.CanonicalInstanceKey(globalBase);
+        }
+
+        var normalized = LocalAiStackHostUrls.NormalizeStackBaseUrl(model.RuntimeConfig.StackBaseUrl)
+            ?? model.RuntimeConfig.StackBaseUrl.TrimEnd('/');
+        return LocalAiStackHostResolver.CanonicalInstanceKey(normalized);
+    }
+
+    private Dictionary<string, HashSet<string>> GroupRequiredRouterIdsByInstance(List<ModelDto> requiredModels)
+    {
+        var byInstance = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var model in requiredModels.Where(m => m.RuntimeConfig is not null))
+        {
+            var instanceKey = ResolveInstanceBase(model);
+            if (!byInstance.TryGetValue(instanceKey, out var set))
+            {
+                set = new HashSet<string>(StringComparer.Ordinal);
+                byInstance[instanceKey] = set;
+            }
+
+            set.Add(NormalizeRouterModelId(model.RuntimeConfig!.RouterModelId!));
+        }
+
+        return byInstance;
     }
 
     private async Task<LlamaModelsResponse> GetRouterModelsAsync(bool useCache, CancellationToken cancellationToken)
@@ -651,43 +782,54 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         return $"Local model '{model.Id}' failed to load{exitCodeSuffix}. Check guideants-ai logs for details.";
     }
 
-    private bool IsExternalLoadInProgress(HashSet<string> requiredRouterIds, LlamaModelsResponse routerState)
+    private bool IsExternalLoadInProgress(
+        Dictionary<string, HashSet<string>> requiredByInstance,
+        List<InstanceSnapshot> instances)
     {
-        if (routerState.Data.Any(m =>
-                requiredRouterIds.Contains(NormalizeRouterModelId(m.Id))
-                && IsRouterModelFailed(m)))
+        if (instances.Any(i => i.Snapshot.Data.Any(m =>
+                requiredByInstance.TryGetValue(i.CanonicalKey, out var requiredIds)
+                && requiredIds.Contains(NormalizeRouterModelId(m.Id))
+                && IsRouterModelFailed(m))))
         {
             return false;
         }
 
         if (_localAiWarmupService.IsWarmupInProgress
-            && !requiredRouterIds.IsSubsetOf(
-                routerState.Data
-                    .Where(IsRouterModelLoaded)
-                    .Select(m => NormalizeRouterModelId(m.Id))
-                    .ToHashSet(StringComparer.Ordinal)))
+            && requiredByInstance.Any(pair =>
+                instances.Any(i => string.Equals(i.CanonicalKey, pair.Key, StringComparison.OrdinalIgnoreCase)
+                    && !pair.Value.IsSubsetOf(i.Snapshot.Data
+                        .Where(IsRouterModelLoaded)
+                        .Select(m => NormalizeRouterModelId(m.Id))
+                        .ToHashSet(StringComparer.Ordinal)))))
         {
             return true;
         }
 
-        foreach (var id in requiredRouterIds)
+        foreach (var pair in requiredByInstance)
         {
-            if (_coordinator.IsAliasLocked(id))
+            foreach (var id in pair.Value)
             {
-                return true;
+                if (_coordinator.IsAliasLocked(id))
+                {
+                    return true;
+                }
             }
         }
 
-        return routerState.Data.Any(m =>
-            requiredRouterIds.Contains(NormalizeRouterModelId(m.Id))
-            && IsRouterModelLoading(m));
+        return instances.Any(i => i.Snapshot.Data.Any(m =>
+            requiredByInstance.TryGetValue(i.CanonicalKey, out var requiredIds)
+            && requiredIds.Contains(NormalizeRouterModelId(m.Id))
+            && IsRouterModelLoading(m)));
     }
 
-    private static string ResolveExternalLoadPhase(LlamaModelsResponse routerState, HashSet<string> requiredRouterIds)
+    private static string ResolveExternalLoadPhase(
+        List<InstanceSnapshot> instances,
+        Dictionary<string, HashSet<string>> requiredByInstance)
     {
-        var hasLoading = routerState.Data.Any(m =>
-            requiredRouterIds.Contains(m.Id)
-            && IsRouterModelLoading(m));
+        var hasLoading = instances.Any(i => i.Snapshot.Data.Any(m =>
+            requiredByInstance.TryGetValue(i.CanonicalKey, out var requiredIds)
+            && requiredIds.Contains(m.Id)
+            && IsRouterModelLoading(m)));
         return hasLoading ? "loading" : "queued";
     }
 
@@ -704,7 +846,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     private ModelRuntimeConfigDto ToLocalRuntimeDescriptor(string modelId, string runtimeConfigJson)
     {
         var parsed = LocalRuntimeConfigurationParser.Parse(modelId, runtimeConfigJson);
-        return new ModelRuntimeConfigDto(parsed.RouterModelId);
+        return new ModelRuntimeConfigDto(parsed.RouterModelId, parsed.StackBaseUrl);
     }
 }
-

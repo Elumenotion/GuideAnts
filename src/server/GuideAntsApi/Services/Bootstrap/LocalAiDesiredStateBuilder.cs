@@ -17,6 +17,11 @@ public sealed class WarmupDesiredBuildOptions
 {
     public IReadOnlyDictionary<string, string>? ServiceDesiredOverrides { get; init; }
 
+    /// <summary>
+    /// The router alias a load operation requested. It is applied to the instance the
+    /// alias's row declares (its stackBaseUrl), falling back to the default machine when
+    /// the row declares no row-owned stack.
+    /// </summary>
     public string? LlamaRouterAliasOverride { get; init; }
 
     /// <summary>When true, all auxiliary services are written as off regardless of routing.</summary>
@@ -30,6 +35,14 @@ public interface ILocalAiDesiredStateBuilder
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Builds the API-owned lifecycle plan. Llama is per-instance: the plan carries one
+/// section per configured instance (global LlamaCpp:BaseUrl + row-owned stacks), each
+/// with the singular alias that instance must hold. ga-admin applies sections per
+/// instance; the splitter fans the plan out, and every instance's executor reconciles
+/// its own llama server toward its own section (unload-then-load, within the instance).
+/// Non-llama services remain single-instance (active on 0 or 1 instance).
+/// </summary>
 public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
 {
     private static readonly string[] AuxiliaryServices =
@@ -44,17 +57,23 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IServiceModeResolver _serviceModeResolver;
     private readonly INotebookChatAliasState _notebookChatAliasState;
+    private readonly ILocalAiStackHostResolver _stackHostResolver;
+    private readonly ILogger<LocalAiDesiredStateBuilder> _logger;
 
     public LocalAiDesiredStateBuilder(
         IConfiguration configuration,
         IServiceScopeFactory scopeFactory,
         IServiceModeResolver serviceModeResolver,
-        INotebookChatAliasState notebookChatAliasState)
+        INotebookChatAliasState notebookChatAliasState,
+        ILocalAiStackHostResolver stackHostResolver,
+        ILogger<LocalAiDesiredStateBuilder> logger)
     {
         _configuration = configuration;
         _scopeFactory = scopeFactory;
         _serviceModeResolver = serviceModeResolver;
         _notebookChatAliasState = notebookChatAliasState;
+        _stackHostResolver = stackHostResolver;
+        _logger = logger;
     }
 
     public async Task<string> BuildPlanJsonAsync(
@@ -62,10 +81,13 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
         CancellationToken cancellationToken = default)
     {
         options ??= new WarmupDesiredBuildOptions();
-        var services = new JsonObject
+        var services = new JsonObject();
+
+        var llamaSections = await BuildLlamaSectionsAsync(options, cancellationToken).ConfigureAwait(false);
+        foreach (var (canonicalKey, section) in llamaSections)
         {
-            ["llama"] = await BuildLlamaSectionAsync(options, cancellationToken).ConfigureAwait(false),
-        };
+            services[$"{LocalAiStackHostUrls.LlamaServiceId}.{canonicalKey}"] = section;
+        }
 
         foreach (var serviceId in AuxiliaryServices)
         {
@@ -83,29 +105,135 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
         }.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
     }
 
-    private async Task<JsonObject> BuildLlamaSectionAsync(
+    /// <summary>
+    /// One section per configured instance. The section's alias is, in priority order:
+    /// a row-owned alias (a row on this instance) &gt; the global chat-default alias
+    /// (only for the global instance) &gt; a notebook alias recorded for this instance
+    /// &gt; disabled. Disabled is the only unload source, and it is applied only by the
+    /// normal plan triggers (chat-defaults change, notebook unload, warmup apply).
+    /// </summary>
+    private async Task<IReadOnlyList<(string CanonicalKey, JsonObject Section)>> BuildLlamaSectionsAsync(
         WarmupDesiredBuildOptions options,
         CancellationToken cancellationToken)
     {
-        var aliasOverride = options.LlamaRouterAliasOverride?.Trim();
-        var alias = !string.IsNullOrWhiteSpace(aliasOverride)
-            ? aliasOverride
-            : await ResolveConfiguredDefaultRouterAliasAsync(cancellationToken).ConfigureAwait(false);
+        var globalBase = _stackHostResolver.GetStackBaseForService(LocalAiStackHostUrls.LlamaServiceId);
+        // One physical box = one instance, even when configured under several host names.
+        var instances = await _stackHostResolver.GetAllConfiguredInstancesAsync(cancellationToken).ConfigureAwait(false);
 
-        // Fallback: a notebook/assistant-scoped chat load may have put a local llama
-        // alias up even though ChatDefaults points at a cloud model. Lifecycle applies
-        // (ASR/TTS recycle, routed warmup restore) must not emit llama.enabled=false in
-        // that case - doing so unloads a model that is actively in use (defect: the
-        // "model not loaded" screen while inference is running).
-        if (string.IsNullOrWhiteSpace(alias))
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetService<ApplicationDbContext>();
+
+        // Row-owned aliases per instance (rule 4: the required model list on the instance).
+        var aliasToInstance = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (db is not null)
         {
-            var activeChatAlias = _notebookChatAliasState.ActiveChatAlias;
-            if (!string.IsNullOrWhiteSpace(activeChatAlias))
+            var rows = await db.Models
+                .AsNoTracking()
+                .Where(m => m.Provider == "llama-cpp" && m.IsActive && m.RuntimeConfigJson != null)
+                .Select(m => new { m.ModelId, m.RuntimeConfigJson })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var row in rows)
             {
-                alias = activeChatAlias;
+                if (string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
+                {
+                    continue; // Row without a config cannot declare placement; skip rather than fail the whole build.
+                }
+
+                LocalRuntimeConfiguration configuration;
+                try
+                {
+                    configuration = LocalRuntimeConfigurationParser.Parse(row.ModelId, row.RuntimeConfigJson);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "[DIAG] BuildLlamaSectionsAsync: skipping model '{ModelId}' with invalid RuntimeConfigJson.",
+                        row.ModelId);
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(configuration.StackBaseUrl)
+                    && LocalAiStackHostUrls.NormalizeStackBaseUrl(configuration.StackBaseUrl) is { } normalizedBase)
+                {
+                    // Name->machine map only: resolves WHERE a model's row says its model
+                    // runs. It carries no load directive - a row declaring placement is not
+                    // an order to the machine to hold that alias.
+                    aliasToInstance[configuration.RouterModelId] =
+                        LocalAiStackHostResolver.CanonicalInstanceKey(normalizedBase);
+                }
             }
         }
 
+        var defaultInfo = db is not null && globalBase is not null
+            ? await ResolveConfiguredDefaultRouterAliasAsync(scope, db, cancellationToken).ConfigureAwait(false)
+            : null;
+        var defaultAlias = defaultInfo?.Alias;
+        var notebookAliases = _notebookChatAliasState.GetActiveChatAliases();
+
+        _logger.LogInformation(
+            "[DIAG] BuildLlamaSectionsAsync: db={Db} globalBase={GlobalBase} rowBases={RowBases} defaultAlias={DefaultAlias} notebookAliases={NotebookAliases}",
+            db is null ? "NULL" : "present",
+            globalBase ?? "null",
+            string.Join(",", instances.Select(i => i.CanonicalKey + "(" + i.Base + ")")),
+            defaultAlias ?? "null",
+            string.Join(";", notebookAliases.Select(kv => kv.Key + "=" + kv.Value)));
+
+        // There is no "global stack": the default is a model, and a model determines
+        // the machine that runs it (its row's stackBaseUrl). Each instance's alias comes
+        // only from live intent: the requested alias (load path) > the default model's
+        // alias > the notebook's active alias for that instance > disabled. A row that
+        // declares a model's placement never injects a load demand of its own, so a
+        // machine is never told to hold a model nothing has asked for.
+        var globalKey = globalBase is not null
+            ? LocalAiStackHostResolver.CanonicalInstanceKey(globalBase)
+            : null;
+
+        string? overrideKey = null;
+        var overrideAlias = options.LlamaRouterAliasOverride?.Trim();
+        if (!string.IsNullOrWhiteSpace(overrideAlias))
+        {
+            overrideKey = aliasToInstance.TryGetValue(overrideAlias!, out var ovKey)
+                ? ovKey
+                : globalKey;
+        }
+
+        var defaultKey = defaultInfo is null
+            ? null
+            : (defaultInfo.StackBaseUrl is { Length: > 0 } defaultStack
+                && LocalAiStackHostUrls.NormalizeStackBaseUrl(defaultStack) is { } defaultNorm
+                ? LocalAiStackHostResolver.CanonicalInstanceKey(defaultNorm)
+                : globalKey);
+
+        var sections = new List<(string CanonicalKey, JsonObject Section)>(instances.Count);
+        foreach (var instance in instances)
+        {
+            var canonicalKey = instance.CanonicalKey;
+            string? alias = null;
+            if (overrideKey is not null
+                && string.Equals(canonicalKey, overrideKey, StringComparison.OrdinalIgnoreCase))
+            {
+                alias = overrideAlias;
+            }
+            else if (defaultKey is not null
+                && string.Equals(canonicalKey, defaultKey, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(defaultAlias))
+            {
+                alias = defaultAlias.Trim();
+            }
+            else if (notebookAliases.TryGetValue(canonicalKey, out var notebookAlias))
+            {
+                alias = notebookAlias;
+            }
+
+            sections.Add((canonicalKey, BuildLlamaSection(alias)));
+        }
+        return sections;
+    }
+
+    private static JsonObject BuildLlamaSection(string? alias)
+    {
         if (string.IsNullOrWhiteSpace(alias))
         {
             return new JsonObject { ["enabled"] = false };
@@ -114,7 +242,7 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
         return new JsonObject
         {
             ["enabled"] = true,
-            ["routerAlias"] = alias,
+            ["routerAlias"] = alias.Trim(),
         };
     }
 
@@ -256,14 +384,18 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             _ => null,
         };
 
-    private async Task<string?> ResolveConfiguredDefaultRouterAliasAsync(CancellationToken cancellationToken)
+    private sealed record DefaultRouterAlias(string Alias, string? StackBaseUrl);
+
+    private async Task<DefaultRouterAlias?> ResolveConfiguredDefaultRouterAliasAsync(
+        IServiceScope scope,
+        ApplicationDbContext db,
+        CancellationToken cancellationToken)
     {
         if (!RuntimeConfigurationPlaceholders.HasUsableUrl(_configuration["LlamaCpp:BaseUrl"]))
         {
             return null;
         }
 
-        using var scope = _scopeFactory.CreateScope();
         var settingsService = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
         var chatDefaultsSection = await settingsService
             .GetSectionAsync("ChatDefaults", cancellationToken)
@@ -274,7 +406,6 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             return null;
         }
 
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var row = await db.Models
             .AsNoTracking()
             .Where(m => m.ModelId == defaultModelId)
@@ -290,8 +421,8 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             return null;
         }
 
-        return LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson)
-            .RouterModelId;
+        var config = LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson);
+        return new DefaultRouterAlias(config.RouterModelId, config.StackBaseUrl);
     }
 
     private enum LocalRoutingDesiredState

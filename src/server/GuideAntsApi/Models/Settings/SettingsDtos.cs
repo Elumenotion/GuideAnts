@@ -304,7 +304,8 @@ public sealed record LlamaRuntimeInventoryItemDto(
     IReadOnlyDictionary<string, string>? RouterPreset = null,
     bool RuntimeFailed = false,
     int? RuntimeExitCode = null,
-    LlamaInstallationProvenanceSummaryDto? InstallationProvenance = null);
+    LlamaInstallationProvenanceSummaryDto? InstallationProvenance = null,
+    string? StackKey = null);
 
 public sealed record LlamaInstallationProvenanceSummaryDto(
     string? CuratedCatalogId,

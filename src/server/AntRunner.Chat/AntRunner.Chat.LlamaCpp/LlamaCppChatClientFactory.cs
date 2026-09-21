@@ -31,11 +31,18 @@ public sealed class LlamaCppChatClientFactory : IChatCompletionClientFactory
         return CreateClientForProfile(deploymentId, (LlamaCppRuntimeProfileData?)null, httpClient);
     }
 
+    /// <summary>
+    /// Creates a client with an explicit per-call <paramref name="configOverride"/>
+    /// (e.g. a row-owned llama stack BaseUrl/ApiKey for multi-stack llama-cpp models).
+    /// When null, the factory-wide configured profile is used, as before.
+    /// </summary>
     public IChatCompletionClient CreateClientForProfile(
         string? deploymentId,
         LlamaCppRuntimeProfileData? profileData,
+        LlamaCppConfig? configOverride,
         HttpClient? httpClient = null)
     {
+        var config = configOverride ?? _config;
         var client = httpClient ?? _httpClientFactory.CreateClient();
         // LlamaCppChatClient owns one explicit deadline token for the complete response body.
         // HttpClient.Timeout is disabled because ResponseHeadersRead otherwise stops enforcing it
@@ -44,10 +51,18 @@ public sealed class LlamaCppChatClientFactory : IChatCompletionClientFactory
 
         return new LlamaCppChatClient(
             client,
-            _config,
+            config,
             deploymentId,
             profileData,
             _clientLogger,
             _timeoutObserver);
+    }
+
+    public IChatCompletionClient CreateClientForProfile(
+        string? deploymentId,
+        LlamaCppRuntimeProfileData? profileData,
+        HttpClient? httpClient = null)
+    {
+        return CreateClientForProfile(deploymentId, profileData, configOverride: null, httpClient);
     }
 }

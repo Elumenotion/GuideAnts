@@ -55,3 +55,51 @@ describe('LlamaInstalledSummary', () => {
     expect(screen.getByText(/router entries unavailable/i)).toBeInTheDocument();
   });
 });
+
+describe('LlamaInstalledSummary without installation provenance', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.settings.getLlamaInstallationDetail).mockRejectedValue(
+      new Error("Model 'qwen3.6-35b-a3b-mtp-max' has no installation provenance record."),
+    );
+    vi.mocked(api.settings.getLlamaRouterEntries).mockResolvedValue({
+      entries: [
+        {
+          alias: 'qwen3.6-max',
+          modelPath: '/models-local/llama/Qwen3.6-35B-A3B-MTP.gguf',
+          mmprojPath: '',
+          hasModelFile: true,
+          hasMmprojFile: false,
+          preset: { 'ctx-size': '32768' },
+        },
+      ],
+    } as never);
+  });
+
+  it('renders the preset editor for a row-owned stack when provenance is missing', async () => {
+    render(
+      <LlamaInstalledSummary
+        modelId="qwen3.6-35b-a3b-mtp-max"
+        runtimeConfigJson={JSON.stringify({ routerModelId: 'qwen3.6-max', stackBaseUrl: 'http://192.0.2.1:8112' })}
+        onOperationStarted={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId('alias-preset-save-panel')).toBeInTheDocument();
+    expect(screen.getByText(/written to the row's stack/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no installation provenance record/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the provenance error for rows without a row-owned stack', async () => {
+    render(
+      <LlamaInstalledSummary
+        modelId="qwen3.6-35b-a3b-mtp-local"
+        runtimeConfigJson={JSON.stringify({ routerModelId: 'qwen3.6-local' })}
+        onOperationStarted={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(/no installation provenance record/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('alias-preset-save-panel')).not.toBeInTheDocument();
+  });
+});

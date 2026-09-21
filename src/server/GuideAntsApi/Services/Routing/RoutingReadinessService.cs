@@ -31,6 +31,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
     private readonly ILlamaRuntimeInventoryService _inventory;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILocalAiWarmupOrchestrationClient? _warmupOrchestrationClient;
+    private readonly GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider? _stackClients;
     private readonly ILogger<RoutingReadinessService> _logger;
 
     public RoutingReadinessService(
@@ -38,13 +39,15 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         ILlamaRuntimeInventoryService inventory,
         IServiceScopeFactory scopeFactory,
         ILogger<RoutingReadinessService> logger,
-        ILocalAiWarmupOrchestrationClient? warmupOrchestrationClient = null)
+        ILocalAiWarmupOrchestrationClient? warmupOrchestrationClient = null,
+        GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider? stackClients = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _warmupOrchestrationClient = warmupOrchestrationClient;
+        _stackClients = stackClients;
     }
 
     public async Task<ModeReadinessDto> ProbeModeAsync(string service, string modeId, CancellationToken cancellationToken = default)
@@ -489,7 +492,12 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
             });
         }
 
-        var inventory = await _inventory.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
+        // Multi-stack: probe the row's own stack. Rows without a row-owned
+        // stack (and tests without a provider) probe the global stack.
+        var rowStack = _stackClients is not null ? parsed.StackBaseUrl : null;
+        var inventory = string.IsNullOrWhiteSpace(rowStack)
+            ? await _inventory.GetInventoryAsync(cancellationToken).ConfigureAwait(false)
+            : await _inventory.GetInventoryForStackAsync(rowStack, cancellationToken).ConfigureAwait(false);
         var entry = inventory.FirstOrDefault(i => string.Equals(i.RouterModelId, parsed.RouterModelId, StringComparison.Ordinal));
 
         if (entry == null)

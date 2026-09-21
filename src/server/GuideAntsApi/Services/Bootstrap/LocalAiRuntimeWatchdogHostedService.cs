@@ -22,12 +22,14 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
     private readonly ILogger<LocalAiRuntimeWatchdogHostedService> _logger;
 
     private readonly ILocalAiStackHostResolver _stackHostResolver;
+    private readonly GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider _stackClients;
 
     public LocalAiRuntimeWatchdogHostedService(
         IServiceScopeFactory scopeFactory,
         ILocalAiStartupWarmupService warmupService,
         ILocalAiWarmupOrchestrationClient orchestrationClient,
         ILocalAiStackHostResolver stackHostResolver,
+        GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider stackClients,
         IConfiguration configuration,
         ILogger<LocalAiRuntimeWatchdogHostedService> logger)
     {
@@ -35,6 +37,7 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
         _warmupService = warmupService;
         _orchestrationClient = orchestrationClient;
         _stackHostResolver = stackHostResolver;
+        _stackClients = stackClients;
         _configuration = configuration;
         _logger = logger;
     }
@@ -126,14 +129,14 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
     private async Task<bool> IsConfiguredDefaultLlamaLoadedAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
-        var routerAlias = await ResolveConfiguredDefaultRouterAliasAsync(scope, cancellationToken)
+        var target = await ResolveConfiguredDefaultRouterAliasAsync(scope, cancellationToken)
             .ConfigureAwait(false);
-        if (routerAlias is null)
+        if (target is null)
         {
             return true;
         }
 
-        var llamaClient = scope.ServiceProvider.GetRequiredService<ILlamaServerRuntimeClient>();
+        var llamaClient = ResolveClientForStack(scope, target.StackBaseUrl);
         LlamaModelsResponse models;
         try
         {
@@ -146,21 +149,21 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
         }
 
         return models.Data.Any(m =>
-            string.Equals(m.Id, routerAlias, StringComparison.Ordinal)
+            string.Equals(m.Id, target.Alias, StringComparison.Ordinal)
             && IsRouterModelLoaded(m));
     }
 
     private async Task<bool> IsConfiguredDefaultLlamaFailedAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
-        var routerAlias = await ResolveConfiguredDefaultRouterAliasAsync(scope, cancellationToken)
+        var target = await ResolveConfiguredDefaultRouterAliasAsync(scope, cancellationToken)
             .ConfigureAwait(false);
-        if (routerAlias is null)
+        if (target is null)
         {
             return false;
         }
 
-        var llamaClient = scope.ServiceProvider.GetRequiredService<ILlamaServerRuntimeClient>();
+        var llamaClient = ResolveClientForStack(scope, target.StackBaseUrl);
         LlamaModelsResponse models;
         try
         {
@@ -172,11 +175,13 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
         }
 
         return models.Data.Any(m =>
-            string.Equals(m.Id, routerAlias, StringComparison.Ordinal)
+            string.Equals(m.Id, target.Alias, StringComparison.Ordinal)
             && IsRouterModelFailed(m));
     }
 
-    private static async Task<string?> ResolveConfiguredDefaultRouterAliasAsync(
+    private sealed record DefaultLlamaTarget(string Alias, string? StackBaseUrl);
+
+    private static async Task<DefaultLlamaTarget?> ResolveConfiguredDefaultRouterAliasAsync(
         IServiceScope scope,
         CancellationToken cancellationToken)
     {
@@ -208,12 +213,24 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
 
         try
         {
-            return LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson).RouterModelId;
+            var cfg = LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson);
+            return new DefaultLlamaTarget(cfg.RouterModelId, cfg.StackBaseUrl);
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// The runtime client for a llama model's machine. A model determines the machine
+    /// that runs it (its row's stackBaseUrl); only when no row-owned stack is declared
+    /// does the default (local) client apply.
+    /// </summary>
+    private ILlamaServerRuntimeClient ResolveClientForStack(IServiceScope scope, string? stackBaseUrl)
+    {
+        return _stackClients.GetClientForStack(stackBaseUrl, null)
+            ?? scope.ServiceProvider.GetRequiredService<ILlamaServerRuntimeClient>();
     }
 
     private static bool IsRouterModelLoaded(LlamaModelData model)

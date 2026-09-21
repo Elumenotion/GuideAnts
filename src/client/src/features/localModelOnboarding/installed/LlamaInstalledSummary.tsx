@@ -4,6 +4,7 @@ import type { InstallationArtifactDto, LlamaInstallationDetailDto, LlamaRouterEn
 import type { ActiveModelOperationState } from '../../../pages/settings/types';
 import { getErrorMessage } from '../../../pages/settings/utils';
 import { formatBytes } from '../curated/format';
+import { parseCanonicalLocalRuntimeJson } from '../../../pages/settings/utils';
 import { ChangeQuantModal } from './ChangeQuantModal';
 import { AliasPresetSavePanel, type AliasPresetSavePanelHandle } from './AliasPresetSavePanel';
 import { ModelChatBehaviorPanel } from './ModelChatBehaviorPanel';
@@ -18,6 +19,13 @@ export interface LlamaInstalledSummaryProps {
   onChanged?: () => Promise<void>;
   /** Publishes a started change-quant download to the settings page's operation tracker. */
   onOperationStarted: (operation: ActiveModelOperationState) => void;
+  /**
+   * The catalog row's RuntimeConfigJson. When the row has no installation
+   * provenance (e.g. its weights live on a row-owned stack) the summary degrades
+   * to a note and still renders the router-preset editor, which writes load
+   * parameters to the stack the row points at.
+   */
+  runtimeConfigJson?: string;
 }
 
 function containerArtifactPath(targetDirectory: string, artifact?: InstallationArtifactDto): string {
@@ -36,7 +44,7 @@ function containerArtifactPath(targetDirectory: string, artifact?: InstallationA
 }
 
 export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, LlamaInstalledSummaryProps>(
-  function LlamaInstalledSummary({ modelId, onChanged, onOperationStarted }, ref) {
+  function LlamaInstalledSummary({ modelId, onChanged, onOperationStarted, runtimeConfigJson }, ref) {
   const presetPanelRef = useRef<AliasPresetSavePanelHandle>(null);
   const [detail, setDetail] = useState<LlamaInstallationDetailDto | null>(null);
   const [routerEntry, setRouterEntry] = useState<LlamaRouterEntryDto | null>(null);
@@ -53,31 +61,33 @@ export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, Lla
     const installationPromise = api.settings.getLlamaInstallationDetail(modelId);
     const entriesPromise = api.settings.getLlamaRouterEntries();
 
-    let installation: LlamaInstallationDetailDto;
+    let installation: LlamaInstallationDetailDto | null = null;
     try {
       installation = await installationPromise;
       setDetail(installation);
-      setLoading(false);
     } catch (loadError) {
       setDetail(null);
-      setRouterEntry(null);
       setError(getErrorMessage(loadError, 'Failed to load installation detail.'));
-      setLoading(false);
-      return;
     }
 
+    // Fetch router entries even when the installation detail 404s: row-owned-stack
+    // rows without provenance render the preset editor, which needs the live entry
+    // (model path) to save.
     try {
       const entries = await entriesPromise;
-      setRouterEntry(
-        entries.entries.find((entry) => entry.alias === installation.routerModelId) ?? null,
-      );
+      const alias =
+        installation?.routerModelId ??
+        parseCanonicalLocalRuntimeJson(runtimeConfigJson)?.routerModelId ??
+        '';
+      setRouterEntry(entries.entries.find((entry) => entry.alias === alias) ?? null);
     } catch (entriesError) {
       setRouterEntry(null);
       setRouterEntriesError(
         getErrorMessage(entriesError, 'Live router entries unavailable. Editing last saved snapshot.'),
       );
     }
-  }, [modelId]);
+    setLoading(false);
+  }, [modelId, runtimeConfigJson]);
 
   useEffect(() => {
     void reload();
@@ -107,6 +117,22 @@ export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, Lla
   }
 
   if (error) {
+    const rowConfig = parseCanonicalLocalRuntimeJson(runtimeConfigJson);
+    // No installation provenance (404) is not fatal when the row targets its own
+    // llama stack: the load parameters are written to that stack's router, which
+    // needs no local installation record. Only rows without a stack have nowhere
+    // to write parameters until the model is installed/attached.
+    if (rowConfig?.stackBaseUrl) {
+      return (
+        <div className="space-y-4">
+          <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            No local installation record. Load parameters for this model are written to the
+            row's stack ({rowConfig.stackBaseUrl}).
+          </div>
+          <AliasPresetSavePanel alias={rowConfig.routerModelId} routerEntry={routerEntry} />
+        </div>
+      );
+    }
     return <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>;
   }
 

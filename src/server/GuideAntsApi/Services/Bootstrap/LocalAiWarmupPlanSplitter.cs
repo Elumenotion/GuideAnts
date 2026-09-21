@@ -3,10 +3,13 @@ using System.Text.Json.Nodes;
 namespace GuideAntsApi.Services.Bootstrap;
 
 /// <summary>
-/// Splits a complete API lifecycle plan into per-stack plans. Each ga-admin instance
-/// receives every service section: services on that stack keep API intent; all other
-/// sections are explicit <c>enabled: false</c> so loopback engines on the wrong box
-/// unload.
+/// Splits a complete API lifecycle plan into per-stack plans. Llama sections are
+/// per-instance (named <c>llama.&lt;instance base&gt;</c>): each stack receives its own
+/// section verbatim and every other instance's section is dropped, so an apply never
+/// says "unload llama" to an instance whose section is not addressed to it. Auxiliary
+/// (non-llama) services stay single-instance: services configured for that stack keep
+/// API intent; all others are explicit <c>enabled: false</c> so loopback engines on the
+/// wrong box unload.
 /// </summary>
 public sealed class LocalAiWarmupPlanSplitter
 {
@@ -38,6 +41,20 @@ public sealed class LocalAiWarmupPlanSplitter
             var stackServices = new JsonObject();
             foreach (var serviceId in LocalAiStackHostUrls.WarmupServiceIds)
             {
+                if (string.Equals(serviceId, LocalAiStackHostUrls.LlamaServiceId, StringComparison.Ordinal))
+                {
+                    // Per-instance llama: pass this stack's own section through untouched,
+                    // matched by CANONICAL identity so one physical box configured under
+                    // several host names receives one section, not one per name.
+                    var globalLlamaBase = _stackHostResolver.GetStackBaseForService(LocalAiStackHostUrls.LlamaServiceId);
+                    var section = ResolveLlamaSectionForStack(
+                        services,
+                        LocalAiStackHostResolver.CanonicalInstanceKey(stackBase),
+                        globalLlamaBase is null ? null : LocalAiStackHostResolver.CanonicalInstanceKey(globalLlamaBase));
+                    stackServices[serviceId] = section;
+                    continue;
+                }
+
                 var serviceStack = _stackHostResolver.GetStackBaseForService(serviceId);
                 if (serviceStack is not null
                     && string.Equals(serviceStack, stackBase, StringComparison.OrdinalIgnoreCase)
@@ -64,6 +81,36 @@ public sealed class LocalAiWarmupPlanSplitter
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// The llama section addressed to stackBase"/>:
+    /// <c>llama.&lt;stackBase&gt;</c> when the plan names it, falling back to a plain
+    /// <c>llama</c> section for global-plan compatibility. Missing = disabled (the
+    /// only unload source; the builder always emits a section for every known instance).
+    /// </summary>
+    internal static JsonObject ResolveLlamaSectionForStack(JsonObject services, string canonicalInstanceKey, string? globalLlamaCanonicalKey)
+    {
+        var instanceKey = $"{LocalAiStackHostUrls.LlamaServiceId}.{canonicalInstanceKey}";
+        JsonNode? instanceNode = services[instanceKey];
+        if (instanceNode is JsonObject instanceSection)
+        {
+            return (JsonObject)instanceSection.DeepClone();
+        }
+
+        // Plain "llama" is a legacy/global-plan compatibility fallback, valid only for the
+        // configured global llama stack itself.
+        if (globalLlamaCanonicalKey is not null
+            && string.Equals(globalLlamaCanonicalKey, canonicalInstanceKey, StringComparison.OrdinalIgnoreCase))
+        {
+            JsonNode? globalNode = services[LocalAiStackHostUrls.LlamaServiceId];
+            if (globalNode is JsonObject globalSection)
+            {
+                return (JsonObject)globalSection.DeepClone();
+            }
+        }
+
+        return new JsonObject { ["enabled"] = false };
     }
 }
 

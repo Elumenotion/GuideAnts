@@ -7,7 +7,19 @@ namespace GuideAntsApi.Services.LlamaCpp;
 
 public interface ILlamaRuntimeInventoryService
 {
+    /// <summary>
+    /// Inventory of the global LlamaCpp:BaseUrl stack (the default llama
+    /// server). Existing single-stack behavior, unchanged.
+    /// </summary>
     Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> GetInventoryAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Live inventory of a row-owned stack (multi-stack llama-cpp): probes
+    /// that stack's /llama-cpp surface. No cache, no INI-derived paths.
+    /// </summary>
+    Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> GetInventoryForStackAsync(
+        string stackBaseUrl,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
@@ -19,6 +31,7 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IRouterModelsConfigService _routerModels;
     private readonly ILlamaServerRuntimeClient _llamaClient;
+    private readonly ILlamaStackRuntimeClientProvider _stackClients;
     private readonly IMemoryCache _cache;
     private readonly ILogger<LlamaRuntimeInventoryService> _logger;
 
@@ -26,12 +39,14 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
         IServiceScopeFactory scopeFactory,
         IRouterModelsConfigService routerModels,
         ILlamaServerRuntimeClient llamaClient,
+        ILlamaStackRuntimeClientProvider stackClients,
         IMemoryCache cache,
         ILogger<LlamaRuntimeInventoryService> logger)
     {
         _scopeFactory = scopeFactory;
         _routerModels = routerModels;
         _llamaClient = llamaClient;
+        _stackClients = stackClients;
         _cache = cache;
         _logger = logger;
     }
@@ -46,7 +61,7 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
 
         try
         {
-            var inventory = await BuildInventoryAsync(cancellationToken).ConfigureAwait(false);
+            var inventory = await BuildInventoryAsync(null, cancellationToken).ConfigureAwait(false);
             _cache.Set(
                 InventoryCacheKey,
                 inventory,
@@ -72,15 +87,47 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
         }
     }
 
-    private async Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> BuildInventoryAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> GetInventoryForStackAsync(
+        string stackBaseUrl,
+        CancellationToken cancellationToken = default)
+    {
+        // Row-owned stack: probe that stack's /llama-cpp surface live, no cache.
+        try
+        {
+            return await BuildInventoryAsync(stackBaseUrl, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to build llama runtime inventory for row-owned stack {StackBaseUrl}.", stackBaseUrl);
+            return Array.Empty<LlamaRuntimeInventoryItemDto>();
+        }
+    }
+
+    private async Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> BuildInventoryAsync(
+        string? stackBaseUrl,
+        CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+        var stackKey = (stackBaseUrl ?? string.Empty).TrimEnd('/');
+        var runtimeClient = _stackClients.GetClientForStack(stackBaseUrl, null) ?? _llamaClient;
+
         IReadOnlyList<RouterModelEntry> routerEntries;
         try
         {
-            routerEntries = await _routerModels.GetEntriesAsync(cancellationToken).ConfigureAwait(false);
+            // Row-owned stacks have no readable INI from here (it lives in the
+            // remote container); router-declared paths are only available for
+            // the global stack. Runtime state (the readiness-relevant part)
+            // comes from the stack's own /llama-cpp surface in both cases.
+            if (string.IsNullOrWhiteSpace(stackBaseUrl))
+            {
+                routerEntries = await _routerModels.GetEntriesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                routerEntries = [];
+            }
         }
         catch (Exception ex)
         {
@@ -93,11 +140,11 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
         LlamaModelsResponse llamaList;
         try
         {
-            llamaList = await _llamaClient.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+            llamaList = await runtimeClient.ListModelsAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to list llama runtime models; inventory will show unknown runtime state.");
+            _logger.LogWarning(ex, "Failed to list llama runtime models (stack={StackKey}); inventory will show unknown runtime state.", stackKey);
             llamaList = new LlamaModelsResponse();
         }
 
@@ -212,7 +259,8 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
                 RouterPreset: entry?.Preset,
                 RuntimeFailed: runtimeRow?.Failed ?? false,
                 RuntimeExitCode: runtimeRow?.ExitCode,
-                InstallationProvenance: provenance));
+                InstallationProvenance: provenance,
+                StackKey: stackKey));
         }
 
         return results;

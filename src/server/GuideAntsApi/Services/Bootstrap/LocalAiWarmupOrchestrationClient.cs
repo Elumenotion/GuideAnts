@@ -69,7 +69,7 @@ public sealed class LocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchestrati
 
     public async Task<WarmupStatusDocument> GetStatusAsync(CancellationToken cancellationToken = default)
     {
-        var stacks = _stackHostResolver.GetAllConfiguredStackBases();
+        var stacks = await _stackHostResolver.GetAllConfiguredStackBasesAsync(cancellationToken).ConfigureAwait(false);
         if (stacks.Count == 0)
         {
             return EmptyStatusDocument();
@@ -115,6 +115,11 @@ public sealed class LocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchestrati
         StackWarmupPlan stackPlan,
         CancellationToken cancellationToken)
     {
+        _logger.LogInformation(
+            "[DIAG] ApplyToStackAsync: stack={StackBase} llamaSection={LlamaSection}",
+            stackPlan.StackBaseUrl,
+            ExtractLlamaSectionForDiag(stackPlan.PlanJson));
+
         var adminBase = LocalAiStackHostUrls.DeriveAdminBaseUri(stackPlan.StackBaseUrl);
         var applyUri = new Uri(adminBase, "warmup/apply");
         var client = _httpClientFactory.CreateClient(HttpClientName);
@@ -149,6 +154,21 @@ public sealed class LocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchestrati
                 ? status.GetString() ?? "unknown"
                 : "unknown",
             Changed: root.TryGetProperty("changed", out var changed) && changed.GetBoolean());
+    }
+
+    private static string ExtractLlamaSectionForDiag(string planJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(planJson);
+            return doc.RootElement.GetProperty("services").TryGetProperty("llama", out var llama)
+                ? llama.GetRawText()
+                : "missing";
+        }
+        catch (Exception ex)
+        {
+            return "parse-failed:" + ex.Message;
+        }
     }
 
     private async Task<WarmupStatusDocument> GetStatusForStackAsync(

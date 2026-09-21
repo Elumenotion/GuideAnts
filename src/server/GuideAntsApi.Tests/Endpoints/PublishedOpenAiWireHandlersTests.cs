@@ -800,7 +800,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             Times.Never);
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("pending_client_tool", true)]
     [DataRow("streaming", true)]
     [DataRow("completed", false)]

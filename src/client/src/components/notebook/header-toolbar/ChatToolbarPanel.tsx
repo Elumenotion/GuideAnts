@@ -35,6 +35,13 @@ export function ChatToolbarPanel({
     chat.inProgressState !== 'failed';
   const overrideAllChatModels = chatDefaults?.overrideAllChatModels ?? chat.overrideAllChatModels;
   const currentModelId = chat.effectiveModelId;
+  // The list is locked only when override is off AND the effective model comes
+  // from the assistant's own definition. When the assistant has no model, the
+  // effective model is the global default, so a pick can enable the override
+  // and change the default in one action.
+  const isDefaultedToGlobalDefault =
+    !overrideAllChatModels && chat.effectiveModelSource === 'defaultedTo';
+  const modelListLocked = !overrideAllChatModels && !isDefaultedToGlobalDefault;
   const loadButtonLabel = hasPendingOp
     ? 'Switching...'
     : chat.localRuntimeOn
@@ -112,9 +119,11 @@ export function ChatToolbarPanel({
   };
 
   const setGlobalModel = async (modelId: string) => {
-    if (!overrideAllChatModels) return;
+    if (modelListLocked) return;
     const current = chatDefaults ?? await api.settings.chatDefaults.get();
     const selectedModel = await resolveCatalogModel(modelId);
+    // Picking from the list while the assistant has no model of its own sets
+    // the global override so the pick takes effect immediately.
     await updateChatDefaultsFromRequest(buildChatDefaultsModelChangeRequest(
       current,
       modelId,
@@ -170,7 +179,9 @@ export function ChatToolbarPanel({
           <span className="block text-xs text-gray-500">
             {overrideAllChatModels
               ? 'Global override is on. Model picks below update settings for all chat paths.'
-              : 'Using assistant definitions. Turn on override to set a global model.'}
+              : isDefaultedToGlobalDefault
+                ? 'This assistant has no model of its own, so the global default is in use. Picking a model turns on the override.'
+                : 'Using assistant definitions. Turn on override to set a global model.'}
           </span>
         </span>
       </label>
@@ -185,11 +196,11 @@ export function ChatToolbarPanel({
                 key={option.modelId}
                 type="button"
                 className={`${textButtonClassName('neutral')} w-full justify-start text-left ${
-                  overrideAllChatModels ? '' : 'cursor-default'
+                  modelListLocked ? 'cursor-default' : ''
                 } ${isCurrent ? 'ring-2 ring-emerald-400/60 bg-emerald-50 font-medium' : ''}`}
                 role="option"
                 aria-selected={isCurrent}
-                disabled={!overrideAllChatModels}
+                disabled={modelListLocked}
                 onClick={() => {
                   void setGlobalModel(option.modelId);
                 }}

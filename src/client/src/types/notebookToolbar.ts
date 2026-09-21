@@ -62,6 +62,8 @@ export interface NotebookToolbarChatDto {
   blockers: string[];
   inProgressOperationId: string | null;
   inProgressState: string | null;
+  /** Why the effective model is selected: 'direct' (assistant definition), 'defaultedTo' (assistant has no model), 'overriddenToDefault' (global override on). */
+  effectiveModelSource?: string | null;
 }
 
 export interface NotebookHeaderToolbarDto {

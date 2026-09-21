@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Configuration;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.Anthropic;
 using AntRunner.Chat.GoogleGemini;
@@ -500,7 +501,8 @@ public sealed class RoutingChatCompletionClientFactoryTests
             openRouterFactory,
             llamaCppFactory,
             chatTargetResolver,
-            chatTargetValidator.Object);
+            chatTargetValidator.Object,
+            new ConfigurationBuilder().Build());
     }
 
     private static ApplicationDbContext CreateDb()
@@ -529,5 +531,103 @@ public sealed class RoutingChatCompletionClientFactoryTests
             return _responseFactory(request);
         }
     }
-}
 
+    [TestMethod]
+    public async Task CreateClient_RoutesToRowOwnedStack_WhenRuntimeConfigHasStackBaseUrl()
+    {
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "qwen3.6-27b-max",
+            DisplayName = "Qwen 3.6 27B (Max)",
+            Provider = "llama-cpp",
+            RuntimeConfigJson = """{"routerModelId":"Qwen3.6-27B-MTP-GGUF","stackBaseUrl":"http://192.0.2.1:8112","stackApiKey":"stack-key"}""",
+            CombineSystemAndDeveloperMessages = true,
+            ThoughtBlockPattern = @"<think>[\s\S]*?</think>",
+            SamplingParametersJson = """{"temperature":{"key":"temperature","displayName":"Temperature","description":"Controls randomness","min":0,"max":2,"step":0.1,"defaultValue":0.7,"displayOrder":0,"enabled":true}}""",
+            ThinkingControlJson = QwenThinkingControlJson,
+            RequestFieldsWhenToolsPresentJson = QwenRequestFieldsWhenToolsPresentJson,
+            IsActive = true
+        });
+        db.SaveChanges();
+
+        var factory = CreateFactory(db);
+
+        Uri? capturedUri = null;
+        string? capturedAuth = null;
+        var handler = new CapturingHandler(request =>
+        {
+            capturedUri = request.RequestUri;
+            capturedAuth = request.Headers.Authorization?.ToString();
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""",
+                    System.Text.Encoding.UTF8,
+                    "application/json")
+            });
+        });
+
+        var client = factory.CreateClient("qwen3.6-27b-max", new HttpClient(handler));
+        var request = new ChatCompletionRequest(
+            messages: [new ChatMessage(AntRunner.Chat.Abstractions.ChatRole.User, "hi")],
+            model: "qwen3.6-27b-max");
+
+        var response = await client.GetCompletionAsync(request);
+
+        response.FirstChoice!.Message.GetText().Should().Be("ok");
+        capturedUri!.ToString().Should().Be("http://192.0.2.1:8112/llama-cpp/v1/chat/completions");
+        capturedAuth.Should().Be("Bearer stack-key");
+    }
+
+    [TestMethod]
+    public async Task CreateClient_UsesGlobalBaseUrl_WhenRuntimeConfigHasNoStack()
+    {
+        using var db = CreateDb();
+        db.Models.Add(CreateLlamaModel("qwen3.5-27b", "Qwen3.5-27B-Q6_K"));
+        db.SaveChanges();
+
+        var factory = CreateFactory(db);
+
+        Uri? capturedUri = null;
+        var handler = new CapturingHandler(request =>
+        {
+            capturedUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""",
+                    System.Text.Encoding.UTF8,
+                    "application/json")
+            });
+        });
+
+        var client = factory.CreateClient("qwen3.5-27b", new HttpClient(handler));
+        var request = new ChatCompletionRequest(
+            messages: [new ChatMessage(AntRunner.Chat.Abstractions.ChatRole.User, "hi")],
+            model: "qwen3.5-27b");
+
+        var response = await client.GetCompletionAsync(request);
+
+        response.FirstChoice!.Message.GetText().Should().Be("ok");
+        // Global test config BaseUrl is http://localhost:8000 (no /llama-cpp prefix in the test fixture).
+        capturedUri!.ToString().Should().Be("http://localhost:8000/v1/chat/completions");
+    }
+
+    private sealed class CapturingHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _factory;
+
+        public CapturingHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> factory)
+        {
+            _factory = factory;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return _factory(request);
+        }
+    }
+}
