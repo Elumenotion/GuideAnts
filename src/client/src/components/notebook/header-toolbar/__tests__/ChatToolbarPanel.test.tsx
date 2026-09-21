@@ -82,6 +82,7 @@ describe('ChatToolbarPanel', () => {
           effectiveModelDisplayName: 'GPT-5 mini',
           effectiveProvider: 'azure-openai',
           overrideAllChatModels: true,
+          effectiveModelSource: 'overriddenToDefault',
           supportsLocalRuntimePower: false,
           localRuntimeOn: false,
           modelOptions: [
@@ -421,6 +422,7 @@ describe('ChatToolbarPanel', () => {
           effectiveModelDisplayName: 'GPT-5 mini',
           effectiveProvider: 'azure-openai',
           overrideAllChatModels: false,
+          effectiveModelSource: 'direct',
           supportsLocalRuntimePower: false,
           localRuntimeOn: false,
           modelOptions: [
@@ -449,7 +451,67 @@ describe('ChatToolbarPanel', () => {
     expect(api.settings.chatDefaults.update).not.toHaveBeenCalled();
   });
 
-  it('polls local runtime load until ready', async () => {
+  it('lets a defaulted assistant pick a model and enables override in one action', async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn(async () => {});
+    vi.mocked(api.settings.chatDefaults.get).mockResolvedValueOnce({
+      rowVersion: 'rv-defaulted',
+      defaultModelId: 'gpt-5-mini',
+      overrideAllChatModels: false,
+      temperature: null,
+      topP: null,
+      reasoningEffort: null,
+      samplingParametersJson: null,
+    });
+
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'ready',
+          summary: 'Chat ready',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'gpt-5-mini',
+          effectiveModelDisplayName: 'GPT-5 mini',
+          effectiveProvider: 'azure-openai',
+          overrideAllChatModels: false,
+          effectiveModelSource: 'defaultedTo',
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+            { modelId: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', provider: 'google-gemini-chat', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={onRefresh}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(api.settings.chatDefaults.get).toHaveBeenCalled());
+    const option = screen.getByRole('option', { name: /Gemini 2.5 Flash/i });
+    expect(option).toBeEnabled();
+    await user.click(option);
+    expect(api.settings.chatDefaults.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModelId: 'gemini-2.5-flash',
+        overrideAllChatModels: true,
+      })
+    );
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it('polls local runtime load until ready'
+, async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn(async () => {});
     const setInFlight = vi.fn();

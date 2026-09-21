@@ -270,6 +270,107 @@ public sealed class NotebookHeaderToolbarServiceTests
     }
 
     [TestMethod]
+    public async Task GetToolbarAsync_ExposesEffectiveModelSource_WhenAssistantDefaultsToGlobalModel()
+    {
+        await using var db = CreateDb();
+        var project = new Project
+        {
+            Title = "Project",
+            Slug = "project"
+        };
+        var notebook = new Notebook
+        {
+            Title = "Notebook",
+            Slug = "notebook",
+            ProjectId = project.Id,
+            Project = project
+        };
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        await db.SaveChangesAsync();
+
+        var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
+        settings
+            .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new SettingsModelDto(
+                    ModelId: "qwen-local",
+                    DisplayName: "Qwen Local",
+                    Provider: "llama-cpp",
+                    Description: null,
+                    ReasoningChoicesJson: null,
+                    RuntimeConfigJson: "{\\\"routerModelId\\\":\\\"qwen-local\\\"}",
+                    IsActive: true,
+                    DisplayOrder: 1,
+                    Created: DateTime.UtcNow,
+                    Updated: null)
+            ]);
+        settings
+            .Setup(x => x.GetServiceEditorStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string serviceId, CancellationToken _) => CreateReadyServiceState(serviceId));
+
+        var readiness = new Mock<IRoutingReadinessService>(MockBehavior.Strict);
+        readiness
+            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()))
+            .ReturnsAsync(new ChatTargetReadinessDto(
+                "qwen-local",
+                "llama-cpp",
+                "ready",
+                [],
+                null,
+                0,
+                "defaultedTo"));
+
+        var chatModelResolver = new Mock<IChatModelResolver>(MockBehavior.Strict);
+        chatModelResolver
+            .Setup(x => x.Resolve(It.IsAny<string?>()))
+            .Returns(new ResolvedChatModel(
+                "qwen-local",
+                ChatModelReferenceKind.DefaultedTo,
+                new ResolvedExecutionPolicy(
+                    "qwen-local",
+                    "llama-cpp",
+                    ParameterAuthority.AssistantDefinition,
+                    new Dictionary<string, System.Text.Json.JsonElement>())));
+
+        var conversations = new Mock<IConversationManager>(MockBehavior.Strict);
+
+        var llamaRuntime = new Mock<INotebookModelRuntimeService>(MockBehavior.Strict);
+        llamaRuntime
+            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NotebookLlamaRuntimeStatusDto
+            {
+                State = "requires_load"
+            });
+
+        var configuration = new ConfigurationBuilder().Build();
+        var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: false);
+
+        var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
+
+        var sut = new NotebookHeaderToolbarService(
+            db,
+            settings.Object,
+            readiness.Object,
+            chatModelResolver.Object,
+            conversations.Object,
+            llamaRuntime.Object,
+            chatDefaults,
+            configuration,
+            Mock.Of<IHttpClientFactory>(),
+            warmup.Object,
+            NullLogger<NotebookHeaderToolbarService>.Instance);
+
+        var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
+
+        toolbar.Chat.OverrideAllChatModels.Should().BeFalse();
+        toolbar.Chat.EffectiveModelSource.Should().Be("defaultedTo");
+    }
+
+    [TestMethod]
     public async Task GetToolbarAsync_ExplainsLocalModelSwitch_WhenAnotherLocalModelIsLoaded()
     {
         await using var db = CreateDb();

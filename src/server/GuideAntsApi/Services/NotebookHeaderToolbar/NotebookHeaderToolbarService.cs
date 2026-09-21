@@ -323,7 +323,13 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             modelOptions,
             chatBlockers,
             chatInProgressId,
-            chatInProgressState);
+            chatInProgressState,
+            chatReferenceKind switch
+            {
+                ChatModelReferenceKind.DefaultedTo => "defaultedTo",
+                ChatModelReferenceKind.OverriddenToDefault => "overriddenToDefault",
+                _ => "direct"
+            });
     }
 
     private async Task<IReadOnlyList<NotebookToolbarModelOptionDto>> BuildSelectableChatModelOptionsAsync(

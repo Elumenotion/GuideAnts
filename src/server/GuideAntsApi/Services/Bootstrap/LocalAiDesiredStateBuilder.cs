@@ -136,7 +136,24 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
 
             foreach (var row in rows)
             {
-                var configuration = LocalRuntimeConfigurationParser.Parse(row.ModelId, row.RuntimeConfigJson);
+                if (string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
+                {
+                    continue; // Row without a config cannot declare placement; skip rather than fail the whole build.
+                }
+
+                LocalRuntimeConfiguration configuration;
+                try
+                {
+                    configuration = LocalRuntimeConfigurationParser.Parse(row.ModelId, row.RuntimeConfigJson);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "[DIAG] BuildLlamaSectionsAsync: skipping model '{ModelId}' with invalid RuntimeConfigJson.",
+                        row.ModelId);
+                    continue;
+                }
+
                 if (!string.IsNullOrWhiteSpace(configuration.StackBaseUrl)
                     && LocalAiStackHostUrls.NormalizeStackBaseUrl(configuration.StackBaseUrl) is { } normalizedBase)
                 {
