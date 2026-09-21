@@ -93,7 +93,7 @@ public class GuideUsageService : IGuideUsageService
     }
 
     public async Task<GuideUsageSummaryDto?> GetGuideUsageSummaryAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to)
@@ -106,7 +106,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             var rows = await ctx.UsageEvents
                 .Where(e => e.AssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.AgentInvocationId == null
                          && e.Created >= from
                          && e.Created <= to)
@@ -129,7 +129,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.AssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.AgentInvocationId == null
                          && e.ConversationId != null
                          && e.Created >= from
@@ -144,7 +144,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.AssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.ConversationId != null
                          && e.Created >= from
                          && e.Created <= to)
@@ -161,7 +161,7 @@ public class GuideUsageService : IGuideUsageService
 
         await using var crewSummaryCtx = await _contextFactory.CreateDbContextAsync();
         var crewSummary = await crewSummaryCtx.UsageEvents
-            .Where(e => e.ProjectId == projectId
+            .Where(e => (projectId == null || e.ProjectId == projectId)
                      && e.AgentInvocationId != null
                      && e.Created >= from
                      && e.Created <= to
@@ -208,7 +208,7 @@ public class GuideUsageService : IGuideUsageService
     }
 
     public async Task<List<DailyUsageBucketDto>?> GetGuideUsageDailyBucketsAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to)
@@ -220,7 +220,7 @@ public class GuideUsageService : IGuideUsageService
 
         var guideConversationIds = await ctx.UsageEvents
             .Where(e => e.AssistantId == guideId
-                     && e.ProjectId == projectId
+                     && (projectId == null || e.ProjectId == projectId)
                      && e.AgentInvocationId == null
                      && e.ConversationId != null
                      && e.Created >= from
@@ -231,7 +231,7 @@ public class GuideUsageService : IGuideUsageService
 
         var directDaily = await ctx.UsageEvents
             .Where(e => e.AssistantId == guideId
-                     && e.ProjectId == projectId
+                     && (projectId == null || e.ProjectId == projectId)
                      && e.AgentInvocationId == null
                      && e.Created >= from
                      && e.Created <= to)
@@ -249,7 +249,7 @@ public class GuideUsageService : IGuideUsageService
             .ToListAsync();
 
         var crewDaily = await ctx.UsageEvents
-            .Where(e => e.ProjectId == projectId
+            .Where(e => (projectId == null || e.ProjectId == projectId)
                      && e.AgentInvocationId != null
                      && e.Created >= from
                      && e.Created <= to
@@ -326,7 +326,7 @@ public class GuideUsageService : IGuideUsageService
     }
 
     public async Task<GuideUsageCrewDto?> GetGuideUsageCrewAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to)
@@ -351,7 +351,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.AssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.ConversationId != null
                          && e.Created >= from
                          && e.Created <= to)
@@ -365,7 +365,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.AssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.AgentInvocationId == null
                          && e.ConversationId != null
                          && e.Created >= from
@@ -380,7 +380,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.AssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.AgentInvocationId == null
                          && e.Category == UsageCategory.ToolCall
                          && e.Created >= from
@@ -400,7 +400,7 @@ public class GuideUsageService : IGuideUsageService
         var crewAssistantIds = crewMembers.Select(cm => cm.AssistantId).ToList();
         await using var crewTotalsCtx = await _contextFactory.CreateDbContextAsync();
         var crewMemberTotals = await crewTotalsCtx.UsageEvents
-            .Where(e => e.ProjectId == projectId
+            .Where(e => (projectId == null || e.ProjectId == projectId)
                      && e.AgentInvocationId != null
                      && e.AssistantId != null
                      && crewAssistantIds.Contains(e.AssistantId.Value)
@@ -443,7 +443,7 @@ public class GuideUsageService : IGuideUsageService
     }
 
     public async Task<GuideUsageConversationsPageDto?> GetGuideUsageConversationsAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to,
@@ -458,7 +458,7 @@ public class GuideUsageService : IGuideUsageService
 
         var directConversationUsage = await _context.UsageEvents
             .Where(e => e.AssistantId == guideId
-                     && e.ProjectId == projectId
+                     && (projectId == null || e.ProjectId == projectId)
                      && e.AgentInvocationId == null
                      && e.ConversationId != null
                      && e.Created >= from
@@ -477,7 +477,7 @@ public class GuideUsageService : IGuideUsageService
         var guideConversationIds = directConversationUsage.Select(c => c.ConversationId).ToList();
 
         var crewConversationUsage = await _context.UsageEvents
-            .Where(e => e.ProjectId == projectId
+            .Where(e => (projectId == null || e.ProjectId == projectId)
                      && e.AgentInvocationId != null
                      && e.ConversationId != null
                      && e.Created >= from
@@ -521,7 +521,9 @@ public class GuideUsageService : IGuideUsageService
             .OrderByDescending(c => c.Created)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(c => new { c.Id, c.NotebookId, c.Title, c.Created })
+            .Select(c => new { c.Id, c.NotebookId, c.Title, c.Created,
+                ProjectId = c.Notebook.ProjectId,
+                ProjectName = c.Notebook.Project.Title })
             .ToListAsync();
 
         var pageIds = conversationMetadata.Select(c => c.Id).ToList();
@@ -569,14 +571,15 @@ public class GuideUsageService : IGuideUsageService
                 reasoningTokens,
                 completionTokens,
                 totalCost,
-                turnIndicesByConversation.GetValueOrDefault(c.Id, Array.Empty<int>()));
+                turnIndicesByConversation.GetValueOrDefault(c.Id, Array.Empty<int>()),
+                c.ProjectName);
         }).ToList();
 
         return new GuideUsageConversationsPageDto(page, pageSize, totalCount, items);
     }
 
     public async Task<GuideApiUsageReportDto?> GetGuideApiUsageReportAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to,
@@ -592,7 +595,7 @@ public class GuideUsageService : IGuideUsageService
         IQueryable<UsageEvent> query = _context.UsageEvents
             .AsNoTracking()
             .Where(e => e.AssistantId == guideId
-                     && e.ProjectId == projectId
+                     && (projectId == null || e.ProjectId == projectId)
                      && e.Created >= from
                      && e.Created <= to);
 
@@ -631,7 +634,7 @@ public class GuideUsageService : IGuideUsageService
     }
 
     public async Task<GuideUsageReportDto?> GetGuideUsageReportAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to)
@@ -681,7 +684,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.AssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.AgentInvocationId == null
                          && e.Created >= from
                          && e.Created <= to)
@@ -706,7 +709,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.AssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.AgentInvocationId == null
                          && e.Category == UsageCategory.ToolCall
                          && e.Created >= from
@@ -723,7 +726,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.AssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.NotebookConversationMessageId != null
                          && e.Created >= from)
                 .Select(e => e.ConversationId)
@@ -737,7 +740,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.InvokingAssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.AgentInvocationId != null
                          && e.Created >= from
                          && e.Created <= to)
@@ -761,7 +764,7 @@ public class GuideUsageService : IGuideUsageService
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
                 .Where(e => e.InvokingAssistantId == guideId
-                         && e.ProjectId == projectId
+                         && (projectId == null || e.ProjectId == projectId)
                          && e.AgentInvocationId != null
                          && e.AssistantId != null
                          && e.Created >= from

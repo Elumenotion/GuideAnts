@@ -28,6 +28,7 @@ public record AssistantDetailsDto(
     List<ConversationStarterDto> ConversationStarters
 ) {
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<EnvironmentVariableDto>? DefaultEnvironmentVariables { get; init; }
     public List<AssistantSkillDto>? Skills { get; init; }
     public int? MaxToolCallsPerTurn { get; init; }
 }
@@ -52,6 +53,7 @@ public record CreateAssistantDto(
 ) {
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<EnvironmentVariableDto>? DefaultEnvironmentVariables { get; init; }
     public List<AssistantSkillSaveDto>? Skills { get; init; }
     public int? MaxToolCallsPerTurn { get; init; }
 }
@@ -77,6 +79,7 @@ public record UpdateAssistantDto(
 ) {
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<EnvironmentVariableDto>? DefaultEnvironmentVariables { get; init; }
     public List<AssistantSkillSaveDto>? Skills { get; init; }
     public int? MaxToolCallsPerTurn { get; init; }
 }

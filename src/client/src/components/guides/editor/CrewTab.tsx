@@ -1,7 +1,7 @@
 import { GuideCrewManager } from '../guideEditor/GuideCrewManager';
 
 interface CrewTabProps {
-  projectId: string;
+  projectId?: string;
   selectedAssistantIds: string[];
   crewMemberLimitById: Record<string, number | null | undefined>;
   crewMemberInvocationLimits: Record<string, number | undefined>;

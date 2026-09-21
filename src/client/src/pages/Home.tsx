@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { FiBarChart2, FiFolderPlus, FiTool } from 'react-icons/fi';
 import { HomeButton } from '../components/common/HomeButton';
+import { GuidesButton } from '../components/common/GuidesButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import { api } from '../services/api';
 import { useToast } from '../components/common/Toast';
@@ -481,6 +482,7 @@ const Home = () => {
               />
             ) : null}
             <HomeButton />
+            <GuidesButton />
             <SettingsButton />
             <HeaderUserMenu />
             <TourStartButton

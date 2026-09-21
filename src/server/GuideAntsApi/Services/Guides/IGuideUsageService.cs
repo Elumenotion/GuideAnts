@@ -11,7 +11,7 @@ public interface IGuideUsageService
     /// Gets top-line summary metrics for a guide usage report.
     /// </summary>
     Task<GuideUsageSummaryDto?> GetGuideUsageSummaryAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to);
@@ -20,7 +20,7 @@ public interface IGuideUsageService
     /// Gets daily usage buckets for charts.
     /// </summary>
     Task<List<DailyUsageBucketDto>?> GetGuideUsageDailyBucketsAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to);
@@ -29,7 +29,7 @@ public interface IGuideUsageService
     /// Gets crew member and direct tool call usage.
     /// </summary>
     Task<GuideUsageCrewDto?> GetGuideUsageCrewAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to);
@@ -38,7 +38,7 @@ public interface IGuideUsageService
     /// Gets paged conversation summaries for drill-down.
     /// </summary>
     Task<GuideUsageConversationsPageDto?> GetGuideUsageConversationsAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to,
@@ -49,7 +49,7 @@ public interface IGuideUsageService
     /// Gets grouped API usage for source-channel attributed events.
     /// </summary>
     Task<GuideApiUsageReportDto?> GetGuideApiUsageReportAsync(
-        Guid projectId,
+        Guid? projectId,
         Guid guideId,
         DateTime from,
         DateTime to,

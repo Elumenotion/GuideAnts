@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
 import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HomeButton } from '../components/common/HomeButton';
+import { GuidesButton } from '../components/common/GuidesButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import ErrorScreen from '../components/ErrorScreen';
 import { TourStartButton } from '../tour/TourStartButton';
@@ -327,6 +328,7 @@ const Conversations = () => {
           <HeaderActionsBar>
             <GuideAntsGuideButton />
             <HomeButton />
+            <GuidesButton />
             <SettingsButton />
             <TourStartButton screenId="conversations-list" inline />
           </HeaderActionsBar>

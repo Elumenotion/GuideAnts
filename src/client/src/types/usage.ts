@@ -240,6 +240,8 @@ export interface ConversationUsageSummaryDto {
   completionTokens: number;
   totalCost: number;
   turnIndices: number[];
+
+  projectName?: string;
 }
 
 // Invocation Detail Types

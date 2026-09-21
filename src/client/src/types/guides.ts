@@ -24,6 +24,7 @@ export interface GuideDetailsDto {
   contextOptions: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
   environmentVariables?: EnvironmentVariableDto[];
+  defaultEnvironmentVariables?: EnvironmentVariableDto[];
   customTools: CustomToolDto[];
   files: FileDto[];
   conversationStarters: ConversationStarterDto[];
@@ -51,6 +52,7 @@ export interface CreateGuideDto {
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
   environmentVariables?: EnvironmentVariableDto[];
+  defaultEnvironmentVariables?: EnvironmentVariableDto[];
   files?: FileUploadDto[];
   skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
@@ -78,6 +80,7 @@ export interface UpdateGuideDto {
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
   environmentVariables?: EnvironmentVariableDto[];
+  defaultEnvironmentVariables?: EnvironmentVariableDto[];
   fileIdsToKeep?: string[]; // IDs of existing files to keep (omitted files are deleted)
   filesToAdd?: FileUploadDto[]; // New files to upload
   skills?: AssistantSkillSaveDto[];
@@ -110,6 +113,7 @@ export interface AssistantDetailsDto {
   tools: ToolAssignmentDto[];
   contextOptions: ContextOptionDto[];
   environmentVariables?: EnvironmentVariableDto[];
+  defaultEnvironmentVariables?: EnvironmentVariableDto[];
   customTools: CustomToolDto[];
   files: FileDto[];
   conversationStarters: ConversationStarterDto[];
@@ -134,6 +138,7 @@ export interface CreateAssistantDto {
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
   environmentVariables?: EnvironmentVariableDto[];
+  defaultEnvironmentVariables?: EnvironmentVariableDto[];
   files?: FileUploadDto[];
   skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
@@ -157,6 +162,7 @@ export interface UpdateAssistantDto {
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
   environmentVariables?: EnvironmentVariableDto[];
+  defaultEnvironmentVariables?: EnvironmentVariableDto[];
   fileIdsToKeep?: string[]; // IDs of existing files to keep (omitted files are deleted)
   filesToAdd?: FileUploadDto[]; // New files to upload
   skills?: AssistantSkillSaveDto[];

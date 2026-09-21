@@ -10,12 +10,22 @@ interface EnvironmentConfigProps {
   entityLabel: 'guide' | 'assistant';
   variables: EnvironmentVariableDto[];
   onChange: (variables: EnvironmentVariableDto[]) => void;
+  /**
+   * 'default' (global route): edits the guide default environment, inherited by
+   * every project that does not override a name. 'project' (default): edits the
+   * project override; inherited variables are shown read-only below.
+   */
+  mode?: 'default' | 'project';
+  /** Guide default environment variables, shown read-only in project mode. */
+  inheritedVariables?: EnvironmentVariableDto[];
 }
 
 export function EnvironmentConfig({
   entityLabel,
   variables,
   onChange,
+  mode = 'project',
+  inheritedVariables = [],
 }: EnvironmentConfigProps) {
   const updateVariables = (
     updater: (variables: EnvironmentVariableDto[]) => EnvironmentVariableDto[]
@@ -36,11 +46,14 @@ export function EnvironmentConfig({
       <div>
         <h2 className="text-lg font-semibold text-gray-900">
           {entityLabel === 'guide' ? 'Guide' : 'Assistant'} Environment
+          {mode === 'default' ? ' (Default)' : ''}
         </h2>
         <p className="text-sm text-gray-600">
-          {entityLabel === 'guide'
-            ? 'Configured for this guide in this project. Script execution hydrates this guide plus its crew member environments. MCP tool sources reference secrets from here for API keys and auth headers.'
-            : 'Configured for this assistant in this project. Script execution and MCP tool sources on this assistant can reference these secrets for API keys and auth headers. Secret values are masked after save.'}
+          {mode === 'default'
+            ? 'Default environment for this guide, inherited by every project that does not override a variable by name. Changing these values applies across all projects at once. Script execution and MCP tool sources resolve secrets from here.'
+            : entityLabel === 'guide'
+              ? 'Configured for this guide in this project. Overrides the guide default on a per-name basis; everything else is inherited. Script execution hydrates this guide plus its crew member environments. MCP tool sources reference secrets from here for API keys and auth headers.'
+              : 'Configured for this assistant in this project. Overrides the guide default on a per-name basis; everything else is inherited. Script execution and MCP tool sources on this assistant can reference these secrets for API keys and auth headers. Secret values are masked after save.'}
         </p>
       </div>
 
@@ -140,6 +153,38 @@ export function EnvironmentConfig({
         <FaPlus className="h-4 w-4" />
         Add Variable
       </button>
+
+      {mode === 'project' && (
+        <div className="border-t border-gray-200 pt-4">
+          <h3 className="text-sm font-semibold text-gray-900">Inherited from default</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            These come from the guide default environment and apply because this project
+            does not set the same name. Set a variable above with the same name to override.
+          </p>
+          {inheritedVariables.length === 0 ? (
+            <div className="mt-3 rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+              No default environment variables are configured for this {entityLabel}.
+            </div>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {inheritedVariables.map((variable, index) => (
+                <div
+                  key={`inherited-${index}`}
+                  className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-4 py-2"
+                >
+                  <div className="text-sm font-medium text-gray-700">{variable.name}</div>
+                  <div className="flex items-center gap-2">
+                    {variable.isSecret && (
+                      <span className="rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-600">secret</span>
+                    )}
+                    <span className="text-xs text-gray-500">{variable.value || '(empty)'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

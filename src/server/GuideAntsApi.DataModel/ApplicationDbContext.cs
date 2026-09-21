@@ -663,6 +663,7 @@ namespace GuideAntsApi.DataModel
                 b.Property(x => x.ToolResourcesJson).HasColumnType("nvarchar(max)");
                 b.Property(x => x.MetadataJson).HasColumnType("nvarchar(max)");
                 b.Property(x => x.Kind).HasConversion<byte>().HasComment("AssistantKind discriminator");
+                b.Property(x => x.DefaultEnvironmentConfigJson).HasColumnType("nvarchar(max)");
                 b.Property(x => x.AvatarImageBytes).HasColumnType("varbinary(max)");
                 b.Property(x => x.HomePageMarkdown).HasColumnType("nvarchar(max)");
                 

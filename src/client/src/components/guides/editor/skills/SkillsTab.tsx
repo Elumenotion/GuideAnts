@@ -27,7 +27,7 @@ import {
 import { decodePendingFileContent } from './skillFileTreeModel';
 
 interface SkillsTabProps {
-  projectId: string;
+  projectId?: string;
   assistantId?: string;
   skills: AssistantSkillDto[];
   pendingSkillUploads: AssistantSkillSaveDto[];
@@ -108,7 +108,7 @@ export function SkillsTab({
 
     try {
       const payload = await buildCreateAssistantFromSkillPayload(
-        projectId,
+        projectId ?? '',
         skills,
         pendingSkillUploads,
         assistantId,
@@ -121,7 +121,7 @@ export function SkillsTab({
         message: `"${created.name}" is ready to use.`,
       });
       setShowCreateFromSkill(false);
-      navigate(`/projects/${projectId}/guides/assistant/${created.id}?tab=general`);
+      navigate(projectId ? `/projects/${projectId}/guides/assistant/${created.id}?tab=general` : `/guides/assistant/${created.id}?tab=general`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create assistant from skill.';
       setCreateFromSkillError(message);

@@ -28,7 +28,11 @@ import {
 type RangePreset = '7d' | '30d' | '90d';
 
 export default function GuideUsagePage() {
-  const { projectId, guideId, assistantId } = useParams<{ projectId: string; guideId?: string; assistantId?: string }>();
+  const { projectId, guideId, assistantId } = useParams<{ projectId?: string; guideId?: string; assistantId?: string }>();
+
+  // Global (all-projects) route: no projectId in the URL. guideUsageApi falls
+  // back to the /api/guides/{id}/usage/* endpoints, which aggregate every project.
+  const isGlobal = !projectId;
   const navigate = useNavigate();
   
   // Support both guide and assistant routes
@@ -141,7 +145,7 @@ export default function GuideUsagePage() {
 
   // Load usage report
   useEffect(() => {
-    if (!projectId || !entityId) return;
+    if (!entityId) return;
     
     let cancelled = false;
     
@@ -157,8 +161,8 @@ export default function GuideUsagePage() {
       setConversationTotalCount(0);
       try {
         const summary = isAssistant
-          ? await guideUsageApi.getAssistantUsageSummary(projectId!, entityId!, from, to)
-          : await guideUsageApi.getGuideUsageSummary(projectId!, entityId!, from, to);
+          ? await guideUsageApi.getAssistantUsageSummary(entityId!, from, to, projectId)
+          : await guideUsageApi.getGuideUsageSummary(entityId!, from, to, projectId);
 
         if (!cancelled) {
           setReport(mapSummaryToReport(summary));
@@ -169,8 +173,8 @@ export default function GuideUsagePage() {
           setLoadingCharts(true);
           try {
             const buckets = isAssistant
-              ? await guideUsageApi.getAssistantUsageCharts(projectId!, entityId!, from, to)
-              : await guideUsageApi.getGuideUsageCharts(projectId!, entityId!, from, to);
+              ? await guideUsageApi.getAssistantUsageCharts(entityId!, from, to, projectId)
+              : await guideUsageApi.getGuideUsageCharts(entityId!, from, to, projectId);
             if (!cancelled) {
               setReport(prev => prev ? { ...prev, dailyBuckets: buckets } : prev);
             }
@@ -187,8 +191,8 @@ export default function GuideUsagePage() {
           setLoadingCrew(true);
           try {
             const crew = isAssistant
-              ? await guideUsageApi.getAssistantUsageCrew(projectId!, entityId!, from, to)
-              : await guideUsageApi.getGuideUsageCrew(projectId!, entityId!, from, to);
+              ? await guideUsageApi.getAssistantUsageCrew(entityId!, from, to, projectId)
+              : await guideUsageApi.getGuideUsageCrew(entityId!, from, to, projectId);
             if (!cancelled) {
               setReport(prev => prev ? { ...prev, crewMembers: crew.crewMembers, directToolCalls: crew.directToolCalls } : prev);
             }
@@ -205,8 +209,8 @@ export default function GuideUsagePage() {
           setLoadingConversations(true);
           try {
             const conversations = isAssistant
-              ? await guideUsageApi.getAssistantUsageConversations(projectId!, entityId!, from, to, 1, conversationPageSize)
-              : await guideUsageApi.getGuideUsageConversations(projectId!, entityId!, from, to, 1, conversationPageSize);
+              ? await guideUsageApi.getAssistantUsageConversations(entityId!, from, to, 1, conversationPageSize, projectId)
+              : await guideUsageApi.getGuideUsageConversations(entityId!, from, to, 1, conversationPageSize, projectId);
             if (!cancelled) {
               setReport(prev => prev ? { ...prev, conversations: conversations.items } : prev);
               setConversationTotalCount(conversations.totalCount);
@@ -235,7 +239,7 @@ export default function GuideUsagePage() {
   }, [projectId, entityId, isAssistant, from, to]);
 
   useEffect(() => {
-    if (!projectId || !entityId) return;
+    if (!entityId) return;
     const currentProjectId = projectId;
     const currentEntityId = entityId;
 
@@ -246,8 +250,8 @@ export default function GuideUsagePage() {
       setApiUsageError(null);
       try {
         const next = isAssistant
-          ? await guideUsageApi.getAssistantApiUsage(currentProjectId, currentEntityId, from, to, apiUsageSource)
-          : await guideUsageApi.getGuideApiUsage(currentProjectId, currentEntityId, from, to, apiUsageSource);
+          ? await guideUsageApi.getAssistantApiUsage(currentEntityId, from, to, apiUsageSource, currentProjectId)
+          : await guideUsageApi.getGuideApiUsage(currentEntityId, from, to, apiUsageSource, currentProjectId);
         if (!cancelled) {
           setApiUsageReport(next);
         }
@@ -279,14 +283,14 @@ export default function GuideUsagePage() {
   }
 
   const loadMoreConversations = async () => {
-    if (!projectId || !entityId || !report || loadingConversations) return;
+    if (!entityId || !report || loadingConversations) return;
     const nextPage = conversationPage + 1;
     setLoadingConversations(true);
     setConversationsError(null);
     try {
       const response = isAssistant
-        ? await guideUsageApi.getAssistantUsageConversations(projectId, entityId, from, to, nextPage, conversationPageSize)
-        : await guideUsageApi.getGuideUsageConversations(projectId, entityId, from, to, nextPage, conversationPageSize);
+        ? await guideUsageApi.getAssistantUsageConversations(entityId, from, to, nextPage, conversationPageSize, projectId)
+        : await guideUsageApi.getGuideUsageConversations(entityId, from, to, nextPage, conversationPageSize, projectId);
       setReport(prev => prev ? { ...prev, conversations: [...prev.conversations, ...response.items] } : prev);
       setConversationPage(nextPage);
       setConversationTotalCount(response.totalCount);
@@ -298,6 +302,10 @@ export default function GuideUsagePage() {
   };
 
   const handleBack = () => {
+    if (isGlobal) {
+      navigate('/guides');
+      return;
+    }
     const tab = isAssistant ? 'assistants' : 'guides';
     navigate(`/projects/${projectId}/guides?tab=${tab}`);
   };
@@ -456,7 +464,11 @@ export default function GuideUsagePage() {
               {report?.guideName || entity?.name || (isAssistant ? 'Assistant' : 'Guide')} Usage Report
             </h1>
             <p className="text-xs md:text-sm text-gray-600">
-              {report ? `${report.totalConversations} conversations in selected period` : 'Loading...'}
+              {report
+                ? isGlobal
+                  ? `${report.totalConversations} conversations across all projects in selected period`
+                  : `${report.totalConversations} conversations in selected period`
+                : 'Loading...'}
             </p>
           </div>
         </div>
@@ -986,6 +998,11 @@ export default function GuideUsagePage() {
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Title
                         </th>
+                        {isGlobal && (
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Project
+                          </th>
+                        )}
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Started
                         </th>
@@ -1021,6 +1038,11 @@ export default function GuideUsagePage() {
                             <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                               {conv.title || '(Untitled conversation)'}
                             </td>
+                            {isGlobal && (
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                                {conv.projectName || '(deleted project)'}
+                              </td>
+                            )}
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
                               {formatDate(conv.created)}
                             </td>

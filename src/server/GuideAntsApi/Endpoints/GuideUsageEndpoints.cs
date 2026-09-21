@@ -410,6 +410,255 @@ public static class GuideUsageEndpoints
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden);
 
+
+        // Global (no-project) Guide usage report endpoint
+        var globalGuideUsageGroup = app.MapGroup("/api/guides/{guideId}/usage")
+            .WithTags("Guide Usage (Global)")
+            .RequireAuthorization("RequireAdmin")
+            .WithOpenApi();
+
+        globalGuideUsageGroup.MapGet("/summary", async (
+            Guid guideId,
+            DateTime from,
+            DateTime to,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var summary = await usageService.GetGuideUsageSummaryAsync(null, guideId, from, to);
+                if (summary == null)
+                    return Results.NotFound();
+                return Results.Ok(summary);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GlobalGetGuideUsageSummary")
+        .Produces<GuideUsageSummaryDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        globalGuideUsageGroup.MapGet("/charts", async (
+            Guid guideId,
+            DateTime from,
+            DateTime to,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var buckets = await usageService.GetGuideUsageDailyBucketsAsync(null, guideId, from, to);
+                if (buckets == null)
+                    return Results.NotFound();
+                return Results.Ok(buckets);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GlobalGetGuideUsageCharts")
+        .Produces<List<DailyUsageBucketDto>>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        globalGuideUsageGroup.MapGet("/crew", async (
+            Guid guideId,
+            DateTime from,
+            DateTime to,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var crew = await usageService.GetGuideUsageCrewAsync(null, guideId, from, to);
+                if (crew == null)
+                    return Results.NotFound();
+                return Results.Ok(crew);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GlobalGetGuideUsageCrew")
+        .Produces<GuideUsageCrewDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        globalGuideUsageGroup.MapGet("/conversations", async (
+            Guid guideId,
+            DateTime from,
+            DateTime to,
+            int? page,
+            int? pageSize,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var conversations = await usageService.GetGuideUsageConversationsAsync(
+                    null,
+                    guideId,
+                    from,
+                    to,
+                    page ?? 1,
+                    pageSize ?? 100);
+                if (conversations == null)
+                    return Results.NotFound();
+                return Results.Ok(conversations);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GlobalGetGuideUsageConversations")
+        .Produces<GuideUsageConversationsPageDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        globalGuideUsageGroup.MapGet("/api", async (
+            Guid guideId,
+            DateTime from,
+            DateTime to,
+            string? source,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var report = await usageService.GetGuideApiUsageReportAsync(null, guideId, from, to, source);
+                if (report == null)
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.Ok(report);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GlobalGetGuideApiUsage")
+        .Produces<GuideApiUsageReportDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        // Global (no-project) Assistant usage report endpoint
+        var globalAssistantUsageGroup = app.MapGroup("/api/assistants/{assistantId}/usage")
+            .WithTags("Assistant Usage (Global)")
+            .RequireAuthorization("RequireAdmin")
+            .WithOpenApi();
+
+        globalAssistantUsageGroup.MapGet("/summary", async (
+            Guid assistantId,
+            DateTime from,
+            DateTime to,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var summary = await usageService.GetGuideUsageSummaryAsync(null, assistantId, from, to);
+                if (summary == null)
+                    return Results.NotFound();
+                return Results.Ok(summary);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GlobalGetAssistantUsageSummary")
+        .Produces<GuideUsageSummaryDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        globalAssistantUsageGroup.MapGet("/charts", async (
+            Guid assistantId,
+            DateTime from,
+            DateTime to,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var buckets = await usageService.GetGuideUsageDailyBucketsAsync(null, assistantId, from, to);
+                if (buckets == null)
+                    return Results.NotFound();
+                return Results.Ok(buckets);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GlobalGetAssistantUsageCharts")
+        .Produces<List<DailyUsageBucketDto>>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        globalAssistantUsageGroup.MapGet("/crew", async (
+            Guid assistantId,
+            DateTime from,
+            DateTime to,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var crew = await usageService.GetGuideUsageCrewAsync(null, assistantId, from, to);
+                if (crew == null)
+                    return Results.NotFound();
+                return Results.Ok(crew);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GlobalGetAssistantUsageCrew")
+        .Produces<GuideUsageCrewDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        globalAssistantUsageGroup.MapGet("/conversations", async (
+            Guid assistantId,
+            DateTime from,
+            DateTime to,
+            int? page,
+            int? pageSize,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var conversations = await usageService.GetGuideUsageConversationsAsync(
+                    null,
+                    assistantId,
+                    from,
+                    to,
+                    page ?? 1,
+                    pageSize ?? 100);
+                if (conversations == null)
+                    return Results.NotFound();
+                return Results.Ok(conversations);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GlobalGetAssistantUsageConversations")
+        .Produces<GuideUsageConversationsPageDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
         // Turn prompt-trace endpoint (system/context/tool definitions drill-down)
         var turnTraceGroup = app.MapGroup("/api/conversations/{conversationId}/turns/{turnIndex}/trace")
             .WithTags("Conversation Messages")

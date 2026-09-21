@@ -14,6 +14,7 @@ import Terms from '@/pages/Terms';
 import Privacy from '@/pages/Privacy';
 import GuidesDashboard from '../pages/GuidesDashboard';
 import GuideEditor from '../pages/GuideEditor';
+import GlobalGuides from '../pages/GlobalGuides';
 import AssistantEditor from '../pages/AssistantEditor';
 import PublicGuide from '../pages/PublicGuide';
 import GuideUsagePage from '../pages/GuideUsagePage';
@@ -89,6 +90,16 @@ const AppContent = () => {
       <Route path="/projects/:projectId/notebooks/:notebookId" element={withProtection(withProjectProvider(<NotebookDetails />))} />
       <Route path="/projects/:projectId/notebooks/:notebookId/edit" element={withEditorProtection(withProjectProvider(<EditNotebook />))} />
       <Route path="/projects/:projectId/notebooks/:notebookId/files/preview" element={withProtection(withProjectProvider(<FilePreviewPage />))} />
+      // Global (all-projects) guide routes: editor manages the guide default
+      // environment (inherited by all projects); usage covers every project.
+      <Route path="guides" element={withAdminProtection(<GlobalGuides />)} />
+      <Route path="guides/guide/new" element={withAdminProtection(<GuideEditor />)} />
+      <Route path="guides/guide/:guideId" element={withAdminProtection(<GuideEditor />)} />
+      <Route path="guides/guide/:guideId/usage" element={withAdminProtection(<GuideUsagePage />)} />
+      <Route path="guides/assistant/new" element={withAdminProtection(<AssistantEditor />)} />
+      <Route path="guides/assistant/:assistantId" element={withAdminProtection(<AssistantEditor />)} />
+      <Route path="guides/assistant/:assistantId/usage" element={withAdminProtection(<GuideUsagePage />)} />
+
       <Route path="/projects/:projectId/guides" element={withAdminProtection(withProjectProvider(<GuidesDashboard />))} />
       <Route path="/projects/:projectId/guides/guide/new" element={withAdminProtection(withProjectProvider(<GuideEditor />))} />
       <Route path="/projects/:projectId/guides/guide/:guideId" element={withAdminProtection(withProjectProvider(<GuideEditor />))} />

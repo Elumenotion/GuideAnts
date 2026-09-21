@@ -6,7 +6,7 @@ import { CrewMemberLimitsRow } from '../editor/crew/CrewMemberLimitsRow';
 import { CrewMemberLimitOverrideField } from '../editor/crew/CrewMemberLimitOverrideField';
 
 interface GuideCrewManagerProps {
-  projectId: string;
+  projectId?: string;
   selectedAssistantIds: string[];
   crewMemberLimitById: Record<string, number | null | undefined>;
   crewMemberInvocationLimits: Record<string, number | undefined>;

@@ -4,6 +4,7 @@ import { UsageBucket, UsageSummaryDto, ProjectUsageSummaryDto, UsageBreakdownWit
 import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
 import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HomeButton } from '../components/common/HomeButton';
+import { GuidesButton } from '../components/common/GuidesButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import { TourStartButton } from '../tour/TourStartButton';
 import { useRegisterTour } from '../tour/useRegisterTour';
@@ -138,6 +139,7 @@ const Usage = () => {
           <HeaderActionsBar>
             <GuideAntsGuideButton />
             <HomeButton />
+            <GuidesButton />
             <SettingsButton />
             <TourStartButton screenId="usage" inline />
           </HeaderActionsBar>

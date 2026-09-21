@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfirmationDialog } from '../components/common/ConfirmationDialog';
 import { HomeButton } from '../components/common/HomeButton';
+import { GuidesButton } from '../components/common/GuidesButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import { TourStartButton } from '../tour/TourStartButton';
 import { useToast } from '../components/common/Toast';
@@ -623,6 +624,7 @@ export default function Settings() {
               />
             ) : null}
             <HomeButton />
+            <GuidesButton />
             <SettingsButton />
             <HeaderUserMenu />
             <TourStartButton screenId="settings" inline />
