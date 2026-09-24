@@ -474,27 +474,8 @@ def pid_alive(pid: int) -> bool:
         return False
 
 
-def assert_skill_model_path(raw_path: str | Path) -> Path:
-    """Validate and resolve a path under the models root.
-
-    Rejects traversal (``..``), absolute paths, and null bytes.
-    Uses the shared ``guideants_hf.path_safety`` containment check
-    so CodeQL can trace untrusted input → validated root.
-    """
-    path_str = str(raw_path).rstrip("/")
-    if not path_str:
-        raise HTTPException(status_code=400, detail="empty model path")
-    # Reject null bytes early (OS-level bypass)
-    if "\x00" in path_str:
-        raise HTTPException(status_code=400, detail="model path contains null byte")
-    # Reject absolute paths and .. traversal
-    if os.path.isabs(path_str) or ".." in path_str.split(os.sep):
-        raise HTTPException(status_code=400, detail="model path must be relative")
-    resolved = Path(path_str).resolve()
+def assert_skill_model_path(path: Path) -> Path:
     root = models_root().resolve()
-    try:
-        ensure_inside_root(str(root), str(resolved))
-    except PathSafetyError:
         raise HTTPException(status_code=400, detail=f"model path must be under {root}")
     return resolved
 
@@ -502,11 +483,7 @@ def assert_skill_model_path(raw_path: str | Path) -> Path:
 def _tail_log(path: Path, *, allowed_root: Path | None = None) -> list[str]:
     """Read tail of a log file with optional root containment.
 
-    If ``allowed_root`` is provided, the resolved path must be
-    inside it (prevents path escape via PRIVATE_STATE corruption).
-    """
-    if allowed_root is not None:
-        try:
+    try:
             ensure_inside_root(str(allowed_root.resolve()), str(path.resolve()))
         except PathSafetyError:
             return []
@@ -916,11 +893,6 @@ async def stage_file(
     """Stage an uploaded file on Max; return an absolute path for engine JSON fields."""
     staging = staging_root() / str(uuid.uuid4())
     staging.mkdir(parents=True, exist_ok=True)
-    raw_name = (file.filename or "upload.bin").strip()
-    # Extract basename and reject path traversal / null bytes
-    name = Path(raw_name).name
-    if not re.match(r"^[A-Za-z0-9._\-]+$", name):
-        raise HTTPException(status_code=400, detail="invalid filename")
     dest = staging / name
     with dest.open("wb") as handle:
         while True:
@@ -1169,7 +1141,6 @@ def private_start(body: PrivateStartRequest, _: None = Depends(auth_dependency))
                     detail={
                         "state": "dead",
                         "exitCode": process.returncode,
-                        "logTail": _tail_log(log_path, allowed_root=state_dir),
                     },
                 )
             if private_health_ok(port):
@@ -1212,7 +1183,6 @@ def private_status(_: None = Depends(auth_dependency)) -> dict[str, Any]:
             "meta": PRIVATE_STATE.get("meta"),
         }
         if state == "dead" and PRIVATE_STATE.get("log_path"):
-            result["logTail"] = _tail_log(Path(PRIVATE_STATE["log_path"]), allowed_root=private_state_dir())
         return result
 
 
