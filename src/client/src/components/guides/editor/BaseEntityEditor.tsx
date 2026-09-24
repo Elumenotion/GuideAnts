@@ -57,6 +57,7 @@ interface FormData {
   contextOptions: ContextOptionDto[];
   authProviders: AuthProviderDto[]; // Only used for guides
   environmentVariables: EnvironmentVariableDto[];
+  inheritedVariables: EnvironmentVariableDto[]; // guide default env, read-only in project mode
   existingFiles: FileDto[]; // Files already on the server
   newFiles: FileUploadDto[]; // New files to be uploaded
   skills: AssistantSkillDto[];
@@ -84,6 +85,7 @@ const defaultFormData: FormData = {
   contextOptions: [],
   authProviders: [],
   environmentVariables: [],
+  inheritedVariables: [],
   existingFiles: [],
   newFiles: [],
   skills: [],
@@ -162,7 +164,12 @@ function buildCrewMemberLimitsPayload(
 interface BaseEntityEditorProps {
   entityType: 'assistant' | 'guide';
   entityId?: string;
-  projectId: string;
+  /**
+   * When omitted, the editor is in global (all-projects) mode: the environment
+   * tab edits the guide's default environment (inherited by every project),
+   * and usage covers all projects.
+   */
+  projectId?: string;
 }
 
 export default function BaseEntityEditor({ entityType, entityId, projectId }: BaseEntityEditorProps) {
@@ -650,7 +657,15 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           customTools: data.customTools,
           contextOptions: data.contextOptions,
           authProviders: data.authProviders || [],
-          environmentVariables: data.environmentVariables || [],
+          // Global mode: the form edits the guide default environment (inherited by
+          // every project). Project mode: the form edits the project override and the
+          // default is shown read-only via inheritedVariables.
+          environmentVariables: projectId
+            ? data.environmentVariables || []
+            : data.defaultEnvironmentVariables || [],
+          inheritedVariables: projectId
+            ? data.defaultEnvironmentVariables || []
+            : [],
           existingFiles: data.files || [],
           newFiles: [],
           skills: reindexSkillDisplayOrders(data.skills || []),
@@ -694,7 +709,12 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           customTools: data.customTools,
           contextOptions: data.contextOptions,
           authProviders: [],
-          environmentVariables: data.environmentVariables || [],
+          environmentVariables: projectId
+            ? data.environmentVariables || []
+            : data.defaultEnvironmentVariables || [],
+          inheritedVariables: projectId
+            ? data.defaultEnvironmentVariables || []
+            : [],
           existingFiles: data.files || [],
           newFiles: [],
           skills: reindexSkillDisplayOrders(data.skills || []),
@@ -714,7 +734,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
       }
     } catch (error: any) {
       showToast({ type: 'error', title: `Failed to load ${entityType}`, message: error.message });
-      navigate(`/projects/${projectId}/guides`);
+      navigate(projectId ? `/projects/${projectId}/guides` : '/guides');
     } finally {
       setLoading(false);
     }
@@ -954,7 +974,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
 
           const newGuide = await api.guides.guides.create(createDto);
           showToast({ type: 'success', title: 'Guide created successfully' });
-          navigate(`/projects/${projectId}/guides/guide/${newGuide.id}`);
+          navigate(projectId ? `/projects/${projectId}/guides/guide/${newGuide.id}` : `/guides/guide/${newGuide.id}`);
           return;
         } else {
           const createDto: CreateAssistantDto = {
@@ -984,7 +1004,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
 
           const newAssistant = await api.guides.assistants.create(createDto);
           showToast({ type: 'success', title: 'Assistant created successfully' });
-          navigate(`/projects/${projectId}/guides/assistant/${newAssistant.id}`);
+          navigate(projectId ? `/projects/${projectId}/guides/assistant/${newAssistant.id}` : `/guides/assistant/${newAssistant.id}`);
           return;
         }
       }
@@ -1003,7 +1023,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     } else {
       // Navigate to the appropriate tab based on entity type
       const tab = isGuide ? 'guides' : 'assistants';
-      navigate(`/projects/${projectId}/guides?tab=${tab}`);
+      navigate(projectId ? `/projects/${projectId}/guides?tab=${tab}` : `/guides?tab=${tab}`);
     }
   };
 
@@ -1012,7 +1032,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     setIsDirty(false);
     // Navigate to the appropriate tab based on entity type
     const tab = isGuide ? 'guides' : 'assistants';
-    navigate(`/projects/${projectId}/guides?tab=${tab}`);
+    navigate(projectId ? `/projects/${projectId}/guides?tab=${tab}` : `/guides?tab=${tab}`);
   };
 
   const handleExport = async () => {
@@ -1291,6 +1311,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               entityLabel={isGuide ? 'guide' : 'assistant'}
               variables={formData.environmentVariables}
               onChange={(environmentVariables) => updateForm({ environmentVariables })}
+              mode={projectId ? 'project' : 'default'}
+              inheritedVariables={projectId ? formData.inheritedVariables : []}
             />
           )}
 

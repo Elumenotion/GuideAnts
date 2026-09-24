@@ -31,6 +31,7 @@ public record GuideDetailsDto(
     List<CrewSummaryDto> Crews
 ) {
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<EnvironmentVariableDto>? DefaultEnvironmentVariables { get; init; }
     public List<AssistantSkillDto>? Skills { get; init; }
     public SandboxWireApiConfigDto? SandboxWireApiConfig { get; init; }
     public int? MaxToolCallsPerTurn { get; init; }
@@ -59,6 +60,7 @@ public record CreateGuideDto(
 ) {
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<EnvironmentVariableDto>? DefaultEnvironmentVariables { get; init; }
     public List<AssistantSkillSaveDto>? Skills { get; init; }
     public SandboxWireApiConfigDto? SandboxWireApiConfig { get; init; }
     public int? MaxToolCallsPerTurn { get; init; }
@@ -89,6 +91,7 @@ public record UpdateGuideDto(
 ) {
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<EnvironmentVariableDto>? DefaultEnvironmentVariables { get; init; }
     public List<AssistantSkillSaveDto>? Skills { get; init; }
     public SandboxWireApiConfigDto? SandboxWireApiConfig { get; init; }
     public int? MaxToolCallsPerTurn { get; init; }

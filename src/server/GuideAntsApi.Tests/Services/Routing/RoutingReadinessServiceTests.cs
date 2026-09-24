@@ -447,6 +447,7 @@ public sealed class RoutingReadinessServiceTests
     [DataRow("google-gemini-chat", "GoogleGeminiApi")]
     [DataRow("hf-inference-chat", "HuggingFace")]
     [DataRow("openrouter-chat", "OpenRouter")]
+    [DataRow("openai-compatible", null)]
     public void MapChatProviderToSection_CoversEveryProvider_KnownToChatTargetValidator(string provider, string expectedSection)
     {
         // Regression guard: MapChatProviderToSection must recognize every
@@ -460,6 +461,86 @@ public sealed class RoutingReadinessServiceTests
         RoutingReadinessService
             .MapChatProviderToSection(provider)
             .Should().Be(expectedSection);
+    }
+
+    [TestMethod]
+    public void MapChatProviderToSection_ReturnsNull_ForOpenAiCompatible_RowOwned()
+    {
+        // openai-compatible has no global section: readiness is row-level (the
+        // row's RuntimeConfigJson baseUrl). Null here is deliberate and is
+        // handled in ProbeChatTargetAsync, not a spurious "unrecognized" blocker.
+        RoutingReadinessService
+            .MapChatProviderToSection("openai-compatible")
+            .Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task ProbeChatTargetAsync_OpenAiCompatible_IsReady_WhenRowHasValidBaseUrl()
+    {
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "vllm-qwen",
+            DisplayName = "Qwen via vLLM",
+            Provider = "openai-compatible",
+            RuntimeConfigJson = """{"baseUrl":"http://localhost:8000/v1"}""",
+            IsActive = true,
+            Created = DateTime.UtcNow
+        });
+        db.SaveChanges();
+
+        var configuration = BuildConfigurationWithDefaults();
+        var appSettings = CreateAppSettings(db, configuration);
+        var inventory = new Mock<ILlamaRuntimeInventoryService>();
+        inventory.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+
+        var service = new RoutingReadinessService(
+            appSettings,
+            inventory.Object,
+            new TestServiceScopeFactory(db, configuration),
+            Mock.Of<ILogger<RoutingReadinessService>>());
+
+        var result = await service.ProbeChatTargetAsync("vllm-qwen");
+
+        result.Status.Should().Be("ready");
+        result.Blockers.Should().NotContain(b => b.Contains("baseUrl", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ProbeChatTargetAsync_OpenAiCompatible_IsBlocked_WhenRowMissingBaseUrl()
+    {
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "vllm-no-base",
+            DisplayName = "vLLM row missing baseUrl",
+            Provider = "openai-compatible",
+            RuntimeConfigJson = null,
+            IsActive = true,
+            Created = DateTime.UtcNow
+        });
+        db.SaveChanges();
+
+        var configuration = BuildConfigurationWithDefaults();
+        var appSettings = CreateAppSettings(db, configuration);
+        var inventory = new Mock<ILlamaRuntimeInventoryService>();
+        inventory.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+
+        var service = new RoutingReadinessService(
+            appSettings,
+            inventory.Object,
+            new TestServiceScopeFactory(db, configuration),
+            Mock.Of<ILogger<RoutingReadinessService>>());
+
+        var result = await service.ProbeChatTargetAsync("vllm-no-base");
+
+        result.Status.Should().Be("blocked");
+        result.Blockers.Should().Contain(b =>
+            b.StartsWith(RoutingReadinessService.BlockerKeys.ProviderMissing, StringComparison.Ordinal)
+            && b.Contains("openai-compatible:baseUrl", StringComparison.Ordinal)
+            && b.Contains("vllm-no-base", StringComparison.Ordinal));
     }
 
     [TestMethod]

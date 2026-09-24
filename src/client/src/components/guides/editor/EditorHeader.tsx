@@ -3,6 +3,7 @@ import { TourStartButton } from '../../../tour/TourStartButton';
 import { HeaderActionsBar } from '../../common/HeaderActionsBar';
 import { GuideAntsGuideButton } from '../../../features/guideantsGuide/GuideAntsGuideButton';
 import { HomeButton } from '../../common/HomeButton';
+import { GuidesButton } from '../../common/GuidesButton';
 import { SettingsButton } from '../../common/SettingsButton';
 
 interface EditorHeaderProps {
@@ -86,6 +87,7 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
               <span className="sr-only">{saveLabel}</span>
             </button>
             <HomeButton />
+            <GuidesButton />
             <SettingsButton />
             <div data-tour-id="guide.header.help">
               <TourStartButton screenId={tourScreenId ?? 'guideBuilder'} inline />

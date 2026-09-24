@@ -211,6 +211,9 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<string>("DefaultEnvironmentConfigJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Description")
                         .HasMaxLength(1024)
                         .HasColumnType("nvarchar(1024)");
@@ -981,6 +984,7 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasDefaultValueSql("GETUTCDATE()");
 
                     b.Property<Guid?>("ExecutionId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("FilesCreated")
@@ -1006,6 +1010,7 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Status")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(20)

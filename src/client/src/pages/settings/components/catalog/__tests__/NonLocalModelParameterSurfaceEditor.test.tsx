@@ -14,6 +14,7 @@ function baseValue(): NonLocalModelParameterSurfaceValue {
     reasoningChoicesJson: '',
     thinkingControlJson: '{}',
     requestFieldsWhenToolsPresentJson: '{}',
+    combineSystemAndDeveloperMessages: true,
   };
 }
 
@@ -69,5 +70,36 @@ describe('NonLocalModelParameterSurfaceEditor - Reasoning Choices JSON', () => {
 
     expect(input).toHaveValue('not json');
     expect(screen.getByText('Reasoning choices JSON must be valid JSON.')).toBeInTheDocument();
+  });
+});
+
+describe('NonLocalModelParameterSurfaceEditor - Combine system and developer messages', () => {
+  function MergeHarness({ provider }: { provider: string }) {
+    const [value, setValue] = useState(baseValue());
+    return (
+      <NonLocalModelParameterSurfaceEditor
+        provider={provider}
+        value={value}
+        onChange={(updates) => setValue((previous) => ({ ...previous, ...updates }))}
+      />
+    );
+  }
+
+  it('shows the combine checkbox for openai-compatible and toggles it', async () => {
+    const user = userEvent.setup();
+    render(<MergeHarness provider="openai-compatible" />);
+    const checkbox = screen.getByRole('checkbox', {
+      name: /combine system and developer messages/i,
+    });
+    expect(checkbox).toBeChecked();
+    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it('does not show the combine checkbox for other non-local providers', () => {
+    render(<MergeHarness provider="openrouter-chat" />);
+    expect(
+      screen.queryByRole('checkbox', { name: /combine system and developer messages/i }),
+    ).not.toBeInTheDocument();
   });
 });

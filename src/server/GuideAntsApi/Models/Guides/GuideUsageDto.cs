@@ -129,7 +129,8 @@ public record ConversationUsageSummaryDto(
     long ReasoningTokens,
     long CompletionTokens,
     decimal TotalCost,
-    IReadOnlyList<int> TurnIndices
+    IReadOnlyList<int> TurnIndices,
+    string? ProjectName = null
 );
 
 /// <summary>

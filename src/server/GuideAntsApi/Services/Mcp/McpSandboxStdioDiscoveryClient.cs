@@ -196,35 +196,11 @@ public sealed class McpSandboxStdioDiscoveryClient(
         {
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
-
-        var guideAndCrewIds = await db.GuideMembers
-            .AsNoTracking()
-            .Where(member => member.GuideId == guideId)
-            .OrderBy(member => member.DisplayOrder ?? int.MaxValue)
-            .ThenBy(member => member.Assistant.Name)
-            .Select(member => member.AssistantId)
-            .ToListAsync(cancellationToken);
-
-        guideAndCrewIds.Insert(0, guideId);
-
-        var environmentManifests = await db.ProjectAssistantEnvironments
-            .AsNoTracking()
-            .Where(environment => environment.ProjectId == projectId
-                && guideAndCrewIds.Contains(environment.AssistantId))
-            .Select(environment => new
-            {
-                environment.AssistantId,
-                environment.EnvironmentConfigJson,
-            })
-            .ToListAsync(cancellationToken);
-
-        var manifestByAssistantId = environmentManifests
-            .ToDictionary(environment => environment.AssistantId, environment => environment.EnvironmentConfigJson);
-        var orderedManifests = guideAndCrewIds
-            .Select(assistantId => manifestByAssistantId.TryGetValue(assistantId, out var manifest) ? manifest : null)
-            .Where(manifest => !string.IsNullOrWhiteSpace(manifest))
-            .ToArray();
-
+        var orderedManifests = await EnvironmentManifestResolver.ResolveAsync(
+            db,
+            projectId,
+            guideId,
+            cancellationToken);
         return EnvironmentVariableConfigSerializer.DeserializeForExecution(
             settingsSecretsOptions.Value,
             orderedManifests);

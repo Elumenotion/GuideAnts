@@ -341,17 +341,31 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                         requiredModels = new List<ModelDto>();
                     }
 
-                    foreach (var model in requiredModels.Where(m => m.RuntimeConfig is not null))
+                    // Direct actuation: unload this context's aliases on the instances it
+                    // loaded them on (within-instance only). No lifecycle-plan apply - a
+                    // plan apply would send an unload for llama and the container would
+                    // act on it, which must not happen.
+                    var instances = await GetInstanceSnapshotsAsync(useCache: false, CancellationToken.None).ConfigureAwait(false);
+                    var instanceByKey = instances.ToDictionary(i => i.CanonicalKey, StringComparer.OrdinalIgnoreCase);
+                    foreach (var model in requiredModels.Where(m => m.RuntimeConfig is not null
+                        && !string.IsNullOrWhiteSpace(m.RuntimeConfig.RouterModelId)))
                     {
-                        _notebookChatAliasState.ClearInstance(ResolveInstanceBase(model));
-                    }
+                        var alias = NormalizeRouterModelId(model.RuntimeConfig!.RouterModelId!);
+                        var instanceBase = ResolveInstanceBase(model);
+                        if (instanceByKey.TryGetValue(instanceBase, out var instance))
+                        {
+                            var loaded = instance.Snapshot.Data.Any(m =>
+                                IsRouterModelLoaded(m)
+                                && string.Equals(NormalizeRouterModelId(m.Id), alias, StringComparison.Ordinal));
+                            if (loaded)
+                            {
+                                await using var _ = await _coordinator.AcquireAliasLockAsync(alias, CancellationToken.None).ConfigureAwait(false);
+                                await instance.Client.UnloadModelAsync(alias, CancellationToken.None).ConfigureAwait(false);
+                            }
+                        }
 
-                    // Return to default routed warmup via GuideAntsApi policy
-                    // (SyncDesiredAndApplyAsync). ga-admin executes the per-instance
-                    // unload on each instance the plan addresses.
-                    await _localAiWarmup.SyncDesiredAndApplyAsync(
-                        waitForCompletion: true,
-                        cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                        _notebookChatAliasState.ClearInstance(instanceBase);
+                    }
 
                     op.State = "ready";
                     op.CompletedAt = DateTime.UtcNow;
@@ -383,13 +397,11 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             await _loadLock.WaitAsync();
             InvalidateRouterModelsCache();
 
-            // Chat special case (D6): drain aux via INI+apply first.
-            op.State = "unloading";
-            await warmup.SyncDesiredAndApplyAsync(
-                new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true },
-                waitForCompletion: true,
-                CancellationToken.None).ConfigureAwait(false);
-            drainedAuxForChat = true;
+            // Llama actuation is API-direct: the load path loads the required alias on
+            // its own instance and evicts the within-instance conflicts itself below.
+            // No lifecycle-plan apply on a load path - a plan apply would send an unload
+            // for llama (the plan no longer carries llama intent) and the container would
+            // act on it, which must not happen for loads.
 
             // Per-instance reconcile (rule 4/5): on each instance that owns required
             // rows, evict loaded-but-not-required aliases (within that instance only),
@@ -492,15 +504,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                         $"Timed out waiting for local models to report loaded. Missing: {string.Join("; ", missingByInstance)}");
                 }
             }
-
-            op.State = "loading";
-            // Rule 5: the plain desired-state apply is the only plan apply that touches
-            // other instances. The builder now emits a section for every instance
-            // (default alias on the default's instance, notebook aliases on their
-            // instances, enabled:false elsewhere), so no alias override is needed.
-            await warmup.SyncDesiredAndApplyAsync(
-                waitForCompletion: true,
-                cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
             op.State = "ready";
             op.CompletedAt = DateTime.UtcNow;

@@ -27,13 +27,15 @@ function handleUnauthorized(response: Response): void {
 
 export const guideUsageApi = {
   async getGuideUsageSummary(
-    projectId: string,
     guideId: string,
     from: string,
-    to: string
+    to: string,
+    projectId?: string
   ): Promise<GuideUsageSummaryDto> {
     const params = new URLSearchParams({ from, to });
-    const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/summary?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/summary?${params}`
+      : `${API_BASE_URL}/guides/${guideId}/usage/summary?${params}`;
     
     const response = await fetch(url, withAuthFetchInit({
       method: 'GET',
@@ -49,13 +51,15 @@ export const guideUsageApi = {
   },
 
   async getAssistantUsageSummary(
-    projectId: string,
     assistantId: string,
     from: string,
-    to: string
+    to: string,
+    projectId?: string
   ): Promise<GuideUsageSummaryDto> {
     const params = new URLSearchParams({ from, to });
-    const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/summary?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/summary?${params}`
+      : `${API_BASE_URL}/assistants/${assistantId}/usage/summary?${params}`;
     
     const response = await fetch(url, withAuthFetchInit({
       method: 'GET',
@@ -71,13 +75,15 @@ export const guideUsageApi = {
   },
 
   async getGuideUsageCharts(
-    projectId: string,
     guideId: string,
     from: string,
-    to: string
+    to: string,
+    projectId?: string
   ): Promise<DailyUsageBucketDto[]> {
     const params = new URLSearchParams({ from, to });
-    const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/charts?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/charts?${params}`
+      : `${API_BASE_URL}/guides/${guideId}/usage/charts?${params}`;
     const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
@@ -87,13 +93,15 @@ export const guideUsageApi = {
   },
 
   async getAssistantUsageCharts(
-    projectId: string,
     assistantId: string,
     from: string,
-    to: string
+    to: string,
+    projectId?: string
   ): Promise<DailyUsageBucketDto[]> {
     const params = new URLSearchParams({ from, to });
-    const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/charts?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/charts?${params}`
+      : `${API_BASE_URL}/assistants/${assistantId}/usage/charts?${params}`;
     const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
@@ -103,13 +111,15 @@ export const guideUsageApi = {
   },
 
   async getGuideUsageCrew(
-    projectId: string,
     guideId: string,
     from: string,
-    to: string
+    to: string,
+    projectId?: string
   ): Promise<GuideUsageCrewDto> {
     const params = new URLSearchParams({ from, to });
-    const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/crew?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/crew?${params}`
+      : `${API_BASE_URL}/guides/${guideId}/usage/crew?${params}`;
     const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
@@ -119,13 +129,15 @@ export const guideUsageApi = {
   },
 
   async getAssistantUsageCrew(
-    projectId: string,
     assistantId: string,
     from: string,
-    to: string
+    to: string,
+    projectId?: string
   ): Promise<GuideUsageCrewDto> {
     const params = new URLSearchParams({ from, to });
-    const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/crew?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/crew?${params}`
+      : `${API_BASE_URL}/assistants/${assistantId}/usage/crew?${params}`;
     const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
@@ -135,15 +147,17 @@ export const guideUsageApi = {
   },
 
   async getGuideUsageConversations(
-    projectId: string,
     guideId: string,
     from: string,
     to: string,
     page: number,
-    pageSize: number
+    pageSize: number,
+    projectId?: string
   ): Promise<GuideUsageConversationsPageDto> {
     const params = new URLSearchParams({ from, to, page: String(page), pageSize: String(pageSize) });
-    const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/conversations?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/conversations?${params}`
+      : `${API_BASE_URL}/guides/${guideId}/usage/conversations?${params}`;
     const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
@@ -153,15 +167,17 @@ export const guideUsageApi = {
   },
 
   async getAssistantUsageConversations(
-    projectId: string,
     assistantId: string,
     from: string,
     to: string,
     page: number,
-    pageSize: number
+    pageSize: number,
+    projectId?: string
   ): Promise<GuideUsageConversationsPageDto> {
     const params = new URLSearchParams({ from, to, page: String(page), pageSize: String(pageSize) });
-    const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/conversations?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/conversations?${params}`
+      : `${API_BASE_URL}/assistants/${assistantId}/usage/conversations?${params}`;
     const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
@@ -171,17 +187,19 @@ export const guideUsageApi = {
   },
 
   async getGuideApiUsage(
-    projectId: string,
     guideId: string,
     from: string,
     to: string,
-    source: GuideUsageSourceFilter = 'all'
+    source: GuideUsageSourceFilter = 'all',
+    projectId?: string
   ): Promise<GuideApiUsageReportDto> {
     const params = new URLSearchParams({ from, to });
     if (source !== 'all') {
       params.set('source', source);
     }
-    const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/api?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/api?${params}`
+      : `${API_BASE_URL}/guides/${guideId}/usage/api?${params}`;
     const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
@@ -191,17 +209,19 @@ export const guideUsageApi = {
   },
 
   async getAssistantApiUsage(
-    projectId: string,
     assistantId: string,
     from: string,
     to: string,
-    source: GuideUsageSourceFilter = 'all'
+    source: GuideUsageSourceFilter = 'all',
+    projectId?: string
   ): Promise<GuideApiUsageReportDto> {
     const params = new URLSearchParams({ from, to });
     if (source !== 'all') {
       params.set('source', source);
     }
-    const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/api?${params}`;
+    const url = projectId
+      ? `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/api?${params}`
+      : `${API_BASE_URL}/assistants/${assistantId}/usage/api?${params}`;
     const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {

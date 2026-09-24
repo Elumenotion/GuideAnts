@@ -24,7 +24,8 @@ public sealed class LlmProviderResolverTests
             ["llama-cpp"] = "LocalLlamaCpp",
             ["google-gemini-chat"] = "GoogleGemini",
             ["hf-inference-chat"] = "HuggingFace",
-            ["openrouter-chat"] = "OpenRouter"
+            ["openrouter-chat"] = "OpenRouter",
+            ["openai-compatible"] = "OpenAICompatible"
         };
 
         expectedByProvider.Keys

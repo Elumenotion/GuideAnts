@@ -5,6 +5,7 @@ using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.OpenAiCompatible;
 using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Services.Routing;
@@ -167,8 +168,22 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
             var providerSection = MapChatProviderToSection(provider);
             if (providerSection == null)
             {
-                blockers.Add(
-                    $"{BlockerKeys.ProviderMissing}: provider '{provider}' for model '{modelId}' is not a recognized chat provider.");
+                if (string.Equals(provider, "openai-compatible", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Row-owned readiness (openai-compatible): no global section.
+                    // The only possible blocker is a missing/invalid row baseUrl.
+                    if (!OpenAiCompatibleRuntimeConfigurationParser.TryParseBaseUrl(
+                        catalogRow.RuntimeConfigJson, out _))
+                    {
+                        blockers.Add(
+                            $"{BlockerKeys.ProviderMissing}: openai-compatible:baseUrl is not configured on model '{modelId}'.");
+                    }
+                }
+                else
+                {
+                    blockers.Add(
+                        $"{BlockerKeys.ProviderMissing}: provider '{provider}' for model '{modelId}' is not a recognized chat provider.");
+                }
             }
             else
             {

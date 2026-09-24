@@ -72,6 +72,9 @@
     <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.OpenRouter\AntRunner.Chat.OpenRouter.csproj">
       <Private>True</Private>
     </ProjectReference>
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.OpenAiCompatible\AntRunner.Chat.OpenAiCompatible.csproj">
+      <Private>True</Private>
+    </ProjectReference>
     <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat\AntRunner.Chat.csproj">
       <Private>True</Private>
     </ProjectReference>

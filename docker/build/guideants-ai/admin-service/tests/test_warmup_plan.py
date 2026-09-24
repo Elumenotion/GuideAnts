@@ -10,7 +10,6 @@ if str(_SERVICE_ROOT) not in sys.path:
 
 from warmup_plan import (
     AUX_SERVICES,
-    SERVICE_LLAMA,
     WarmupPlanValidationError,
     parse_warmup_plan,
     plan_to_payload,
@@ -30,7 +29,6 @@ def _plan_payload() -> dict:
     return {
         "schemaVersion": 1,
         "services": {
-            SERVICE_LLAMA: {"enabled": False},
             "SpeechTranscription": {"enabled": False},
             "Embeddings": {
                 "enabled": True,
@@ -46,6 +44,16 @@ def _plan_payload() -> dict:
 
 
 class WarmupPlanTests(unittest.TestCase):
+    def test_plan_with_llama_section_is_rejected(self) -> None:
+        # Contract: llama is API-direct. A plan that carries a llama section is
+        # invalid and the executor must refuse it, so no plan apply can ever load
+        # or unload a chat model.
+        payload = _plan_payload()
+        payload["services"]["llama"] = {"enabled": False}
+
+        with self.assertRaisesRegex(WarmupPlanValidationError, "Unknown warmup services"):
+            parse_warmup_plan(payload)
+
     def test_parse_requires_explicit_state_for_every_service(self) -> None:
         payload = _plan_payload()
         del payload["services"]["ImageGeneration"]

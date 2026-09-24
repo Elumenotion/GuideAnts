@@ -21,6 +21,7 @@ import { LlamaCppAddForm } from './providers/LlamaCppForm';
 import { OpenAiChatAddForm } from './providers/OpenAiChatForm';
 import { OpenAiResponsesAddForm } from './providers/OpenAiResponsesForm';
 import { OpenRouterAddForm } from './providers/OpenRouterForm';
+import { OpenAiCompatibleAddForm, buildOpenAiCompatibleRuntimeConfigJson } from './providers/OpenAiCompatibleForm';
 import { KnownCloudModel, ModelIdTypeahead } from './ModelIdTypeahead';
 import { resolveParameterSurfaceSeed } from '../../parameterSurfaceSeeds';
 import { NonLocalModelParameterSurfaceEditor } from './NonLocalModelParameterSurfaceEditor';
@@ -52,6 +53,7 @@ const CATALOG_PROVIDER_OPTIONS: readonly AddModelProvider[] = [
   'google-gemini-chat',
   'hf-inference-chat',
   'openrouter-chat',
+  'openai-compatible',
 ];
 
 const VISIBLE_CATALOG_PROVIDER_OPTIONS = CATALOG_PROVIDER_OPTIONS.filter(
@@ -135,6 +137,8 @@ function renderProviderForm(
       return <HuggingFaceInferenceAddForm {...props} />;
     case 'openrouter-chat':
       return <OpenRouterAddForm {...props} />;
+    case 'openai-compatible':
+      return <OpenAiCompatibleAddForm {...props} />;
     default:
       return <p className="text-sm text-gray-600">Pick a provider to continue.</p>;
   }
@@ -332,6 +336,14 @@ export function AddModelWizard({
   // install is caught where its fields actually are (Step 3), not as a
   // banner on the read-only review step (Step 4).
   const providerConfigError = useMemo(() => {
+    if (value.provider === 'openai-compatible') {
+      try {
+        buildOpenAiCompatibleRuntimeConfigJson(value.openAiCompatibleBaseUrl, value.openAiCompatibleApiKey);
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : 'Invalid base URL.';
+      }
+    }
     if (value.provider !== 'llama-cpp' || llamaOnboardingMode === 'curated') {
       return null;
     }
@@ -665,6 +677,7 @@ export function AddModelWizard({
                   reasoningChoicesJson: value.reasoningChoicesJson,
                   thinkingControlJson: value.thinkingControlJson,
                   requestFieldsWhenToolsPresentJson: value.requestFieldsWhenToolsPresentJson,
+                  combineSystemAndDeveloperMessages: value.combineSystemAndDeveloperMessages,
                 }}
                 onChange={(updates) => setValue((previous) => ({ ...previous, ...updates }))}
               />
@@ -694,6 +707,16 @@ export function AddModelWizard({
             {value.provider === 'llama-cpp' ? (
               <div>
                 <strong>Install Source:</strong> {value.llamaInstallSource}
+              </div>
+            ) : null}
+            {value.provider === 'openai-compatible' ? (
+              <div>
+                <strong>Base URL:</strong> {value.openAiCompatibleBaseUrl}
+              </div>
+            ) : null}
+            {value.provider === 'openai-compatible' ? (
+              <div>
+                <strong>API key:</strong> {value.openAiCompatibleApiKey.trim().length > 0 ? 'set' : 'none'}
               </div>
             ) : null}
           </div>

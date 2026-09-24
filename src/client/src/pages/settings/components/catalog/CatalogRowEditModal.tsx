@@ -20,6 +20,7 @@ import { LlamaCppEditForm, type LlamaCppEditFormHandle } from './providers/Llama
 import { OpenAiChatEditForm } from './providers/OpenAiChatForm';
 import { OpenAiResponsesEditForm } from './providers/OpenAiResponsesForm';
 import { OpenRouterEditForm } from './providers/OpenRouterForm';
+import { OpenAiCompatibleEditForm } from './providers/OpenAiCompatibleForm';
 import { NonLocalModelParameterSurfaceEditor } from './NonLocalModelParameterSurfaceEditor';
 import { LlamaModelChatBehaviorEditor } from './LlamaModelChatBehaviorEditor';
 
@@ -72,6 +73,8 @@ function renderEditForm(
       return <HuggingFaceInferenceEditForm {...props} />;
     case 'openrouter-chat':
       return <OpenRouterEditForm {...props} />;
+    case 'openai-compatible':
+      return <OpenAiCompatibleEditForm {...props} />;
     default:
       return null;
   }
@@ -153,7 +156,9 @@ export function CatalogRowEditModal({
         runtimeConfigJson:
           value.provider === 'llama-cpp'
             ? buildLlamaRuntimeConfigJsonWithStack(model, stackBaseUrl, stackApiKey)
-            : undefined,
+            : value.provider === 'openai-compatible'
+              ? value.runtimeConfigJson
+              : undefined,
       });
       await api.settings.updateModel(model.modelId, request);
       await onSaved();
@@ -305,6 +310,7 @@ export function CatalogRowEditModal({
                 reasoningChoicesJson: value.reasoningChoicesJson,
                 thinkingControlJson: value.thinkingControlJson,
                 requestFieldsWhenToolsPresentJson: value.requestFieldsWhenToolsPresentJson,
+                combineSystemAndDeveloperMessages: value.combineSystemAndDeveloperMessages,
               }}
               onChange={(updates) => setValue((previous) => (previous ? { ...previous, ...updates } : previous))}
             />

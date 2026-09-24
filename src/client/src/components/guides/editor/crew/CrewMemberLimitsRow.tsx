@@ -4,7 +4,7 @@ import { api } from '../../../../services/api';
 import { formatLimitDisplay } from '../toolLimits/toolLimitDisplay';
 
 interface CrewMemberLimitsRowProps {
-  projectId: string;
+  projectId?: string;
   assistantId: string;
   assistantName: string;
   initialMaxToolCallsPerTurn?: number | null;
@@ -34,7 +34,7 @@ export function CrewMemberLimitsRow({
 
     const loadLimits = async () => {
       try {
-        const details = await api.guides.assistants.get(assistantId, projectId);
+        const details = await api.guides.assistants.get(assistantId, projectId ?? undefined);
         if (!cancelled) {
           setMaxToolCallsPerTurn(details.maxToolCallsPerTurn ?? null);
         }
@@ -58,7 +58,7 @@ export function CrewMemberLimitsRow({
   }, [assistantId, projectId, initialMaxToolCallsPerTurn]);
 
   const handleEditLimits = () => {
-    navigate(`/projects/${projectId}/guides/assistant/${assistantId}?tab=tools&toolsSubTab=global`);
+    navigate(projectId ? `/projects/${projectId}/guides/assistant/${assistantId}?tab=tools&toolsSubTab=global` : `/guides/assistant/${assistantId}?tab=tools&toolsSubTab=global`);
   };
 
   return (

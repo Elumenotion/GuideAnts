@@ -1,4 +1,5 @@
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.OpenAiCompatible;
 using System.Text.Json;
 
 namespace GuideAntsApi.Services.Routing;
@@ -30,7 +31,8 @@ public sealed class ChatTargetValidator : IChatTargetValidator
         "llama-cpp",
         "google-gemini-chat",
         "hf-inference-chat",
-        "openrouter-chat"
+        "openrouter-chat",
+        "openai-compatible"
     };
 
     private readonly IConfiguration _configuration;
@@ -50,7 +52,7 @@ public sealed class ChatTargetValidator : IChatTargetValidator
             throw new RoutingException(
                 RoutingErrorCodes.ProviderNotReady,
                 $"Provider '{target.Provider}' for model '{target.ModelId}' is not supported. "
-                + "Expected one of: openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, llama-cpp, google-gemini-chat, hf-inference-chat, openrouter-chat.",
+                + "Expected one of: openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, llama-cpp, google-gemini-chat, hf-inference-chat, openrouter-chat, or openai-compatible.",
                 action: $"Update model '{target.ModelId}' in Settings → Models & Runtime to one of the supported providers.",
                 serviceId: "Chat",
                 providerSection: target.Provider,
@@ -108,6 +110,10 @@ public sealed class ChatTargetValidator : IChatTargetValidator
                     providerSection: "OpenRouter",
                     fields: new[] { "ApiKey" },
                     modelId: target.ModelId);
+                break;
+
+            case "openai-compatible":
+                ValidateOpenAiCompatible(target);
                 break;
         }
     }
@@ -168,6 +174,26 @@ public sealed class ChatTargetValidator : IChatTargetValidator
                 providerSection,
                 blockers: new[] { $"{providerSection}:{field} is not valid JSON: {ex.Message}" },
                 serviceId: "Chat");
+        }
+    }
+
+    /// <summary>
+    /// openai-compatible is row-owned: readiness lives on the catalog row's
+    /// RuntimeConfigJson (baseUrl), not a global section. Missing/invalid baseUrl
+    /// is a PROVIDER_MISSING_FIELDS blocker naming the field; the action points at
+    /// the catalog row.
+    /// </summary>
+    private void ValidateOpenAiCompatible(ChatTarget target)
+    {
+        if (!OpenAiCompatibleRuntimeConfigurationParser.TryParseBaseUrl(target.RuntimeConfigJson, out _))
+        {
+            throw new RoutingException(
+                RoutingErrorCodes.ProviderNotReady,
+                $"openai-compatible:baseUrl is not configured on model '{target.ModelId}' (RuntimeConfigJson must carry an absolute http(s) v1 base URL).",
+                action: $"Open Settings → Models & Runtime → Catalog and set a Base URL for '{target.ModelId}'.",
+                serviceId: "Chat",
+                providerSection: "openai-compatible",
+                modelId: target.ModelId);
         }
     }
 

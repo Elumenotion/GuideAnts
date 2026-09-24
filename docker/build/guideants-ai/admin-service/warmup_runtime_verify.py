@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from warmup_plan import (
-    SERVICE_LLAMA,
     WARMUP_SERVICE_SECTIONS,
     WarmupPlanDocument,
     section_execution_ref,
@@ -48,10 +47,8 @@ def _get_json(url: str, timeout: float = 5.0) -> tuple[int, Any]:
 
 
 def _engine_base(service_id: str) -> str | None:
-    from warmup_engine_client import SERVICE_ENGINE_BASE_URLS, LLAMA_BASE_URL
+    from warmup_engine_client import SERVICE_ENGINE_BASE_URLS
 
-    if service_id == SERVICE_LLAMA:
-        return LLAMA_BASE_URL
     return SERVICE_ENGINE_BASE_URLS.get(service_id)
 
 
@@ -78,32 +75,6 @@ def _probe_aux_loaded(service_id: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def _probe_llama_loaded_aliases() -> list[str]:
-    base = _engine_base(SERVICE_LLAMA)
-    if not base:
-        return []
-    status, payload = _get_json(f"{base.rstrip('/')}/models")
-    if status != 200 or not isinstance(payload, dict):
-        return []
-    entries = payload.get("data")
-    if not isinstance(entries, list):
-        return []
-    loaded: list[str] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        alias = entry.get("id")
-        if not isinstance(alias, str):
-            continue
-        status_obj = entry.get("status")
-        if isinstance(status_obj, dict) and str(status_obj.get("value") or "").lower() == "loaded":
-            loaded.append(alias)
-            continue
-        if str(entry.get("state") or "").lower() == "loaded":
-            loaded.append(alias)
-    return loaded
-
-
 def find_runtime_mismatches(plan: WarmupPlanDocument) -> list[LocalAiRuntimeAlignmentMismatch]:
     """Return mechanical mismatches between plan and engine HTTP (empty if aligned)."""
     mismatches: list[LocalAiRuntimeAlignmentMismatch] = []
@@ -111,30 +82,6 @@ def find_runtime_mismatches(plan: WarmupPlanDocument) -> list[LocalAiRuntimeAlig
         section = plan.services.get(section_name)
         should_load = section_should_load(section_name, section)
         plan_ref = section_execution_ref(section_name, section) if section is not None else None
-
-        if section_name == SERVICE_LLAMA:
-            loaded_aliases = _probe_llama_loaded_aliases()
-            if should_load:
-                if not plan_ref:
-                    mismatches.append(
-                        LocalAiRuntimeAlignmentMismatch(section_name, "plan enabled but missing router alias")
-                    )
-                    continue
-                if plan_ref not in loaded_aliases:
-                    mismatches.append(
-                        LocalAiRuntimeAlignmentMismatch(
-                            section_name,
-                            f"expected loaded alias '{plan_ref}' but engine reports {loaded_aliases!r}",
-                        )
-                    )
-            elif loaded_aliases:
-                mismatches.append(
-                    LocalAiRuntimeAlignmentMismatch(
-                        section_name,
-                        f"plan disabled but engine still has loaded aliases {loaded_aliases!r}",
-                    )
-                )
-            continue
 
         loaded, loaded_ref = _probe_aux_loaded(section_name)
         if should_load:

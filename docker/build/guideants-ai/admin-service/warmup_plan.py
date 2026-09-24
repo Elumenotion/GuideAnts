@@ -7,14 +7,13 @@ import json
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-SERVICE_LLAMA = "llama"
 AUX_SERVICES = (
     "SpeechTranscription",
     "Embeddings",
     "SpeechSynthesis",
     "ImageGeneration",
 )
-WARMUP_SERVICE_SECTIONS = (SERVICE_LLAMA,) + AUX_SERVICES
+WARMUP_SERVICE_SECTIONS = AUX_SERVICES
 
 
 class WarmupPlanValidationError(ValueError):
@@ -81,8 +80,6 @@ def aux_section_load_request(
 def section_execution_ref(section_name: str, section: WarmupServiceSection) -> str | None:
     if not section.enabled:
         return None
-    if section_name == SERVICE_LLAMA:
-        return (section.router_alias or "").strip() or None
     if section_name == "ImageGeneration":
         return (section.bundle_id or "").strip() or None
     return aux_section_model_ref(section)

@@ -7,6 +7,7 @@ import type {
   SettingsSectionDto,
   SettingsSectionSchemaDto,
 } from '../../../types/settings';
+import { buildOpenAiCompatibleRuntimeConfigJson } from '../components/catalog/providers/OpenAiCompatibleForm';
 import {
   SECRET_MASK,
   buildAddModelRequest,
@@ -46,6 +47,59 @@ describe('buildAddModelRequest', () => {
       samplingParametersJson: state.samplingParametersJson,
     });
     expect(request.install).toBeUndefined();
+  });
+
+  it('sends row-owned runtimeConfigJson for openai-compatible', () => {
+    const state = createEmptyAddModelWizardState('openai-compatible');
+    state.catalogModelId = 'vllm-qwen';
+    state.catalogDisplayName = 'Qwen via vLLM';
+    state.openAiCompatibleBaseUrl = ' http://localhost:8000/v1 ';
+    state.openAiCompatibleApiKey = ' row-key ';
+
+    const request = buildAddModelRequest(state);
+
+    expect(request.provider).toBe('openai-compatible');
+    const runtimeConfigJson = request.providerConfig?.runtimeConfigJson as string;
+    const parsed = JSON.parse(runtimeConfigJson) as { baseUrl: string; apiKey: string };
+    expect(parsed.baseUrl).toBe('http://localhost:8000/v1');
+    expect(parsed.apiKey).toBe('row-key');
+  });
+
+  it('sends empty apiKey for openai-compatible when keyless', () => {
+    const state = createEmptyAddModelWizardState('openai-compatible');
+    state.catalogModelId = 'ollama-llama';
+    state.catalogDisplayName = 'Llama via Ollama';
+    state.openAiCompatibleBaseUrl = 'http://127.0.0.1:11434/v1';
+    state.openAiCompatibleApiKey = '';
+
+    const request = buildAddModelRequest(state);
+
+    const parsed = JSON.parse(request.providerConfig?.runtimeConfigJson as string) as {
+      baseUrl: string;
+      apiKey: string;
+    };
+    expect(parsed.baseUrl).toBe('http://127.0.0.1:11434/v1');
+    expect(parsed.apiKey).toBe('');
+  });
+
+  it('throws for openai-compatible when base url is missing or malformed', () => {
+    const missing = createEmptyAddModelWizardState('openai-compatible');
+    missing.catalogModelId = 'm1';
+    missing.catalogDisplayName = 'M1';
+    missing.openAiCompatibleBaseUrl = '';
+    expect(() => buildAddModelRequest(missing)).toThrow('Base URL is required.');
+
+    const trailing = createEmptyAddModelWizardState('openai-compatible');
+    trailing.catalogModelId = 'm2';
+    trailing.catalogDisplayName = 'M2';
+    trailing.openAiCompatibleBaseUrl = 'http://localhost:8000/v1/';
+    expect(() => buildAddModelRequest(trailing)).toThrow('must not include a trailing slash');
+
+    const relative = createEmptyAddModelWizardState('openai-compatible');
+    relative.catalogModelId = 'm3';
+    relative.catalogDisplayName = 'M3';
+    relative.openAiCompatibleBaseUrl = 'localhost:8000/v1';
+    expect(() => buildAddModelRequest(relative)).toThrow('must be an absolute http(s) URL');
   });
 
   it('sends row-owned request shaping for openrouter and omits it elsewhere', () => {
@@ -206,6 +260,29 @@ describe('buildCatalogEditRequest', () => {
   });
 });
 
+  it('carries runtimeConfigJson for openai-compatible edits', () => {
+    const request = buildCatalogEditRequest(
+      {
+        modelId: 'vllm-qwen',
+        provider: 'openai-compatible',
+        displayName: 'Qwen via vLLM',
+        description: '',
+        displayOrder: '0',
+        isActive: true,
+        samplingParametersJson: '{}',
+        reasoningChoicesJson: '',
+        thinkingControlJson: '{}',
+        requestFieldsWhenToolsPresentJson: '{}',
+        combineSystemAndDeveloperMessages: true,
+        thoughtBlockPattern: '',
+        runtimeConfigJson: '{"baseUrl":"http://localhost:8000/v1","apiKey":"encv2::tests::abc"}',
+      },
+      { runtimeConfigJson: '{"baseUrl":"http://localhost:8000/v1","apiKey":"encv2::tests::abc"}' },
+    );
+
+    expect(request.runtimeConfigJson).toBe('{"baseUrl":"http://localhost:8000/v1","apiKey":"encv2::tests::abc"}');
+  });
+
 describe('legacy runtime config parsers', () => {
   it('imports canonical local runtime config from legacy PascalCase keys', () => {
     const parsed = parseCanonicalLocalRuntimeJson(
@@ -276,6 +353,32 @@ describe('catalog edit helpers', () => {
     );
 
     expect(request.reasoningChoicesJson).toBe('["medium"]');
+  });
+});
+
+describe('buildOpenAiCompatibleRuntimeConfigJson', () => {
+  it('trims and validates baseUrl, keeps keyless rows keyless', () => {
+    expect(buildOpenAiCompatibleRuntimeConfigJson('http://localhost:8000/v1 ', '', false)).toBe(
+      '{"baseUrl":"http://localhost:8000/v1","apiKey":""}',
+    );
+  });
+
+  it('sends remove sentinel for the edit remove flow', () => {
+    expect(
+      buildOpenAiCompatibleRuntimeConfigJson('http://localhost:8000/v1', '', true, '{"baseUrl":"http://localhost:8000/v1","apiKey":"encv2::k::v"}'),
+    ).toBe('{"baseUrl":"http://localhost:8000/v1","apiKey":"__REMOVE__"}');
+  });
+
+  it('preserves the existing stored key when the input is left blank', () => {
+    const existing = '{"baseUrl":"http://localhost:8000/v1","apiKey":"encv2::k::v"}';
+    expect(buildOpenAiCompatibleRuntimeConfigJson('http://localhost:8000/v1', '', false, existing)).toBe(existing);
+  });
+
+  it('replaces the key when a new plaintext value is entered', () => {
+    const existing = '{"baseUrl":"http://localhost:8000/v1","apiKey":"encv2::k::v"}';
+    expect(buildOpenAiCompatibleRuntimeConfigJson('http://localhost:8000/v1', 'new-key', false, existing)).toBe(
+      '{"baseUrl":"http://localhost:8000/v1","apiKey":"new-key"}',
+    );
   });
 });
 

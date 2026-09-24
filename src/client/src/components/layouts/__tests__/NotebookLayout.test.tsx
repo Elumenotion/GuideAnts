@@ -21,6 +21,10 @@ vi.mock('../../common/HomeButton', () => ({
     HomeButton: () => <button aria-label="Back to Home">Home</button>,
 }));
 
+vi.mock('../../common/GuidesButton', () => ({
+    GuidesButton: () => <button aria-label="Open Guides">Guides</button>,
+}));
+
 vi.mock('../../common/SettingsButton', () => ({
     SettingsButton: () => <button aria-label="Open Settings">Settings</button>,
 }));

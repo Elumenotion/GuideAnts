@@ -54,6 +54,7 @@ const CATALOG_PROVIDER_LABELS: Record<string, string> = {
   'google-gemini-chat': 'Google Gemini API',
   'hf-inference-chat': 'Hugging Face Inference',
   'openrouter-chat': 'OpenRouter',
+  'openai-compatible': 'OpenAI-Compatible',
 };
 
 const COMMON_FIELD_LABELS: Record<string, string> = {

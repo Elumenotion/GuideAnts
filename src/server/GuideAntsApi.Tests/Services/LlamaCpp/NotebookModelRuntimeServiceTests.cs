@@ -559,8 +559,13 @@ public class NotebookModelRuntimeServiceTests
     }
 
     [TestMethod]
-    public async Task StartLoadOperationAsync_DrainsAuxViaOrchestratorBeforeLlmLoad_AndRestoresAfter()
+    public async Task StartLoadOperationAsync_LoadsDirectly_OnOwningInstance_WithoutAnyPlanApply()
     {
+        // Contract: llama actuation on a load path is API-direct. The load loads the
+        // required alias on its owning instance and performs NO lifecycle-plan apply -
+        // the plan carries no llama section, so any apply would emit llama unload
+        // intent that the container would act on (the 2026-09-20 defect: a plan apply
+        // unloaded a model that was in use).
         // Arrange
         var notebookId = Guid.NewGuid();
         var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
@@ -577,56 +582,26 @@ public class NotebookModelRuntimeServiceTests
         });
         await _context.SaveChangesAsync();
 
-        // GuideAntsApi owns policy: aux drain via lifecycle apply; bounded direct llama
-        // client calls for the per-instance notebook delta; the final plain desired-state
-        // apply is the only plan apply that touches other instances (rule 5).
-        var callOrder = new List<string>();
-        _mockLocalAiWarmup
-            .Setup(s => s.SyncDesiredAndApplyAsync(
-                It.IsAny<WarmupDesiredBuildOptions?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<WarmupDesiredBuildOptions?, bool, CancellationToken>((options, _, _) =>
-            {
-                if (options?.ForceAuxiliaryIdle == true)
-                {
-                    callOrder.Add("aux-drain");
-                }
-                else if (options is null)
-                {
-                    callOrder.Add("final-plain-apply");
-                }
-                else
-                {
-                    callOrder.Add("apply-default");
-                }
-            })
-            .Returns(Task.CompletedTask);
-
-        var listCalls = 0;
+        var loaded = false;
         _mockLlamaClient
             .Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
-            {
-                listCalls++;
-                return listCalls >= 3
+                loaded
                     ? new LlamaModelsResponse
                     {
                         Data = new List<LlamaModelData>
                         {
-                            new LlamaModelData
-                            {
-                                Id = "qwen-model",
-                                Status = new LlamaModelStatus { Value = "loaded" }
-                            }
+                            new() { Id = "qwen-model", Status = new LlamaModelStatus { Value = "loaded" } }
                         }
                     }
-                    : new LlamaModelsResponse { Data = new List<LlamaModelData>() };
-            });
-
+                    : new LlamaModelsResponse { Data = new List<LlamaModelData>() });
         _mockLlamaClient
             .Setup(c => c.LoadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Callback(() => callOrder.Add("llm-load"))
+            .Callback<string, CancellationToken>((id, _) =>
+            {
+                Assert.AreEqual("qwen-model", id, "the load path must load the required alias");
+                loaded = true;
+            })
             .Returns(Task.CompletedTask);
 
         // Act
@@ -648,29 +623,22 @@ public class NotebookModelRuntimeServiceTests
         // Assert
         Assert.IsNotNull(final);
         Assert.AreEqual("ready", final!.State, final.ErrorDetails);
+        Assert.IsTrue(loaded, "llama load must go through the direct runtime client");
 
-        var drainIndex = callOrder.IndexOf("aux-drain");
-        var llmLoadIndex = callOrder.IndexOf("llm-load");
-        var finalApplyIndex = callOrder.IndexOf("final-plain-apply");
-        Assert.IsTrue(drainIndex >= 0, "aux drain (ForceAuxiliaryIdle apply) missing");
-        Assert.IsTrue(llmLoadIndex >= 0, "llm-load call missing");
-        Assert.IsTrue(finalApplyIndex >= 0, "final plain desired-state apply missing");
-        Assert.IsTrue(drainIndex < llmLoadIndex, "aux drain did not happen before llama load");
-        Assert.IsTrue(llmLoadIndex < finalApplyIndex, "final plain apply did not happen after llama load");
-        Assert.AreEqual(callOrder.Count - 1, finalApplyIndex, "final plain apply must be the last lifecycle call");
+        _mockLlamaClient.Verify(
+            c => c.LoadModelAsync("qwen-model", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockLlamaClient.Verify(
+            c => c.UnloadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
 
+        // No lifecycle-plan apply on a load path - ever.
         _mockLocalAiWarmup.Verify(
             s => s.SyncDesiredAndApplyAsync(
-                It.Is<WarmupDesiredBuildOptions?>(o => o != null && o.ForceAuxiliaryIdle),
+                It.IsAny<WarmupDesiredBuildOptions?>(),
                 It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()),
-            Times.Once);
-        _mockLocalAiWarmup.Verify(
-            s => s.SyncDesiredAndApplyAsync(
-                (WarmupDesiredBuildOptions?)null,
-                true,
-                It.IsAny<CancellationToken>()),
-            Times.Once);
+            Times.Never);
     }
 
     [TestMethod]

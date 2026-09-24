@@ -108,6 +108,14 @@ namespace GuideAntsApi.DataModel.Models
         public string? SandboxWireApiConfigJson { get; set; }
 
         /// <summary>
+        /// Default script execution environment for this assistant/guide, in the same
+        /// EnvironmentVariableManifest JSON shape as ProjectAssistantEnvironment.EnvironmentConfigJson.
+        /// Inherited by all projects at the lowest precedence: an explicit
+        /// ProjectAssistantEnvironment row for a variable name overrides this default per name.
+        /// </summary>
+        public string? DefaultEnvironmentConfigJson { get; set; }
+
+        /// <summary>
         /// Optional default assistant name for guide workspace context.
         /// When Kind=Guide, specifies which crew member is the primary entry point.
         /// Null for regular assistants.

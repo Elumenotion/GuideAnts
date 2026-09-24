@@ -9,6 +9,7 @@ using AntRunner.Chat.GoogleGemini;
 using AntRunner.Chat.HuggingFace;
 using AntRunner.Chat.LlamaCpp;
 using AntRunner.Chat.OpenAI;
+using AntRunner.Chat.OpenAiCompatible;
 using AntRunner.Chat.OpenRouter;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -484,6 +485,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
                 BaseUrl = "http://localhost:8000",
                 TimeoutSeconds = 300
             });
+        var openAiCompatibleFactory = new OpenAiCompatibleChatClientFactory(httpFactory.Object);
         var scopeFactory = new TestServiceScopeFactory(db);
 
         var chatTargetResolver = new ChatTargetResolver(scopeFactory);
@@ -499,10 +501,20 @@ public sealed class RoutingChatCompletionClientFactoryTests
             googleGeminiFactory,
             huggingFaceFactory,
             openRouterFactory,
+            openAiCompatibleFactory,
             llamaCppFactory,
             chatTargetResolver,
             chatTargetValidator.Object,
-            new ConfigurationBuilder().Build());
+            new ConfigurationBuilder().Build(),
+            new GuideAntsApi.Tests.TestUtils.StaticOptionsMonitor<GuideAntsApi.Settings.SettingsSecretsOptions>(
+                new GuideAntsApi.Settings.SettingsSecretsOptions
+                {
+                    ActiveKeyId = "tests",
+                    Keys = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
+                    }
+                }));
     }
 
     private static ApplicationDbContext CreateDb()
@@ -541,7 +553,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             ModelId = "qwen3.6-27b-max",
             DisplayName = "Qwen 3.6 27B (Max)",
             Provider = "llama-cpp",
-            RuntimeConfigJson = """{"routerModelId":"Qwen3.6-27B-MTP-GGUF","stackBaseUrl":"http://192.0.2.1:8112","stackApiKey":"stack-key"}""",
+            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.6-27B-MTP-GGUF\",\"stackBaseUrl\":\"http://192.0.2.1:8112\",\"stackApiKey\":\"stack-key\"}",
             CombineSystemAndDeveloperMessages = true,
             ThoughtBlockPattern = @"<think>[\s\S]*?</think>",
             SamplingParametersJson = """{"temperature":{"key":"temperature","displayName":"Temperature","description":"Controls randomness","min":0,"max":2,"step":0.1,"defaultValue":0.7,"displayOrder":0,"enabled":true}}""",
@@ -612,6 +624,92 @@ public sealed class RoutingChatCompletionClientFactoryTests
         response.FirstChoice!.Message.GetText().Should().Be("ok");
         // Global test config BaseUrl is http://localhost:8000 (no /llama-cpp prefix in the test fixture).
         capturedUri!.ToString().Should().Be("http://localhost:8000/v1/chat/completions");
+    }
+
+    [TestMethod]
+    public void CreateClient_UsesOpenAiCompatible_ForOpenAiCompatibleProvider()
+    {
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "vllm-qwen",
+            DisplayName = "Qwen via vLLM",
+            Provider = "openai-compatible",
+            RuntimeConfigJson = "{\"baseUrl\":\"http://localhost:8000/v1\"}",
+            IsActive = true
+        });
+        db.SaveChanges();
+
+        var factory = CreateFactory(db);
+        var client = factory.CreateClient("vllm-qwen");
+
+        client.Should().BeOfType<OpenAiCompatibleChatClient>();
+    }
+
+    [TestMethod]
+    public async Task CreateClient_RoutesToRowBaseUrl_WhenOpenAiCompatible()
+    {
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "vllm-qwen",
+            DisplayName = "Qwen via vLLM",
+            Provider = "openai-compatible",
+            RuntimeConfigJson = "{\"baseUrl\":\"http://192.0.2.1:8000/v1\",\"apiKey\":\"row-key\"}",
+            IsActive = true
+        });
+        db.SaveChanges();
+
+        var factory = CreateFactory(db);
+
+        Uri? capturedUri = null;
+        string? capturedAuth = null;
+        var handler = new CapturingHandler(request =>
+        {
+            capturedUri = request.RequestUri;
+            capturedAuth = request.Headers.Authorization?.ToString();
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}",
+                    System.Text.Encoding.UTF8,
+                    "application/json")
+            });
+        });
+
+        var client = factory.CreateClient("vllm-qwen", new HttpClient(handler));
+        var request = new ChatCompletionRequest(
+            messages: [new ChatMessage(AntRunner.Chat.Abstractions.ChatRole.User, "hi")],
+            model: "vllm-qwen");
+
+        var response = await client.GetCompletionAsync(request);
+
+        response.FirstChoice!.Message.GetText().Should().Be("ok");
+        capturedUri!.ToString().Should().Be("http://192.0.2.1:8000/v1/chat/completions");
+        capturedAuth.Should().Be("Bearer row-key");
+    }
+
+    [TestMethod]
+    public void CreateClient_Throws_WhenOpenAiCompatibleRowHasNoConfig()
+    {
+        // R-9.1: no silent fallback — a row without baseUrl must surface a routing error.
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "vllm-broken",
+            DisplayName = "Broken vLLM row",
+            Provider = "openai-compatible",
+            RuntimeConfigJson = null,
+            IsActive = true
+        });
+        db.SaveChanges();
+
+        var factory = CreateFactory(db);
+        Action act = () => factory.CreateClient("vllm-broken");
+
+        act.Should().Throw<RoutingException>()
+            .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
+                         && ex.ModelId == "vllm-broken");
     }
 
     private sealed class CapturingHandler : HttpMessageHandler

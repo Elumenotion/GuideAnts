@@ -17,6 +17,11 @@ public interface ILlamaStackRuntimeClientProvider
     /// targets the global stack (caller falls back to the configured client).
     /// </summary>
     ILlamaServerRuntimeClient? GetClientForStack(string? stackBaseUrl, string? stackApiKey);
+
+    /// <summary>
+    /// The global-stack client (rows without a row-owned stack).
+    /// </summary>
+    ILlamaServerRuntimeClient Global { get; }
 }
 
 public sealed class LlamaStackRuntimeClientProvider : ILlamaStackRuntimeClientProvider

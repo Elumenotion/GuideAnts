@@ -100,7 +100,8 @@ public static class SettingsLlamaEndpoints
             [FromBody] LlamaRuntimeLoadRequest request,
             IConfiguration configuration,
             ILlamaRuntimeCoordinator coordinator,
-            ILocalAiWarmupService localAiWarmup,
+            ILlamaStackRuntimeClientProvider stackClients,
+            ApplicationDbContext db,
             CancellationToken cancellationToken) =>
         {
             if (!SettingsGroupFactory.HasConfiguredLlamaRuntime(configuration))
@@ -128,13 +129,17 @@ public static class SettingsLlamaEndpoints
             await using var _ = handle;
             try
             {
-                await localAiWarmup.SyncDesiredAndApplyAsync(
-                    new WarmupDesiredBuildOptions
-                    {
-                        LlamaRouterAliasOverride = request.RouterModelId.Trim(),
-                    },
-                    waitForCompletion: true,
-                    cancellationToken).ConfigureAwait(false);
+                // Direct actuation: the API loads the alias on the instance its row
+                // declares. No lifecycle-plan apply on a load path - the plan carries
+                // no llama section and must never be what loads a model.
+                var alias = request.RouterModelId.Trim();
+                var row = await FindLlamaRowByAliasAsync(db, alias, cancellationToken);
+                if (row is null)
+                {
+                    return Results.Problem("No active llama-cpp model row declares that router alias.");
+                }
+                var client = stackClients.GetClientForStack(row.StackBaseUrl, row.StackApiKey) ?? stackClients.Global;
+                await client.LoadModelAsync(alias, cancellationToken);
                 return Results.Ok();
             }
             catch (Exception ex)
@@ -503,4 +508,44 @@ public static class SettingsLlamaEndpoints
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
+
+    private static async Task<LlamaAliasRow?> FindLlamaRowByAliasAsync(
+        ApplicationDbContext db,
+        string alias,
+        CancellationToken cancellationToken)
+    {
+        var rows = await db.Models
+            .AsNoTracking()
+            .Where(m => m.Provider == "llama-cpp" && m.IsActive && m.RuntimeConfigJson != null)
+            .Select(m => new { m.ModelId, m.RuntimeConfigJson })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
+            {
+                continue;
+            }
+
+            LocalRuntimeConfiguration config;
+            try
+            {
+                config = LocalRuntimeConfigurationParser.Parse(row.ModelId, row.RuntimeConfigJson);
+            }
+            catch (InvalidOperationException)
+            {
+                continue;
+            }
+
+            if (string.Equals(config.RouterModelId, alias, StringComparison.OrdinalIgnoreCase))
+            {
+                return new LlamaAliasRow(config.StackBaseUrl, config.StackApiKey);
+            }
+        }
+
+        return null;
+    }
+
+    private sealed record LlamaAliasRow(string StackBaseUrl, string StackApiKey);
+
 }

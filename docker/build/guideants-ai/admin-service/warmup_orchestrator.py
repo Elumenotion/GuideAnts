@@ -23,7 +23,6 @@ THIS FILE MAY ONLY:
   - Derive mechanical commands from the plan body alone (on → load, off → unload)
   - Call local engine admin HTTP on loopback (warmup_engine_client)
   - Poll engines until ready/unloaded (mechanical waits)
-  - Order GPU drain before llama alias changes (single-GPU box physics, not routing)
   - Skip redundant LOAD calls when the ENGINE HTTP port already reports the plan ref
     (mechanical probe — never skip unload when plan says off)
   - Write .warmup-state.json as DIAGNOSTIC status for /warmup/status
@@ -40,7 +39,6 @@ import threading
 from typing import Any, Callable
 
 from warmup_plan import (
-    SERVICE_LLAMA,
     WARMUP_SERVICE_SECTIONS,
     WarmupPlanDocument,
     WarmupServiceSection,
@@ -51,15 +49,10 @@ from warmup_plan import (
 from warmup_engine_client import (
     aux_engine_loaded_ref,
     aux_engine_reports_loaded,
-    llama_engine_loaded_aliases,
     post_aux_load,
     post_aux_unload,
-    post_llama_load,
-    post_llama_unload,
     wait_aux_ready,
     wait_aux_unloaded,
-    wait_llama_loaded,
-    wait_llama_unloaded,
 )
 from warmup_state import (
     APPLY_STATUS_APPLIED,
@@ -74,7 +67,7 @@ from warmup_state import (
     sync_state_after_plan_submission,
 )
 
-# GPU unload order before llama work; load order after llama work (frozen mechanical order).
+# Frozen mechanical aux order: unload order then load order (single-GPU box physics, not routing).
 AUX_UNLOAD_ORDER = (
     "ImageGeneration",
     "SpeechSynthesis",
@@ -128,40 +121,6 @@ def derive_plan_commands(document: WarmupPlanDocument) -> dict[str, str]:
     return commands
 
 
-def _llama_command_needs_gpu_drain(commands: dict[str, str], document: WarmupPlanDocument) -> bool:
-    """
-    True when llama work will touch VRAM — unload, or load a different alias than
-    the engine currently reports. Unchanged warm llama does not drain aux.
-    """
-    llama_cmd = commands.get(SERVICE_LLAMA)
-    if llama_cmd == "unload":
-        return True
-    if llama_cmd == "load":
-        section = document.services.get(SERVICE_LLAMA)
-        alias = section_execution_ref(SERVICE_LLAMA, section) if section is not None else None
-        if not alias:
-            return False
-        loaded = llama_engine_loaded_aliases()
-        return loaded != [alias]
-    return False
-
-
-def _aux_services_to_drain_before_llama(document: WarmupPlanDocument) -> set[str]:
-    """
-  Mechanical GPU drain: aux engines that the plan keeps warm AND report loaded now.
-
-    Uses engine HTTP probes, NOT .warmup-state.json memory.
-    """
-    to_drain: set[str] = set()
-    for service in AUX_UNLOAD_ORDER:
-        section = document.services.get(service)
-        if not section_should_load(service, section):
-            continue
-        if aux_engine_reports_loaded(service):
-            to_drain.add(service)
-    return to_drain
-
-
 def _patch_state(mutator: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
     return mutate_warmup_state(mutator)
 
@@ -173,7 +132,6 @@ def _set_service_phase(
     error: str | None = None,
     model_id: str | None = None,
     bundle_id: str | None = None,
-    router_alias: str | None = None,
     clear_loaded_refs: bool = False,
 ) -> None:
     def mutate(state: dict[str, Any]) -> None:
@@ -187,19 +145,12 @@ def _set_service_phase(
         if clear_loaded_refs:
             entry.pop("modelId", None)
             entry.pop("bundleId", None)
-            entry.pop("routerAlias", None)
         if model_id is not None:
             entry["modelId"] = model_id
             entry.pop("bundleId", None)
-            entry.pop("routerAlias", None)
         if bundle_id is not None:
             entry["bundleId"] = bundle_id
             entry.pop("modelId", None)
-            entry.pop("routerAlias", None)
-        if router_alias is not None:
-            entry["routerAlias"] = router_alias
-            entry.pop("modelId", None)
-            entry.pop("bundleId", None)
         services[service] = entry
         state["services"] = services
 
@@ -222,87 +173,6 @@ def _set_apply_meta(
             state["inProgressRevision"] = in_progress_revision
 
     _patch_state(mutate)
-
-
-def _is_llama_loaded_entry(entry: dict[str, Any]) -> bool:
-    status = entry.get("status")
-    if isinstance(status, dict):
-        value = status.get("value")
-        if isinstance(value, str) and value.lower() == "loaded":
-            return True
-    state = entry.get("state")
-    return isinstance(state, str) and state.lower() == "loaded"
-
-
-def _unload_llama_to_idle() -> bool:
-    loaded_aliases = llama_engine_loaded_aliases()
-    ok = True
-    for alias in loaded_aliases:
-        _set_service_phase(SERVICE_LLAMA, phase=SERVICE_PHASE_UNLOADING)
-        if not post_llama_unload(alias):
-            ok = False
-        elif not wait_llama_unloaded(alias):
-            ok = False
-    if ok:
-        _set_service_phase(SERVICE_LLAMA, phase=SERVICE_PHASE_IDLE, error=None, clear_loaded_refs=True)
-    else:
-        _set_service_phase(SERVICE_LLAMA, phase=_SERVICE_PHASE_FAILED, error="llama unload timed out")
-    return ok
-
-
-def _load_llama_alias(alias: str) -> bool:
-    # Mechanical fast-path: engine already reports the requested alias loaded.
-    if alias in llama_engine_loaded_aliases():
-        _set_service_phase(
-            SERVICE_LLAMA,
-            phase=SERVICE_PHASE_READY,
-            error=None,
-            router_alias=alias,
-        )
-        return True
-
-    loaded_aliases = llama_engine_loaded_aliases()
-    ok = True
-    for loaded in loaded_aliases:
-        if loaded == alias:
-            continue
-        if not post_llama_unload(loaded):
-            ok = False
-        elif not wait_llama_unloaded(loaded):
-            ok = False
-    _set_service_phase(SERVICE_LLAMA, phase=SERVICE_PHASE_LOADING)
-    if not post_llama_load(alias):
-        _set_service_phase(SERVICE_LLAMA, phase=_SERVICE_PHASE_FAILED, error="llama load request failed")
-        return False
-    if not wait_llama_loaded(alias):
-        _set_service_phase(SERVICE_LLAMA, phase=_SERVICE_PHASE_FAILED, error="llama load timed out")
-        return False
-    _set_service_phase(
-        SERVICE_LLAMA,
-        phase=SERVICE_PHASE_READY,
-        error=None,
-        router_alias=alias,
-    )
-    return ok
-
-
-def _reconcile_llama(section: WarmupServiceSection, action: str) -> bool:
-    if action == "unload":
-        if not llama_engine_loaded_aliases():
-            _set_service_phase(SERVICE_LLAMA, phase=SERVICE_PHASE_IDLE, error=None, clear_loaded_refs=True)
-            return True
-        return _unload_llama_to_idle()
-    if action == "load":
-        alias = section_execution_ref(SERVICE_LLAMA, section)
-        if not alias:
-            _set_service_phase(
-                SERVICE_LLAMA,
-                phase=_SERVICE_PHASE_FAILED,
-                error="llama plan missing router_alias",
-            )
-            return False
-        return _load_llama_alias(alias)
-    return True
 
 
 def _reconcile_aux(service: str, section: WarmupServiceSection, action: str) -> bool:
@@ -394,50 +264,22 @@ def _execute_plan_commands(
 ) -> bool:
     ok = True
 
-    llama_command = commands.get(SERVICE_LLAMA)
-    drain_aux = _llama_command_needs_gpu_drain(commands, desired)
-    gpu_reload_set = _aux_services_to_drain_before_llama(desired) if drain_aux else set()
-    if drain_aux:
-        to_drain = set(gpu_reload_set)
-        for service in AUX_UNLOAD_ORDER:
-            if commands.get(service) == "unload":
-                to_drain.add(service)
-        for service in AUX_UNLOAD_ORDER:
-            if service not in to_drain:
-                continue
-            section = desired.services.get(service)
-            if section is None:
-                continue
-            if not _reconcile_aux(service, section, "unload"):
-                ok = False
-
-    if SERVICE_LLAMA in commands:
-        llama_section = desired.services.get(SERVICE_LLAMA)
-        if llama_section is not None:
-            if not _reconcile_llama(llama_section, commands[SERVICE_LLAMA]):
-                ok = False
+    for service in AUX_UNLOAD_ORDER:
+        if commands.get(service) != "unload":
+            continue
+        section = desired.services.get(service)
+        if section is None:
+            continue
+        if not _reconcile_aux(service, section, "unload"):
+            ok = False
 
     for service in AUX_LOAD_ORDER:
-        command = commands.get(service)
-        if command != "load" and service not in gpu_reload_set:
+        if commands.get(service) != "load":
             continue
         section = desired.services.get(service)
         if section is None:
             continue
         if not _reconcile_aux(service, section, "load"):
-            ok = False
-
-    for service in AUX_UNLOAD_ORDER:
-        command = commands.get(service)
-        if command != "unload":
-            continue
-        section = desired.services.get(service)
-        if section is None:
-            continue
-        if drain_aux and llama_command in {"load", "unload"}:
-            # Already unloaded during GPU drain pass.
-            continue
-        if not _reconcile_aux(service, section, "unload"):
             ok = False
 
     return ok
@@ -649,10 +491,21 @@ def compute_transitions(document: WarmupPlanDocument, state: dict[str, Any]) -> 
     ]
 
 
-def _aux_services_to_drain_before_llama_with_state(
-    document: WarmupPlanDocument,
-    state: dict[str, Any] | None = None,
-) -> set[str]:
-    """Back-compat for tests — .warmup-state.json is intentionally ignored."""
-    del state
-    return _aux_services_to_drain_before_llama(document)
+# Back-compat for tests that imported the old reconcile loop name.
+_run_reconcile_loop = _run_apply_loop
+
+# Back-compat for tests that imported compute_transitions.
+def compute_transitions(document: WarmupPlanDocument, state: dict[str, Any]) -> list:
+    """Deprecated test helper: maps derive_plan_commands to legacy transition objects."""
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True)
+    class ServiceTransition:
+        service: str
+        action: str
+
+    commands = derive_plan_commands(document)
+    return [
+        ServiceTransition(service=service, action=commands[service])
+        for service in WARMUP_SERVICE_SECTIONS
+    ]

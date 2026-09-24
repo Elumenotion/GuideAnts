@@ -267,4 +267,76 @@ public sealed class ChatTargetValidatorTests
 
     private static IConfiguration BuildConfiguration(Dictionary<string, string?> values) =>
         new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+
+    [TestMethod]
+    public void Validate_AcceptsOpenAiCompatible_WhenRowHasValidBaseUrl()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>());
+        var runtimeJson = """{"baseUrl":"http://localhost:8000/v1"}""";
+
+        Action act = () => validator.Validate(new ChatTarget("vllm-qwen", "openai-compatible", RuntimeConfigJson: runtimeJson));
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void Validate_AcceptsOpenAiCompatible_WhenRowHasTrailingSlashFreeHttpBaseUrl()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>());
+        var runtimeJson = """{"baseUrl":"https://api.example.com/v1","apiKey":"encv2::tests::abc"}""";
+
+        Action act = () => validator.Validate(new ChatTarget("vllm-qwen", "openai-compatible", RuntimeConfigJson: runtimeJson));
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void Validate_Throws_ProviderNotReady_WhenOpenAiCompatibleMissingBaseUrl()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>());
+
+        Action act = () => validator.Validate(new ChatTarget("vllm-qwen", "openai-compatible", RuntimeConfigJson: null));
+        act.Should().Throw<RoutingException>()
+            .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
+                         && ex.ProviderSection == "openai-compatible"
+                         && ex.ModelId == "vllm-qwen")
+            .WithMessage("*baseUrl*");
+    }
+
+    [TestMethod]
+    public void Validate_Throws_ProviderNotReady_WhenOpenAiCompatibleBaseUrlIsRelative()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>());
+        var runtimeJson = """{"baseUrl":"localhost:8000/v1"}""";
+
+        Action act = () => validator.Validate(new ChatTarget("vllm-qwen", "openai-compatible", RuntimeConfigJson: runtimeJson));
+        act.Should().Throw<RoutingException>()
+            .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
+                         && ex.ProviderSection == "openai-compatible")
+            .WithMessage("*baseUrl*");
+    }
+
+    [TestMethod]
+    public void Validate_Throws_ProviderNotReady_WhenOpenAiCompatibleBaseUrlHasTrailingSlash()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>());
+        var runtimeJson = """{"baseUrl":"http://localhost:8000/v1/"}""";
+
+        Action act = () => validator.Validate(new ChatTarget("vllm-qwen", "openai-compatible", RuntimeConfigJson: runtimeJson));
+        act.Should().Throw<RoutingException>()
+            .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
+                         && ex.ProviderSection == "openai-compatible")
+            .WithMessage("*baseUrl*");
+    }
+
+    [TestMethod]
+    public void Validate_Throws_ProviderNotReady_ForUnsupportedProvider_IncludesOpenAiCompatible()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>());
+
+        Action act = () => validator.Validate(new ChatTarget("model-x", "some-other-vendor", RuntimeConfigJson: null));
+        act.Should().Throw<RoutingException>()
+            .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
+                         && ex.ModelId == "model-x"
+                         && ex.Message.Contains("openai-compatible"));
+    }
 }
+

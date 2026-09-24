@@ -10,11 +10,7 @@ import BaseEntityEditor from '../components/guides/editor/BaseEntityEditor';
  * - Export functionality
  */
 export default function GuideEditor() {
-  const { projectId, guideId } = useParams<{ projectId: string; guideId?: string }>();
-
-  if (!projectId) {
-    throw new Error('Project ID is required');
-  }
+  const { projectId, guideId } = useParams<{ projectId?: string; guideId?: string }>();
 
   return <BaseEntityEditor entityType="guide" entityId={guideId} projectId={projectId} />;
 }

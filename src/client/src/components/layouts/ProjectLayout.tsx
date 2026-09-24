@@ -3,6 +3,7 @@ import { ProjectDetailsDto } from '../../types/project';
 import { TwoColumnLayout } from './TwoColumnLayout';
 import { TourStartButton } from '../../tour/TourStartButton';
 import { HomeButton } from '../common/HomeButton';
+import { GuidesButton } from '../common/GuidesButton';
 import { SettingsButton } from '../common/SettingsButton';
 import { HeaderActionsBar } from '../common/HeaderActionsBar';
 import { GuideAntsGuideButton } from '../../features/guideantsGuide/GuideAntsGuideButton';
@@ -82,6 +83,7 @@ function ProjectHeader({
                         </button>
                     )}
                     <HomeButton />
+                    <GuidesButton />
                     <SettingsButton />
                     <HeaderUserMenu />
                     <TourStartButton screenId={tourScreenId ?? 'projectDetails'} inline />

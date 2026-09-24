@@ -55,7 +55,8 @@ export type AddModelProvider =
   | 'llama-cpp'
   | 'google-gemini-chat'
   | 'hf-inference-chat'
-  | 'openrouter-chat';
+  | 'openrouter-chat'
+  | 'openai-compatible';
 
 export interface AddModelWizardState {
   provider: AddModelProvider | '';
@@ -81,6 +82,8 @@ export interface AddModelWizardState {
   llamaHuggingFaceRouterPresetRows: Array<{ key: string; value: string }>;
   llamaHuggingFacePresetMode: 'replace' | 'merge';
   llamaExistingAliasRouterModelId: string;
+  openAiCompatibleBaseUrl: string;
+  openAiCompatibleApiKey: string;
 }
 
 export interface CatalogEditState {

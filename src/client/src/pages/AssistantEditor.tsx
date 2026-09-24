@@ -15,11 +15,9 @@ import BaseEntityEditor from '../components/guides/editor/BaseEntityEditor';
  * - Export functionality
  */
 export default function AssistantEditor() {
-  const { projectId, assistantId } = useParams<{ projectId: string; assistantId?: string }>();
+  const { projectId, assistantId } = useParams<{ projectId?: string; assistantId?: string }>();
 
-  if (!projectId) {
-    throw new Error('Project ID is required');
-  }
-
+  // Global (no-project) assistant editor: env form manages the assistant default
+  // environment; save routes by ProjectId presence on the server.
   return <BaseEntityEditor entityType="assistant" entityId={assistantId} projectId={projectId} />;
 }

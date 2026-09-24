@@ -13,6 +13,13 @@ public interface ILocalAiStartupWarmupService
 
     Task WarmupAllAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Obsolete: the API no longer warms the global default via the lifecycle plan.
+    /// Global-default llama reconciliation is direct (IGlobalDefaultLlamaReconciler),
+    /// and auxiliary services are the only remaining plan concern. Kept for source
+    /// compatibility of existing test stubs.
+    /// </summary>
+    [Obsolete("Use IGlobalDefaultLlamaReconciler for the global default; auxiliary-only plan applies via WarmupAllAsync.")]
     Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default);
 
     Task EnsureAuxiliaryServicesLoadedAsync(CancellationToken cancellationToken = default);
@@ -105,6 +112,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
     public Task WarmupAllAsync(CancellationToken cancellationToken = default) =>
         SyncDesiredAndApplyAsync(waitForCompletion: false, cancellationToken: cancellationToken);
 
+    [Obsolete("Use IGlobalDefaultLlamaReconciler for the global default; auxiliary-only plan applies via WarmupAllAsync.")]
     public Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default) =>
         SyncDesiredAndApplyAsync(waitForCompletion: true, cancellationToken: cancellationToken);
 

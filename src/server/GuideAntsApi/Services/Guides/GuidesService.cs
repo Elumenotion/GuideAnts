@@ -79,21 +79,175 @@ public class GuidesService(
 
     public async Task<GuideDetailsDto?> GetGuideAsync(Guid guideId, Guid? projectId = null)
     {
+        // Scalar guide row only (no collection includes) - eliminates the flat multi-collection
+        // JOIN that produced the cartesian product (files x context options x crew x tools),
+        // which duplicated every BLOB (file ContentBytes, crew avatars, Instructions) across
+        // every product row on each request. Each relation is now loaded by its own
+        // single-table query pulling only the columns the DTOs need.
         var guide = await _context.Assistants
             .Include(a => a.Model)
-            .Include(a => a.Tools).ThenInclude(t => t.Tool)
-            .Include(a => a.ContextOptions)
-            .Include(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider).ThenInclude(ap => ap!.Scopes)
-            .Include(a => a.OpenApiSchemas).ThenInclude(s => s.Operations)
-            .Include(a => a.Files)
-            .Include(a => a.SkillMetas)
-            .Include(a => a.ConversationStarters)
-            .Include(a => a.CrewMembers).ThenInclude(ga => ga.Assistant)
             .Where(a => a.Id == guideId && a.Kind == AssistantKind.Guide)
             .FirstOrDefaultAsync();
 
         if (guide == null)
             return null;
+
+        var tools = await _context.AssistantTools
+            .Where(t => t.AssistantId == guideId)
+            .Select(t => new ToolAssignmentDto(
+                t.ToolId,
+                t.Tool.ToolType,
+                t.Tool.DisplayName,
+                false))
+            .ToListAsync();
+
+        var contextOptions = await _context.AssistantContextOptions
+            .Where(co => co.AssistantId == guideId)
+            .Select(co => new ContextOptionDto(
+                co.Key,
+                co.Value))
+            .ToListAsync();
+
+        // Convert OpenApiSchemas to CustomToolDto format
+        var customTools = await _context.AssistantOpenApiSchemas
+            .Where(s => s.AssistantId == guideId)
+            .Select(s => new CustomToolDto(
+                s.Name,
+                s.SpecificationJson,
+                s.ApiHost,
+                s.AuthProvider == null ? null : new OpenApiAuthConfigDto(
+                    s.AuthProvider!.AuthType,
+                    s.AuthProvider.ClientId,
+                    s.AuthProvider.Tenant,
+                    s.AuthProvider.Scopes.Select(sc => sc.Scope).ToList(),
+                    // Never return the actual ValueTemplate (secret) - mask it if present
+                    string.IsNullOrEmpty(s.AuthProvider.ValueTemplate) ? null : "••••••••",
+                    s.AuthProvider.HeaderName,
+                    s.AuthProvider.UserConfigPolicy),
+                s.Operations.Select(op => new OpenApiOperationDto(
+                    op.Id,
+                    op.OperationId,
+                    op.Method,
+                    op.Path,
+                    op.Summary,
+                    op.SchemaFragmentJson,
+                    op.ToolDefinitionJson)).ToList()))
+            .ToListAsync();
+
+        // File metadata only. ContentBytes is never fetched here - FileDto does not carry it,
+        // so the old query's 1,664-row duplication of every file blob was pure waste. The
+        // FolderKind/manifest predicates are applied client-side (string.Equals/EndsWith with
+        // StringComparison are not SQL-translatable), which matches the original in-memory
+        // partitioning and is cheap on this small scalar-only set.
+        var allFileRows = await _context.AssistantFiles
+            .Where(f => f.AssistantId == guideId)
+            .Select(f => new
+            {
+                f.Id,
+                f.FolderKind,
+                f.VectorStoreName,
+                f.RelativePath,
+                f.ContentType,
+                f.Created
+            })
+            .ToListAsync();
+
+        var nonSkillFiles = allFileRows
+            .Where(f => !string.Equals(f.FolderKind, "Skill", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var skillFileRows = allFileRows
+            .Where(f => string.Equals(f.FolderKind, "Skill", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // One batched shadow lookup for all VectorStore files replaces the per-file
+        // GetAssistantFileMarkdownShadowAsync calls (each of which opened a new DbContext
+        // scope), so markdown-shadow loading no longer scales as N+1.
+        var vectorStoreFileIds = nonSkillFiles
+            .Where(f => f.FolderKind == "VectorStore")
+            .Select(f => f.Id)
+            .ToList();
+        var shadowsByFileId = vectorStoreFileIds.Count > 0
+            ? await _context.AssistantFileMarkdownShadows
+                .Where(s => vectorStoreFileIds.Contains(s.OriginalAssistantFileId))
+                .ToDictionaryAsync(s => s.OriginalAssistantFileId, s => new AssistantFileMarkdownShadowDto(
+                    s.Id,
+                    s.OriginalAssistantFileId,
+                    s.ContentHash,
+                    s.FileSize,
+                    s.Status,
+                    s.ErrorMessage,
+                    s.Created,
+                    s.ProcessedAt))
+            : new Dictionary<Guid, AssistantFileMarkdownShadowDto>();
+
+        var files = nonSkillFiles
+            .Select(f => new FileDto(
+                f.Id,
+                f.FolderKind,
+                f.VectorStoreName,
+                f.RelativePath,
+                f.ContentType,
+                f.Created,
+                f.FolderKind == "VectorStore" ? shadowsByFileId.GetValueOrDefault(f.Id) : null))
+            .ToList();
+
+        // Skill files: ContentBytes is fetched only for the SKILL.md manifests that
+        // SkillDtoBuilder parses for frontmatter and tier-1 resolution (manifest detection
+        // uses the same EndsWith("SKILL.md", OrdinalIgnoreCase) predicate as SkillDtoBuilder).
+        var manifestIds = skillFileRows
+            .Where(f => f.RelativePath.EndsWith("SKILL.md", StringComparison.OrdinalIgnoreCase))
+            .Select(f => f.Id)
+            .ToList();
+        var manifestContentById = manifestIds.Count > 0
+            ? await _context.AssistantFiles
+                .Where(f => manifestIds.Contains(f.Id))
+                .Select(f => new { f.Id, f.ContentBytes })
+                .ToDictionaryAsync(f => f.Id, f => f.ContentBytes)
+            : new Dictionary<Guid, byte[]?>();
+
+        var skillFiles = skillFileRows
+            .Select(r => new AssistantFile
+            {
+                Id = r.Id,
+                FolderKind = r.FolderKind,
+                VectorStoreName = r.VectorStoreName,
+                RelativePath = r.RelativePath,
+                ContentType = r.ContentType,
+                Created = r.Created,
+                ContentBytes = manifestContentById.GetValueOrDefault(r.Id)
+            })
+            .ToList();
+
+        var skillMetas = await _context.AssistantSkillMetas
+            .Where(m => m.AssistantId == guideId)
+            .ToListAsync();
+
+        var skills = SkillDtoBuilder.BuildFromAssistantFiles(skillFiles, skillMetas);
+
+        var conversationStarters = await _context.AssistantConversationStarters
+            .Where(cs => cs.AssistantId == guideId)
+            .OrderBy(cs => cs.OrderIndex)
+            .Select(cs => new ConversationStarterDto(
+                cs.Id,
+                cs.Prompt,
+                cs.OrderIndex))
+            .ToListAsync();
+
+        // Crew members: only the scalar columns CrewMemberDto needs (name, avatar-exists,
+        // max-tool-call limits). AvatarImageBytes != null is evaluated in the SQL projection
+        // (IS NOT NULL), so the avatar payload itself never crosses the wire.
+        var crewMembers = await _context.GuideMembers
+            .Where(gm => gm.GuideId == guideId)
+            .OrderBy(gm => gm.DisplayOrder)
+            .Select(gm => new CrewMemberDto(
+                gm.AssistantId,
+                gm.Assistant.Name,
+                gm.Assistant.AvatarImageBytes != null ? $"/api/assistants/{gm.AssistantId}/avatar" : null,
+                false, // IsGlobal - to be determined by business logic
+                gm.DisplayOrder ?? 0,
+                gm.MaxToolCallsPerInvocation,
+                gm.Assistant.MaxToolCallsPerTurn))
+            .ToListAsync();
 
         var guideDto = new GuideDto(
             guide.Id,
@@ -102,122 +256,13 @@ public class GuidesService(
             guide.AvatarImageBytes != null ? $"/api/guides/{guide.Id}/avatar?t={guide.Updated?.Ticks ?? guide.Created.Ticks}" : null,
             guide.ModelId,
             guide.Model?.DisplayName,
-            guide.Tools.Count + guide.OpenApiSchemas.Sum(s => s.Operations.Count),
-            guide.CrewMembers.Select(ga => ga.AssistantId).Distinct().Count(),
+            tools.Count + customTools.Sum(s => s.Operations?.Count ?? 0),
+            crewMembers.Count,
             guide.Created,
             guide.Updated
         );
 
-        var tools = guide.Tools.Select(t => new ToolAssignmentDto(
-            t.ToolId,
-            t.Tool.ToolType,
-            t.Tool.DisplayName,
-            false
-        )).ToList();
-
-        var contextOptions = guide.ContextOptions.Select(co => new ContextOptionDto(
-            co.Key,
-            co.Value
-        )).ToList();
-
-        // Convert OpenApiSchemas back to CustomToolDto format
-        var customTools = guide.OpenApiSchemas.Select(schema => 
-        {
-            OpenApiAuthConfigDto? authConfig = null;
-            if (schema.AuthProvider != null)
-            {
-                // Never return the actual ValueTemplate (secret) - mask it if present
-                var maskedValue = string.IsNullOrEmpty(schema.AuthProvider.ValueTemplate) 
-                    ? null 
-                    : "••••••••";
-                
-                authConfig = new OpenApiAuthConfigDto(
-                    schema.AuthProvider.AuthType,
-                    schema.AuthProvider.ClientId,
-                    schema.AuthProvider.Tenant,
-                    [.. schema.AuthProvider.Scopes.Select(s => s.Scope)],
-                    maskedValue, // Return masked value for write-only field
-                    schema.AuthProvider.HeaderName,
-                    schema.AuthProvider.UserConfigPolicy
-                );
-            }
-
-            var operations = schema.Operations.Select(op => new OpenApiOperationDto(
-                op.Id,
-                op.OperationId,
-                op.Method,
-                op.Path,
-                op.Summary,
-                op.SchemaFragmentJson,
-                op.ToolDefinitionJson
-            )).ToList();
-
-            return new CustomToolDto(
-                schema.Name,
-                schema.SpecificationJson,
-                schema.ApiHost,
-                authConfig,
-                operations
-            );
-        }).ToList();
-
-        var files = new List<FileDto>();
-        foreach (var f in guide.Files.Where(file =>
-                     !string.Equals(file.FolderKind, "Skill", StringComparison.OrdinalIgnoreCase)))
-        {
-            AssistantFileMarkdownShadowDto? shadowDto = null;
-            if (f.FolderKind == "VectorStore")
-            {
-                var shadow = await _markdownExtractionService.GetAssistantFileMarkdownShadowAsync(f.Id);
-                if (shadow != null)
-                {
-                    shadowDto = new AssistantFileMarkdownShadowDto(
-                        shadow.Id,
-                        shadow.OriginalAssistantFileId,
-                        shadow.ContentHash,
-                        shadow.FileSize,
-                        shadow.Status,
-                        shadow.ErrorMessage,
-                        shadow.Created,
-                        shadow.ProcessedAt
-                    );
-                }
-            }
-
-            files.Add(new FileDto(
-                f.Id,
-                f.FolderKind,
-                f.VectorStoreName,
-                f.RelativePath,
-                f.ContentType,
-                f.Created,
-                shadowDto
-            ));
-        }
-
-        var skills = SkillDtoBuilder.BuildFromAssistantFiles(guide.Files, guide.SkillMetas);
-
-        var conversationStarters = guide.ConversationStarters
-            .OrderBy(cs => cs.OrderIndex)
-            .Select(cs => new ConversationStarterDto(
-                cs.Id,
-                cs.Prompt,
-                cs.OrderIndex
-            )).ToList();
-
         // Guide has one crew (simplified from multiple crews)
-        var crewMembers = guide.CrewMembers
-            .OrderBy(ga => ga.DisplayOrder)
-            .Select(ga => new CrewMemberDto(
-                ga.AssistantId,
-                ga.Assistant.Name,
-                ga.Assistant.AvatarImageBytes != null ? $"/api/assistants/{ga.AssistantId}/avatar" : null,
-                false, // IsGlobal - to be determined by business logic
-                ga.DisplayOrder ?? 0,
-                ga.MaxToolCallsPerInvocation,
-                ga.Assistant.MaxToolCallsPerTurn
-            )).ToList();
-        
         List<CrewSummaryDto> crews = [new CrewSummaryDto(guide.Id, $"{guide.Name} Crew", crewMembers)];
 
         // Parse auth providers from AuthConfigJson
@@ -267,6 +312,7 @@ public class GuidesService(
         )
         {
             EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null,
+            DefaultEnvironmentVariables = EnvironmentVariableConfigSerializer.DeserializeForClient(guide.DefaultEnvironmentConfigJson),
             Skills = skills.Count > 0 ? skills : null,
             SandboxWireApiConfig = DeserializeSandboxWireApiConfig(guide.SandboxWireApiConfigJson),
             MaxToolCallsPerTurn = guide.MaxToolCallsPerTurn
@@ -525,7 +571,18 @@ public class GuidesService(
         await ValidateSandboxWireApiConfigAsync(guide.Id, dto.SandboxWireApiConfig);
         guide.SandboxWireApiConfigJson = SerializeSandboxWireApiConfig(dto.SandboxWireApiConfig);
         _context.Assistants.Add(guide);
-        await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
+        if (dto.ProjectId.HasValue && dto.ProjectId.Value != Guid.Empty)
+        {
+            await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
+        }
+        else
+        {
+            // Global (no-project) editor: EnvironmentVariables targets the guide default environment.
+            guide.DefaultEnvironmentConfigJson = EnvironmentVariableConfigSerializer.SerializeFromClient(
+                dto.EnvironmentVariables,
+                guide.DefaultEnvironmentConfigJson,
+                _settingsSecretsOptions.CurrentValue);
+        }
         await _context.SaveChangesAsync();
         await StageMcpSandboxSetupIfNeededAsync(dto.ProjectId, guide.Id, dto.CustomTools);
 
@@ -626,7 +683,18 @@ public class GuidesService(
             : null;
         await ValidateSandboxWireApiConfigAsync(guideId, dto.SandboxWireApiConfig);
         guide.SandboxWireApiConfigJson = SerializeSandboxWireApiConfig(dto.SandboxWireApiConfig);
-        await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
+        if (dto.ProjectId.HasValue && dto.ProjectId.Value != Guid.Empty)
+        {
+            await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
+        }
+        else
+        {
+            // Global (no-project) editor: EnvironmentVariables targets the guide default environment.
+            guide.DefaultEnvironmentConfigJson = EnvironmentVariableConfigSerializer.SerializeFromClient(
+                dto.EnvironmentVariables,
+                guide.DefaultEnvironmentConfigJson,
+                _settingsSecretsOptions.CurrentValue);
+        }
         await _context.SaveChangesAsync();
         await StageMcpSandboxSetupIfNeededAsync(dto.ProjectId, guide.Id, dto.CustomTools);
 
@@ -867,6 +935,7 @@ public class GuidesService(
         )
         {
             EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null,
+            DefaultEnvironmentVariables = EnvironmentVariableConfigSerializer.DeserializeForClient(assistant.DefaultEnvironmentConfigJson),
             Skills = skills.Count > 0 ? skills : null,
             MaxToolCallsPerTurn = assistant.MaxToolCallsPerTurn
         };
@@ -907,7 +976,18 @@ public class GuidesService(
             null
         );
         _context.Assistants.Add(assistant);
-        await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
+        if (dto.ProjectId.HasValue && dto.ProjectId.Value != Guid.Empty)
+        {
+            await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
+        }
+        else
+        {
+            // Global (no-project) editor: EnvironmentVariables targets the guide default environment.
+            assistant.DefaultEnvironmentConfigJson = EnvironmentVariableConfigSerializer.SerializeFromClient(
+                dto.EnvironmentVariables,
+                assistant.DefaultEnvironmentConfigJson,
+                _settingsSecretsOptions.CurrentValue);
+        }
         await _context.SaveChangesAsync();
 
         if (dto.Skills is { Count: > 0 })
@@ -1017,7 +1097,18 @@ public class GuidesService(
             dto.MaxToolCallsPerTurn,
             null
         );
-        await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
+        if (dto.ProjectId.HasValue && dto.ProjectId.Value != Guid.Empty)
+        {
+            await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
+        }
+        else
+        {
+            // Global (no-project) editor: EnvironmentVariables targets the guide default environment.
+            assistant.DefaultEnvironmentConfigJson = EnvironmentVariableConfigSerializer.SerializeFromClient(
+                dto.EnvironmentVariables,
+                assistant.DefaultEnvironmentConfigJson,
+                _settingsSecretsOptions.CurrentValue);
+        }
         await _context.SaveChangesAsync();
 
         return new AssistantDto(

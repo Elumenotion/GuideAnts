@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
 import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HomeButton } from '../components/common/HomeButton';
+import { GuidesButton } from '../components/common/GuidesButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import { api } from '../services/api';
 import { TourStartButton } from '../tour/TourStartButton';
@@ -65,6 +66,7 @@ export default function NewProject() {
                     <HeaderActionsBar>
                         <GuideAntsGuideButton />
                         <HomeButton />
+                        <GuidesButton />
                         <SettingsButton />
                         <TourStartButton screenId="new-project" inline />
                     </HeaderActionsBar>

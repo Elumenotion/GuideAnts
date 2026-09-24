@@ -3,6 +3,7 @@ using System.Text.Json;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.OpenAiCompatible;
 
 namespace GuideAntsApi.Settings;
 
@@ -83,7 +84,7 @@ public sealed partial class ApplicationSettingsService
 
         var provider = request.Provider.Trim();
         var normalizedReasoningChoices = NormalizeReasoningChoicesJson(routeModelId, request.ReasoningChoicesJson);
-        var normalizedRuntimeConfigJson = NormalizeRuntimeConfigJson(routeModelId, provider, request.RuntimeConfigJson);
+        var normalizedRuntimeConfigJson = NormalizeRuntimeConfigJson(routeModelId, provider, request.RuntimeConfigJson, model.RuntimeConfigJson);
         ValidateProviderReasoningChoices(routeModelId, provider, normalizedReasoningChoices);
         ValidateLlamaBehavior(routeModelId, provider, request.ThinkingControlJson);
 
@@ -146,8 +147,33 @@ public sealed partial class ApplicationSettingsService
             .ToList();
     }
 
-    private string? NormalizeRuntimeConfigJson(string modelId, string provider, string? runtimeConfigJson)
+    private string? NormalizeRuntimeConfigJson(
+        string modelId,
+        string provider,
+        string? runtimeConfigJson,
+        string? existingRuntimeConfigJson = null)
     {
+        if (string.Equals(provider, "openai-compatible", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(runtimeConfigJson))
+            {
+                return null;
+            }
+
+            if (ContainsRuntimeProfilePointer(runtimeConfigJson))
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelId}' cannot persist runtimeProfileId for provider 'openai-compatible'. Configure SamplingParametersJson and ReasoningChoicesJson on the model row instead.");
+            }
+
+            // Row-owned endpoint + encrypted apiKey (same keyring as section secrets).
+            return OpenAiCompatibleRuntimeConfigSecrets.NormalizeAndEncrypt(
+                modelId,
+                runtimeConfigJson,
+                existingRuntimeConfigJson,
+                _settingsSecretsOptionsMonitor.CurrentValue);
+        }
+
         if (!string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
         {
             if (string.IsNullOrWhiteSpace(runtimeConfigJson))
