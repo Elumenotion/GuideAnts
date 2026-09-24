@@ -117,21 +117,33 @@ public static class SettingsCoreEndpoints
                 return Results.NotFound();
             }
 
-            try
+            // The global default model change is the unload signal: the API unloads
+            // every loaded alias that is not the new default on every in-use instance,
+            // and loads the new default on its own instance if not loaded.
+            //
+            // Run in the background: a settings change must never block on the local AI
+            // node. Synchronously awaiting the reconciler made this request hang (up to
+            // its verify timeout) while the node was down, which left the settings save
+            // and the header-toolbar model switch stuck in a wait state for a service
+            // that may never load. The reconciliation is idempotent and self-heals:
+            // the runtime watchdog re-applies the desired state (including the global
+            // default) once the node is reachable, and startup warmup reconciles on API
+            // boot.
+            _ = Task.Run(async () =>
             {
-                // The global default model change is the unload signal: the API unloads
-                // every loaded alias that is not the new default on every in-use instance,
-                // and loads the new default on its own instance if not loaded. Done
-                // directly and synchronously, so this response is only returned after the
-                // instances match the new default.
-                await globalDefaultLlamaReconciler.ReconcileWithGlobalDefaultAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                loggerFactory
-                    .CreateLogger("ChatDefaultsLlamaReconcile")
-                    .LogWarning(ex, "Failed to reconcile llama instances with the new global default after chat-defaults update.");
-            }
+                try
+                {
+                    await globalDefaultLlamaReconciler
+                        .ReconcileWithGlobalDefaultAsync(CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    loggerFactory
+                        .CreateLogger("ChatDefaultsLlamaReconcile")
+                        .LogWarning(ex, "Failed to reconcile llama instances with the new global default after chat-defaults update.");
+                }
+            });
 
             return Results.Ok(SettingsChatDefaultsMapper.MapChatDefaults(result.Section));
         })

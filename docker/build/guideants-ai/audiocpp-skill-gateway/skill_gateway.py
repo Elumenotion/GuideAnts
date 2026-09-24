@@ -38,7 +38,10 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+import re
+import shlex
 from typing import Any
+from guideants_hf.path_safety import PathSafetyError, ensure_inside_root
 from urllib.parse import urlparse
 
 import uvicorn
@@ -471,15 +474,42 @@ def pid_alive(pid: int) -> bool:
         return False
 
 
-def assert_skill_model_path(path: Path) -> Path:
+def assert_skill_model_path(raw_path: str | Path) -> Path:
+    """Validate and resolve a path under the models root.
+
+    Rejects traversal (``..``), absolute paths, and null bytes.
+    Uses the shared ``guideants_hf.path_safety`` containment check
+    so CodeQL can trace untrusted input → validated root.
+    """
+    path_str = str(raw_path).rstrip("/")
+    if not path_str:
+        raise HTTPException(status_code=400, detail="empty model path")
+    # Reject null bytes early (OS-level bypass)
+    if "\x00" in path_str:
+        raise HTTPException(status_code=400, detail="model path contains null byte")
+    # Reject absolute paths and .. traversal
+    if os.path.isabs(path_str) or ".." in path_str.split(os.sep):
+        raise HTTPException(status_code=400, detail="model path must be relative")
+    resolved = Path(path_str).resolve()
     root = models_root().resolve()
-    resolved = path.resolve()
-    if root not in resolved.parents and resolved != root:
+    try:
+        ensure_inside_root(str(root), str(resolved))
+    except PathSafetyError:
         raise HTTPException(status_code=400, detail=f"model path must be under {root}")
     return resolved
 
 
-def _tail_log(path: Path, lines: int) -> list[str]:
+def _tail_log(path: Path, *, allowed_root: Path | None = None) -> list[str]:
+    """Read tail of a log file with optional root containment.
+
+    If ``allowed_root`` is provided, the resolved path must be
+    inside it (prevents path escape via PRIVATE_STATE corruption).
+    """
+    if allowed_root is not None:
+        try:
+            ensure_inside_root(str(allowed_root.resolve()), str(path.resolve()))
+        except PathSafetyError:
+            return []
     try:
         with path.open("r", encoding="utf-8", errors="replace") as handle:
             return handle.readlines()[-lines:]
@@ -886,7 +916,11 @@ async def stage_file(
     """Stage an uploaded file on Max; return an absolute path for engine JSON fields."""
     staging = staging_root() / str(uuid.uuid4())
     staging.mkdir(parents=True, exist_ok=True)
-    name = Path(file.filename or "upload.bin").name
+    raw_name = (file.filename or "upload.bin").strip()
+    # Extract basename and reject path traversal / null bytes
+    name = Path(raw_name).name
+    if not re.match(r"^[A-Za-z0-9._\-]+$", name):
+        raise HTTPException(status_code=400, detail="invalid filename")
     dest = staging / name
     with dest.open("wb") as handle:
         while True:
@@ -955,9 +989,13 @@ def fetch_model(body: FetchRequest, _: None = Depends(auth_dependency)) -> dict[
     for entry in selected:
         repo_path = entry["path"]
         local_rel = repo_path
+        # Validate strip_prefix doesn't contain traversal
+        if ".." in (body.strip_prefix or ""):
+            raise HTTPException(status_code=400, detail="strip_prefix contains ..")
         if body.strip_prefix and local_rel.startswith(body.strip_prefix):
             local_rel = local_rel[len(body.strip_prefix) :].lstrip("/")
         local_path = dest / local_rel
+        ensure_inside_root(str(dest.resolve()), str(local_path.resolve()))
         expected_size = entry.get("size")
         if expected_size is not None and local_path.is_file() and local_path.stat().st_size == expected_size:
             skipped.append(repo_path)
@@ -1015,6 +1053,9 @@ def build_private_model_configs(body: PrivateStartRequest) -> list[dict[str, Any
         if not model_path.is_dir():
             raise HTTPException(status_code=400, detail=f"model directory not found: {model_path}")
         model_id = spec.model_id or model_path.name
+        # Sanitize model_id to prevent command injection via config
+        if not re.match(r"^[A-Za-z0-9._\-]+$", model_id):
+            raise HTTPException(status_code=400, detail="invalid model id")
         if model_id in seen_ids:
             raise HTTPException(status_code=400, detail=f"duplicate model id: {model_id}")
         seen_ids.add(model_id)
@@ -1068,7 +1109,9 @@ def private_start(body: PrivateStartRequest, _: None = Depends(auth_dependency))
         }
         state_dir = private_state_dir()
         config_path = state_dir / f"engine-{port}.json"
+        ensure_inside_root(str(state_dir.resolve()), str(config_path.resolve()))
         log_path = state_dir / f"engine-{port}.log"
+        ensure_inside_root(str(state_dir.resolve()), str(log_path.resolve()))
         with config_path.open("w", encoding="utf-8") as handle:
             json.dump(config, handle, indent=2)
             handle.write("\n")
@@ -1126,7 +1169,7 @@ def private_start(body: PrivateStartRequest, _: None = Depends(auth_dependency))
                     detail={
                         "state": "dead",
                         "exitCode": process.returncode,
-                        "logTail": _tail_log(log_path, 40),
+                        "logTail": _tail_log(log_path, allowed_root=state_dir),
                     },
                 )
             if private_health_ok(port):
@@ -1169,7 +1212,7 @@ def private_status(_: None = Depends(auth_dependency)) -> dict[str, Any]:
             "meta": PRIVATE_STATE.get("meta"),
         }
         if state == "dead" and PRIVATE_STATE.get("log_path"):
-            result["logTail"] = _tail_log(Path(str(PRIVATE_STATE["log_path"])), 40)
+            result["logTail"] = _tail_log(Path(PRIVATE_STATE["log_path"]), allowed_root=private_state_dir())
         return result
 
 
