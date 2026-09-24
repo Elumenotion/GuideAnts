@@ -4,11 +4,15 @@ using AntRunner.Chat.GoogleGemini;
 using AntRunner.Chat.HuggingFace;
 using AntRunner.Chat.LlamaCpp;
 using AntRunner.Chat.OpenAI;
+using AntRunner.Chat.OpenAiCompatible;
 using AntRunner.Chat.OpenRouter;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.OpenAiCompatible;
 using GuideAntsApi.Services.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Services.Conversations;
 
@@ -25,10 +29,12 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
     private readonly GoogleGeminiChatClientFactory _googleGeminiFactory;
     private readonly HuggingFaceChatClientFactory _huggingFaceFactory;
     private readonly OpenRouterChatClientFactory _openRouterFactory;
+    private readonly OpenAiCompatibleChatClientFactory _openAiCompatibleFactory;
     private readonly LlamaCppChatClientFactory _llamaCppFactory;
     private readonly IChatTargetResolver _chatTargetResolver;
     private readonly IChatTargetValidator _chatTargetValidator;
     private readonly IConfiguration _configuration;
+    private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptions;
     private readonly ILogger<RoutingChatCompletionClientFactory> _logger;
 
     public RoutingChatCompletionClientFactory(
@@ -40,10 +46,12 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         GoogleGeminiChatClientFactory googleGeminiFactory,
         HuggingFaceChatClientFactory huggingFaceFactory,
         OpenRouterChatClientFactory openRouterFactory,
+        OpenAiCompatibleChatClientFactory openAiCompatibleFactory,
         LlamaCppChatClientFactory llamaCppFactory,
         IChatTargetResolver chatTargetResolver,
         IChatTargetValidator chatTargetValidator,
         IConfiguration configuration,
+        IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions,
         ILogger<RoutingChatCompletionClientFactory>? logger = null)
     {
         _openAiPlatformChatFactory = openAiPlatformChatFactory ?? throw new ArgumentNullException(nameof(openAiPlatformChatFactory));
@@ -54,10 +62,12 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         _googleGeminiFactory = googleGeminiFactory ?? throw new ArgumentNullException(nameof(googleGeminiFactory));
         _huggingFaceFactory = huggingFaceFactory ?? throw new ArgumentNullException(nameof(huggingFaceFactory));
         _openRouterFactory = openRouterFactory ?? throw new ArgumentNullException(nameof(openRouterFactory));
+        _openAiCompatibleFactory = openAiCompatibleFactory ?? throw new ArgumentNullException(nameof(openAiCompatibleFactory));
         _llamaCppFactory = llamaCppFactory ?? throw new ArgumentNullException(nameof(llamaCppFactory));
         _chatTargetResolver = chatTargetResolver ?? throw new ArgumentNullException(nameof(chatTargetResolver));
         _chatTargetValidator = chatTargetValidator ?? throw new ArgumentNullException(nameof(chatTargetValidator));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _settingsSecretsOptions = settingsSecretsOptions ?? throw new ArgumentNullException(nameof(settingsSecretsOptions));
         _logger = logger ?? NullLogger<RoutingChatCompletionClientFactory>.Instance;
     }
 
@@ -114,6 +124,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
                 target.ModelId,
                 ToProviderChatBehavior(target.ChatBehavior),
                 httpClient),
+            Provider.OpenAiCompatible => CreateOpenAiCompatibleClient(target, httpClient),
             _ => throw new RoutingException(
                 RoutingErrorCodes.ProviderNotReady,
                 $"Unsupported provider for model '{target.ModelId}'.",
@@ -135,9 +146,10 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         "google-gemini-chat" => Provider.GoogleGeminiChat,
         "hf-inference-chat" => Provider.HuggingFaceInferenceChat,
         "openrouter-chat" => Provider.OpenRouterChat,
+        "openai-compatible" => Provider.OpenAiCompatible,
         _ => throw new RoutingException(
             RoutingErrorCodes.ProviderNotReady,
-            $"Provider '{target.Provider}' is not supported. Expected openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, llama-cpp, google-gemini-chat, hf-inference-chat, or openrouter-chat.",
+            $"Provider '{target.Provider}' is not supported. Expected openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, llama-cpp, google-gemini-chat, hf-inference-chat, openrouter-chat, or openai-compatible.",
             action: $"Change the provider for '{target.ModelId}' in Settings → Models & Runtime → Catalog.",
             serviceId: "Chat",
             modelId: target.ModelId,
@@ -154,7 +166,8 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         LlamaCpp,
         GoogleGeminiChat,
         HuggingFaceInferenceChat,
-        OpenRouterChat
+        OpenRouterChat,
+        OpenAiCompatible
     }
 
     /// <summary>
@@ -171,7 +184,10 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
 
         var thinking = data.ThinkingControl?.ChoiceActions is { Count: > 0 } ? data.ThinkingControl : null;
         var hasExtraFields = data.RequestFieldsWhenToolsPresent is { Count: > 0 };
-        if (thinking == null && !hasExtraFields)
+        // The combine flag defaults to true on every catalog row, so a row that configures
+        // nothing else still projects a behavior object: the OpenAI-compatible clients then
+        // merge multiple system/developer messages (strict Qwen templates reject the rest).
+        if (thinking == null && !hasExtraFields && !data.CombineSystemAndDeveloperMessages)
         {
             return null;
         }
@@ -190,7 +206,45 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
 
         return new ProviderChatBehavior(
             thinkingControl,
-            hasExtraFields ? data.RequestFieldsWhenToolsPresent : null);
+            hasExtraFields ? data.RequestFieldsWhenToolsPresent : null,
+            data.CombineSystemAndDeveloperMessages);
+    }
+
+    /// <summary>
+    /// Builds an openai-compatible client from the row's RuntimeConfigJson. No silent
+    /// fallback (R-9.1): a missing/invalid row config throws a RoutingException. The
+    /// apiKey is decrypted from its enc::v2 envelope at routing time.
+    /// </summary>
+    private IChatCompletionClient CreateOpenAiCompatibleClient(ChatTarget target, HttpClient? httpClient)
+    {
+        OpenAiCompatibleRuntimeConfiguration config;
+        try
+        {
+            config = OpenAiCompatibleRuntimeConfigurationParser.ParseRequired(
+                target.ModelId,
+                target.RuntimeConfigJson,
+                _settingsSecretsOptions.CurrentValue);
+        }
+        catch (Exception ex)
+        {
+            throw new RoutingException(
+                RoutingErrorCodes.ProviderNotReady,
+                $"openai-compatible:baseUrl is not configured on model '{target.ModelId}'.",
+                action: $"Open Settings → Models & Runtime → Catalog and set a Base URL for '{target.ModelId}'.",
+                serviceId: "Chat",
+                providerSection: "openai-compatible",
+                modelId: target.ModelId,
+                innerException: ex);
+        }
+        return _openAiCompatibleFactory.CreateClientForBehavior(
+            target.ModelId,
+            ToProviderChatBehavior(target.ChatBehavior),
+            httpClient,
+            new OpenAiCompatibleChatConfig
+            {
+                BaseUrl = config.BaseUrl,
+                ApiKey = string.IsNullOrEmpty(config.ApiKey) ? null : config.ApiKey
+            });
     }
 
     /// <summary>

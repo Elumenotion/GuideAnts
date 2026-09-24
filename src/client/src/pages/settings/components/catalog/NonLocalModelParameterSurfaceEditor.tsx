@@ -1,6 +1,7 @@
 import type { NonLocalParameterSurface } from '../../parameterSurface';
 import {
   providerSupportsRowOwnedRequestShaping,
+  providerSupportsSystemMessageMerge,
   validateOptionalJsonObject,
   validateReasoningChoicesJson,
   validateSamplingParametersJson,
@@ -9,6 +10,7 @@ import {
 export interface NonLocalModelParameterSurfaceValue extends NonLocalParameterSurface {
   thinkingControlJson: string;
   requestFieldsWhenToolsPresentJson: string;
+  combineSystemAndDeveloperMessages: boolean;
 }
 
 interface NonLocalModelParameterSurfaceEditorProps {
@@ -25,6 +27,7 @@ export function NonLocalModelParameterSurfaceEditor({
   const samplingError = validateSamplingParametersJson(value.samplingParametersJson);
   const reasoningError = validateReasoningChoicesJson(value.reasoningChoicesJson);
   const supportsRequestShaping = providerSupportsRowOwnedRequestShaping(provider);
+  const supportsSystemMessageMerge = providerSupportsSystemMessageMerge(provider);
   const thinkingError = supportsRequestShaping
     ? validateOptionalJsonObject(value.thinkingControlJson, 'Thinking control JSON')
     : null;
@@ -73,6 +76,24 @@ export function NonLocalModelParameterSurfaceEditor({
         </p>
         {reasoningError ? <p className="text-xs text-red-700">{reasoningError}</p> : null}
       </div>
+
+      {supportsSystemMessageMerge ? (
+        <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={value.combineSystemAndDeveloperMessages}
+            onChange={(event) => onChange({ combineSystemAndDeveloperMessages: event.target.checked })}
+            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span>
+            Combine system and developer messages
+            <span className="block text-[11px] font-normal text-gray-500">
+              Merge all system/developer messages into one leading system message. Strict Qwen
+              templates reject any other shape.
+            </span>
+          </span>
+        </label>
+      ) : null}
 
       {supportsRequestShaping ? (
         <>

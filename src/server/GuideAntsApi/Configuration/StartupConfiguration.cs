@@ -29,6 +29,7 @@ using AntRunner.Chat.GoogleGemini;
 using AntRunner.Chat.HuggingFace;
 using AntRunner.Chat.LlamaCpp;
 using AntRunner.Chat.OpenAI;
+using AntRunner.Chat.OpenAiCompatible;
 using AntRunner.Chat.OpenRouter;
 using Microsoft.AspNetCore.Authorization;
 using GuideAntsApi.Settings;
@@ -126,6 +127,7 @@ public static class StartupConfiguration
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupOrchestrationClient, GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiRuntimeAlignmentVerifier, GuideAntsApi.Services.Bootstrap.LocalAiRuntimeAlignmentVerifier>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.IGlobalDefaultLlamaReconciler, GuideAntsApi.Services.Bootstrap.GlobalDefaultLlamaReconciler>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService>(
             static sp => (GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService)sp.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService>());
         services.AddHostedService<GuideAntsApi.Services.Bootstrap.LocalAiRuntimeWatchdogHostedService>();
@@ -382,6 +384,14 @@ public static class StartupConfiguration
                 httpClientFactory,
                 configAccessor: resolver.GetOpenRouterChatConfig,
                 loggerFactory: loggerFactory);
+        });
+        // openai-compatible is row-owned: the factory is a plain singleton with no
+        // keyed/global config; every client is built with a per-row BaseUrl/ApiKey.
+        services.AddSingleton(provider =>
+        {
+            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+            return new OpenAiCompatibleChatClientFactory(httpClientFactory, loggerFactory);
         });
         services.AddSingleton(provider =>
         {

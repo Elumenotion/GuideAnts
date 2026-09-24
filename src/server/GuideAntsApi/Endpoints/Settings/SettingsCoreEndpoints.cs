@@ -96,7 +96,7 @@ public static class SettingsCoreEndpoints
         group.MapPut("/chat-defaults", async (
             [FromBody] UpdateChatDefaultsRequest request,
             IApplicationSettingsService settingsService,
-            GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService localAiWarmup,
+            GuideAntsApi.Services.Bootstrap.IGlobalDefaultLlamaReconciler globalDefaultLlamaReconciler,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -119,13 +119,18 @@ public static class SettingsCoreEndpoints
 
             try
             {
-                await localAiWarmup.WarmupAllAsync(cancellationToken).ConfigureAwait(false);
+                // The global default model change is the unload signal: the API unloads
+                // every loaded alias that is not the new default on every in-use instance,
+                // and loads the new default on its own instance if not loaded. Done
+                // directly and synchronously, so this response is only returned after the
+                // instances match the new default.
+                await globalDefaultLlamaReconciler.ReconcileWithGlobalDefaultAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 loggerFactory
-                    .CreateLogger("ChatDefaultsRuntimeReload")
-                    .LogWarning(ex, "Failed to reload local AI stack after chat-defaults update.");
+                    .CreateLogger("ChatDefaultsLlamaReconcile")
+                    .LogWarning(ex, "Failed to reconcile llama instances with the new global default after chat-defaults update.");
             }
 
             return Results.Ok(SettingsChatDefaultsMapper.MapChatDefaults(result.Section));

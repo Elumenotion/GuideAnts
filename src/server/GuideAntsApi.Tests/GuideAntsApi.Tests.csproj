@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GuideAntsApi\GuideAntsApi.csproj" />
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.OpenAiCompatible\AntRunner.Chat.OpenAiCompatible.csproj" />
   </ItemGroup>
 
 </Project>

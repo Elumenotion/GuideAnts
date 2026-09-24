@@ -66,10 +66,14 @@ internal static class SettingsModelOnboardingSupport
 
         try
         {
+            // Row-owned providers (openai-compatible) validate the row's RuntimeConfigJson,
+            // not a global section — pass the incoming row config through so the
+            // baseUrl requirement is checked on the real payload.
+            var rowConfigJson = GetProviderConfigString(request.ProviderConfig, "runtimeConfigJson");
             chatTargetValidator.Validate(new ChatTarget(
                 ModelId: modelId,
                 Provider: provider,
-                RuntimeConfigJson: null));
+                RuntimeConfigJson: rowConfigJson));
         }
         catch (RoutingException ex)
         {
@@ -107,6 +111,12 @@ internal static class SettingsModelOnboardingSupport
         // Optional row-owned request shaping; only providers whose clients honor it send these.
         var thinkingControlJson = GetProviderConfigString(request.ProviderConfig, "thinkingControlJson");
         var requestFieldsJson = GetProviderConfigString(request.ProviderConfig, "requestFieldsWhenToolsPresentJson");
+        // Row-owned connection details (openai-compatible: baseUrl + optional apiKey).
+        // Only row-owned providers send this; other providers keep null as before.
+        var rowRuntimeConfigJson = string.Equals(
+                request.Provider, "openai-compatible", StringComparison.OrdinalIgnoreCase)
+            ? GetProviderConfigString(request.ProviderConfig, "runtimeConfigJson")
+            : null;
 
         return new CreateSettingsModelRequest(
             ModelId: request.Catalog.ModelId.Trim(),
@@ -114,7 +124,7 @@ internal static class SettingsModelOnboardingSupport
             Provider: request.Provider.Trim(),
             Description: string.IsNullOrWhiteSpace(request.Catalog.Description) ? null : request.Catalog.Description.Trim(),
             ReasoningChoicesJson: string.IsNullOrWhiteSpace(reasoningChoicesJson) ? null : reasoningChoicesJson.Trim(),
-            RuntimeConfigJson: null,
+            RuntimeConfigJson: string.IsNullOrWhiteSpace(rowRuntimeConfigJson) ? null : rowRuntimeConfigJson.Trim(),
             CombineSystemAndDeveloperMessages: true,
             ThoughtBlockPattern: null,
             SamplingParametersJson: string.IsNullOrWhiteSpace(samplingParametersJson) ? "{}" : samplingParametersJson.Trim(),

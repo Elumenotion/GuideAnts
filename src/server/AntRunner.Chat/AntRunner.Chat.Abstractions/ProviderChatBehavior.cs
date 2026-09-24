@@ -37,11 +37,20 @@ public sealed record ProviderThinkingControl(
 /// </summary>
 public sealed record ProviderChatBehavior(
     ProviderThinkingControl? ThinkingControl = null,
-    IReadOnlyDictionary<string, JsonElement>? ExtraRequestFields = null)
+    IReadOnlyDictionary<string, JsonElement>? ExtraRequestFields = null,
+    bool? CombineSystemAndDeveloperMessages = null)
 {
     public bool HasExtraRequestFields => ExtraRequestFields is { Count: > 0 };
 
     public bool HasThinkingControl => ThinkingControl?.ChoiceActions is { Count: > 0 };
+
+    /// <summary>
+    /// True when the row asks the client to merge all system/developer messages
+    /// (anywhere in the list) into a single leading system message — the Qwen
+    /// template guard rejects any other shape. Null means the row configures
+    /// nothing and the client keeps its built-in pass-through mapping.
+    /// </summary>
+    public bool HasSystemMessageMerge => CombineSystemAndDeveloperMessages == true;
 }
 
 /// <summary>

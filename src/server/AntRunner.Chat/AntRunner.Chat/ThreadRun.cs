@@ -572,7 +572,7 @@ namespace AntRunner.Chat
             ChatRunOutput? runResults = null;
             UsageResponse? accumulatedUsage = null;
             int evaluatorTurnCounter = 0;
-            
+
             // Track files created/modified across all tool calls in this run
             var accumulatedNewFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var accumulatedModifiedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -599,6 +599,9 @@ namespace AntRunner.Chat
                         toolChoice = "none";
                         ctx.ToolLimitState = ctx.ToolLimitState with { Phase = LimitEscalationPhase.ToolChoiceNone };
                     }
+
+                    // vLLM (and some OpenAI-compatible servers) reject "tools": [] — send null instead
+                    if (tools?.Count == 0) tools = null;
 
                     var chatRequest = new ChatCompletionRequest(
                         messages,
@@ -1757,18 +1760,18 @@ namespace AntRunner.Chat
                                         ToolCallId = requiredOutput.Id
                                     };
                                 }
-                                
+
                                 // Extract init script filename from URL: sandbox://init.py -> init.py
                                 var initScriptFilename = ExtractSandboxInitFilename(builder.BaseUrl);
-                                
+
                                 // Function name is the operationId (matches builder.Operation)
                                 var functionName = builder.Operation;
-                                
+
                                 // Inject context if not already present
                                 builder.Params ??= [];
                                 var isolatedCtx = ctx with { RunId = null };
                                 builder.Params["context"] = isolatedCtx;
-                                
+
                                 // Execute the sandbox tool (calls static method that resolves service via DI)
                                 var sandboxResult = await ExecuteSandboxToolStaticAsync(
                                     toolName,
@@ -1778,7 +1781,7 @@ namespace AntRunner.Chat
                                     assistantDef.Name!,
                                     isolatedCtx,
                                     cancellationToken);
-                                
+
                                 output = SerializeToolResult(sandboxResult);
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -2562,6 +2565,5 @@ namespace AntRunner.Chat
                 return $"ERROR: Failed to invoke MCP sandbox tool: {ex.InnerException?.Message ?? ex.Message}";
             }
         }
-
     }
 }

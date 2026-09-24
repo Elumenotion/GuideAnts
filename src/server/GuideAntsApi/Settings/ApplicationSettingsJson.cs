@@ -86,7 +86,75 @@ public static class ApplicationSettingsJson
             || value.StartsWith(LegacySecretCipherPrefix, StringComparison.Ordinal);
     }
 
-    public static JsonObject EncryptSecrets(SettingsSectionDefinition definition, JsonObject payload, SettingsSecretsOptions options)
+    /// <summary>
+    /// Single-value <c>enc::v2</c> encryption for secrets that live outside a settings
+    /// section (row-owned fields stored in catalog columns). Same envelope and keyring as
+    /// section secrets. Blank/whitespace plaintext returns <c>null</c> (field unset). Callers
+    /// must not pass already-encrypted values — check <see cref="IsEncryptedSecretValue"/>
+    /// first; such values are returned unchanged by this method (no double-wrap).
+    /// </summary>
+    public static string? EncryptSecretValue(string? plaintext, SettingsSecretsOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(plaintext))
+        {
+            return null;
+        }
+
+        if (plaintext.StartsWith(SecretCipherPrefix, StringComparison.Ordinal)
+            || plaintext.StartsWith(LegacySecretCipherPrefix, StringComparison.Ordinal))
+        {
+            return plaintext;
+        }
+
+        var (activeKeyId, activeKeyBytes) = GetActiveEncryptionKeyOrThrow(options);
+        return EncryptEncV2(plaintext, activeKeyId, activeKeyBytes);
+    }
+
+    /// <summary>
+    /// Single-value decryption for row-owned secrets. Returns the plaintext for
+    /// <c>enc::v2</c> values, the legacy-protector plaintext for <c>enc::</c> values, and the
+    /// value as-is for plaintext. When an encrypted value cannot be decrypted (keyring
+    /// rotation) this returns <c>null</c> — the caller treats the secret as unset rather than
+    /// sending an undecryptable ciphertext over the wire.
+    /// </summary>
+    public static string? DecryptSecretValue(
+        string? raw,
+        SettingsSecretsOptions options,
+        IDataProtector? legacyProtector = null)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        if (raw.StartsWith(SecretCipherPrefix, StringComparison.Ordinal))
+        {
+            var keyRing = BuildReadKeyRing(options);
+            return TryDecryptEncV2(raw, keyRing, out var plaintext) ? plaintext : null;
+        }
+
+        if (raw.StartsWith(LegacySecretCipherPrefix, StringComparison.Ordinal))
+        {
+            if (legacyProtector == null)
+            {
+                return null;
+            }
+
+            var cipher = raw[LegacySecretCipherPrefix.Length..];
+            try
+            {
+                return legacyProtector.Unprotect(cipher);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return raw;
+    }
+
+        public static JsonObject EncryptSecrets(SettingsSectionDefinition definition, JsonObject payload, SettingsSecretsOptions options)
     {
         var (activeKeyId, activeKeyBytes) = GetActiveEncryptionKeyOrThrow(options);
 

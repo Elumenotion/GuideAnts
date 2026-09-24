@@ -96,6 +96,19 @@ export function providerSupportsRowOwnedRequestShaping(provider: string): boolea
   return ROW_OWNED_REQUEST_SHAPING_PROVIDERS.has(provider.trim().toLowerCase());
 }
 
+/**
+ * Providers whose chat client merges row-owned system/developer messages (the
+ * `combineSystemAndDeveloperMessages` row flag). Only openai-compatible consumes the flag
+ * today — its client merges all system/developer messages into one leading system message
+ * so strict Qwen templates do not reject multi-system requests. llama-cpp rows edit the
+ * same flag in LlamaModelChatBehaviorEditor.
+ */
+const SYSTEM_MESSAGE_MERGE_PROVIDERS = new Set(['openai-compatible']);
+
+export function providerSupportsSystemMessageMerge(provider: string): boolean {
+  return SYSTEM_MESSAGE_MERGE_PROVIDERS.has(provider.trim().toLowerCase());
+}
+
 /** Validates an optional JSON-object field: blank and `{}` both mean "not configured". */
 export function validateOptionalJsonObject(json: string, label: string): string | null {
   const trimmed = json.trim();

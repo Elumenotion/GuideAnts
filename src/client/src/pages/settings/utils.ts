@@ -28,6 +28,7 @@ import {
   buildLocalModelAddModelRequest,
 } from '../../features/localModelOnboarding/buildCommand';
 import { mapSettingsAddModelStateToOnboardingDraft } from '../../features/localModelOnboarding/mapDraft';
+import { buildOpenAiCompatibleRuntimeConfigJson } from './components/catalog/providers/OpenAiCompatibleForm';
 
 export const SECRET_MASK = '********';
 
@@ -101,6 +102,8 @@ export function createEmptyAddModelWizardState(preselectedProvider?: string | nu
     llamaHuggingFaceRouterPresetRows: [],
     llamaHuggingFacePresetMode: 'replace',
     llamaExistingAliasRouterModelId: '',
+    openAiCompatibleBaseUrl: '',
+    openAiCompatibleApiKey: '',
   };
 }
 
@@ -341,6 +344,14 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
   const providerConfig: Record<string, unknown> = {
     samplingParametersJson: parameterSurface.samplingParametersJson,
   };
+  if (provider === 'openai-compatible') {
+    // Row-owned connection details (baseUrl + optional apiKey) — the only
+    // non-local provider whose endpoint/key live on the catalog row.
+    providerConfig.runtimeConfigJson = buildOpenAiCompatibleRuntimeConfigJson(
+      state.openAiCompatibleBaseUrl,
+      state.openAiCompatibleApiKey,
+    );
+  }
   if (parameterSurface.reasoningChoicesJson) {
     providerConfig.reasoningChoicesJson = parameterSurface.reasoningChoicesJson;
   }

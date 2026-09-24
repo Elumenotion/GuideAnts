@@ -796,35 +796,8 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
 
     private static List<LlamaMessage> NormalizeMessagesWithCombinedSystemPrompt(IReadOnlyList<ChatMessage> messages)
     {
-        var normalized = new List<LlamaMessage>();
-        var systemFragments = new List<string>();
-
-        foreach (var message in messages)
-        {
-            if (message.Role is ChatRole.System or ChatRole.Developer)
-            {
-                var text = message.GetText();
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    systemFragments.Add(text);
-                }
-
-                continue;
-            }
-
-            normalized.Add(MapMessage(message));
-        }
-
-        if (systemFragments.Count > 0)
-        {
-            normalized.Insert(0, new LlamaMessage
-            {
-                Role = "system",
-                Content = string.Join("\n\n", systemFragments)
-            });
-        }
-
-        return normalized;
+        var combined = SystemMessageMerger.CombineSystemAndDeveloperMessages(messages).ToList();
+        return combined.Select(MapMessage).ToList();
     }
 
     private static LlamaMessage MapMessage(ChatMessage message)
