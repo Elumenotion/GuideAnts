@@ -2,7 +2,6 @@
 
 **Status:** Accepted (shipped)
 **Date:** 2026-09-24
-**Deciders:** GuideAnts context-compaction workstream (design spec [`docs/superpowers/specs/2026-09-21-context-compaction-design.md`](superpowers/specs/2026-09-21-context-compaction-design.md), decision D5)
 
 ## Context
 
