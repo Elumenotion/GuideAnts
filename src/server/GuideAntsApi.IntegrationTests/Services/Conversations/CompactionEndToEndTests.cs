@@ -121,6 +121,46 @@ public sealed class CompactionEndToEndTests : BaseEndpointTest
         }
     }
 
+    [TestMethod]
+    public async Task Compact_WithoutPriorOverflow_FirstSendAfterCompaction_UsesSummary()
+    {
+        // The overflow-first tests above leave a FAILED turn above the boundary, which masked the
+        // first-turn bug. Here the boundary is the last turn that exists, as in normal manual use.
+        var behavior = FakeChatCompletionBehavior.Instance;
+        behavior.Reset();
+
+        Guid projectId, notebookId, conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await ConversationStreamTestHelpers.SeedProjectNotebookAsync(db, "Compaction first turn");
+            conversationId = await ConversationStreamTestHelpers.SeedConversationAsync(db, notebookId, "Compaction first turn");
+        }
+
+        var conv = new CompactedConversation(projectId, notebookId, conversationId, 0, 0);
+        const int turns = RecallMarkerTurn + 1;
+        for (var turn = 1; turn <= turns; turn++)
+        {
+            var events = await SendAsync(conv, SetupMessage(turn));
+            events.Should().Contain(e => e.EventType == StreamingEventTypes.Complete, $"setup turn {turn} must complete");
+        }
+
+        var compactResponse = await Client.PostAsync(
+            $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/compact", content: null);
+        compactResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var compaction = await compactResponse.Content.ReadFromJsonAsync<CompactionResultDto>();
+        compaction!.BoundaryTurnIndex.Should().Be(turns);
+
+        var firstEvents = await SendAsync(conv, "First message after compaction.");
+        firstEvents.Should().Contain(e => e.EventType == StreamingEventTypes.Complete);
+
+        var requestText = string.Join("\n", behavior.LastRequestMessages!.Select(m => m.GetText()));
+        requestText.Should().Contain(ConversationStreamTestHelpers.HandoffFramingFragment,
+            "the very first turn after compaction must already use the summary");
+        requestText.Should().NotContain(RecallMarker,
+            "pre-boundary content must not reach the model verbatim on the first post-compaction turn");
+    }
+
     private sealed record CompactedConversation(
         Guid ProjectId, Guid NotebookId, Guid ConversationId, int BoundaryTurnIndex, int PromptCharBudget);
 

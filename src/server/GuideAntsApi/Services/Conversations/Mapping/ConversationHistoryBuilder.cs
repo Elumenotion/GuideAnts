@@ -172,17 +172,11 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         bool isAssistantSwitch,
         CancellationToken cancellationToken)
     {
+        // No "stale boundary" check here: conv is loaded before the current turn is created, so a
+        // boundary equal to the highest loaded turn is the normal just-compacted state.
+        // ConversationUndoService clamps the boundary when it deletes turns, which is what keeps
+        // a boundary from covering turns the user never asked to compact (D1).
         var boundary = conv.CompactionBoundaryTurnIndex;
-        if (boundary.HasValue && !conv.Turns.Any(t => t.TurnIndex > boundary.Value))
-        {
-            // A boundary with no turn beyond it is stale, not "just compacted": in the normal flow
-            // the current turn is always created and persisted before this method runs, so a turn
-            // above the boundary always exists here. This only happens when Undo has reset turn
-            // indices backward underneath an earlier boundary (ConversationUndoService does not
-            // clamp CompactionBoundaryTurnIndex) - fall back to full history rather than silently
-            // compacting turns the user never asked to compact (D1).
-            boundary = null;
-        }
 
         if (!boundary.HasValue)
         {

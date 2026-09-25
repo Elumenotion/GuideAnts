@@ -139,6 +139,18 @@ public sealed class ConversationUndoService : IConversationUndoService
                         $"Cannot undo while turn {durableStreamingTurn.TurnIndex} is still streaming");
                 }
 
+                // Undo deletes every turn at or after the target, and the next turn reuses the freed
+                // index. A compaction boundary at or past the target would otherwise silently compact
+                // turns the user creates after the undo (D1), so pull it back to the last surviving
+                // turn - or clear it when none survives. Same SaveChanges as the deletes below.
+                if (conv.CompactionBoundaryTurnIndex is int boundary && boundary >= targetMessage.TurnIndex)
+                {
+                    conv.CompactionBoundaryTurnIndex = await db.ConversationTurns
+                        .Where(t => t.NotebookConversationId == conversationId)
+                        .Where(t => t.TurnIndex < targetMessage.TurnIndex)
+                        .MaxAsync(t => (int?)t.TurnIndex);
+                }
+
                 _logger.LogInformation(
                     "Undo removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}",
                     messagesToRemove.Count,

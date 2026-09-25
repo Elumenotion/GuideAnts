@@ -215,12 +215,7 @@ public sealed class ConversationHistoryBuilderCompactionTests
         // Simulate a second compaction press that moved the boundary forward to include turn 3
         // (CompactionService's job in W4; here we just set the column directly, as W5 only cares
         // that the history builder re-derives from source, not that it drives the move itself).
-        // A turn 4 is added first because in the real flow (ConversationService.cs) the current
-        // turn's own user message is always persisted before PrepareMessagesForAssistantAsync runs
-        // for it - so a boundary never sits at-or-above every existing turn when this method is
-        // called for real. Without turn 4 here, boundary=3 would look identical to the
-        // stale-after-undo case the next test guards against, and this test would start exercising
-        // that guard instead of the recomputation property it's meant to prove.
+        // A turn 4 is added so the second pass has a non-empty tail to assert ordering against.
         conv.Turns.Add(new ConversationTurn
         {
             NotebookConversationId = _conversationId, TurnIndex = 4, AssistantName = "Claude",
@@ -245,21 +240,35 @@ public sealed class ConversationHistoryBuilderCompactionTests
     }
 
     [TestMethod]
-    public async Task PrepareMessages_BoundaryStaleAfterUndo_FallsBackToFullHistoryRatherThanCompactingAgainstTheUsersWill()
+    public async Task PrepareMessages_FirstTurnAfterCompaction_BoundaryAtLastLoadedTurn_SendsSummaryNotFullHistory()
     {
+        // The real first-turn-after-compaction shape: ConversationService loads the conversation
+        // (with its turns) BEFORE it creates the current turn in a separate DbContext, so the
+        // loaded entity's highest turn IS the boundary. That must compact, not fall back.
         var conv = LoadConversation();
-        // Simulates the state left behind when ConversationUndoService deletes turns at/after a
-        // target index and the next turn is reassigned from the new Max(TurnIndex) - without
-        // clamping CompactionBoundaryTurnIndex, a boundary set before the undo can end up at or
-        // above every turn that still exists. D1 forbids compaction the user didn't ask for, so a
-        // boundary this stale must be treated as if the conversation was never compacted, not
-        // silently applied against whatever turns happen to remain.
-        conv.CompactionBoundaryTurnIndex = 5;
+        conv.CompactionBoundaryTurnIndex = 3;
 
         var messages = await _builder.PrepareMessagesForAssistantAsync(conv, "Claude", Guid.NewGuid());
 
-        messages.Should().HaveCount(6); // full uncompacted history for turns 1-3, not a bare summary
-        messages.Should().NotContain(m => m.GetText().Contains("condensed handoff briefing"));
+        messages.Should().ContainSingle(); // the summary; no post-boundary turns exist yet
+        messages[0].Role.Should().Be(ChatMessageRole.System);
+        messages[0].GetText().Should().Contain("condensed handoff briefing");
+        messages[0].GetText().Should().Contain("[Compacted 6 earlier message(s).]"); // all 3 turns
+    }
+
+    [TestMethod]
+    public async Task PrepareMessages_AssistantSwitch_FirstTurnAfterCompaction_SummaryThenHandoff()
+    {
+        SeedAssistantCache(SwitchAssistantName);
+        var conv = LoadConversation();
+        conv.CompactionBoundaryTurnIndex = 3;
+
+        var messages = await _builder.PrepareMessagesForAssistantAsync(conv, SwitchAssistantName, Guid.NewGuid());
+
+        messages.Should().HaveCount(2);
+        messages[0].GetText().Should().Contain("condensed handoff briefing");
+        messages[1].Role.Should().Be(ChatMessageRole.System);
+        messages[1].GetText().Should().Contain("previous messages between the user and assistant");
     }
 
     [TestMethod]
