@@ -642,4 +642,96 @@ describe('conversation reducer', () => {
     });
     expect(next).toBe(initialState);
   });
+
+  it('sets contextStatus wholesale on SET_CONTEXT_STATUS', () => {
+    const status = {
+      contextWindowTokens: 8192,
+      estimatedPromptTokens: 4096,
+      boundaryTurnIndex: null,
+      estimateSource: 'ProviderUsage' as const,
+      modelDeploymentId: 'gpt-4o-mini',
+      contextWindowSource: 'Catalog' as const,
+    };
+
+    const next = reducer(initialState, { type: 'SET_CONTEXT_STATUS', payload: status });
+
+    expect(next.contextStatus).toEqual(status);
+  });
+
+  it('SET_CONTEXT_STATUS with null clears a previously-known status', () => {
+    const withStatus = reducer(initialState, {
+      type: 'SET_CONTEXT_STATUS',
+      payload: { contextWindowTokens: 100, estimatedPromptTokens: 10, boundaryTurnIndex: null, estimateSource: 'Characters' as const, modelDeploymentId: null, contextWindowSource: 'Unknown' as const },
+    });
+
+    const cleared = reducer(withStatus, { type: 'SET_CONTEXT_STATUS', payload: null });
+
+    expect(cleared.contextStatus).toBeNull();
+  });
+
+  it('MERGE_CONTEXT_STATUS_AFTER_COMPACT merges into an existing contextStatus', () => {
+    const withStatus = reducer(initialState, {
+      type: 'SET_CONTEXT_STATUS',
+      payload: {
+        contextWindowTokens: 8192,
+        estimatedPromptTokens: 5000,
+        boundaryTurnIndex: null,
+        estimateSource: 'ProviderUsage' as const,
+        modelDeploymentId: 'gpt-4o-mini',
+        contextWindowSource: 'Catalog' as const,
+      },
+    });
+
+    const merged = reducer(withStatus, {
+      type: 'MERGE_CONTEXT_STATUS_AFTER_COMPACT',
+      payload: { boundaryTurnIndex: 5, estimatedTokensAfter: 900 },
+    });
+
+    expect(merged.contextStatus).toEqual({
+      contextWindowTokens: 8192,
+      estimatedPromptTokens: 900,
+      boundaryTurnIndex: 5,
+      estimateSource: 'ProviderUsage',
+      modelDeploymentId: 'gpt-4o-mini',
+      contextWindowSource: 'Catalog',
+    });
+  });
+
+  it('MERGE_CONTEXT_STATUS_AFTER_COMPACT builds a minimal contextStatus when none exists', () => {
+    const merged = reducer(initialState, {
+      type: 'MERGE_CONTEXT_STATUS_AFTER_COMPACT',
+      payload: { boundaryTurnIndex: 5, estimatedTokensAfter: 900 },
+    });
+
+    expect(merged.contextStatus).toEqual({
+      contextWindowTokens: null,
+      estimatedPromptTokens: 900,
+      boundaryTurnIndex: 5,
+      estimateSource: 'None',
+      modelDeploymentId: null,
+      contextWindowSource: 'Unknown',
+    });
+  });
+
+  it('MERGE_CONTEXT_STATUS_AFTER_COMPACT falls back to the existing estimate when estimatedTokensAfter is null', () => {
+    const withStatus = reducer(initialState, {
+      type: 'SET_CONTEXT_STATUS',
+      payload: {
+        contextWindowTokens: 8192,
+        estimatedPromptTokens: 5000,
+        boundaryTurnIndex: null,
+        estimateSource: 'ProviderUsage' as const,
+        modelDeploymentId: 'gpt-4o-mini',
+        contextWindowSource: 'Catalog' as const,
+      },
+    });
+
+    const merged = reducer(withStatus, {
+      type: 'MERGE_CONTEXT_STATUS_AFTER_COMPACT',
+      payload: { boundaryTurnIndex: 5, estimatedTokensAfter: null },
+    });
+
+    expect(merged.contextStatus?.estimatedPromptTokens).toBe(5000);
+    expect(merged.contextStatus?.boundaryTurnIndex).toBe(5);
+  });
 });

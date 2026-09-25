@@ -23,11 +23,13 @@ public interface IConversationHistoryBuilder
     Task<List<ChatMessage>> ApplyAssistantSwitchLogicAsync(
         NotebookConversation conv,
         string newAssistantName,
+        int? compactionBoundaryTurnIndex = null,
         CancellationToken cancellationToken = default);
 
     Task<List<ChatMessage>> BuildOpenAiMessagesAsync(
         NotebookConversation conv,
         string assistantName,
+        int? compactionBoundaryTurnIndex = null,
         CancellationToken cancellationToken = default);
 
     Task<List<ChatMessage>> BuildPublishedMessagesForAssistantAsync(

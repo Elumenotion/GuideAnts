@@ -66,6 +66,40 @@ public sealed class CatalogServiceRowAuthorityTests
         model.ReasoningChoices.Should().Equal("none", "low", "medium", "high");
     }
 
+    [TestMethod]
+    public async Task GetModelsAsync_CarriesContextWindowAndMaxOutputTokensFromRow()
+    {
+        await using var context = CreateContext();
+        context.Models.Add(new Model
+        {
+            ModelId = "ctx-model",
+            DisplayName = "Ctx",
+            Provider = "openai-chat",
+            SamplingParametersJson = "{}",
+            ContextWindowTokens = 262_147,
+            MaxOutputTokens = 16_381,
+            IsActive = true,
+        });
+        context.Models.Add(new Model
+        {
+            ModelId = "no-ctx-model",
+            DisplayName = "NoCtx",
+            Provider = "openai-chat",
+            SamplingParametersJson = "{}",
+            IsActive = true,
+        });
+        await context.SaveChangesAsync();
+
+        var models = (await new CatalogService(context).GetModelsAsync()).ToList();
+
+        var withValues = models.Single(m => m.ModelId == "ctx-model");
+        withValues.ContextWindowTokens.Should().Be(262_147);
+        withValues.MaxOutputTokens.Should().Be(16_381);
+        var withoutValues = models.Single(m => m.ModelId == "no-ctx-model");
+        withoutValues.ContextWindowTokens.Should().BeNull();
+        withoutValues.MaxOutputTokens.Should().BeNull();
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

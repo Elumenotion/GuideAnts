@@ -76,7 +76,13 @@ public sealed class ChatModelResolver : IChatModelResolver
         IReadOnlyDictionary<string, JsonElement> parameters)
     {
         var target = _chatTargetResolver.Resolve(modelId);
-        var policy = new ResolvedExecutionPolicy(modelId, target.Provider, authority, parameters);
+        var policy = new ResolvedExecutionPolicy(
+            modelId,
+            target.Provider,
+            authority,
+            parameters,
+            target.ContextWindowTokens,
+            target.MaxOutputTokens);
         return new ResolvedChatModel(modelId, referenceKind, policy);
     }
 

@@ -8,6 +8,7 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Utils;
 using GuideAntsApi.Services.SystemGuide;
+using GuideAntsApi.Services.Conversations.Commands;
 using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
 
@@ -15,6 +16,58 @@ namespace GuideAntsApi.Endpoints;
 
 public static class NotebookConversationsEndpoints
 {
+    internal static async Task<IResult> GetConversationAsync(
+        IConversationService svc,
+        IConversationContextStatusService contextStatus,
+        ILogger logger,
+        Guid convoId,
+        CancellationToken ct)
+    {
+        var conversation = await svc.GetConversationWithMessagesAsync(convoId);
+        if (conversation == null)
+        {
+            return Results.NotFound();
+        }
+
+        try
+        {
+            var status = await contextStatus.GetAsync(convoId, ct);
+            return Results.Ok(conversation with { ContextStatus = status });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The meter is advisory. Never fail a conversation load because of it.
+            logger.LogWarning(ex, "Failed to compute context status for conversation {ConversationId}", convoId);
+            return Results.Ok(conversation);
+        }
+    }
+
+    internal static async Task<IResult> CompactConversationAsync(
+        ICompactionService compactionService,
+        ILogger logger,
+        Guid convoId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var outcome = await compactionService.CompactConversationAsync(convoId, ct);
+            return Results.Ok(new CompactionResultDto(
+                outcome.BoundaryTurnIndex,
+                outcome.MessagesSummarized,
+                outcome.EstimatedTokensBefore,
+                outcome.EstimatedTokensAfter));
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "Conversation not found" });
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message.Contains("Conversation is locked by", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Conflict(new { error = ex.Message });
+        }
+    }
+
     public static void MapNotebookConversationsEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/projects/{projectId:guid}/notebooks/{notebookId:guid}/conversations")
@@ -31,11 +84,13 @@ public static class NotebookConversationsEndpoints
         .Produces<IReadOnlyList<NotebookConversationListDto>>(StatusCodes.Status200OK);
 
         // Get single conversation with messages
-        group.MapGet("/{convoId:guid}", async ([FromServices] IConversationService svc, Guid convoId) =>
-        {
-            var conversation = await svc.GetConversationWithMessagesAsync(convoId);
-            return conversation == null ? Results.NotFound() : Results.Ok(conversation);
-        })
+        group.MapGet("/{convoId:guid}", async (
+            [FromServices] IConversationService svc,
+            [FromServices] IConversationContextStatusService contextStatus,
+            [FromServices] ILoggerFactory loggerFactory,
+            Guid convoId,
+            CancellationToken ct) =>
+            await GetConversationAsync(svc, contextStatus, loggerFactory.CreateLogger("NotebookConversations"), convoId, ct))
         .Produces<NotebookConversationWithMessagesDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound);
 
@@ -86,6 +141,19 @@ public static class NotebookConversationsEndpoints
         })
         .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent);
+
+        // POST compact this conversation (summarize older turns to reclaim context)
+        group.MapPost("/{convoId:guid}/compact", async (
+                [FromServices] ICompactionService compactionService,
+                [FromServices] ILoggerFactory loggerFactory,
+                Guid notebookId,
+                Guid convoId,
+                CancellationToken ct) =>
+            await CompactConversationAsync(compactionService, loggerFactory.CreateLogger("NotebookConversations"), convoId, ct))
+            .RequireAuthorization("RequireContributor")
+            .Produces<CompactionResultDto>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict);
 
         // POST cancel an in-flight stream turn (idempotent Stop control)
         group.MapPost("/{convoId:guid}/turns/{turnId:guid}/cancel", async (

@@ -192,7 +192,9 @@ public sealed record SettingsModelDto(
     string? ThoughtBlockPattern = null,
     string SamplingParametersJson = "{}",
     string ThinkingControlJson = "{}",
-    string RequestFieldsWhenToolsPresentJson = "{}");
+    string RequestFieldsWhenToolsPresentJson = "{}",
+    int? ContextWindowTokens = null,
+    int? MaxOutputTokens = null);
 
 public sealed record CreateSettingsModelRequest(
     string ModelId,
@@ -207,7 +209,9 @@ public sealed record CreateSettingsModelRequest(
     string? ThoughtBlockPattern = null,
     string SamplingParametersJson = "{}",
     string ThinkingControlJson = "{}",
-    string RequestFieldsWhenToolsPresentJson = "{}");
+    string RequestFieldsWhenToolsPresentJson = "{}",
+    int? ContextWindowTokens = null,
+    int? MaxOutputTokens = null);
 
 public sealed record UpdateSettingsModelRequest(
     string ModelId,
@@ -222,14 +226,18 @@ public sealed record UpdateSettingsModelRequest(
     string? ThoughtBlockPattern = null,
     string SamplingParametersJson = "{}",
     string ThinkingControlJson = "{}",
-    string RequestFieldsWhenToolsPresentJson = "{}");
+    string RequestFieldsWhenToolsPresentJson = "{}",
+    int? ContextWindowTokens = null,
+    int? MaxOutputTokens = null);
 
 public sealed record AddModelCatalogDto(
     string ModelId,
     string DisplayName,
     string? Description,
     int? DisplayOrder,
-    bool IsActive);
+    bool IsActive,
+    int? ContextWindowTokens = null,
+    int? MaxOutputTokens = null);
 
 public sealed record AddModelInstallHuggingFaceDto(
     string Repository,

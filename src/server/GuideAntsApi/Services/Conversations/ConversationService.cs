@@ -1008,7 +1008,10 @@ public class ConversationService : IConversationService
                 oAuthUserAccessToken = ctx.ExternalAuthTokens.FirstOrDefault().Value,
                 ExternalAuthTokens = ctx.ExternalAuthTokens,
                 ClientToolDefinitions = ctx.Request.ClientToolDefinitions,
-                ExecutionPolicy = ctx.ExecutionPolicy
+                ExecutionPolicy = ctx.ExecutionPolicy,
+                // D7: recall exists only for a conversation the user actually compacted. A
+                // conversation with no boundary has nothing to recall and sees no new tool.
+                EnableConversationRecall = ctx.Conversation.CompactionBoundaryTurnIndex.HasValue
             },
             PreviousMessages = ctx.PreviousMessages,
             UserMessageId = ctx.UserMessage?.Id,

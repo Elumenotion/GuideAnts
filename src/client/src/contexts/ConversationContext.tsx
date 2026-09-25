@@ -150,6 +150,7 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
           convo.assistantName,
         );
         dispatch({ type: 'SET_MESSAGES', payload: messages });
+        dispatch({ type: 'SET_CONTEXT_STATUS', payload: convo.contextStatus ?? null });
 
         if (convo.activeTurn
           && ['streaming', 'pending_client_tool'].includes((convo.activeTurn.status ?? '').toLowerCase())
@@ -419,6 +420,13 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
   onTurnIdAssignedRef.current = actions.onTurnIdAssigned;
   onStreamTerminalRef.current = actions.clearPendingStop;
 
+  const mergeContextStatusAfterCompact = useCallback((boundaryTurnIndex: number | null, estimatedTokensAfter: number | null) => {
+    dispatch({
+      type: 'MERGE_CONTEXT_STATUS_AFTER_COMPACT',
+      payload: { boundaryTurnIndex, estimatedTokensAfter },
+    });
+  }, []);
+
   const currentAssistant = useMemo(() => {
     const name = state.selectedAssistant || undefined;
     return name ? assistantByName[name] : undefined;
@@ -447,12 +455,15 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     streamingMode: state.streamingMode ?? 'at-rest',
     activeStreamingUser: state.activeStreamingUser,
     pendingAttachments,
+    conversationId,
+    contextStatus: state.contextStatus ?? null,
     userProfiles: state.userProfiles ?? {},
     handleStreamingEvent,
     setStreamingMode: actions.setStreamingMode,
     cancelStream: actions.cancelStream,
     addPendingAttachment: actions.addPendingAttachment,
     removePendingAttachment: actions.removePendingAttachment,
+    mergeContextStatusAfterCompact,
     onPreviewFile,
     onPreviewFileByPath,
   };

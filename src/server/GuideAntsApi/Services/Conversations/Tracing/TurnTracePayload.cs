@@ -39,6 +39,8 @@ public sealed class TurnTraceSegment
     public int? ToolLimitCallsUsed { get; set; }
 
     public string? ToolLimitEscalationPhase { get; set; }
+
+    public int? CompactionBoundaryTurnIndex { get; set; }
 }
 
 public sealed class TurnTraceRound

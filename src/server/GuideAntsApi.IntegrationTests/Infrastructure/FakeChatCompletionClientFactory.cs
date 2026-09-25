@@ -20,6 +20,7 @@ internal enum FakeChatScenario
     RepeatedToolCalls,
     PartialTimeoutStream,
     NestedAgentBlocking,
+    OverflowAbovePromptBudget,
 }
 
 internal sealed class FakeChatCompletionBehavior
@@ -40,6 +41,18 @@ internal sealed class FakeChatCompletionBehavior
     public TaskCompletionSource<bool> NonCooperativeStreamRelease { get; private set; } = CreateSignal();
     public TaskCompletionSource<bool> SlowStreamFirstChunkEmitted { get; private set; } = CreateSignal();
     public IReadOnlyList<ChatMessage>? LastRequestMessages { get; private set; }
+
+    /// <summary>
+    /// For <see cref="FakeChatScenario.OverflowAbovePromptBudget"/>: a streamed request whose messages total
+    /// more characters than this is rejected with <see cref="ChatContextOverflowException"/>, as a provider
+    /// rejecting an oversized prompt would be. At or under the budget the reply is the default one.
+    /// </summary>
+    public int PromptCharBudget { get; set; } = int.MaxValue;
+
+    public IReadOnlyList<string>? LastRequestToolNames { get; private set; }
+
+    public static int PromptChars(IEnumerable<ChatMessage> messages) =>
+        messages.Sum(m => m.GetText()?.Length ?? 0);
 
     /// <summary>
     /// Invoked synchronously immediately before a tool_calls response is returned.
@@ -81,6 +94,8 @@ internal sealed class FakeChatCompletionBehavior
         SlowStreamFirstChunkEmitted = CreateSignal();
         OnToolCallsReturning = null;
         LastRequestMessages = null;
+        PromptCharBudget = int.MaxValue;
+        LastRequestToolNames = null;
         Interlocked.Exchange(ref _callIndex, 0);
         Interlocked.Exchange(ref _toolChoiceNoneRequestCount, 0);
     }
@@ -90,8 +105,13 @@ internal sealed class FakeChatCompletionBehavior
 
     public void SignalNestedCompletionStarted() => NestedCompletionStarted.TrySetResult(true);
 
-    public void CaptureRequest(ChatCompletionRequest request) =>
+    public void CaptureRequest(ChatCompletionRequest request)
+    {
         LastRequestMessages = request.Messages.ToList();
+        LastRequestToolNames = (request.Tools ?? [])
+            .Select(t => t.Function?.Name ?? string.Empty)
+            .ToList();
+    }
 }
 
 internal sealed class FakeChatCompletionClientFactory : IChatCompletionClientFactory
@@ -145,6 +165,7 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
             FakeChatScenario.RepeatedToolCalls => RepeatedToolCallsAsync(request, onChunk),
             FakeChatScenario.PartialTimeoutStream => PartialTimeoutStreamAsync(onChunk, cancellationToken),
             FakeChatScenario.NestedAgentBlocking => NestedAgentBlockingStreamAsync(onChunk),
+            FakeChatScenario.OverflowAbovePromptBudget => OverflowAbovePromptBudgetAsync(request, onChunk),
             _ => DefaultStreamAsync(onChunk)
         };
     }
@@ -157,6 +178,22 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
             new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, "Reading the web page."), null)
         ]));
         return Task.FromResult(CreateToolCallsResponse());
+    }
+
+    private Task<ChatCompletionResponse> OverflowAbovePromptBudgetAsync(
+        ChatCompletionRequest request,
+        Action<ChatCompletionChunk> onChunk)
+    {
+        var promptChars = FakeChatCompletionBehavior.PromptChars(request.Messages);
+        if (promptChars > _behavior.PromptCharBudget)
+        {
+            throw new ChatContextOverflowException(
+                "exceed_context_size_error: the request exceeds the available context size",
+                promptTokens: promptChars / 4,
+                contextSize: _behavior.PromptCharBudget / 4);
+        }
+
+        return DefaultStreamAsync(onChunk);
     }
 
     private async Task<ChatCompletionResponse> WaitForNestedCompletionAsync(

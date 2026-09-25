@@ -32,4 +32,11 @@ public class NotebookConversation
 
     [Required]
     public DateTime Created { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Turn index at which the user last compacted. Messages with a lower TurnIndex are
+    /// replaced by a generated summary at history-build time. Null = never compacted.
+    /// Monotonic: this value only ever increases (see CompactionService).
+    /// </summary>
+    public int? CompactionBoundaryTurnIndex { get; set; }
 } 

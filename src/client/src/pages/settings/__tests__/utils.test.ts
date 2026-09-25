@@ -9,6 +9,7 @@ import type {
 } from '../../../types/settings';
 import { buildOpenAiCompatibleRuntimeConfigJson } from '../components/catalog/providers/OpenAiCompatibleForm';
 import {
+  normalizeTokenCount,
   SECRET_MASK,
   buildAddModelRequest,
   buildCatalogEditRequest,
@@ -228,6 +229,8 @@ describe('buildCatalogEditRequest', () => {
         displayName: 'Qwen Local',
         description: '',
         displayOrder: '',
+        contextWindowTokens: '',
+        maxOutputTokens: '',
         isActive: true,
         samplingParametersJson: '{"temperature":0.2}',
         reasoningChoicesJson: '["low"]',
@@ -321,6 +324,8 @@ describe('catalog edit helpers', () => {
       combineSystemAndDeveloperMessages: true,
       thoughtBlockPattern: '',
       displayOrder: '3',
+      contextWindowTokens: '',
+      maxOutputTokens: '',
     });
   });
 
@@ -332,6 +337,8 @@ describe('catalog edit helpers', () => {
         displayName: 'Qwen Local',
         description: '',
         displayOrder: '',
+        contextWindowTokens: '',
+        maxOutputTokens: '',
         isActive: true,
         samplingParametersJson: '{}',
         reasoningChoicesJson: '["medium"]',
@@ -689,6 +696,8 @@ describe('buildCatalogEditRequest edge cases', () => {
       displayName: 'GPT-4o',
       description: '  optional desc  ',
       displayOrder: '2',
+      contextWindowTokens: '',
+      maxOutputTokens: '',
       isActive: true,
       samplingParametersJson: '{"temperature":{"key":"temperature","label":"Temperature","description":"","min":0,"max":2,"step":0.1,"default":1,"displayOrder":0,"exposedInGuideBuilder":true}}',
       reasoningChoicesJson: '["low","high"]',
@@ -712,6 +721,8 @@ describe('buildCatalogEditRequest edge cases', () => {
       displayName: 'Qwen',
       description: '',
       displayOrder: '',
+      contextWindowTokens: '',
+      maxOutputTokens: '',
       isActive: true,
       samplingParametersJson: '{}',
       reasoningChoicesJson: '',
@@ -734,6 +745,8 @@ describe('buildCatalogEditRequest edge cases', () => {
         displayName: 'Qwen',
         description: '',
         displayOrder: '',
+        contextWindowTokens: '',
+        maxOutputTokens: '',
         isActive: true,
         samplingParametersJson: '{}',
         reasoningChoicesJson: '',
@@ -754,6 +767,8 @@ describe('buildCatalogEditRequest edge cases', () => {
       displayName: 'GPT-4.1',
       description: '',
       displayOrder: '',
+      contextWindowTokens: '',
+      maxOutputTokens: '',
       isActive: true,
       samplingParametersJson: '{}',
       reasoningChoicesJson: '',
@@ -773,6 +788,8 @@ describe('buildCatalogEditRequest edge cases', () => {
         displayName: 'GPT-4.1',
         description: '',
         displayOrder: '',
+        contextWindowTokens: '',
+        maxOutputTokens: '',
         isActive: true,
         samplingParametersJson: '{bad-json',
         reasoningChoicesJson: '',
@@ -803,6 +820,8 @@ describe('buildCatalogEditRequest llama-cpp reasoning', () => {
       displayName: 'Qwen Local',
       description: '',
       displayOrder: '',
+      contextWindowTokens: '',
+      maxOutputTokens: '',
       isActive: true,
       samplingParametersJson: '{}',
       reasoningChoicesJson: '',
@@ -812,5 +831,25 @@ describe('buildCatalogEditRequest llama-cpp reasoning', () => {
       thoughtBlockPattern: '',
     });
     expect(request.reasoningChoicesJson).toBeUndefined();
+  });
+});
+
+describe('normalizeTokenCount', () => {
+  it.each([
+    ['200000', 200000],
+    [' 200000 ', 200000],
+    ['007', 7],
+    ['2147483647', 2147483647],
+    ['', null],
+    ['   ', null],
+    ['0', null],
+    ['-3', null],
+    ['1.5', null],
+    ['1e5', null],
+    ['12abc', null],
+    ['2147483648', null],
+    ['3000000000', null],
+  ])('maps %j to %s', (input, expected) => {
+    expect(normalizeTokenCount(input)).toBe(expected);
   });
 });

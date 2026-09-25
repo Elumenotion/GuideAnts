@@ -400,9 +400,9 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         }
 
         // Prompt exceeds the loaded model's context window. This is a request-shaping problem, not a
-        // caller bug or crash, so it gets the recoverable exception type the execution engine catches
-        // to unwind the oversized message and retry. llama-server strips its (huge) body from the
-        // thrown message, so this client must classify at the source — see ChatContextOverflowClassifier.
+        // caller bug or crash, so it gets the typed exception that lets ThreadRun classify and
+        // propagate the overflow consistently across providers. llama-server strips its (huge) body
+        // from the thrown message, so this client must classify at the source — see ChatContextOverflowClassifier.
         if (ChatContextOverflowClassifier.TryClassifyBody((int)response.StatusCode, responseBody, out var promptTokens, out var contextSize))
         {
             throw new ChatContextOverflowException(

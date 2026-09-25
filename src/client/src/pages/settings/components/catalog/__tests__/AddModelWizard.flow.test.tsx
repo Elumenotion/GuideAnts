@@ -565,4 +565,110 @@ describe('AddModelWizard flow', () => {
     onTerminal?.({ status: 'completed' });
     await waitFor(() => expect(screen.getByText('Completed')).toBeInTheDocument());
   });
+
+  describe('context window seeding', () => {
+    async function pickSuggestion(user: ReturnType<typeof userEvent.setup>, id: string) {
+      render(<AddModelWizard {...baseProps} providerPreselect="openai-chat" />);
+      const modelId = catalogInputs().modelId;
+      await user.click(modelId);
+      await user.type(modelId, id);
+      await user.click(await screen.findByText(id, { selector: 'div.font-mono' }));
+      // Blur the id field and let the duplicate-id check settle so Continue is enabled.
+      await user.tab();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    }
+
+    async function createAndGetRequest(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await user.click(screen.getByRole('button', { name: 'Create model' }));
+      await waitFor(() => expect(mockApi.settings.addModel).toHaveBeenCalled());
+      return mockApi.settings.addModel.mock.calls[0]![0].catalog;
+    }
+
+    it('carries the seed values of a picked known model into the create request', async () => {
+      const user = userEvent.setup();
+      await pickSuggestion(user, 'gpt-5.1');
+      expect(screen.getByLabelText('Context window (tokens)')).toHaveValue('400000');
+      expect(screen.getByLabelText('Max output (tokens)')).toHaveValue('128000');
+      const catalog = await createAndGetRequest(user);
+      expect(catalog).toEqual(
+        expect.objectContaining({ contextWindowTokens: 400000, maxOutputTokens: 128000 }),
+      );
+    });
+
+    it('sends null for a picked known model with no seed values', async () => {
+      const user = userEvent.setup();
+      await pickSuggestion(user, 'gpt-4.1-nano');
+      expect(screen.getByLabelText('Context window (tokens)')).toHaveValue('');
+      const catalog = await createAndGetRequest(user);
+      expect(catalog).toHaveProperty('contextWindowTokens', null);
+      expect(catalog).toHaveProperty('maxOutputTokens', null);
+    });
+
+    it('sends values typed for a model absent from the seed, and null for invalid entries', async () => {
+      const user = userEvent.setup();
+      render(<AddModelWizard {...baseProps} providerPreselect="openai-chat" />);
+      const { modelId, displayName } = catalogInputs();
+      await user.type(modelId, 'custom-model');
+      await user.type(displayName, 'Custom');
+      await user.type(screen.getByLabelText('Context window (tokens)'), '65432');
+      await user.type(screen.getByLabelText('Max output (tokens)'), '-3');
+      const catalog = await createAndGetRequest(user);
+      expect(catalog).toEqual(
+        expect.objectContaining({ contextWindowTokens: 65432, maxOutputTokens: null }),
+      );
+    });
+  });
+
+  describe('local model window inputs', () => {
+    it('shows the window inputs for cloud providers', () => {
+      render(<AddModelWizard {...baseProps} providerPreselect="anthropic" />);
+      expect(screen.getByLabelText('Context window (tokens)')).toBeInTheDocument();
+      expect(screen.getByLabelText('Max output (tokens)')).toBeInTheDocument();
+      expect(screen.getByText(/context meter misleading/i)).toBeInTheDocument();
+    });
+
+    it('hides the window inputs and hint for llama-cpp in the advanced flow', async () => {
+      const user = userEvent.setup();
+      render(<AddModelWizard {...baseProps} providerPreselect="llama-cpp" />);
+      await user.click(screen.getByRole('button', { name: /Custom Hugging Face/i }));
+      await user.click(screen.getByRole('button', { name: 'Back' }));
+      expect(screen.getByText(/Catalog entry/)).toBeInTheDocument();
+      expect(screen.queryByLabelText('Context window (tokens)')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Max output (tokens)')).not.toBeInTheDocument();
+      expect(screen.queryByText(/context meter misleading/i)).not.toBeInTheDocument();
+    });
+
+    it('does not send window values typed under a cloud provider after switching to llama-cpp', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.settings.browseHuggingFaceRepository).mockResolvedValue({
+        repository: 'unsloth/Qwen3.6-9B-GGUF',
+        gated: false,
+        tokenUsed: false,
+        files: [
+          { path: 'Qwen3.6-9B-Q5_K_M.gguf', size: 5000, category: 'gguf', quantLabel: 'Q5_K_M', sharded: false },
+        ],
+        resolvedRevision: '8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a',
+      } as any);
+      render(<AddModelWizard {...baseProps} providerPreselect="anthropic" />);
+      await user.type(screen.getByLabelText('Context window (tokens)'), '65432');
+      await user.type(screen.getByLabelText('Max output (tokens)'), '4321');
+      await user.click(screen.getByRole('button', { name: 'Back' }));
+      await user.selectOptions(screen.getByRole('combobox'), 'llama-cpp');
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await user.click(screen.getByRole('button', { name: /Custom Hugging Face/i }));
+      await user.type(screen.getByLabelText(/catalog model id/i), 'qwen3.6-local');
+      await user.type(screen.getByLabelText(/router alias/i), 'qwen3.6-local');
+      await user.type(screen.getByPlaceholderText(/Qwen3\.6-35B-A3B-GGUF/i), 'unsloth/Qwen3.6-9B-GGUF');
+      await user.click(screen.getByRole('button', { name: /browse repository/i }));
+      await waitFor(() => expect(api.settings.browseHuggingFaceRepository).toHaveBeenCalled());
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await user.click(screen.getByRole('button', { name: 'Create model' }));
+      await waitFor(() => expect(mockApi.settings.addModel).toHaveBeenCalled());
+      const sent = JSON.stringify(mockApi.settings.addModel.mock.calls[0]![0]);
+      expect(sent).not.toContain('65432');
+      expect(sent).not.toContain('4321');
+    });
+  });
 });

@@ -76,6 +76,8 @@ interface CellListProps {
   /** Whether the undo control is available. Undo does not require a chat model/runtime, so it is
    *  gated separately from canEdit (which also covers sending/editing). */
   canUndo?: boolean;
+  /** Turn index at which the conversation was last compacted, or null/undefined if never. */
+  compactionBoundaryTurnIndex?: number | null;
   'data-tour-id'?: string;
 }
 
@@ -304,6 +306,7 @@ const CellList = React.memo(function CellList({
   onPreviewFileByPath,
   canEdit = false,
   canUndo = false,
+  compactionBoundaryTurnIndex = null,
   'data-tour-id': dataTourId
 }: CellListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -901,9 +904,23 @@ const CellList = React.memo(function CellList({
                 ? workflowMessages
                 : workflowMessages.filter(m => m.id !== finalAssistantMessage?.id);
               const isLastTurn = idx === groupedTurns.length - 1;
+              const turnIndexOfThisTurn = turn.allMessages[0]?.turnIndex;
+              const showCompactionMarker = compactionBoundaryTurnIndex != null
+                && turnIndexOfThisTurn === compactionBoundaryTurnIndex + 1;
 
               return (
                 <React.Fragment key={`turn-${idx}`}>
+                  {showCompactionMarker && (
+                    <div
+                      key={`compaction-marker-${idx}`}
+                      className="col-span-3 flex items-center gap-2 my-2 text-xs text-gray-500"
+                      data-testid="compaction-boundary-marker"
+                    >
+                      <div className="flex-1 border-t border-gray-200" />
+                      <span>Conversation compacted — earlier messages summarized</span>
+                      <div className="flex-1 border-t border-gray-200" />
+                    </div>
+                  )}
                   {/* User message(s) for this turn */}
                   {turn.userMessages.map((um, uidx) => {
                     const isLastUser = uidx === turn.userMessages.length - 1;

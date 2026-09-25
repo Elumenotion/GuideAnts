@@ -91,15 +91,17 @@ internal static class StreamingErrorEnvelope
             };
         }
 
-        // Context overflow that survived the engine's unwind/retry (e.g. the system prompt alone
-        // exceeds the window). Surface a distinct code so the UI can prompt for a smaller request.
+        // Context overflow. No unwind/retry exists anymore (D5) -- this fires on the very first
+        // round that exceeds the window. Compaction is the remedy; the client independently
+        // overrides this message with the same framing (useStreamingEventHandler.ts), but this
+        // string should say the same thing for any other consumer of the raw envelope.
         var overflow = ex as ChatContextOverflowException ?? inner as ChatContextOverflowException;
         if (overflow != null)
         {
             return new
             {
                 code = "chat_context_overflow",
-                message = "The request was too large for the model's context window. Retry with a smaller message or a different approach.",
+                message = "The request was too large for the model's context window. Use Compact in the conversation to summarize older messages, then retry.",
                 type = nameof(ChatContextOverflowException),
                 promptTokens = overflow.PromptTokens,
                 contextSize = overflow.ContextSize,

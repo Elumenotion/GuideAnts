@@ -11,6 +11,7 @@ vi.mock('../../../../../services/api', () => ({
   api: {
     settings: {
       updateModel: vi.fn(),
+      probeModelContextWindow: vi.fn(),
     },
   },
 }));
@@ -282,5 +283,177 @@ describe('CatalogRowEditModal', () => {
 
     expect(screen.queryByText('Stack base URL')).not.toBeInTheDocument();
     expect(screen.queryByText('Stack API key')).not.toBeInTheDocument();
-  })
+  });
+
+  describe('context window fields', () => {
+    const windowModel: SettingsModelDto = {
+      ...openAiModel,
+      contextWindowTokens: 271828,
+      maxOutputTokens: 31415,
+    };
+
+    const renderModal = (model: SettingsModelDto) =>
+      render(
+        <CatalogRowEditModal
+          model={model}
+          orderedModels={[model]}
+          isOpen
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+        />,
+      );
+
+    const savedRequest = () => vi.mocked(api.settings.updateModel).mock.calls[0]![1];
+
+    it('shows the row existing values in both inputs', () => {
+      renderModal(windowModel);
+      expect(screen.getByLabelText('Context window (tokens)')).toHaveValue('271828');
+      expect(screen.getByLabelText('Max output (tokens)')).toHaveValue('31415');
+    });
+
+    it('shows empty inputs for a row without values', () => {
+      renderModal(openAiModel);
+      expect(screen.getByLabelText('Context window (tokens)')).toHaveValue('');
+      expect(screen.getByLabelText('Max output (tokens)')).toHaveValue('');
+    });
+
+    it('sends an edited context window on save', async () => {
+      const user = userEvent.setup();
+      renderModal(windowModel);
+      const input = screen.getByLabelText('Context window (tokens)');
+      await user.clear(input);
+      await user.type(input, '314159');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(api.settings.updateModel).toHaveBeenCalled());
+      expect(savedRequest()).toEqual(
+        expect.objectContaining({ contextWindowTokens: 314159, maxOutputTokens: 31415 }),
+      );
+    });
+
+    it('sends null when the fields are cleared', async () => {
+      const user = userEvent.setup();
+      renderModal(windowModel);
+      await user.clear(screen.getByLabelText('Context window (tokens)'));
+      await user.clear(screen.getByLabelText('Max output (tokens)'));
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(api.settings.updateModel).toHaveBeenCalled());
+      expect(savedRequest()).toEqual(
+        expect.objectContaining({ contextWindowTokens: null, maxOutputTokens: null }),
+      );
+    });
+
+    it('does not wipe existing values when saving an unrelated edit', async () => {
+      const user = userEvent.setup();
+      renderModal(windowModel);
+      await user.click(screen.getByRole('checkbox', { name: /active/i }));
+      const order = screen.getByDisplayValue('1');
+      await user.clear(order);
+      await user.type(order, '7');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(api.settings.updateModel).toHaveBeenCalled());
+      expect(savedRequest()).toEqual(
+        expect.objectContaining({
+          isActive: false,
+          displayOrder: 7,
+          contextWindowTokens: 271828,
+          maxOutputTokens: 31415,
+        }),
+      );
+    });
+
+    it('always includes both keys, as null, for a row with no values', async () => {
+      const user = userEvent.setup();
+      renderModal(openAiModel);
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(api.settings.updateModel).toHaveBeenCalled());
+      const request = savedRequest();
+      expect(request).toHaveProperty('contextWindowTokens', null);
+      expect(request).toHaveProperty('maxOutputTokens', null);
+    });
+
+    it.each([['0'], ['-5'], ['12.5'], ['abc']])('sends null for the invalid entry %s', async (entry) => {
+      const user = userEvent.setup();
+      renderModal(windowModel);
+      const context = screen.getByLabelText('Context window (tokens)');
+      const output = screen.getByLabelText('Max output (tokens)');
+      await user.clear(context);
+      await user.type(context, entry);
+      await user.clear(output);
+      await user.type(output, entry);
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(api.settings.updateModel).toHaveBeenCalled());
+      expect(savedRequest()).toEqual(
+        expect.objectContaining({ contextWindowTokens: null, maxOutputTokens: null }),
+      );
+    });
+  });
+
+  describe('fetch from provider', () => {
+    const anthropicModel: SettingsModelDto = {
+      ...openAiModel,
+      modelId: 'claude-haiku-4-5',
+      provider: 'anthropic',
+      contextWindowTokens: 1000,
+      maxOutputTokens: 500,
+    };
+
+    const renderModal = (model: SettingsModelDto) =>
+      render(
+        <CatalogRowEditModal
+          model={model}
+          orderedModels={[model]}
+          isOpen
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+        />,
+      );
+
+    it('fills both inputs from the probe result without saving', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.settings.probeModelContextWindow).mockResolvedValue({
+        supported: true,
+        contextWindowTokens: 200000,
+        maxOutputTokens: 64000,
+        message: null,
+      });
+      renderModal(anthropicModel);
+
+      await user.click(screen.getByRole('button', { name: /fetch from provider/i }));
+
+      await waitFor(() =>
+        expect(screen.getByLabelText('Context window (tokens)')).toHaveValue('200000'),
+      );
+      expect(screen.getByLabelText('Max output (tokens)')).toHaveValue('64000');
+      expect(api.settings.probeModelContextWindow).toHaveBeenCalledWith('claude-haiku-4-5', 'anthropic');
+      expect(api.settings.updateModel).not.toHaveBeenCalled();
+    });
+
+    it('shows the message and leaves the inputs alone when no values come back', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.settings.probeModelContextWindow).mockResolvedValue({
+        supported: true,
+        contextWindowTokens: null,
+        maxOutputTokens: null,
+        message: 'No Anthropic API key is configured.',
+      });
+      renderModal(anthropicModel);
+
+      await user.click(screen.getByRole('button', { name: /fetch from provider/i }));
+
+      expect(await screen.findByText('No Anthropic API key is configured.')).toBeInTheDocument();
+      expect(screen.getByLabelText('Context window (tokens)')).toHaveValue('1000');
+      expect(screen.getByLabelText('Max output (tokens)')).toHaveValue('500');
+      expect(api.settings.updateModel).not.toHaveBeenCalled();
+    });
+
+    it('is absent for a provider that publishes no context window', () => {
+      renderModal(openAiModel);
+      expect(screen.queryByRole('button', { name: /fetch from provider/i })).not.toBeInTheDocument();
+    });
+  });
 });

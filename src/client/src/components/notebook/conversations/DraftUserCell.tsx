@@ -14,6 +14,8 @@ import { useAudioRecorder } from '../../../hooks/useAudioRecorder';
 import MicrophoneButton from '../../common/MicrophoneButton';
 import CameraCapture from '../../common/CameraCapture';
 import { useToast } from '../../common/Toast';
+import ContextMeter from './ContextMeter';
+import CompactButton from './CompactButton';
 
 /**
  * Normalizes markdown content for chat messages by converting paragraph breaks
@@ -112,7 +114,7 @@ export default function DraftUserCell({
   // that did not persist the send (see applyComposerTerminalOutcome). Do NOT re-add clearing
   // logic here — the draft cell is a pure view of pendingAttachments; ownership lives in the
   // action layer so the SSE handler never has to manage composer state.
-  const { pendingAttachments, addPendingAttachment, removePendingAttachment } = useConversation();
+  const { pendingAttachments, addPendingAttachment, removePendingAttachment, conversationId, contextStatus, refresh, mergeContextStatusAfterCompact } = useConversation();
   const { showToast } = useToast();
 
   // Speech-to-text hook
@@ -750,6 +752,11 @@ export default function DraftUserCell({
             {/* Action buttons */}
             <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
               <div className="text-sm text-gray-500">
+                {!isReadOnly && (
+                  <span className="mr-3">
+                    <ContextMeter contextStatus={contextStatus} />
+                  </span>
+                )}
                 {/* Keyboard shortcuts - hidden on mobile */}
                 {!isReadOnly && (
                   <span className="hidden md:inline">
@@ -766,6 +773,16 @@ export default function DraftUserCell({
                 )}
               </div>
               <div className="flex items-center space-x-2">
+                {!isReadOnly && conversationId && projectId && notebookId && (
+                  <CompactButton
+                    projectId={projectId}
+                    notebookId={notebookId}
+                    conversationId={conversationId}
+                    disabled={isBusy}
+                    onSuccess={refresh}
+                    onCompacted={(result) => mergeContextStatusAfterCompact(result.boundaryTurnIndex, result.estimatedTokensAfter)}
+                  />
+                )}
                 {/* Camera button */}
                 {!isReadOnly && isCameraSupported && (
                   <button

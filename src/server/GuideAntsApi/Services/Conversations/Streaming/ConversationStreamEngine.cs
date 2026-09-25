@@ -13,6 +13,7 @@ using GuideAntsApi.Services.Components.Sync;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Conversations.Persistence;
 using GuideAntsApi.Services.Conversations.Tracing;
+using GuideAntsApi.Services.Routing;
 
 namespace GuideAntsApi.Services.Conversations.Streaming;
 
@@ -31,6 +32,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ConversationStreamRunRegistry _streamRunRegistry;
     private readonly INotebookFileSyncService? _notebookFileSyncService;
+    private readonly ILearnedContextWindowCache? _learnedContextWindows;
     private readonly ILogger<ConversationStreamEngine> _logger;
 
     public ConversationStreamEngine(
@@ -41,7 +43,8 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
         IServiceScopeFactory scopeFactory,
         ConversationStreamRunRegistry streamRunRegistry,
         ILogger<ConversationStreamEngine> logger,
-        INotebookFileSyncService? notebookFileSyncService = null)
+        INotebookFileSyncService? notebookFileSyncService = null,
+        ILearnedContextWindowCache? learnedContextWindows = null)
     {
         _httpClientFactory = httpClientFactory;
         _chatClientFactory = chatClientFactory;
@@ -51,7 +54,38 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
         _streamRunRegistry = streamRunRegistry;
         _logger = logger;
         _notebookFileSyncService = notebookFileSyncService;
+        _learnedContextWindows = learnedContextWindows;
     }
+
+    /// <summary>
+    /// Metadata only: remembers the context window a provider reported when it rejected a prompt as
+    /// too large. Never alters the turn outcome. The model id must be the resolved catalog id
+    /// (what <c>IChatModelResolver</c> returns), the same id space <c>IContextWindowResolver</c> uses.
+    /// </summary>
+    internal static void RecordLearnedContextWindow(
+        ILearnedContextWindowCache? cache, string? modelId, Exception ex)
+    {
+        if (cache == null || string.IsNullOrWhiteSpace(modelId))
+        {
+            return;
+        }
+
+        var inner = ex is ChatConversationException chatEx ? chatEx.InnerException : ex.InnerException;
+        var overflow = ex as ChatContextOverflowException ?? inner as ChatContextOverflowException;
+        if (overflow != null)
+        {
+            cache.Record(modelId, overflow.ContextSize);
+        }
+    }
+
+    /// <summary>
+    /// The marker fires once, on the first turn whose history was built from the compacted form -
+    /// not on every subsequent turn, since a live-connected observer only needs it at the moment
+    /// the transcript's shape actually changes. A client that connects later gets the same fact
+    /// from the conversation's context-status read instead (contextStatus.boundaryTurnIndex).
+    /// </summary>
+    internal static bool ShouldEmitCompactionBoundaryMarker(int? compactionBoundaryTurnIndex, int currentTurnIndex) =>
+        compactionBoundaryTurnIndex.HasValue && currentTurnIndex == compactionBoundaryTurnIndex.Value + 1;
 
     public async IAsyncEnumerable<StreamingEvent> RunStreamAsync(
         ConversationStreamRunContext context,
@@ -231,6 +265,16 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             var fileUrlContext = policy.BuildFileUrlContext(context.Conversation, context.PublisherId, context.HostUrl);
             var turnTraceCollector = new TurnTraceCollector(context.AssistantName, context.ModelDeploymentId);
             context.ChatOptions.TraceCollector = turnTraceCollector;
+
+            if (context.Conversation.CompactionBoundaryTurnIndex is int boundaryTurnIndex)
+            {
+                turnTraceCollector.CaptureCompaction(boundaryTurnIndex);
+
+                if (ShouldEmitCompactionBoundaryMarker(boundaryTurnIndex, context.TurnIndex))
+                {
+                    TryWrite(StreamingEvents.BuildCompactionBoundaryMarkerEvent(boundaryTurnIndex, context.DbTurn.Id));
+                }
+            }
 
             async Task PersistTraceSegmentAsync(string captureState, string? errorMessage = null, CancellationToken ct = default)
             {
@@ -842,6 +886,14 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
                 try
                 {
+                    try
+                    {
+                        RecordLearnedContextWindow(_learnedContextWindows, context.ModelDeploymentId, ex);
+                    }
+                    catch (Exception learnEx)
+                    {
+                        _logger.LogWarning(learnEx, "Failed to record learned context window for conversation {ConversationId}", context.ConversationId);
+                    }
                     var terminalStatus = ConversationTurnTerminalizer.MapTerminalStatus(partialOutput, ex);
                     terminalizationAttempted = true;
                     terminalizationConfirmed = await TerminalizeTurnUntilConfirmedAsync(

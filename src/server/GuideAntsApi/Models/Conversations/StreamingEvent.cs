@@ -33,4 +33,6 @@ public static class StreamingEventTypes
     // Client-handled tool flow (NEW)
     public const string ExternalToolCall = "external_tool_call";        // Client-handled tool call subset
     public const string PendingClientTool = "pending_client_tool";      // Stream ended awaiting client results
-} 
+
+    public const string CompactionBoundaryMarker = "compaction_boundary_marker"; // Compacted history now backs this turn
+}

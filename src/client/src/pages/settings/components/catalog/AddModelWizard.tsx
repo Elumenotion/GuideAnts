@@ -530,6 +530,11 @@ export function AddModelWizard({
               setValue((previous) => ({
                 ...previous,
                 provider,
+                // Local models get their window from the runtime; never carry values typed
+                // under another provider into a llama-cpp add.
+                ...(provider === 'llama-cpp'
+                  ? { catalogContextWindowTokens: '', catalogMaxOutputTokens: '' }
+                  : {}),
               }));
             }}
             className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -565,6 +570,8 @@ export function AddModelWizard({
                   catalogDescription: suggestion.description ?? '',
                   samplingParametersJson: seed.samplingParametersJson,
                   reasoningChoicesJson: seed.reasoningChoicesJson,
+                  catalogContextWindowTokens: suggestion.contextWindowTokens?.toString() ?? '',
+                  catalogMaxOutputTokens: suggestion.maxOutputTokens?.toString() ?? '',
                 }));
               }}
               onBlur={() => void validateModelId()}
@@ -600,6 +607,39 @@ export function AddModelWizard({
               className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
+          {/* Local models report their window live from the runtime; the local onboarding
+              path ignores these fields, so do not offer them. */}
+          {value.provider !== 'llama-cpp' ? (
+            <>
+              <div className="space-y-2">
+                <label htmlFor="add-model-context-window" className="block text-xs font-medium uppercase tracking-wide text-gray-600">Context window (tokens)</label>
+                <input
+                  id="add-model-context-window"
+                  type="text"
+                  inputMode="numeric"
+                  value={value.catalogContextWindowTokens}
+                  onChange={(event) => setValue((previous) => ({ ...previous, catalogContextWindowTokens: event.target.value }))}
+                  placeholder="Unknown"
+                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="add-model-max-output" className="block text-xs font-medium uppercase tracking-wide text-gray-600">Max output (tokens)</label>
+                <input
+                  id="add-model-max-output"
+                  type="text"
+                  inputMode="numeric"
+                  value={value.catalogMaxOutputTokens}
+                  onChange={(event) => setValue((previous) => ({ ...previous, catalogMaxOutputTokens: event.target.value }))}
+                  placeholder="Unknown"
+                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <p className="text-xs text-gray-500 md:col-span-2">
+                An incorrect value makes the context meter misleading. Leave empty if unknown.
+              </p>
+            </>
+          ) : null}
           <label className="inline-flex items-center gap-2 text-sm text-gray-700 md:col-span-2">
             <input
               type="checkbox"

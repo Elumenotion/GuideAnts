@@ -333,6 +333,22 @@ export function useStreamingEventHandler(
         console.log('System message:', event.data);
         break;
 
+      case 'compaction_boundary_marker':
+        dispatch({
+          type: 'SET_CONTEXT_STATUS',
+          payload: state.contextStatus
+            ? { ...state.contextStatus, boundaryTurnIndex: event.data.boundaryTurnIndex }
+            : {
+                contextWindowTokens: null,
+                estimatedPromptTokens: null,
+                boundaryTurnIndex: event.data.boundaryTurnIndex,
+                estimateSource: 'None',
+                modelDeploymentId: null,
+                contextWindowSource: 'Unknown',
+              },
+        });
+        break;
+
       case 'error':
         {
           if (stopPending) {
@@ -342,7 +358,7 @@ export function useStreamingEventHandler(
 
           const errorMessage = event.data?.message || 'An error occurred during the conversation';
           const errorAction = event.data?.action;
-          const displayMessage = errorAction ? `${errorMessage}\n\n${errorAction}` : errorMessage;
+          let displayMessage = errorAction ? `${errorMessage}\n\n${errorAction}` : errorMessage;
           const errorType = event.data?.type;
           // Server-populated `code` field. Currently one of:
           //   'local_llm_oom'       — classified CUDA/OOM response body from llama-server
@@ -352,6 +368,14 @@ export function useStreamingEventHandler(
           //   'local_llm_recovering' — automatic recovery currently owns the model
           // See GuideAntsApi/Services/Conversations/StreamingErrorEnvelope.cs.
           const errorCode = event.data?.code;
+
+          // chat_context_overflow gets a single sharpened message that names Compact as the
+          // remedy — computed once here so the persistent SET_STREAMING_ERROR banner and the
+          // toast below never drift apart (the banner used to keep the old, contradicting
+          // "retry with a smaller message" text while only the toast got the fix).
+          if (errorCode === 'chat_context_overflow') {
+            displayMessage = 'This conversation is too large for the model to process. Press Compact in the composer to summarize older messages and free up space, then try again.';
+          }
 
           // Conversation state only. Composer restore/clear is the action layer's
           // onComplete('error') call, which applies the same turnId persistence oracle as
@@ -405,6 +429,13 @@ export function useStreamingEventHandler(
               title: 'Attachment Still Processing',
               message: errorMessage,
               duration: 10000
+            });
+          } else if (errorCode === 'chat_context_overflow') {
+            showToast({
+              type: 'error',
+              title: 'Context window full',
+              message: displayMessage,
+              duration: 10000,
             });
           } else {
             showToast({

@@ -149,6 +149,9 @@ coverage*.info
 src/server/coverage-*
 src/server/TestResults/
 
+# W9 compaction benchmark output -- quotes real transcript content, never commit
+src/server/.compaction-benchmark/
+
 # Visual Studio code coverage results
 *.coverage
 *.coveragexml

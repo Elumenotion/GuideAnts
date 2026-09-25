@@ -354,6 +354,8 @@ export interface SettingsModelDto {
   requestFieldsWhenToolsPresentJson: string;
   isActive: boolean;
   displayOrder?: number;
+  contextWindowTokens?: number | null;
+  maxOutputTokens?: number | null;
   created: string;
   updated?: string;
 }
@@ -372,6 +374,8 @@ export interface CreateSettingsModelRequest {
   requestFieldsWhenToolsPresentJson: string;
   isActive: boolean;
   displayOrder?: number;
+  contextWindowTokens?: number | null;
+  maxOutputTokens?: number | null;
 }
 
 export interface UpdateSettingsModelRequest {
@@ -388,6 +392,15 @@ export interface UpdateSettingsModelRequest {
   requestFieldsWhenToolsPresentJson: string;
   isActive: boolean;
   displayOrder?: number;
+  contextWindowTokens?: number | null;
+  maxOutputTokens?: number | null;
+}
+
+export interface ContextWindowProbeResult {
+  supported: boolean;
+  contextWindowTokens?: number | null;
+  maxOutputTokens?: number | null;
+  message?: string | null;
 }
 
 export interface AddModelCatalogDto {
@@ -396,6 +409,8 @@ export interface AddModelCatalogDto {
   description?: string;
   displayOrder?: number;
   isActive: boolean;
+  contextWindowTokens?: number | null;
+  maxOutputTokens?: number | null;
 }
 
 export interface AddModelInstallHuggingFaceDto {

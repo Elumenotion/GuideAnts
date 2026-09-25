@@ -39,7 +39,9 @@ public class CatalogService : ICatalogService
                 m.ThoughtBlockPattern,
                 m.SamplingParametersJson,
                 m.ThinkingControlJson,
-                m.RequestFieldsWhenToolsPresentJson
+                m.RequestFieldsWhenToolsPresentJson,
+                m.ContextWindowTokens,
+                m.MaxOutputTokens
             })
             .ToListAsync();
 
@@ -123,7 +125,8 @@ public class CatalogService : ICatalogService
             results.Add(new ModelDto(
                 m.ModelId, m.DisplayName, m.Description, m.ReasoningChoicesJson,
                 m.IsActive, m.DisplayOrder, runtimeConfig,
-                samplingPolicy, reasoningChoices, defaultReasoningChoice));
+                samplingPolicy, reasoningChoices, defaultReasoningChoice,
+                m.ContextWindowTokens, m.MaxOutputTokens));
         }
 
         return results;

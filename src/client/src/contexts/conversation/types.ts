@@ -1,4 +1,5 @@
 import type { EnhancedConversationState, PendingAttachment, AssistantDefinition } from '../../types/conversation';
+import type { ConversationContextStatus } from '../../types/notebook';
 import type { UserInfo } from '../../services/userService';
 import type { NotebookTemplateDto } from '../../types/project';
 
@@ -27,12 +28,15 @@ export interface ConversationContextProps extends EnhancedConversationState {
   activeStreamingUser?: { userId: string; userName: string };
   pendingAttachments: PendingAttachment[];
   userProfiles?: Record<string, UserInfo>;
+  conversationId: string;
+  contextStatus: ConversationContextStatus | null;
 
   handleStreamingEvent: (event: { type: string; data: any }) => void;
   setStreamingMode: (mode: StreamingMode, activeUser?: { userId: string; userName: string }) => Promise<void>;
   cancelStream: () => void;
   addPendingAttachment: (att: PendingAttachment) => void;
   removePendingAttachment: (fileId: string) => void;
+  mergeContextStatusAfterCompact: (boundaryTurnIndex: number | null, estimatedTokensAfter: number | null) => void;
   onPreviewFile?: (fileId: string) => void;
   onPreviewFileByPath?: (relativePath: string) => void;
 }
@@ -92,7 +96,7 @@ export interface SendStreamState {
 export interface ActionType {
   type: 'SET_MESSAGES' | 'ADD_MESSAGE' | 'UPDATE_MESSAGE' | 'REMOVE_LAST_TURN' | 'SET_STREAMING' | 'SET_ASSISTANT' | 'SET_DRAFT' | 'SET_ATTACHMENTS' | 'SET_EDITING' | 'SET_EDIT_ERROR' | 'SET_EDIT_LOADING' | 'APPEND_TOKEN' | 'FINALIZE_STREAMING_MESSAGE' | 'SET_ASSISTANTS' | 'SET_CONVERSATION_STARTERS' | 'SET_INITIALIZED' | 'SET_JUST_COMPLETED_STREAMING' | 'SET_CANCELLING' | 'SET_USER_PROFILES' | 'SET_STREAMING_ERROR' | 'SET_NOTEBOOK_TEMPLATE' |
   'START_STREAMING_TURN' | 'SET_TOOL_CALLS' | 'ENSURE_TOOL_CALL' | 'ADD_TOOL_RESULT' | 'ADD_FINAL_RESPONSE' | 'COMPLETE_STREAMING_TURN' | 'UPDATE_STREAMING_PROGRESS' | 'ADD_TOOL_ERROR' | 'SET_ACTIVE_TOOL_ACTIVITY' | 'ADD_ATTACHMENT' | 'REMOVE_ATTACHMENT' | 'CLEAR_ATTACHMENTS' | 'CONVERT_STREAMING_IDS' | 'CLEAR_STREAMING_CELL' | 'SET_PENDING_CELL_CLEAR' |
-  'SET_STREAMING_MODE' | 'SET_UNDOING';
+  'SET_STREAMING_MODE' | 'SET_UNDOING' | 'SET_CONTEXT_STATUS' | 'MERGE_CONTEXT_STATUS_AFTER_COMPACT';
   payload?: any;
 }
 
@@ -112,4 +116,5 @@ export interface ExtendedConversationState extends EnhancedConversationState {
   pendingAttachments?: PendingAttachment[];
   userProfiles?: Record<string, UserInfo>;
   notebookTemplate?: NotebookTemplateDto;
+  contextStatus?: ConversationContextStatus | null;
 }

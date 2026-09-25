@@ -37,6 +37,20 @@ namespace GuideAntsApi.DataModel.Models
         public string? Description { get; set; }
 
         /// <summary>
+        /// Maximum total tokens this model accepts in one request (prompt + output).
+        /// Null when unknown — callers must render an explicit unknown state rather than
+        /// assume a default. A wrong value silently misleads the context meter.
+        /// </summary>
+        public int? ContextWindowTokens { get; set; }
+
+        /// <summary>
+        /// Maximum tokens this model can produce in one response. Reserved from
+        /// <see cref="ContextWindowTokens"/> when computing remaining prompt headroom.
+        /// Null when unknown.
+        /// </summary>
+        public int? MaxOutputTokens { get; set; }
+
+        /// <summary>
         /// Optional JSON array string of valid reasoning choices for this model.
         /// Example: ["None","Enabled"].
         /// </summary>

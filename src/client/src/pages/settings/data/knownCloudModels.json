@@ -29,7 +29,9 @@
     "providers": ["openai-chat", "azure-openai-chat"],
     "description": "Multimodal flagship model with vision, audio, and text capabilities.",
     "parameterSurfaceSeed": "openai_chat_standard",
-    "reasoningEffortEnabled": false
+    "reasoningEffortEnabled": false,
+    "contextWindowTokens": 128000,
+    "maxOutputTokens": 16384
   },
   {
     "modelId": "gpt-4o-mini",
@@ -37,7 +39,9 @@
     "providers": ["openai-chat", "azure-openai-chat"],
     "description": "Small, efficient multimodal model optimised for speed and cost.",
     "parameterSurfaceSeed": "openai_chat_standard",
-    "reasoningEffortEnabled": false
+    "reasoningEffortEnabled": false,
+    "contextWindowTokens": 128000,
+    "maxOutputTokens": 16384
   },
   {
     "modelId": "gpt-5-chat",
@@ -45,7 +49,9 @@
     "providers": ["openai-chat", "azure-openai-chat"],
     "description": "GPT-5 via the chat-completions endpoint.",
     "parameterSurfaceSeed": "openai_chat_standard",
-    "reasoningEffortEnabled": false
+    "reasoningEffortEnabled": false,
+    "contextWindowTokens": 128000,
+    "maxOutputTokens": 16384
   },
   {
     "modelId": "gpt-5.1",
@@ -53,7 +59,9 @@
     "providers": ["openai-chat", "azure-openai-chat"],
     "description": "GPT-5.1 via the chat-completions endpoint.",
     "parameterSurfaceSeed": "openai_chat_standard",
-    "reasoningEffortEnabled": false
+    "reasoningEffortEnabled": false,
+    "contextWindowTokens": 400000,
+    "maxOutputTokens": 128000
   },
   {
     "modelId": "o3",
@@ -61,7 +69,9 @@
     "providers": ["openai-responses", "azure-openai-responses"],
     "description": "Advanced reasoning model. Reasoning effort is configurable.",
     "parameterSurfaceSeed": "openai_responses_reasoning",
-    "reasoningEffortEnabled": true
+    "reasoningEffortEnabled": true,
+    "contextWindowTokens": 200000,
+    "maxOutputTokens": 100000
   },
   {
     "modelId": "o4-mini",
@@ -69,7 +79,9 @@
     "providers": ["openai-responses", "azure-openai-responses"],
     "description": "Compact reasoning model balancing speed and reasoning depth.",
     "parameterSurfaceSeed": "openai_responses_reasoning",
-    "reasoningEffortEnabled": true
+    "reasoningEffortEnabled": true,
+    "contextWindowTokens": 200000,
+    "maxOutputTokens": 100000
   },
   {
     "modelId": "gpt-5",
@@ -77,7 +89,9 @@
     "providers": ["openai-responses", "azure-openai-responses"],
     "description": "GPT-5 via the Responses API with extended reasoning support.",
     "parameterSurfaceSeed": "openai_responses_reasoning",
-    "reasoningEffortEnabled": true
+    "reasoningEffortEnabled": true,
+    "contextWindowTokens": 400000,
+    "maxOutputTokens": 128000
   },
   {
     "modelId": "gpt-5-mini",
@@ -85,7 +99,9 @@
     "providers": ["openai-responses", "azure-openai-responses"],
     "description": "Compact GPT-5 via the Responses API.",
     "parameterSurfaceSeed": "openai_responses_reasoning",
-    "reasoningEffortEnabled": true
+    "reasoningEffortEnabled": true,
+    "contextWindowTokens": 400000,
+    "maxOutputTokens": 128000
   },
   {
     "modelId": "gpt-5-nano",
@@ -93,7 +109,9 @@
     "providers": ["openai-responses", "azure-openai-responses"],
     "description": "Smallest GPT-5 Responses model, optimised for cost and latency.",
     "parameterSurfaceSeed": "openai_responses_reasoning",
-    "reasoningEffortEnabled": true
+    "reasoningEffortEnabled": true,
+    "contextWindowTokens": 400000,
+    "maxOutputTokens": 128000
   },
   {
     "modelId": "gpt-5.2-codex",
@@ -101,42 +119,54 @@
     "providers": ["openai-responses", "azure-openai-responses"],
     "description": "Code-specialised Responses-API model with extended reasoning.",
     "parameterSurfaceSeed": "openai_responses_reasoning",
-    "reasoningEffortEnabled": true
+    "reasoningEffortEnabled": true,
+    "contextWindowTokens": 400000,
+    "maxOutputTokens": 128000
   },
   {
     "modelId": "claude-opus-4-5",
     "displayName": "Claude Opus 4.5",
     "providers": ["anthropic"],
     "description": "Anthropic's most capable model. Best for complex reasoning and long-context tasks.",
-    "parameterSurfaceSeed": "anthropic_standard"
+    "parameterSurfaceSeed": "anthropic_standard",
+    "contextWindowTokens": 200000,
+    "maxOutputTokens": 64000
   },
   {
     "modelId": "claude-sonnet-4-5",
     "displayName": "Claude Sonnet 4.5",
     "providers": ["anthropic"],
     "description": "Balanced capability and speed. Strong reasoning with extended thinking support.",
-    "parameterSurfaceSeed": "anthropic_standard"
+    "parameterSurfaceSeed": "anthropic_standard",
+    "contextWindowTokens": 200000,
+    "maxOutputTokens": 64000
   },
   {
     "modelId": "claude-haiku-4-5",
     "displayName": "Claude Haiku 4.5",
     "providers": ["anthropic"],
     "description": "Fastest and most compact Claude model for responsive, high-volume tasks.",
-    "parameterSurfaceSeed": "anthropic_standard"
+    "parameterSurfaceSeed": "anthropic_standard",
+    "contextWindowTokens": 200000,
+    "maxOutputTokens": 64000
   },
   {
     "modelId": "gemini-2.5-pro",
     "displayName": "Gemini 2.5 Pro",
     "providers": ["google-gemini-chat"],
     "description": "Google's most capable Gemini model with multimodal reasoning.",
-    "parameterSurfaceSeed": "google_gemini_25_pro"
+    "parameterSurfaceSeed": "google_gemini_25_pro",
+    "contextWindowTokens": 1048576,
+    "maxOutputTokens": 65536
   },
   {
     "modelId": "gemini-2.5-flash",
     "displayName": "Gemini 2.5 Flash",
     "providers": ["google-gemini-chat"],
     "description": "Fast and cost-efficient Gemini model for high-throughput workloads.",
-    "parameterSurfaceSeed": "google_gemini_25_flash"
+    "parameterSurfaceSeed": "google_gemini_25_flash",
+    "contextWindowTokens": 1048576,
+    "maxOutputTokens": 65536
   },
   {
     "modelId": "minimax/minimax-m3",

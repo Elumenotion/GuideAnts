@@ -127,6 +127,31 @@ export function reducer(state: ExtendedConversationState, action: ActionType): E
     case 'SET_NOTEBOOK_TEMPLATE':
       return { ...state, notebookTemplate: action.payload };
 
+    case 'SET_CONTEXT_STATUS':
+      return { ...state, contextStatus: action.payload };
+
+    case 'MERGE_CONTEXT_STATUS_AFTER_COMPACT': {
+      const payload = action.payload as { boundaryTurnIndex: number | null; estimatedTokensAfter: number | null };
+      const existing = state.contextStatus;
+      return {
+        ...state,
+        contextStatus: existing
+          ? {
+              ...existing,
+              estimatedPromptTokens: payload.estimatedTokensAfter ?? existing.estimatedPromptTokens,
+              boundaryTurnIndex: payload.boundaryTurnIndex,
+            }
+          : {
+              contextWindowTokens: null,
+              estimatedPromptTokens: payload.estimatedTokensAfter,
+              boundaryTurnIndex: payload.boundaryTurnIndex,
+              estimateSource: 'None',
+              modelDeploymentId: null,
+              contextWindowSource: 'Unknown',
+            },
+      };
+    }
+
     case 'SET_STREAMING_ERROR':
       return { ...state, streamingError: action.payload };
 

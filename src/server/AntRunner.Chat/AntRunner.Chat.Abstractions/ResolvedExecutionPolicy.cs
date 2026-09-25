@@ -12,4 +12,6 @@ public sealed record ResolvedExecutionPolicy(
     string ModelId,
     string Provider,
     ParameterAuthority Authority,
-    IReadOnlyDictionary<string, JsonElement> Parameters);
+    IReadOnlyDictionary<string, JsonElement> Parameters,
+    int? ContextWindowTokens = null,
+    int? MaxOutputTokens = null);

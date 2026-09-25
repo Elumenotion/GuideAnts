@@ -1,5 +1,6 @@
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat;
+using AntRunner.Chat.Compaction;
 using AntRunner.ToolCalling.AssistantDefinitions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -131,7 +132,8 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
 
         if (isAssistantSwitch)
         {
-            var switchMessages = await ApplyAssistantSwitchLogicAsync(conv, assistantName, cancellationToken);
+            var switchMessages = await BuildHistoryTailAsync(
+                conv, assistantName, isAssistantSwitch: true, cancellationToken);
             string? ctxContent = null;
             var ctxIndex = messages.FindIndex(m => m.Role == ChatMessageRole.System && m.GetText().StartsWith("{\"contextOptions\""));
             if (ctxIndex >= 0)
@@ -150,14 +152,127 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             return messages;
         }
 
-        var conversationMessages = await BuildOpenAiMessagesAsync(conv, assistantName, cancellationToken);
+        var conversationMessages = await BuildHistoryTailAsync(
+            conv, assistantName, isAssistantSwitch: false, cancellationToken);
         messages.AddRange(conversationMessages);
         return messages;
+    }
+
+    /// <summary>
+    /// Composes the post-instructions portion of history for one assistant path (switch or
+    /// continuation): when <see cref="NotebookConversation.CompactionBoundaryTurnIndex"/> is set,
+    /// this is <c>[system: summary] + verbatim tail</c> (D3); otherwise it is the unmodified full
+    /// history, exactly as before this plan (D7 - zero behavior change when never compacted).
+    /// Per the spec's Error handling table, any failure while building the compacted form falls
+    /// back to the full-history call rather than failing the turn.
+    /// </summary>
+    private async Task<List<ChatMessage>> BuildHistoryTailAsync(
+        NotebookConversation conv,
+        string assistantName,
+        bool isAssistantSwitch,
+        CancellationToken cancellationToken)
+    {
+        var boundary = conv.CompactionBoundaryTurnIndex;
+        if (boundary.HasValue && !conv.Turns.Any(t => t.TurnIndex > boundary.Value))
+        {
+            // A boundary with no turn beyond it is stale, not "just compacted": in the normal flow
+            // the current turn is always created and persisted before this method runs, so a turn
+            // above the boundary always exists here. This only happens when Undo has reset turn
+            // indices backward underneath an earlier boundary (ConversationUndoService does not
+            // clamp CompactionBoundaryTurnIndex) - fall back to full history rather than silently
+            // compacting turns the user never asked to compact (D1).
+            boundary = null;
+        }
+
+        if (!boundary.HasValue)
+        {
+            return isAssistantSwitch
+                ? await ApplyAssistantSwitchLogicAsync(conv, assistantName, cancellationToken: cancellationToken)
+                : await BuildOpenAiMessagesAsync(conv, assistantName, cancellationToken: cancellationToken);
+        }
+
+        try
+        {
+            var tail = isAssistantSwitch
+                ? await ApplyAssistantSwitchLogicAsync(conv, assistantName, boundary, cancellationToken)
+                : await BuildOpenAiMessagesAsync(conv, assistantName, boundary, cancellationToken);
+            var summary = await BuildCompactionSummaryMessageAsync(conv.Id, boundary.Value, cancellationToken);
+
+            var result = new List<ChatMessage>(tail.Count + 1) { summary };
+            result.AddRange(tail);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Compaction failed for conversation {ConversationId} at boundary {BoundaryTurnIndex}; falling back to full uncompacted history",
+                conv.Id, boundary.Value);
+
+            return isAssistantSwitch
+                ? await ApplyAssistantSwitchLogicAsync(conv, assistantName, cancellationToken: cancellationToken)
+                : await BuildOpenAiMessagesAsync(conv, assistantName, cancellationToken: cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Loads everything before the compaction boundary and runs it through W3's pure
+    /// <see cref="CompactionEngine"/>. Recomputed from source messages every call (never from a
+    /// previously-stored summary), so repeated compaction does not compound loss - see D3.
+    /// Internal (not private) so the W9 benchmark measures this exact path rather than a re-implementation.
+    /// </summary>
+    internal async Task<ChatMessage> BuildCompactionSummaryMessageAsync(
+        Guid conversationId, int boundaryTurnIndex, CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var preBoundaryMessages = await db.NotebookConversationMessages
+            .AsNoTracking()
+            .Where(m => m.NotebookConversationId == conversationId && m.TurnIndex <= boundaryTurnIndex)
+            .OrderBy(m => m.TurnIndex)
+            .ThenBy(m => m.MessageSequence)
+            .ToListAsync(cancellationToken);
+
+        var deduped = ConversationMessageMapper.FilterDuplicateAssistantMessages(preBoundaryMessages);
+        var chatMessages = deduped.Select(ConversationMessageMapper.ToChatMessage).ToList();
+
+        var turnRows = await db.ConversationTurns
+            .AsNoTracking()
+            .Where(t => t.NotebookConversationId == conversationId && t.TurnIndex <= boundaryTurnIndex)
+            .Select(t => new { t.TurnIndex, t.FilesCreated, t.FilesModified })
+            .ToListAsync(cancellationToken);
+
+        var turnFacts = turnRows
+            .Select(t => new TurnFacts(t.TurnIndex, ParseFileList(t.FilesCreated), ParseFileList(t.FilesModified)))
+            .ToList();
+
+        var compaction = CompactionEngine.Compact(chatMessages, turnFacts);
+
+        return new ChatMessage(ChatMessageRole.System, compaction.SummaryText);
+    }
+
+    private static List<string> ParseFileList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     public async Task<List<ChatMessage>> ApplyAssistantSwitchLogicAsync(
         NotebookConversation conv,
         string newAssistantName,
+        int? compactionBoundaryTurnIndex = null,
         CancellationToken cancellationToken = default)
     {
         var dedupedMessages = ConversationMessageMapper.FilterDuplicateAssistantMessages(
@@ -167,6 +282,16 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             m => m.Content,
             m => !string.IsNullOrEmpty(m.ToolCalls)
         );
+
+        if (compactionBoundaryTurnIndex.HasValue)
+        {
+            // W4's CompactionService guarantees the boundary always sits on a completed turn, so a
+            // plain TurnIndex cut here never splits an assistant tool_calls message from its
+            // tool_result pairing.
+            dedupedMessages = dedupedMessages
+                .Where(m => m.TurnIndex > compactionBoundaryTurnIndex.Value)
+                .ToList();
+        }
 
         var assistantDef = await AssistantUtility.GetAssistantCreateRequest(newAssistantName);
         if (assistantDef == null)
@@ -287,6 +412,7 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
     public async Task<List<ChatMessage>> BuildOpenAiMessagesAsync(
         NotebookConversation conv,
         string assistantName,
+        int? compactionBoundaryTurnIndex = null,
         CancellationToken cancellationToken = default)
     {
         var list = new List<ChatMessage>();
@@ -298,6 +424,13 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             m => m.Content,
             m => !string.IsNullOrEmpty(m.ToolCalls)
         );
+
+        if (compactionBoundaryTurnIndex.HasValue)
+        {
+            filteredMessages = filteredMessages
+                .Where(m => m.TurnIndex > compactionBoundaryTurnIndex.Value)
+                .ToList();
+        }
 
         var validToolCallIds = new HashSet<string>();
         foreach (var dbMsg in filteredMessages.Where(m => m.Role == DataModelChatRole.Assistant && !string.IsNullOrEmpty(m.ToolCalls)))
@@ -604,8 +737,8 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
     }
 
     /// <summary>
-    /// One tool result per call id. When duplicates exist (e.g. pre-fix overflow unwind inserts),
-    /// keep the latest sequence so the model sees the replacement notice, not the oversized payload.
+    /// One tool result per call id. Defense-in-depth: if a duplicate row for the same call id
+    /// exists for any reason, keep only the latest sequence so history rebuild sees exactly one result.
     /// </summary>
     internal static Dictionary<string, NotebookConversationMessage> IndexToolMessagesByCallId(
         IEnumerable<NotebookConversationMessage> historyMessages)
