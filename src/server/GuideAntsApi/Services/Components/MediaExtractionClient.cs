@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.Options;
+using GuideAntsApi.DataModel.Media;
 using GuideAntsApi.Services.Core;
 using Microsoft.Extensions.Options;
 
@@ -51,13 +52,28 @@ namespace GuideAntsApi.Services.Components
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                var error = ExtractErrorMessage(responseBody);
+                var (error, errorType) = ExtractErrorMessageAndType(responseBody);
+
+                // A valid file with no audio stream is a legitimate empty result, not a
+                // failure: surface a typed exception so callers can skip, not retry.
+                if (string.Equals(errorType, "NO_AUDIO_STREAM", StringComparison.Ordinal))
+                {
+                    var sourcePath = ParseSourcePath(error);
+                    _logger.LogInformation(
+                        "Media extraction reported no audio stream (status {StatusCode}): {Error}",
+                        (int)response.StatusCode,
+                        error);
+                    throw new MediaNoAudioStreamException(sourcePath ?? string.Empty);
+                }
+
+                var message = string.IsNullOrWhiteSpace(errorType)
+                    ? $"Media extraction API failed ({(int)response.StatusCode}): {error}"
+                    : $"Media extraction API failed ({(int)response.StatusCode}): [{errorType}] {error}";
                 _logger.LogError(
                     "Media extraction API failed with status code {StatusCode}: {Error}",
                     (int)response.StatusCode,
-                    error);
-                throw new InvalidOperationException(
-                    $"Media extraction API failed ({(int)response.StatusCode}): {error}");
+                    message);
+                throw new InvalidOperationException(message);
             }
 
             var result = JsonSerializer.Deserialize<MediaExtractionResponse>(responseBody, JsonOptions);
@@ -69,11 +85,23 @@ namespace GuideAntsApi.Services.Components
             return result;
         }
 
-        private static string ExtractErrorMessage(string responseBody)
+        private static string? ParseSourcePath(string error)
+        {
+            const string marker = "no audio stream: ";
+            var index = error.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                return null;
+            }
+
+            return error[(index + marker.Length)..].Trim();
+        }
+
+        private static (string Error, string? ErrorType) ExtractErrorMessageAndType(string responseBody)
         {
             if (string.IsNullOrWhiteSpace(responseBody))
             {
-                return "No error body returned.";
+                return ("No error body returned.", null);
             }
 
             try
@@ -81,14 +109,53 @@ namespace GuideAntsApi.Services.Components
                 using var document = JsonDocument.Parse(responseBody);
                 var root = document.RootElement;
 
+                string? errorType = null;
+                if (root.TryGetProperty("errorType", out var errorTypeElement)
+                    && errorTypeElement.ValueKind == JsonValueKind.String)
+                {
+                    errorType = errorTypeElement.GetString();
+                }
+
                 if (root.TryGetProperty("detail", out var detail))
                 {
-                    return detail.ValueKind == JsonValueKind.String ? detail.GetString() ?? responseBody : detail.ToString();
+                    if (detail.ValueKind == JsonValueKind.String)
+                    {
+                        return (detail.GetString() ?? detail.ToString(), errorType);
+                    }
+
+                    if (detail.ValueKind == JsonValueKind.Object)
+                    {
+                        // Some error payloads nest the fields in the detail object.
+                        if (errorType is null
+                            && detail.TryGetProperty("errorType", out var nestedErrorType)
+                            && nestedErrorType.ValueKind == JsonValueKind.String)
+                        {
+                            errorType = nestedErrorType.GetString();
+                        }
+
+                        string? nestedText = null;
+                        if (detail.TryGetProperty("message", out var nestedMessage)
+                            && nestedMessage.ValueKind == JsonValueKind.String)
+                        {
+                            nestedText = nestedMessage.GetString();
+                        }
+
+                        if (nestedText is null
+                            && detail.TryGetProperty("detail", out var nestedDetail)
+                            && nestedDetail.ValueKind == JsonValueKind.String)
+                        {
+                            nestedText = nestedDetail.GetString();
+                        }
+
+                        return (nestedText ?? detail.ToString(), errorType);
+                    }
+
+                    return (detail.ToString(), errorType);
                 }
 
                 if (root.TryGetProperty("message", out var message))
                 {
-                    return message.ValueKind == JsonValueKind.String ? message.GetString() ?? responseBody : message.ToString();
+                    return (message.ValueKind == JsonValueKind.String ? message.GetString() ?? responseBody : message.ToString(), errorType);
                 }
             }
             catch
@@ -96,7 +163,7 @@ namespace GuideAntsApi.Services.Components
                 // Fall back to the raw body when the payload is not JSON.
             }
 
-            return responseBody.Trim();
+            return (responseBody.Trim(), null);
         }
     }
 }

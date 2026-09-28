@@ -4,6 +4,7 @@ using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Services;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.DataModel.Media;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -170,6 +171,31 @@ public sealed class TranscribeNotebookFileMarkdownHandlerDeepTests
 
         result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
         (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Failed);
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_NoAudioStream_MarksSkippedAndSucceeds()
+    {
+        using var storage = new TempStorage();
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"transcribe-deep-noaudio-{Guid.NewGuid():N}");
+        var notebookFileId = await SeedAsync(options, "video.mp4");
+        storage.WriteNotebookFile("test-project", "test-notebook", "video.mp4", new byte[] { 1 });
+
+        var transcription = new Mock<ITranscriptionAdapter>();
+        transcription.Setup(x => x.IsAudioOrVideoSupported(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        transcription.Setup(x => x.IsFileSizeSupported(It.IsAny<long>())).Returns(true);
+        transcription.Setup(x => x.TranscribeToMarkdownAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new MediaNoAudioStreamException(".system/media-extract/abc/input.mp4"));
+
+        var handler = CreateHandler(options, transcription.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
+
+        var result = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+
+        // A no-audio source is a legitimate empty result: success, no retry budget burned,
+        // and the shadow is Skipped (not Failed).
+        result.IsSuccess.Should().BeTrue();
+        result.FailureClass.Should().BeNull();
+        (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Skipped);
     }
 
     [TestMethod]

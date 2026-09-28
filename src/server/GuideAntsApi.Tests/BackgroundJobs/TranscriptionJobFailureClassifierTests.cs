@@ -1,5 +1,6 @@
 using FluentAssertions;
 using GuideAntsApi.BackgroundJobs;
+using GuideAntsApi.DataModel.Media;
 
 namespace GuideAntsApi.Tests.BackgroundJobs;
 
@@ -35,6 +36,49 @@ public sealed class TranscriptionJobFailureClassifierTests
     {
         var result = TranscriptionJobFailureClassifier.Classify(
             new InvalidOperationException("Audio extraction failed - output file is empty"),
+            CancellationToken.None);
+
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
+    }
+
+    [TestMethod]
+    public void Classify_ReturnsPermanentMissingInput_ForFfmpegNoAudioStreamMessage()
+    {
+        var result = TranscriptionJobFailureClassifier.Classify(
+            new InvalidOperationException(
+                "Media extraction API failed (500): ffmpeg failed with exit code 234: [out#0/mp3 @ 0x1] Output file does not contain any stream"),
+            CancellationToken.None);
+
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
+    }
+
+    [TestMethod]
+    public void Classify_ReturnsPermanentMissingInput_ForNoAudioStreamErrorType()
+    {
+        var result = TranscriptionJobFailureClassifier.Classify(
+            new InvalidOperationException(
+                "Media extraction API failed (422): [NO_AUDIO_STREAM] Source file contains no audio stream: .system/media-extract/abc/input.mp4"),
+            CancellationToken.None);
+
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
+    }
+
+    [TestMethod]
+    public void Classify_ReturnsPermanentMissingInput_ForUnreadableMediaErrorType()
+    {
+        var result = TranscriptionJobFailureClassifier.Classify(
+            new InvalidOperationException(
+                "Media extraction API failed (422): [UNREADABLE_MEDIA] Source file could not be probed: Invalid data found when processing input"),
+            CancellationToken.None);
+
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
+    }
+
+    [TestMethod]
+    public void Classify_ReturnsPermanentMissingInput_ForNoAudioStreamExceptionType()
+    {
+        var result = TranscriptionJobFailureClassifier.Classify(
+            new MediaNoAudioStreamException(".system/media-extract/abc/input.mp4"),
             CancellationToken.None);
 
         result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);

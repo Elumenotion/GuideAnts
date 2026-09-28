@@ -68,7 +68,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends build-essential ca-certificates cmake git \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --recursive --depth 1 --shallow-submodules --branch main https://github.com/0xShug0/audio.cpp /src/audio.cpp \
+RUN git clone --depth 1 --branch main https://github.com/0xShug0/audio.cpp /src/audio.cpp \
     && cmake -S /src/audio.cpp -B /src/audio.cpp/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DENGINE_ENABLE_CUDA=ON \
@@ -106,7 +106,7 @@ RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/ga-script-exec /tmp/ga-script-exec.c
 # =============================================================================
 # CUDA 13 backend (runtime base + python deps builder + dependency image)
 # =============================================================================
-FROM ghcr.io/ggml-org/llama.cpp:server-cuda13-b10615 AS runtime-cuda13-base
+FROM ghcr.io/ggml-org/llama.cpp:server-cuda13-v0.5.0 AS runtime-cuda13-base
 ARG GA_UBUNTU_MIRROR_URL
 ENV DEBIAN_FRONTEND=noninteractive
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
@@ -204,6 +204,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && rm -f /tmp/emb-requirements.txt /tmp/asr-requirements.txt /tmp/tts-requirements.txt /tmp/llama-admin-requirements.txt /tmp/requirements.txt
 
 FROM runtime-cuda13-base AS deps-cuda13
+# libnccl2 is preinstalled in the llama.cpp base image and held by upstream
+# (dpkg --get-selections) to pin its CUDA stack; apt-get install of the
+# package name would try to upgrade it from the NVIDIA repo and fail on the
+# hold. Assert presence instead of (re)installing.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -211,7 +215,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libopenblas0-pthread liblapack3 \
         gdal-bin libgdal-dev \
         libgeos-dev libproj-dev \
-        libnccl2 \
+    && dpkg -s libnccl2 > /dev/null \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=pydeps-cuda13-builder /opt/venv /opt/venv

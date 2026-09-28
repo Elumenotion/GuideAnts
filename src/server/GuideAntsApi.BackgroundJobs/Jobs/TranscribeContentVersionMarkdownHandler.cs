@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using GuideAntsApi.BackgroundJobs.Services;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.DataModel.Media;
 using GuideAntsApi.DataModel.Utilities;
 
 namespace GuideAntsApi.BackgroundJobs.Jobs;
@@ -130,6 +131,20 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
                 payload: new IndexContentMarkdownShadowJob(payload.ContentFileVersionId),
                 ct: cancellationToken);
 
+            return JobExecutionResult.Success();
+        }
+        catch (MediaNoAudioStreamException ex)
+        {
+            // A media file with no audio track is a legitimate empty result, not a failure:
+            // skip it (no markdown, nothing to index) and do not burn the retry budget.
+            Logger.LogInformation(
+                "Transcription skipped for ContentFileVersion {Id}: no audio stream in {SourcePath}",
+                payload.ContentFileVersionId,
+                ex.SourcePath);
+            shadow.Status = MarkdownExtractionStatus.Skipped;
+            shadow.ErrorMessage = "No audio stream in source file";
+            shadow.ProcessedAt = DateTime.UtcNow;
+            try { await context.SaveChangesAsync(cancellationToken); } catch { }
             return JobExecutionResult.Success();
         }
         catch (Exception ex)

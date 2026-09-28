@@ -199,6 +199,60 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
       expect(headers.get('Accept')).toBe('text/event-stream');
     });
 
+    it('serializes modelDeploymentId into the request body when provided', async () => {
+      mockFetch.mockResolvedValue(
+        sseResponse([
+          'event: complete\n',
+          'data: {"turnId":"t1"}\n',
+          '\n',
+        ]),
+      );
+
+      await api.projects.notebooks.conversations.sendMessageStream(
+        projectId,
+        notebookId,
+        convoId,
+        { instructions: 'hello', assistantName: 'Claude', modelDeploymentId: 'gpt-4o' },
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+      );
+
+      const [, init] = mockFetch.mock.calls[0] ?? [];
+      const body = init?.body as string;
+      expect(JSON.parse(body)).toEqual({
+        instructions: 'hello',
+        assistantName: 'Claude',
+        modelDeploymentId: 'gpt-4o',
+      });
+    });
+
+    it('omits modelDeploymentId from the request body when not provided', async () => {
+      mockFetch.mockResolvedValue(
+        sseResponse([
+          'event: complete\n',
+          'data: {"turnId":"t1"}\n',
+          '\n',
+        ]),
+      );
+
+      await api.projects.notebooks.conversations.sendMessageStream(
+        projectId,
+        notebookId,
+        convoId,
+        { instructions: 'hello', assistantName: 'Claude' },
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+      );
+
+      const [, init] = mockFetch.mock.calls[0] ?? [];
+      const body = init?.body as string;
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      expect(parsed.instructions).toBe('hello');
+      expect('modelDeploymentId' in parsed).toBe(false);
+    });
+
     it('throws on non-ok response', async () => {
       mockFetch.mockResolvedValue({
         ok: false,

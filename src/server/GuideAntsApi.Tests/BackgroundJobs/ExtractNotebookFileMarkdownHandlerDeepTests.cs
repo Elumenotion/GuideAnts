@@ -134,6 +134,29 @@ public sealed class ExtractNotebookFileMarkdownHandlerDeepTests
     }
 
     [TestMethod]
+    public async Task HandleAsync_SkippedShadow_IsTerminal_AndDoesNotRedispatchTranscription()
+    {
+        using var storage = new TempStorage();
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"extract-deep-skipped-terminal-{Guid.NewGuid():N}");
+        var notebookFileId = await SeedAsyncWithStatusAsync(options, "video.mp4", MarkdownExtractionStatus.Skipped);
+        storage.WriteNotebookFile("test-project", "test-notebook", "video.mp4", new byte[] { 1, 2, 3 });
+
+        var docIntel = new Mock<IDocumentIntelligenceService>();
+        var queue = new BackgroundJobTestHelpers.CapturingJobQueueService();
+
+        var handler = CreateHandler(options, docIntel.Object, queue, storage.Root);
+
+        var result = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+
+        // A Skipped shadow (e.g. a video with no audio stream) is terminal: success, and it
+        // must NOT re-dispatch the transcription job (that is what caused the re-queue loop).
+        result.IsSuccess.Should().BeTrue();
+        queue.Enqueued.Should().BeEmpty();
+        (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Skipped);
+        docIntel.Verify(x => x.IsFileTypeSupported(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [TestMethod]
     public async Task HandleAsync_RecoversMissingShadow_WhenNotebookFileExists()
     {
         using var storage = new TempStorage();
@@ -182,6 +205,34 @@ public sealed class ExtractNotebookFileMarkdownHandlerDeepTests
             });
         }
 
+        await seed.SaveChangesAsync();
+        return notebookFileId;
+    }
+
+    private static async Task<Guid> SeedAsyncWithStatusAsync(DbContextOptions<ApplicationDbContext> options, string relativePath, MarkdownExtractionStatus status)
+    {
+        var notebookFileId = Guid.NewGuid();
+        await using var seed = new ApplicationDbContext(options);
+        var (_, notebookId) = await BackgroundJobTestHelpers.SeedProjectNotebookAsync(seed);
+        var notebookFile = new NotebookFile
+        {
+            Id = notebookFileId,
+            NotebookId = notebookId,
+            RelativePath = relativePath,
+            FileSize = 3,
+            LastModifiedUtc = DateTime.UtcNow,
+            FileHash = "hash"
+        };
+        notebookFile.GenerateDocumentId(notebookId);
+        seed.NotebookFiles.Add(notebookFile);
+        seed.NotebookFileMarkdownShadows.Add(new NotebookFileMarkdownShadow
+        {
+            OriginalNotebookFileId = notebookFileId,
+            ContentHash = string.Empty,
+            StoragePath = string.Empty,
+            FileSize = 0,
+            Status = status
+        });
         await seed.SaveChangesAsync();
         return notebookFileId;
     }

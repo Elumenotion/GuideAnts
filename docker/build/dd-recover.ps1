@@ -21,7 +21,7 @@
 #
 # Usage (run in the user session that owns Docker Desktop, e.g. 'dougl'):
 #   powershell -ExecutionPolicy Bypass -File .\dd-recover.ps1
-#   powershell -ExecutionPolicy Bypass -File .\dd-recover.ps1 -PullTest ghcr.io/ggml-org/llama.cpp:server-cuda13-b10615
+#   powershell -ExecutionPolicy Bypass -File .\dd-recover.ps1 -PullTest ghcr.io/ggml-org/llama.cpp:server-cuda13-v0.5.0
 # =============================================================================
 param(
     # Optional: pull this image at the end to prove end-to-end success
