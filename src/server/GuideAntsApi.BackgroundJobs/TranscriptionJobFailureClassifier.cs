@@ -1,5 +1,7 @@
 namespace GuideAntsApi.BackgroundJobs;
 
+using GuideAntsApi.DataModel.Media;
+
 /// <summary>
 /// Classifies transcription job failures using structured exception signals instead of log substring matching.
 /// </summary>
@@ -24,6 +26,11 @@ public static class TranscriptionJobFailureClassifier
     {
         for (var current = ex; current is not null; current = current.InnerException)
         {
+            if (current is MediaNoAudioStreamException)
+            {
+                return true;
+            }
+
             if (current is ArgumentException)
             {
                 return true;
@@ -43,6 +50,9 @@ public static class TranscriptionJobFailureClassifier
             if (ContainsPermanentMediaStatusCode(message)
                 || message.Contains("output file is empty", StringComparison.OrdinalIgnoreCase)
                 || message.Contains("output contains no stream", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("does not contain any stream", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("[NO_AUDIO_STREAM]", StringComparison.Ordinal)
+                || message.Contains("[UNREADABLE_MEDIA]", StringComparison.Ordinal)
                 || message.Contains("Audio extraction failed", StringComparison.OrdinalIgnoreCase))
             {
                 return true;

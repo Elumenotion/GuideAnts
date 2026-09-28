@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using GuideAntsApi.BackgroundJobs.Services;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.DataModel.Media;
 
 namespace GuideAntsApi.BackgroundJobs.Jobs;
 
@@ -150,6 +151,20 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
                 payload: new IndexNotebookMarkdownShadowJob(payload.NotebookFileId),
                 ct: cancellationToken);
 
+            return JobExecutionResult.Success();
+        }
+        catch (MediaNoAudioStreamException ex)
+        {
+            // A video with no audio track is a legitimate empty result, not a failure:
+            // skip it (no markdown, nothing to index) and do not burn the retry budget.
+            Logger.LogInformation(
+                "Transcription skipped for NotebookFile {Id}: no audio stream in {SourcePath}",
+                payload.NotebookFileId,
+                ex.SourcePath);
+            shadow.Status = MarkdownExtractionStatus.Skipped;
+            shadow.ErrorMessage = "No audio stream in source file";
+            shadow.ProcessedAt = DateTime.UtcNow;
+            await context.SaveChangesAsync(cancellationToken);
             return JobExecutionResult.Success();
         }
         catch (Exception ex)

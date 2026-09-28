@@ -73,10 +73,11 @@ def log_event(event: str, **fields: Any) -> None:
 
 
 class MediaServiceError(Exception):
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(self, status_code: int, detail: str, error_type: str | None = None) -> None:
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
+        self.error_type = error_type
 
 
 class ExtractAudioRequest(BaseModel):
@@ -205,6 +206,48 @@ def run_ffmpeg(
         )
 
 
+def count_audio_streams(source_path: Path, timeout_seconds: int) -> int:
+    # Note: ffprobe has no -nostdin flag (ffmpeg-only); stdin is detached via
+    # subprocess.DEVNULL instead.
+    command = [
+        "ffprobe",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=index",
+        "-of",
+        "csv=p=0",
+        str(source_path),
+    ]
+
+    try:
+        process = subprocess.run(
+            command, capture_output=True, text=True, check=False,
+            timeout=timeout_seconds, stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise MediaServiceError(
+            status_code=500,
+            detail=f"ffprobe timed out after {timeout_seconds} seconds.",
+            error_type="UNREADABLE_MEDIA",
+        ) from exc
+
+    if process.returncode != 0:
+        error_text = (process.stderr or process.stdout or "").strip()
+        if not error_text:
+            error_text = "ffprobe exited with a non-zero status code."
+        raise MediaServiceError(
+            status_code=422,
+            detail=f"Source file could not be probed: {error_text}",
+            error_type="UNREADABLE_MEDIA",
+        )
+
+    return sum(1 for line in (process.stdout or "").splitlines() if line.strip())
+
+
 def process_extract_audio_request(
     payload: ExtractAudioRequest,
     storage_root: Path | None = None,
@@ -233,8 +276,16 @@ def process_extract_audio_request(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    started = time.perf_counter()
     effective_timeout = timeout_seconds if timeout_seconds is not None else FFMPEG_TIMEOUT_SECONDS
+    audio_stream_count = count_audio_streams(source_path, timeout_seconds=effective_timeout)
+    if audio_stream_count == 0:
+        raise MediaServiceError(
+            status_code=422,
+            detail=f"Source file contains no audio stream: {payload.sourcePath}",
+            error_type="NO_AUDIO_STREAM",
+        )
+
+    started = time.perf_counter()
     run_ffmpeg(
         source_path=source_path,
         output_path=output_path,
@@ -299,7 +350,13 @@ async def extract_audio(request: Request, payload: ExtractAudioRequest) -> dict[
             requestId=request_id,
             statusCode=exc.status_code,
             error=exc.detail,
+            **({"errorType": exc.error_type} if exc.error_type else {}),
         )
+        if exc.error_type:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={"detail": exc.detail, "errorType": exc.error_type},
+            ) from exc
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     except Exception as exc:
         log_event(

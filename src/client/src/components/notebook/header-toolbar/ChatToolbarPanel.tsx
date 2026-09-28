@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FaCheck, FaCog, FaPlay, FaSpinner, FaStop } from 'react-icons/fa';
+import { FaCheck, FaCog, FaPlay, FaSpinner, FaStop, FaTimes } from 'react-icons/fa';
 import { api } from '../../../services/api';
 import { textButtonClassName } from '../../../pages/settings/components/shared/ActionButtons';
 import type { ChatPanelProps } from './types';
@@ -12,6 +12,10 @@ import {
   chatDefaultsToConfig,
   normalizeChatModelConfigForModel,
 } from '../../chat-model/chatDefaults';
+import {
+  getConversationModelOverride,
+  setConversationModelOverride as storeSetConversationModelOverride,
+} from '../../../contexts/conversation/conversationModelOverride';
 
 const OP_POLL_MS = 2_000;
 
@@ -19,6 +23,7 @@ export function ChatToolbarPanel({
   chat,
   projectId,
   notebookId,
+  conversationId,
   setInFlight,
   onRefresh,
   assistantIdForLlama,
@@ -28,6 +33,12 @@ export function ChatToolbarPanel({
 }: ChatPanelProps) {
   const [chatDefaults, setChatDefaults] = useState<ChatDefaultsDto | null>(null);
   const [catalogModels, setCatalogModels] = useState<ModelDto[]>([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
+  // Per-conversation model override (session-local). Initialised from the shared
+  // store so a reopened popover reflects the pick that was already made.
+  const [conversationModelOverride, setConversationModelOverride] = useState<string | null>(
+    () => getConversationModelOverride(conversationId)
+  );
   const [chatDefaultsError, setChatDefaultsError] = useState<string | null>(null);
   const hasPendingOp =
     chat.inProgressState &&
@@ -62,6 +73,7 @@ export function ChatToolbarPanel({
     try {
       const models = await api.guides.catalogs.models();
       setCatalogModels(models);
+      setCatalogLoaded(true);
     } catch (error: any) {
       setChatDefaultsError(error?.message ?? 'Failed to load catalog models.');
     }
@@ -76,6 +88,10 @@ export function ChatToolbarPanel({
     () => new Map(catalogModels.map((model) => [model.modelId, model])),
     [catalogModels]
   );
+
+  const conversationOverrideLabel = conversationModelOverride
+    ? catalogModelById.get(conversationModelOverride)?.displayName ?? conversationModelOverride
+    : null;
 
   const resolveCatalogModel = async (modelId: string): Promise<ModelDto | undefined> => {
     const existing = catalogModelById.get(modelId);
@@ -132,6 +148,20 @@ export function ChatToolbarPanel({
     ));
   };
 
+  // --- Per-conversation model override (session-local; not global settings) ---
+  // Selecting writes to the shared per-conversation store, which
+  // `useConversationActions.sendMessage` reads on the next send. No server call:
+  // the override is request-scoped and each turn already records its own model.
+  const selectConversationModel = (modelId: string) => {
+    setConversationModelOverride(modelId);
+    storeSetConversationModelOverride(conversationId, modelId);
+  };
+
+  const clearConversationModel = () => {
+    setConversationModelOverride(null);
+    storeSetConversationModelOverride(conversationId, null);
+  };
+
   const powerOn = async () => {
     setInFlight(true);
     try {
@@ -164,6 +194,55 @@ export function ChatToolbarPanel({
           : chat.summary}
       </div>
       {chatDefaultsError ? <div className="text-xs text-amber-700">{chatDefaultsError}</div> : null}
+
+      <div className="rounded border border-slate-200 bg-slate-50/60 p-2" data-testid="conversation-model-override">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold text-gray-700">Model for this conversation</span>
+          {conversationModelOverride ? (
+            <button
+              type="button"
+              className="text-xs text-slate-500 hover:text-slate-800"
+              aria-label="Clear conversation model override"
+              title="Revert to the assistant / global default"
+              onClick={clearConversationModel}
+            >
+              <FaTimes className="h-3 w-3" aria-hidden />
+              Clear
+            </button>
+          ) : null}
+        </div>
+        {conversationModelOverride ? (
+          <p className="mt-1 text-xs text-emerald-700">
+            <span className="font-medium">{conversationOverrideLabel}</span> — sent with every message in this conversation until cleared.
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-gray-500">Using the assistant's model (or the global default).</p>
+        )}
+        <select
+          className="mt-2 w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          value={conversationModelOverride ?? ''}
+          aria-label="Model for this conversation"
+          disabled={!catalogLoaded}
+          onChange={(e) => {
+            const modelId = e.target.value;
+            if (modelId) {
+              selectConversationModel(modelId);
+            } else {
+              clearConversationModel();
+            }
+          }}
+        >
+          <option value="">Use assistant's model</option>
+          {catalogModels
+            .filter((model) => model.isActive)
+            .map((model) => (
+              <option key={model.modelId} value={model.modelId}>
+                {model.displayName}
+                {model.description ? ` — ${model.description}` : ''}
+              </option>
+            ))}
+        </select>
+      </div>
 
       <label className="flex cursor-pointer items-start gap-2">
         <input

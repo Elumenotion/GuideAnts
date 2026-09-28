@@ -20,6 +20,7 @@ vi.mock('../../../services/userService', () => ({
 }));
 
 import { useConversationActions } from '../useConversationActions';
+import { setConversationModelOverride, getConversationModelOverride } from '../conversationModelOverride';
 import { api } from '../../../services/api';
 import { ensureValidTokensForTemplate } from '../../../utils/notebookAuth';
 import {
@@ -115,6 +116,8 @@ describe('useConversationActions', () => {
     conversations.editMessage = vi.fn().mockResolvedValue({});
     conversations.undoLast = vi.fn().mockResolvedValue({});
     conversations.get = vi.fn().mockResolvedValue({ messages: [] });
+    // Reset the per-conversation model override store so tests are isolated.
+    setConversationModelOverride(CONVERSATION_ID, null);
   });
 
   afterEach(() => {
@@ -184,6 +187,68 @@ describe('useConversationActions', () => {
         expect.objectContaining({ requestServerCancel: expect.any(Function) }),
       );
       expect(deps.setCurrentStreamController).toHaveBeenCalled();
+    });
+
+    describe('per-conversation model override passthrough', () => {
+      it('includes modelDeploymentId when the conversation override is set', async () => {
+        setConversationModelOverride(CONVERSATION_ID, 'gpt-4o');
+        const { actions } = mountActions();
+
+        await act(async () => {
+          await actions.sendMessage('hello');
+        });
+
+        expect(api.projects.notebooks.conversations.sendMessageStream).toHaveBeenCalledWith(
+          PROJECT_ID,
+          NOTEBOOK_ID,
+          CONVERSATION_ID,
+          expect.objectContaining({
+            instructions: 'hello',
+            assistantName: 'Claude',
+            modelDeploymentId: 'gpt-4o',
+          }),
+          expect.any(Function),
+          expect.any(Function),
+          expect.any(Function),
+          expect.any(AbortSignal),
+          expect.objectContaining({ requestServerCancel: expect.any(Function) }),
+        );
+      });
+
+      it('omits modelDeploymentId when no conversation override is set', async () => {
+        const { actions } = mountActions();
+
+        await act(async () => {
+          await actions.sendMessage('hello');
+        });
+
+        const sendCall = vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mock.calls[0];
+        const payload = sendCall?.[3] as Record<string, unknown>;
+        expect(payload.instructions).toBe('hello');
+        // No override -> the field is undefined, so JSON.stringify omits it on the wire.
+        expect(payload.modelDeploymentId).toBeUndefined();
+      });
+
+      it('re-reads the override at send time, so switching it mid-conversation changes subsequent sends', async () => {
+        const { actions } = mountActions();
+
+        // First send: no override -> field omitted.
+        await act(async () => {
+          await actions.sendMessage('first');
+        });
+        let payload = vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mock.calls[0]?.[3] as Record<string, unknown>;
+        expect(payload.modelDeploymentId).toBeUndefined();
+
+        // Set the override between sends (e.g. user picks a model in the toolbar).
+        setConversationModelOverride(CONVERSATION_ID, 'claude-3');
+
+        // Second send: override present -> field included.
+        await act(async () => {
+          await actions.sendMessage('second');
+        });
+        payload = vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mock.calls[1]?.[3] as Record<string, unknown>;
+        expect(payload.modelDeploymentId).toBe('claude-3');
+      });
     });
 
     it('round-trips attachment metadata with normalized paths and PascalCase upload types', async () => {

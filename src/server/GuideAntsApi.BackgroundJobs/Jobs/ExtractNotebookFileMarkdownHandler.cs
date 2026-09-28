@@ -97,8 +97,13 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
             }
         }
 
-        if (shadow.Status == MarkdownExtractionStatus.Completed)
+        if (shadow.Status == MarkdownExtractionStatus.Completed
+            || shadow.Status == MarkdownExtractionStatus.Skipped)
         {
+            // Terminal: Completed has content; Skipped means the source was examined and
+            // there is nothing to extract (e.g. a video with no audio stream). Re-dispatching
+            // would loop forever. A manual retry (RetryNotebookExtractionAsync) resets to
+            // Pending to force reprocessing.
             return JobExecutionResult.Success(); // Idempotent
         }
 

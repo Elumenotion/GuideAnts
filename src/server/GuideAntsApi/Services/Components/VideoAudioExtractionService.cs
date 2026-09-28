@@ -1,3 +1,4 @@
+using GuideAntsApi.DataModel.Media;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Core;
 using Microsoft.Extensions.Options;
@@ -66,6 +67,16 @@ namespace GuideAntsApi.Services.Components
                         CleanupDirectory(workspacePath);
                         return ValueTask.CompletedTask;
                     });
+            }
+            catch (MediaNoAudioStreamException)
+            {
+                CleanupDirectory(workspacePath);
+                // A valid video with no audio track is an empty result, not an error:
+                // log at info level (no stack trace) and let the caller skip it.
+                _logger.LogInformation(
+                    "No audio stream to extract from staged video content for {FileName}",
+                    LogValueSanitizer.Sanitize(fileName));
+                throw;
             }
             catch (Exception ex)
             {

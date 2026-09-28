@@ -75,7 +75,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         build-essential ca-certificates cmake git \
         libvulkan-dev glslang-tools glslc spirv-headers \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --recursive --depth 1 --shallow-submodules --branch main https://github.com/0xShug0/audio.cpp /src/audio.cpp \
+RUN git clone --depth 1 --branch main https://github.com/0xShug0/audio.cpp /src/audio.cpp \
     && cmake -S /src/audio.cpp -B /src/audio.cpp/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DENGINE_ENABLE_CUDA=OFF \
@@ -172,7 +172,7 @@ RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/ga-script-exec /tmp/ga-script-exec.c
 # =============================================================================
 # Vulkan backend (runtime base + python deps builder + dependency image)
 # =============================================================================
-FROM ghcr.io/ggml-org/llama.cpp:server-vulkan-b10615 AS runtime-vulkan-base
+FROM ghcr.io/ggml-org/llama.cpp:server-vulkan-v0.5.0 AS runtime-vulkan-base
 ARG GA_UBUNTU_MIRROR_URL
 ENV DEBIAN_FRONTEND=noninteractive
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \

@@ -144,7 +144,8 @@ namespace GuideAntsApi.Services.Components
                 throw new ArgumentException($"No markdown shadow found for ContentFileVersion {contentFileVersionId}");
             }
 
-            if (shadow.Status != MarkdownExtractionStatus.Failed)
+            if (shadow.Status != MarkdownExtractionStatus.Failed
+                && shadow.Status != MarkdownExtractionStatus.Skipped)
             {
                 throw new InvalidOperationException($"Cannot retry extraction for shadow with status {shadow.Status}");
             }

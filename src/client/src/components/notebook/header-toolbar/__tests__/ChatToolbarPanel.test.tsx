@@ -2,6 +2,10 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatToolbarPanel } from '../ChatToolbarPanel';
+import {
+  getConversationModelOverride,
+  setConversationModelOverride,
+} from '../../../../contexts/conversation/conversationModelOverride';
 import { api } from '../../../../services/api';
 
 vi.mock('../../../../services/api', () => ({
@@ -62,6 +66,7 @@ describe('ChatToolbarPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    setConversationModelOverride('c-override', null);
   });
 
   afterEach(() => {
@@ -264,7 +269,10 @@ describe('ChatToolbarPanel', () => {
       />
     );
 
-    await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+    await waitFor(() => {
+        const select = screen.getByRole('combobox', { name: /Model for this conversation/i }) as HTMLSelectElement;
+        expect(select.disabled).toBe(false);
+      });
     expect(screen.getByRole('button', { name: /load selected local chat model/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /load selected local chat model/i })).toHaveTextContent('Load model');
     expect(screen.queryByRole('button', { name: /unload selected local chat model/i })).not.toBeInTheDocument();
@@ -556,7 +564,10 @@ describe('ChatToolbarPanel', () => {
       />
     );
 
-    await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+    await waitFor(() => {
+        const select = screen.getByRole('combobox', { name: /Model for this conversation/i }) as HTMLSelectElement;
+        expect(select.disabled).toBe(false);
+      });
     await user.click(screen.getByRole('button', { name: /load selected local chat model/i }));
 
     await waitFor(
@@ -603,7 +614,10 @@ describe('ChatToolbarPanel', () => {
       />
     );
 
-    await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+    await waitFor(() => {
+        const select = screen.getByRole('combobox', { name: /Model for this conversation/i }) as HTMLSelectElement;
+        expect(select.disabled).toBe(false);
+      });
     expect(screen.getByText('Switching...')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /load selected local chat model/i })).toBeDisabled();
   });
@@ -720,8 +734,118 @@ describe('ChatToolbarPanel', () => {
       />
     );
 
-    await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+    await waitFor(() => {
+        const select = screen.getByRole('combobox', { name: /Model for this conversation/i }) as HTMLSelectElement;
+        expect(select.disabled).toBe(false);
+      });
     expect(screen.getByRole('button', { name: /selected local chat model is loaded/i })).toHaveTextContent('Loaded');
     expect(screen.getByRole('button', { name: /unload selected local chat model/i })).toHaveTextContent('Unload');
+  });
+
+  describe('per-conversation model override picker', () => {
+    // A preceding test sets `catalogs.models` via mockResolvedValue (not Once), leaking
+    // its catalog into later tests. Reset it here so the picker tests are deterministic.
+    beforeEach(() => {
+      vi.mocked(api.guides.catalogs.models).mockResolvedValue([
+        { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+        { modelId: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', provider: 'google-gemini-chat', isActive: true },
+      ]);
+    });
+
+    const renderPanel = (conversationId = 'c-override') =>
+      render(
+        <ChatToolbarPanel
+          chat={{
+            status: 'ready',
+            summary: 'Chat ready',
+            conversationId,
+            selectedAssistantName: 'assistant',
+            effectiveModelId: 'gpt-5-mini',
+            effectiveModelDisplayName: 'GPT-5 mini',
+            effectiveProvider: 'azure-openai',
+            overrideAllChatModels: false,
+            effectiveModelSource: 'direct',
+            supportsLocalRuntimePower: false,
+            localRuntimeOn: false,
+            modelOptions: [
+              { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+            ],
+            blockers: [],
+            inProgressOperationId: null,
+            inProgressState: null,
+          }}
+          projectId="p1"
+          notebookId="n1"
+          conversationId={conversationId}
+          inFlight={false}
+          setInFlight={vi.fn()}
+          onRefresh={vi.fn(async () => {})}
+          onOpenSettings={vi.fn()}
+          onRequestUnloadConfirm={vi.fn()}
+        />
+      );
+
+    it('renders the picker and shows the "using assistant model" state by default', async () => {
+      renderPanel();
+      await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+
+      expect(screen.getByTestId('conversation-model-override')).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: /Model for this conversation/i })).toBeInTheDocument();
+      expect(screen.getByText(/Using the assistant's model/i)).toBeInTheDocument();
+      expect(getConversationModelOverride('c-override')).toBeNull();
+    });
+
+    it('writing the store before render is reflected in the picker (reopened popover)', async () => {
+      setConversationModelOverride('c-override', 'gemini-2.5-flash');
+      renderPanel();
+      await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+
+      expect(
+        (screen.getByRole('combobox', { name: /Model for this conversation/i }) as HTMLSelectElement).value
+      ).toBe('gemini-2.5-flash');
+      expect(screen.getByText(/sent with every message in this conversation/i)).toBeInTheDocument();
+    });
+
+    it('selecting a model writes it to the per-conversation store', async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+
+      const select = screen.getByRole('combobox', { name: /Model for this conversation/i }) as HTMLSelectElement;
+      // The catalog mock serves two active models; pick the second one.
+      await user.selectOptions(select, 'gemini-2.5-flash');
+
+      expect(getConversationModelOverride('c-override')).toBe('gemini-2.5-flash');
+      expect(screen.getByText(/sent with every message in this conversation/i)).toBeInTheDocument();
+      // The global settings API must NOT be touched by a per-conversation pick.
+      expect(api.settings.chatDefaults.update).not.toHaveBeenCalled();
+    });
+
+    it('clearing the override resets it to null in the store', async () => {
+      const user = userEvent.setup();
+      setConversationModelOverride('c-override', 'gemini-2.5-flash');
+      renderPanel();
+      await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+
+      await user.click(screen.getByRole('button', { name: /Clear conversation model override/i }));
+
+      expect(getConversationModelOverride('c-override')).toBeNull();
+      expect(screen.getByText(/Using the assistant's model/i)).toBeInTheDocument();
+    });
+
+    it('selecting the "Use assistant\'s model" option clears the override', async () => {
+      const user = userEvent.setup();
+      setConversationModelOverride('c-override', 'gemini-2.5-flash');
+      renderPanel();
+      await waitFor(() => {
+        const select = screen.getByRole('combobox', { name: /Model for this conversation/i }) as HTMLSelectElement;
+        expect(select.disabled).toBe(false);
+      });
+
+      const select = screen.getByRole('combobox', { name: /Model for this conversation/i }) as HTMLSelectElement;
+      await user.selectOptions(select, '');
+
+      expect(getConversationModelOverride('c-override')).toBeNull();
+    });
   });
 });
