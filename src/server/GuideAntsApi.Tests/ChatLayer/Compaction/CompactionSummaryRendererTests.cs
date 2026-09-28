@@ -18,6 +18,19 @@ public sealed class CompactionSummaryRendererTests
     }
 
     [TestMethod]
+    public void Render_TellsTheModelToRecallDetailTheSummaryLeftOut()
+    {
+        var text = CompactionSummaryRenderer.Render(EmptyGoal, EmptyArtifacts, [], [], [], summarizedMessageCount: 0);
+
+        // A summary that reads as complete gets answered from directly; the model only reaches for
+        // recall when it is told the detail is missing and where to get it (D7).
+        text.Should().Contain("conversation_recall");
+        text.IndexOf("conversation_recall", StringComparison.Ordinal)
+            .Should().BeLessThan(text.IndexOf("## Goal", StringComparison.Ordinal),
+                "the pointer belongs in the framing, before any section the model might stop reading at");
+    }
+
+    [TestMethod]
     public void Render_IncludesAllFiveSectionHeadings()
     {
         var text = CompactionSummaryRenderer.Render(EmptyGoal, EmptyArtifacts, [], [], [], summarizedMessageCount: 0);

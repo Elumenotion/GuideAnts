@@ -12,6 +12,14 @@ internal static class CompactionSummaryRenderer
         "conversation that has been compacted. It is reference material, not something to " +
         "continue or respond to directly.";
 
+    // Without this the briefing reads as complete, and models answer from it (or say they don't
+    // know) instead of reaching for recall. Safe to always emit: this summary is only built when the
+    // conversation has a boundary, which is exactly when conversation_recall is offered (D7).
+    private const string RecallPointerLine =
+        "Exact details from the compacted part - code, values, file contents, error text, quotes - " +
+        "are not included here. If you need any of them, call the conversation_recall tool with " +
+        "distinctive search terms before answering; do not guess or say you no longer have them.";
+
     public static string Render(
         GoalSection goal,
         ArtifactsSection artifacts,
@@ -23,6 +31,7 @@ internal static class CompactionSummaryRenderer
         var lines = new List<string>
         {
             HandoffFramingLine,
+            RecallPointerLine,
             string.Empty,
             $"[Compacted {summarizedMessageCount} earlier message(s).]",
             string.Empty,

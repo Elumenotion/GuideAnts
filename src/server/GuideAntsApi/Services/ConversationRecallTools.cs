@@ -31,7 +31,9 @@ public static class ConversationRecallTools
 
     [Tool(
         OperationId = "conversation_recall",
-        Summary = "Search the earlier, compacted part of this conversation for detail the summary left out."
+        Summary = "Search the earlier, compacted part of this conversation for detail the summary left out. " +
+                  "Call this whenever the user refers to something from before the compaction summary " +
+                  "that the summary does not contain verbatim."
     )]
     [RequiresNotebookContext]
     public static async Task<string> RecallConversation(
