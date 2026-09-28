@@ -766,7 +766,7 @@ public sealed class ConversationPersistence : IConversationPersistence
                     throw new KeyNotFoundException($"Conversation turn {request.TurnId} was not found.");
                 }
 
-                // One tool result per ToolCallId. Context-overflow unwind (and retries) must update
+                // One tool result per ToolCallId. A retried tool call must update the existing row
                 // in place — inserting a second row with the same id breaks history rebuild.
                 if (!string.IsNullOrWhiteSpace(request.ToolCallId))
                 {

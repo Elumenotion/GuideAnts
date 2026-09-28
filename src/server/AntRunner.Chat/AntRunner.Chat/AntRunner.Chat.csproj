@@ -24,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="GuideAntsApi.Tests" />
   </ItemGroup>
 
   <ItemGroup>

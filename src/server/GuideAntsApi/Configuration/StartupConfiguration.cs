@@ -150,6 +150,7 @@ public static class StartupConfiguration
         services.AddScoped<IHostFolderMountService, HostFolderMountService>();
         services.AddScoped<ISemiStructuredDataService, SemiStructuredDataService>();
         services.AddScoped<IConversationQueryService, ConversationQueryService>();
+        services.AddScoped<IConversationContextStatusService, ConversationContextStatusService>();
         services.AddScoped<IConversationCommandService, ConversationCommandService>();
         services.AddScoped<IAttachmentContentService, AttachmentContentService>();
         services.AddSingleton<IAttachmentRenderCache, AttachmentRenderCache>();
@@ -162,6 +163,8 @@ public static class StartupConfiguration
         services.AddSingleton<PublishedConversationStreamPolicy>();
         services.AddScoped<IConversationStreamEngine, ConversationStreamEngine>();
         services.AddScoped<IConversationUndoService, ConversationUndoService>();
+        services.AddScoped<ICompactionService, CompactionService>();
+        services.AddScoped<IConversationRecallService, ConversationRecallService>();
         services.AddScoped<IConversationService, ConversationService>();
         services.AddScoped<IPublishedConversationService, PublishedConversationService>();
         services.AddScoped<GuideAntsApi.Services.Auth.IPublishedGuideAuthService, GuideAntsApi.Services.Auth.PublishedGuideAuthService>();
@@ -415,10 +418,13 @@ public static class StartupConfiguration
         });
         // Routing resolvers + validator + llama runtime coordinator (Phase A of settings-and-llama-completion plan).
         services.AddSingleton<IChatTargetResolver, ChatTargetResolver>();
+        services.AddSingleton<IContextWindowResolver, ContextWindowResolver>();
+        services.AddSingleton<IModelContextWindowProbe, ModelContextWindowProbe>();
         services.AddSingleton<IChatModelResolver, ChatModelResolver>();
         services.AddSingleton<IChatTargetValidator, ChatTargetValidator>();
         services.AddSingleton<IServiceModeResolver, ServiceModeResolver>();
         services.AddSingleton<ILlamaRuntimeCoordinator, LlamaRuntimeCoordinator>();
+        services.AddSingleton<ILearnedContextWindowCache, LearnedContextWindowCache>();
         services.AddScoped<IRoutingReadinessService, RoutingReadinessService>();
         services.AddExceptionHandler<RoutingExceptionHandler>();
 

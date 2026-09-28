@@ -1,7 +1,7 @@
 import React from 'react';
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '../../../test/test-utils';
+import { render, screen, waitFor } from '../../../test/test-utils';
 import userEvent from '@testing-library/user-event';
 import { ProjectLayout } from '../ProjectLayout';
 import { ProjectDetailsDto } from '../../../types/project';
@@ -174,7 +174,8 @@ describe('ProjectLayout', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Resize' }));
     await userEvent.click(screen.getByRole('button', { name: 'Collapse' }));
 
-    expect(localStorage.getItem('sidebarWidth')).toBe('288');
+    // Width is persisted inside requestAnimationFrame, so wait for the frame to flush.
+    await waitFor(() => expect(localStorage.getItem('sidebarWidth')).toBe('288'));
     expect(localStorage.getItem('sidebarCollapsed')).toBe('true');
   });
 

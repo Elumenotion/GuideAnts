@@ -30,7 +30,9 @@ public record ModelDto(
     ModelRuntimeConfigDto? RuntimeConfig,
     IReadOnlyList<SamplingParameterPolicyDto>? SamplingParameterPolicy,
     IReadOnlyList<string>? ReasoningChoices,
-    string? DefaultReasoningChoice
+    string? DefaultReasoningChoice,
+    int? ContextWindowTokens = null,
+    int? MaxOutputTokens = null
 );
 
 // Tool catalog entry

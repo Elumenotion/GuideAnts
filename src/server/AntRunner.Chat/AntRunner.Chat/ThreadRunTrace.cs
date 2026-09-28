@@ -37,6 +37,8 @@ public interface IThreadRunTraceCollector
     void CaptureToolLimitState(
         int toolCallsUsed,
         string escalationPhase);
+
+    void CaptureCompaction(int boundaryTurnIndex);
 }
 
 public sealed record ThreadRunTraceMessageSnapshot(

@@ -331,9 +331,30 @@ export interface ConversationStreamingPreviewDto {
     turnIndex: number;
 }
 
+export type ContextEstimateSource = 'None' | 'ProviderUsage' | 'Characters';
+
+export type ContextWindowSource = 'Unknown' | 'Learned' | 'Catalog' | 'LiveRuntime';
+
+export interface ConversationContextStatus {
+    contextWindowTokens: number | null;
+    estimatedPromptTokens: number | null;
+    boundaryTurnIndex: number | null;
+    estimateSource: ContextEstimateSource;
+    modelDeploymentId: string | null;
+    contextWindowSource: ContextWindowSource;
+}
+
+export interface ConversationCompactionResult {
+    boundaryTurnIndex: number | null;
+    messagesSummarized: number;
+    estimatedTokensBefore: number | null;
+    estimatedTokensAfter: number | null;
+}
+
 export interface NotebookConversationWithMessagesDto extends NotebookConversationDto {
   messages: MessageDto[];
   activeTurn?: ConversationTurnStatusDto | null;
   lock?: ConversationLockStatusDto | null;
   streamingPreview?: ConversationStreamingPreviewDto | null;
+  contextStatus?: ConversationContextStatus | null;
 }

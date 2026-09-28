@@ -1831,6 +1831,9 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<bool>("CombineSystemAndDeveloperMessages")
                         .HasColumnType("bit");
 
+                    b.Property<int?>("ContextWindowTokens")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("Created")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime2")
@@ -1850,6 +1853,9 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
+
+                    b.Property<int?>("MaxOutputTokens")
+                        .HasColumnType("int");
 
                     b.Property<string>("Provider")
                         .IsRequired()
@@ -1962,6 +1968,9 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("CompactionBoundaryTurnIndex")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("Created")
                         .ValueGeneratedOnAdd()

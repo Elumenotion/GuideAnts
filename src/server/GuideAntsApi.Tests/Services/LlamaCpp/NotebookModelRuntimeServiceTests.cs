@@ -541,6 +541,29 @@ public class NotebookModelRuntimeServiceTests
     }
 
 
+    [TestMethod]
+    public async Task GetLlamaModelsFromCatalogAsync_CarriesContextWindowAndMaxOutputTokensFromRow()
+    {
+        _context.Models.Add(new Model
+        {
+            ModelId = "local-ctx", Provider = "llama-cpp", IsActive = true,
+            ContextWindowTokens = 262_147, MaxOutputTokens = 16_381
+        });
+        _context.Models.Add(new Model { ModelId = "local-noctx", Provider = "llama-cpp", IsActive = true });
+        await _context.SaveChangesAsync();
+
+        var method = typeof(NotebookModelRuntimeService)
+            .GetMethod("GetLlamaModelsFromCatalogAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var models = await (Task<List<GuideAntsApi.Models.Guides.ModelDto>>)method.Invoke(_service, new object[] { CancellationToken.None })!;
+
+        var withValues = models.Single(m => m.ModelId == "local-ctx");
+        Assert.AreEqual(262_147, withValues.ContextWindowTokens);
+        Assert.AreEqual(16_381, withValues.MaxOutputTokens);
+        var without = models.Single(m => m.ModelId == "local-noctx");
+        Assert.IsNull(without.ContextWindowTokens);
+        Assert.IsNull(without.MaxOutputTokens);
+    }
+
     private NotebookModelRuntimeService CreateService(IMemoryCache cache)
     {
         return new NotebookModelRuntimeService(

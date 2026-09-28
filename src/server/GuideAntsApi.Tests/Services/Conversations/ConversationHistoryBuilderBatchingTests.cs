@@ -365,4 +365,54 @@ public sealed class ConversationHistoryBuilderBatchingTests
             s => s.CreateOpenAiContentFromNotebookFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
+
+    [TestMethod]
+    public async Task BuildOpenAiMessages_WithBoundary_ExcludesMessagesAtOrBeforeBoundary()
+    {
+        var conv = LoadConversation();
+
+        var messages = await _builder.BuildOpenAiMessagesAsync(conv, "Claude", compactionBoundaryTurnIndex: 1);
+
+        messages.Should().HaveCount(4);
+        messages.Select(m => m.GetText()).Should().ContainInOrder(
+            "user message 2", "assistant message 2",
+            "user message 3", "assistant message 3");
+    }
+
+    [TestMethod]
+    public async Task BuildOpenAiMessages_NoBoundary_UnchangedFromBeforeThisPlan()
+    {
+        var conv = LoadConversation();
+
+        var messages = await _builder.BuildOpenAiMessagesAsync(conv, "Claude");
+
+        messages.Should().HaveCount(6);
+    }
+
+    [TestMethod]
+    public async Task ApplyAssistantSwitchLogic_WithBoundary_ExcludesMessagesAtOrBeforeBoundary()
+    {
+        SeedAssistantCache(SwitchAssistantName);
+        var conv = LoadConversation();
+
+        var messages = await _builder.ApplyAssistantSwitchLogicAsync(conv, SwitchAssistantName, compactionBoundaryTurnIndex: 2);
+
+        // 2 tail messages (turn 3 only) + the trailing handoff system message, which is governed by
+        // conv.Messages.Any() on the ORIGINAL collection, not the filtered tail - so it still appears.
+        messages.Should().HaveCount(3);
+        messages.Select(m => m.GetText()).Should().ContainInOrder("user message 3", "assistant message 3");
+        messages[2].Role.Should().Be(ChatMessageRole.System);
+        messages[2].GetText().Should().Contain("previous messages between the user and assistant");
+    }
+
+    [TestMethod]
+    public async Task ApplyAssistantSwitchLogic_NoBoundary_UnchangedFromBeforeThisPlan()
+    {
+        SeedAssistantCache(SwitchAssistantName);
+        var conv = LoadConversation();
+
+        var messages = await _builder.ApplyAssistantSwitchLogicAsync(conv, SwitchAssistantName);
+
+        messages.Should().HaveCount(7);
+    }
 }

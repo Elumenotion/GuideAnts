@@ -1,6 +1,3 @@
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text;
 using AntRunner.Chat;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
@@ -45,14 +42,15 @@ public sealed class ToolLimitIntegrationTests : BaseEndpointTest
         using (var scope = SharedFactory!.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
-            conversationId = await SeedConversationAsync(db, notebookId, "Tool limit escalation");
+            (projectId, notebookId) = await ConversationStreamTestHelpers.SeedProjectNotebookAsync(db, "Tool Limit");
+            conversationId = await ConversationStreamTestHelpers.SeedConversationAsync(db, notebookId, "Tool limit escalation");
             await SetAssistantToolLimitAsync(db, "assistant", maxToolCallsPerTurn: 1);
         }
 
         FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.RepeatedToolCalls;
 
-        var events = await SendConversationStreamToCompletionAsync(
+        var events = await ConversationStreamTestHelpers.SendMessageStreamAsync(
+            Client,
             projectId,
             notebookId,
             conversationId,
@@ -99,15 +97,16 @@ public sealed class ToolLimitIntegrationTests : BaseEndpointTest
         using (var scope = SharedFactory!.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
-            conversationId = await SeedConversationAsync(db, notebookId, "Repeated tool rounds");
+            (projectId, notebookId) = await ConversationStreamTestHelpers.SeedProjectNotebookAsync(db, "Tool Limit");
+            conversationId = await ConversationStreamTestHelpers.SeedConversationAsync(db, notebookId, "Repeated tool rounds");
             await SetAssistantToolLimitAsync(db, "assistant", maxToolCallsPerTurn: 2);
         }
 
         var behavior = FakeChatCompletionBehavior.Instance;
         behavior.Scenario = FakeChatScenario.RepeatedToolCalls;
 
-        var events = await SendConversationStreamToCompletionAsync(
+        var events = await ConversationStreamTestHelpers.SendMessageStreamAsync(
+            Client,
             projectId,
             notebookId,
             conversationId,
@@ -159,14 +158,15 @@ public sealed class ToolLimitIntegrationTests : BaseEndpointTest
         using (var scope = SharedFactory!.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
-            conversationId = await SeedConversationAsync(db, notebookId, "T13 reload");
+            (projectId, notebookId) = await ConversationStreamTestHelpers.SeedProjectNotebookAsync(db, "Tool Limit");
+            conversationId = await ConversationStreamTestHelpers.SeedConversationAsync(db, notebookId, "T13 reload");
             await SetAssistantToolLimitAsync(db, "assistant", maxToolCallsPerTurn: 1);
         }
 
         FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.RepeatedToolCalls;
 
-        await SendConversationStreamToCompletionAsync(
+        await ConversationStreamTestHelpers.SendMessageStreamAsync(
+            Client,
             projectId,
             notebookId,
             conversationId,
@@ -203,91 +203,5 @@ public sealed class ToolLimitIntegrationTests : BaseEndpointTest
         }
         await db.SaveChangesAsync();
         AssistantUtility.ClearCache(assistantName);
-    }
-
-    private static async Task<(Guid projectId, Guid notebookId)> SeedProjectNotebookAsync(ApplicationDbContext db)
-    {
-        var guideId = await db.Assistants
-            .Where(a => a.Kind == AssistantKind.Guide && a.IsActive)
-            .Select(a => a.Id)
-            .FirstAsync();
-
-        var project = new Project
-        {
-            Id = Guid.NewGuid(),
-            Title = $"Tool Limit Project {Guid.NewGuid():N}",
-            Slug = $"tl-{Guid.NewGuid():N}",
-            Description = "integration",
-            Created = DateTime.UtcNow
-        };
-        db.Projects.Add(project);
-
-        var notebook = new Notebook
-        {
-            Id = Guid.NewGuid(),
-            Title = $"Tool Limit Notebook {Guid.NewGuid():N}",
-            Slug = $"tl-nb-{Guid.NewGuid():N}",
-            ProjectId = project.Id,
-            GuideId = guideId,
-            Created = DateTime.UtcNow
-        };
-        db.Notebooks.Add(notebook);
-        await db.SaveChangesAsync();
-        return (project.Id, notebook.Id);
-    }
-
-    private static async Task<Guid> SeedConversationAsync(ApplicationDbContext db, Guid notebookId, string title)
-    {
-        var conv = new NotebookConversation { NotebookId = notebookId, Title = title };
-        db.NotebookConversations.Add(conv);
-        await db.SaveChangesAsync();
-        return conv.Id;
-    }
-
-    private async Task<List<(string EventType, string Payload)>> SendConversationStreamToCompletionAsync(
-        Guid projectId,
-        Guid notebookId,
-        Guid conversationId,
-        object requestBody)
-    {
-        using var req = new HttpRequestMessage(
-            HttpMethod.Post,
-            $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/messages")
-        {
-            Content = JsonContent.Create(requestBody)
-        };
-        req.Headers.Accept.Clear();
-        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-
-        using var resp = await Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
-        resp.EnsureSuccessStatusCode();
-
-        var events = new List<(string EventType, string Payload)>();
-        await using var stream = await resp.Content.ReadAsStreamAsync();
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-
-        string? currentEvent = null;
-        while (!reader.EndOfStream)
-        {
-            var line = await reader.ReadLineAsync();
-            if (line == null)
-            {
-                break;
-            }
-
-            if (line.StartsWith("event:", StringComparison.Ordinal))
-            {
-                currentEvent = line["event:".Length..].Trim();
-                continue;
-            }
-
-            if (line.StartsWith("data:", StringComparison.Ordinal) && currentEvent != null)
-            {
-                var payload = line["data:".Length..].Trim();
-                events.Add((currentEvent, payload));
-            }
-        }
-
-        return events;
     }
 }

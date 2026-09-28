@@ -100,4 +100,18 @@ public static class StreamingEvents
             StreamingEventTypes.StreamingProgress,
             JsonSerializer.Serialize(payload, JsonOptions));
     }
+
+    public static StreamingEvent BuildCompactionBoundaryMarkerEvent(int boundaryTurnIndex, Guid? turnId = null)
+    {
+        var payload = new
+        {
+            turnId,
+            boundaryTurnIndex,
+            timestamp = DateTime.UtcNow
+        };
+
+        return new StreamingEvent(
+            StreamingEventTypes.CompactionBoundaryMarker,
+            JsonSerializer.Serialize(payload, JsonOptions));
+    }
 }

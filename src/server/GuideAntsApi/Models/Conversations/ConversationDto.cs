@@ -1,3 +1,4 @@
+using GuideAntsApi.Services.Conversations;
 namespace GuideAntsApi.Models.Conversations;
 
 using GuideAntsApi.DataModel.Models;
@@ -77,7 +78,8 @@ public record NotebookConversationWithMessagesDto(
     IReadOnlyList<MessageDto> Messages,
     ConversationTurnStatusDto? ActiveTurn = null,
     ConversationLockStatusDto? Lock = null,
-    ConversationStreamingPreviewDto? StreamingPreview = null);
+    ConversationStreamingPreviewDto? StreamingPreview = null,
+    ConversationContextStatusDto? ContextStatus = null);
 
 public class SendMessageRequest
 {

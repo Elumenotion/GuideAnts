@@ -8,6 +8,8 @@ export interface KnownCloudModel {
   description?: string;
   parameterSurfaceSeed?: string;
   reasoningEffortEnabled?: boolean;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
 }
 
 const ALL_KNOWN_MODELS: KnownCloudModel[] = knownModels as KnownCloudModel[];

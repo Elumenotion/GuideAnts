@@ -131,7 +131,9 @@ internal static class SettingsModelOnboardingSupport
             ThinkingControlJson: string.IsNullOrWhiteSpace(thinkingControlJson) ? "{}" : thinkingControlJson.Trim(),
             RequestFieldsWhenToolsPresentJson: string.IsNullOrWhiteSpace(requestFieldsJson) ? "{}" : requestFieldsJson.Trim(),
             IsActive: request.Catalog.IsActive,
-            DisplayOrder: request.Catalog.DisplayOrder);
+            DisplayOrder: request.Catalog.DisplayOrder,
+            ContextWindowTokens: request.Catalog.ContextWindowTokens,
+            MaxOutputTokens: request.Catalog.MaxOutputTokens);
     }
 
     public static string? BuildCloudRuntimeConfigJson(AddModelRequest request)

@@ -36,6 +36,12 @@ namespace AntRunner.Chat
         private static readonly ConcurrentDictionary<string, Dictionary<string, ToolCaller>> RequestBuilderCache = new();
         private static readonly ConcurrentDictionary<string, long> RequestBuilderCacheGenerations = new();
 
+        /// <summary>
+        /// Operation id of the recall tool injected per run when a conversation has a compaction
+        /// boundary. Never present in an assistant's persisted tool list.
+        /// </summary>
+        internal const string ConversationRecallToolName = "conversation_recall";
+
         // Tracks which files have already been announced in a conversation to avoid duplicates
         private static readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> ConversationFileAnnouncements = new();
 
@@ -523,6 +529,12 @@ namespace AntRunner.Chat
                 }
             }
 
+            if (options.EnableConversationRecall)
+            {
+                TryAdvertiseRegisteredTool(
+                    ConversationRecallToolName, "compaction", tools, registeredToolNames, traceTools);
+            }
+
             if (options.ClientToolDefinitions != null)
             {
                 foreach (var clientTool in options.ClientToolDefinitions)
@@ -577,10 +589,6 @@ namespace AntRunner.Chat
             var accumulatedNewFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var accumulatedModifiedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // Messages already replaced by an abort notice after a context-overflow rejection.
-            // Tracked so each retry targets a different (next-largest) message and the loop converges.
-            var unwoundMessages = new HashSet<ChatMessage>();
-
             try
             {
                 while (continueChat)
@@ -610,6 +618,7 @@ namespace AntRunner.Chat
                         reasoningEffort: reasoningEffortParam,
                         samplingParameters: samplingParams,
                         toolChoice: toolChoice);
+                    var requestPromptChars = PromptTokenEstimator.CountChars(messages);
                     LogOutboundChatRequest(roundIndex, chatRequest);
                     traceCollector?.CaptureRoundRequest(
                         roundIndex,
@@ -617,23 +626,11 @@ namespace AntRunner.Chat
                         BuildTraceMessageSnapshots(messages),
                         traceTools);
 
-                    ChatCompletionResponse response;
-                    try
-                    {
-                        response = await InvokeCompletionAsync(api, chatRequest, onStream, token);
-                    }
-                    catch (ChatContextOverflowException overflowEx)
-                    {
-                        // Unwind the largest offending message in this turn, replace it with a short
-                        // abort notice, and retry. If nothing can be unwound the request is
-                        // irreducible (e.g. the system prompt alone overflows) so we rethrow.
-                        if (TryUnwindOversizedMessage(messages, unwoundMessages, overflowEx, tracedMessageAdded))
-                        {
-                            continue;
-                        }
-
-                        throw;
-                    }
+                    // Context overflow fails cleanly (D5) -- no unwind, no retry, no message
+                    // content ever mutated. ChatContextOverflowException propagates like any other
+                    // exception; ConversationStreamEngine's outer catch surfaces it to the client as
+                    // chat_context_overflow and still records the learned context window from it.
+                    var response = await InvokeCompletionAsync(api, chatRequest, onStream, token);
 
                     messages.Add(response.FirstChoice!.Message);
 
@@ -649,7 +646,7 @@ namespace AntRunner.Chat
 
                     if (response.Usage != null)
                     {
-                        accumulatedUsage = MergeRoundUsage(accumulatedUsage, response.Usage);
+                        accumulatedUsage = MergeRoundUsage(accumulatedUsage, response.Usage, requestPromptChars);
                     }
 
                     var lastRole = messages.Last().Role;
@@ -804,6 +801,7 @@ namespace AntRunner.Chat
 
                                     // Mark run results as pending client tool and end loop
                                     runResults = BuildRunResults(messages, response) ?? new ChatRunOutput { Messages = messages };
+                                    CopyLastRoundUsage(accumulatedUsage, runResults);
                                     runResults.Status = "pending_client_tool";
                                     continueChat = false;
                                 }
@@ -953,6 +951,105 @@ namespace AntRunner.Chat
 
         private static string ResolveToolTraceSource(string toolName) =>
             toolName is "skills_list" or "skills_read" ? "skills" : "guide";
+
+        /// <summary>
+        /// Adds a registry-discovered static tool to this run's advertised tool list. Used for tools
+        /// whose exposure is decided per run rather than by the assistant's persisted tool list.
+        /// Failures are logged and skipped: an unadvertised tool is a missing capability, never a
+        /// failed turn.
+        /// </summary>
+        private static void TryAdvertiseRegisteredTool(
+            string operationId,
+            string traceSource,
+            List<ChatToolDefinition> tools,
+            HashSet<string> registeredToolNames,
+            List<ThreadRunTraceToolDefinitionSnapshot> traceTools)
+        {
+            var wireName = ToolOperationIdSanitizer.ToWireName(operationId);
+            if (registeredToolNames.Contains(wireName))
+            {
+                return;
+            }
+
+            var match = ToolContractRegistry.GetAllToolOperations()
+                .FirstOrDefault(kvp => string.Equals(kvp.Key, operationId, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(match.Key))
+            {
+                Logger.LogWarning(
+                    "Run-scoped tool {OperationId} is not registered in the tool contract registry",
+                    LogValueSanitizer.Sanitize(operationId));
+                return;
+            }
+
+            try
+            {
+                var schema = ToolContractRegistry.GenerateOpenApiSchema(match.Value);
+                foreach (var def in OpenApiHelper.GetToolDefinitionsFromJson(schema))
+                {
+                    var function = def.Function?.AsObject;
+                    if (function?.Name != wireName)
+                    {
+                        continue;
+                    }
+
+                    var parametersJsonNode = JsonNode.Parse(JsonSerializer.Serialize(function.Parameters));
+                    tools.Add(new ChatToolDefinition(
+                        new ChatFunctionDefinition(function.Name!, function.Description, parametersJsonNode)));
+                    registeredToolNames.Add(function.Name!);
+                    traceTools.Add(new ThreadRunTraceToolDefinitionSnapshot(
+                        function.Name!, function.Description, parametersJsonNode?.ToJsonString(), traceSource));
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(
+                    ex,
+                    "Failed to advertise run-scoped tool {OperationId}",
+                    LogValueSanitizer.Sanitize(operationId));
+            }
+        }
+
+        /// <summary>
+        /// Registers the request builder for a registry-discovered static tool, outside the
+        /// assistant's own tool list. Mirrors the crew-bridge registration immediately below its
+        /// call site.
+        /// </summary>
+        private static async Task TryRegisterRegisteredToolBuilder(
+            string operationId,
+            string assistantName,
+            Dictionary<string, ToolCaller> builders)
+        {
+            var match = ToolContractRegistry.GetAllToolOperations()
+                .FirstOrDefault(kvp => string.Equals(kvp.Key, operationId, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(match.Key))
+            {
+                return;
+            }
+
+            try
+            {
+                var schema = ToolContractRegistry.GenerateOpenApiSchema(match.Value);
+                var validationResult = OpenApiHelper.ValidateAndParseOpenApiSpec(schema);
+                if (!validationResult.Status || validationResult.Spec == null)
+                {
+                    return;
+                }
+
+                var requestBuilders = await ToolCaller.GetToolCallers(validationResult.Spec, assistantName);
+                var wireName = ToolOperationIdSanitizer.ToWireName(match.Key);
+                if (requestBuilders.TryGetValue(wireName, out var builder))
+                {
+                    builders[wireName] = builder;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(
+                    ex,
+                    "Failed to register request builder for run-scoped tool {OperationId}",
+                    LogValueSanitizer.Sanitize(operationId));
+            }
+        }
 
         /// <summary>
         /// Emits the full provider-bound chat request (messages, tools, sampling) when
@@ -1263,11 +1360,12 @@ namespace AntRunner.Chat
 
         /// <summary>
         /// Single provider-agnostic chokepoint for issuing a completion. Normalizes any provider's
-        /// "context window exceeded" failure into <see cref="ChatContextOverflowException"/> so the
-        /// engine's unwind/retry path is identical regardless of which chat provider is in use.
+        /// "context window exceeded" failure into <see cref="ChatContextOverflowException"/> so every
+        /// provider surfaces the same typed exception, regardless of which chat provider is in use.
         /// Raw-HTTP clients that strip their body (e.g. llama-server) already throw the typed
         /// exception; SDK-based clients (OpenAI, Anthropic) surface the marker text in their thrown
-        /// exception and are translated here.
+        /// exception and are translated here. The caller lets it propagate uncaught (D5) -- no
+        /// unwind, no retry.
         /// </summary>
         private static async Task<ChatCompletionResponse> InvokeCompletionAsync(
             IChatCompletionClient api,
@@ -1287,7 +1385,7 @@ namespace AntRunner.Chat
             }
             catch (ChatContextOverflowException)
             {
-                // Already classified at the source (e.g. llama client) — let it flow to the unwinder.
+                // Already classified at the source (e.g. llama client) — let it propagate (D5).
                 throw;
             }
             catch (Exception ex) when (ChatContextOverflowClassifier.Matches(ex))
@@ -1299,96 +1397,6 @@ namespace AntRunner.Chat
             }
         }
 
-        /// <summary>
-        /// Replaces the largest non-system message in the turn with a short "aborted for size" notice
-        /// after a context-overflow rejection, preserving tool-call pairing so the retried request
-        /// stays structurally valid. Returns false when there is nothing left to unwind.
-        /// </summary>
-        private static bool TryUnwindOversizedMessage(
-            List<ChatMessage> messages,
-            HashSet<ChatMessage> alreadyUnwound,
-            ChatContextOverflowException overflowEx,
-            MessageAddedEventHandler? onMessage)
-        {
-            var targetIndex = -1;
-            var targetLength = -1;
-            for (var i = 0; i < messages.Count; i++)
-            {
-                var candidate = messages[i];
-                if (candidate.Role == ChatRole.System || candidate.Role == ChatRole.Developer)
-                {
-                    continue;
-                }
-
-                if (alreadyUnwound.Contains(candidate))
-                {
-                    continue;
-                }
-
-                var length = candidate.GetText().Length;
-                if (length > targetLength)
-                {
-                    targetLength = length;
-                    targetIndex = i;
-                }
-            }
-
-            if (targetIndex < 0)
-            {
-                return false;
-            }
-
-            var original = messages[targetIndex];
-            var notice = BuildContextOverflowNotice(overflowEx);
-            var replacement = BuildAbortReplacement(original, notice);
-            messages[targetIndex] = replacement;
-            alreadyUnwound.Add(replacement);
-
-            Logger.LogWarning(
-                "Chat request exceeded the model context window; unwound oversized {Role} message at index {Index} ({OriginalChars} chars) and retrying. PromptTokens={PromptTokens}, ContextSize={ContextSize}.",
-                original.Role,
-                targetIndex,
-                targetLength,
-                overflowEx.PromptTokens,
-                overflowEx.ContextSize);
-
-            // Surface the substitution so the abort notice is persisted in place of the dropped content.
-            onMessage?.Invoke(null, new MessageAddedEventArgs(
-                replacement.Role.ToString(),
-                replacement.GetText(),
-                replacement.ToolCallId,
-                replacement.FunctionName,
-                toolCallsJson: null,
-                isReplacement: true));
-
-            return true;
-        }
-
-        private static ChatMessage BuildAbortReplacement(ChatMessage original, string notice)
-        {
-            var content = new List<ChatContent> { new(notice) };
-
-            if (original.Role == ChatRole.Tool)
-            {
-                // Preserve tool_call_id / name so the assistant tool_call ↔ tool result pairing holds.
-                return new ChatMessage(original.ToolCallId ?? string.Empty, original.FunctionName ?? string.Empty, content);
-            }
-
-            // Preserve any tool_calls on an assistant message so following tool results stay valid.
-            return new ChatMessage(original.Role, content, original.ToolCalls, original.ThinkingBlocks);
-        }
-
-        private static string BuildContextOverflowNotice(ChatContextOverflowException overflowEx)
-        {
-            var detail = overflowEx.PromptTokens.HasValue && overflowEx.ContextSize.HasValue
-                ? $" (prompt was ~{overflowEx.PromptTokens.Value:N0} tokens vs the {overflowEx.ContextSize.Value:N0} token limit)"
-                : string.Empty;
-
-            return
-                $"[Message aborted due to size restrictions{detail}. The original content was too large for the model " +
-                "context window and has been removed. Retry with a different approach that limits the message size — " +
-                "for example, write large output to a file and return only a short summary instead of the full content.]";
-        }
 
         private static void IncorporateCancelledStreamResponse(
             List<ChatMessage> messages,
@@ -1403,7 +1411,7 @@ namespace AntRunner.Chat
 
             if (partialResponse.Usage != null)
             {
-                accumulatedUsage = MergeRoundUsage(accumulatedUsage, partialResponse.Usage);
+                accumulatedUsage = MergeRoundUsage(accumulatedUsage, partialResponse.Usage, roundPromptChars: 0); // request messages for the partial round are not in scope
             }
         }
 
@@ -1470,12 +1478,31 @@ namespace AntRunner.Chat
                 usage: null);
         }
 
-        private static UsageResponse MergeRoundUsage(UsageResponse? accumulated, ChatCompletionUsage roundUsage)
+        /// <summary>
+        /// Carries the last-round prompt size onto a result whose Usage was built from a single response.
+        /// </summary>
+        internal static void CopyLastRoundUsage(UsageResponse? accumulatedUsage, ChatRunOutput runResults)
+        {
+            if (accumulatedUsage?.LastRoundPromptTokens == null) return;
+            runResults.Usage ??= new UsageResponse();
+            runResults.Usage.LastRoundPromptTokens = accumulatedUsage.LastRoundPromptTokens;
+            runResults.Usage.LastRoundPromptChars = accumulatedUsage.LastRoundPromptChars;
+        }
+
+        internal static UsageResponse MergeRoundUsage(
+            UsageResponse? accumulated, ChatCompletionUsage roundUsage, int roundPromptChars)
         {
             var roundCached = roundUsage.PromptTokensDetails?.CachedTokens ?? 0;
             var roundPrompt = roundUsage.PromptTokens ?? 0;
             var roundCompletion = roundUsage.CompletionTokens ?? 0;
             var roundTotal = roundUsage.TotalTokens ?? (roundPrompt + roundCompletion);
+
+            // Only a round that reported prompt tokens updates the pair, so the two fields
+            // describe the same round. A 0 char count (request unavailable) means no pair.
+            var lastTokens = roundPrompt > 0 ? roundPrompt : accumulated?.LastRoundPromptTokens;
+            int? lastChars = roundPrompt > 0
+                ? (roundPromptChars > 0 ? roundPromptChars : (int?)null)
+                : accumulated?.LastRoundPromptChars;
 
             if (accumulated == null)
             {
@@ -1484,7 +1511,9 @@ namespace AntRunner.Chat
                     PromptTokens = roundPrompt,
                     CompletionTokens = roundCompletion,
                     CachedPromptTokens = roundCached,
-                    TotalTokens = roundTotal
+                    TotalTokens = roundTotal,
+                    LastRoundPromptTokens = lastTokens,
+                    LastRoundPromptChars = lastChars
                 };
             }
 
@@ -1493,7 +1522,9 @@ namespace AntRunner.Chat
                 PromptTokens = (accumulated.PromptTokens ?? 0) + roundPrompt,
                 CompletionTokens = (accumulated.CompletionTokens ?? 0) + roundCompletion,
                 CachedPromptTokens = (accumulated.CachedPromptTokens ?? 0) + roundCached,
-                TotalTokens = (accumulated.TotalTokens ?? 0) + roundTotal
+                TotalTokens = (accumulated.TotalTokens ?? 0) + roundTotal,
+                LastRoundPromptTokens = lastTokens,
+                LastRoundPromptChars = lastChars
             };
         }
 
@@ -2214,6 +2245,18 @@ namespace AntRunner.Chat
                 }
             }
 
+            // conversation_recall never appears in an assistant's persisted tool list -- ThreadRun
+            // injects it per run when the conversation has a compaction boundary (W7/D7), so the
+            // assistantOperationIds gate above can never see it. Register its builder unconditionally:
+            // this prevents the specific failure of an ADVERTISED call having no builder (which would
+            // silently drop that tool_result and likely get the request rejected by the provider on
+            // the next round). Note dispatch itself is not gated on what this turn advertised -- any
+            // name with a registered builder can be invoked if the model emits it -- so this does not
+            // by itself guarantee the tool can only run when EnableConversationRecall was set for the
+            // turn. The tool's own scoping (InvocationContext.ConversationId, plus the service
+            // returning nothing for a conversation with no compaction boundary) is what keeps this safe.
+            await TryRegisterRegisteredToolBuilder(
+                ConversationRecallToolName, assistantName, assistantRequestBuilders);
 
             // Inject crew-bridge tool builders for Guide assistants ONLY
             // These are only added when we have explicit __crew_names__ metadata from NotebookTemplate manifests

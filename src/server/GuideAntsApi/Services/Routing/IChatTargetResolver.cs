@@ -14,7 +14,9 @@ public sealed record ChatTarget(
     string ModelId,
     string Provider,
     string? RuntimeConfigJson,
-    GuideAntsApi.Services.LlamaCpp.RuntimeProfileData? ChatBehavior = null);
+    GuideAntsApi.Services.LlamaCpp.RuntimeProfileData? ChatBehavior = null,
+    int? ContextWindowTokens = null,
+    int? MaxOutputTokens = null);
 
 public interface IChatTargetResolver
 {
@@ -62,7 +64,9 @@ public sealed class ChatTargetResolver : IChatTargetResolver
                 m.ThoughtBlockPattern,
                 m.SamplingParametersJson,
                 m.ThinkingControlJson,
-                m.RequestFieldsWhenToolsPresentJson
+                m.RequestFieldsWhenToolsPresentJson,
+                m.ContextWindowTokens,
+                m.MaxOutputTokens
             })
             .FirstOrDefault();
 
@@ -105,6 +109,12 @@ public sealed class ChatTargetResolver : IChatTargetResolver
             chatBehavior = null;
         }
 
-        return new ChatTarget(row.ModelId, provider, row.RuntimeConfigJson, chatBehavior);
+        return new ChatTarget(
+            row.ModelId,
+            provider,
+            row.RuntimeConfigJson,
+            chatBehavior,
+            row.ContextWindowTokens,
+            row.MaxOutputTokens);
     }
 }

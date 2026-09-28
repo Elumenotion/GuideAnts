@@ -651,7 +651,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 m.ReasoningChoicesJson,
                 m.IsActive,
                 m.DisplayOrder,
-                m.RuntimeConfigJson
+                m.RuntimeConfigJson,
+                m.ContextWindowTokens,
+                m.MaxOutputTokens
             })
             .ToListAsync(cancellationToken);
 
@@ -667,7 +669,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 : ToLocalRuntimeDescriptor(m.ModelId, m.RuntimeConfigJson),
             SamplingParameterPolicy: null,
             ReasoningChoices: null,
-            DefaultReasoningChoice: null
+            DefaultReasoningChoice: null,
+            ContextWindowTokens: m.ContextWindowTokens,
+            MaxOutputTokens: m.MaxOutputTokens
         )).ToList();
     }
 

@@ -24,6 +24,9 @@ import { OpenAiCompatibleEditForm } from './providers/OpenAiCompatibleForm';
 import { NonLocalModelParameterSurfaceEditor } from './NonLocalModelParameterSurfaceEditor';
 import { LlamaModelChatBehaviorEditor } from './LlamaModelChatBehaviorEditor';
 
+/** Providers whose APIs publish a model's context window (see ModelContextWindowProbe). */
+const CONTEXT_WINDOW_PROBE_PROVIDERS = ['anthropic', 'openrouter-chat'];
+
 interface CatalogRowEditModalProps {
   model: SettingsModelDto | null;
   orderedModels: SettingsModelDto[];
@@ -123,6 +126,8 @@ export function CatalogRowEditModal({
   const [error, setError] = useState<string | null>(null);
   const [stackBaseUrl, setStackBaseUrl] = useState('');
   const [stackApiKey, setStackApiKey] = useState('');
+  const [probing, setProbing] = useState(false);
+  const [probeMessage, setProbeMessage] = useState<string | null>(null);
   const llamaFormRef = useRef<LlamaCppEditFormHandle>(null);
 
   useEffect(() => {
@@ -130,6 +135,8 @@ export function CatalogRowEditModal({
       setValue(null);
       setError(null);
       setSaving(false);
+      setProbing(false);
+      setProbeMessage(null);
       setStackBaseUrl('');
       setStackApiKey('');
       return;
@@ -137,10 +144,42 @@ export function CatalogRowEditModal({
     setValue(createCatalogEditStateFromModel(model));
     setError(null);
     setSaving(false);
+    setProbing(false);
+    setProbeMessage(null);
     const parsed = parseCanonicalLocalRuntimeJson(model.runtimeConfigJson);
     setStackBaseUrl(model.provider === 'llama-cpp' ? (parsed?.stackBaseUrl ?? '') : '');
     setStackApiKey(model.provider === 'llama-cpp' ? (parsed?.stackApiKey ?? '') : '');
   }, [isOpen, model]);
+
+  const probeContextWindow = async () => {
+    if (!value) {
+      return;
+    }
+    setProbing(true);
+    setProbeMessage(null);
+    try {
+      const result = await api.settings.probeModelContextWindow(value.modelId, value.provider);
+      if (result.contextWindowTokens) {
+        setValue((previous) =>
+          previous
+            ? {
+                ...previous,
+                contextWindowTokens: String(result.contextWindowTokens),
+                maxOutputTokens: result.maxOutputTokens
+                  ? String(result.maxOutputTokens)
+                  : previous.maxOutputTokens,
+              }
+            : previous,
+        );
+      } else {
+        setProbeMessage(result.message ?? 'The provider did not report a context window.');
+      }
+    } catch (probeError) {
+      setProbeMessage(getErrorMessage(probeError, 'Failed to fetch from provider.'));
+    } finally {
+      setProbing(false);
+    }
+  };
 
   const submit = async () => {
     if (!value || !model) {
@@ -227,6 +266,46 @@ export function CatalogRowEditModal({
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
+            <div className="space-y-2">
+              <label htmlFor="catalog-edit-context-window" className="block text-xs font-medium uppercase tracking-wide text-gray-600">Context window (tokens)</label>
+              <input
+                id="catalog-edit-context-window"
+                type="text"
+                inputMode="numeric"
+                value={value.contextWindowTokens}
+                onChange={(event) => setValue((previous) => (previous ? { ...previous, contextWindowTokens: event.target.value } : previous))}
+                placeholder="Unknown"
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="catalog-edit-max-output" className="block text-xs font-medium uppercase tracking-wide text-gray-600">Max output (tokens)</label>
+              <input
+                id="catalog-edit-max-output"
+                type="text"
+                inputMode="numeric"
+                value={value.maxOutputTokens}
+                onChange={(event) => setValue((previous) => (previous ? { ...previous, maxOutputTokens: event.target.value } : previous))}
+                placeholder="Unknown"
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            {CONTEXT_WINDOW_PROBE_PROVIDERS.includes(value.provider) ? (
+              <div className="md:col-span-2">
+                <TextActionButton
+                  tone="neutral"
+                  onClick={() => void probeContextWindow()}
+                  disabled={probing || saving}
+                  title="Fill these fields from the provider (review before saving)"
+                >
+                  Fetch from provider
+                </TextActionButton>
+                {probeMessage ? <p className="mt-1 text-xs text-amber-600">{probeMessage}</p> : null}
+              </div>
+            ) : null}
+            <p className="text-xs text-gray-500 md:col-span-2">
+              An incorrect value makes the context meter misleading. Leave empty if unknown.
+            </p>
             <div className="space-y-2 md:col-span-2">
               <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Description</label>
               <textarea

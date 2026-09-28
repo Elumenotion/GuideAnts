@@ -231,6 +231,22 @@ public class Program
             guideAntsSystemSeeder.SeedAsync().GetAwaiter().GetResult();
             LogPhase("GuideAntsSystemSeeder");
 
+            // Metadata-only: fills null context-window values on existing catalog rows (never overwrites).
+            // Optional: a failure here must never stop the app from booting.
+            try
+            {
+                GuideAntsApi.Services.Bootstrap.ModelContextWindowBackfill.RunAsync(
+                    scope.ServiceProvider.GetRequiredService<GuideAntsApi.DataModel.ApplicationDbContext>(),
+                    CancellationToken.None).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                scope.ServiceProvider.GetRequiredService<ILogger<Program>>().LogWarning(
+                    ex,
+                    "Model context window back-fill was skipped; context windows can be entered in Settings.");
+            }
+            LogPhase("ModelContextWindowBackfill");
+
             var localServiceAutoSelector = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector>();
             localServiceAutoSelector.AutoSelectAsync().GetAwaiter().GetResult();
             LogPhase("LocalServiceAutoSelector");
@@ -303,6 +319,9 @@ public class Program
 
         // Initialize static service provider for SkillTools (skills_list/skills_read)
         GuideAntsApi.Services.SkillTools.InitializeServiceProvider(app.Services);
+
+        // Initialize static service provider for ConversationRecallTools (conversation_recall)
+        GuideAntsApi.Services.ConversationRecallTools.InitializeServiceProvider(app.Services);
 
         // Initialize static service provider for ReadWeb tools
         GuideAntsApi.Services.ReadWebTools.InitializeServiceProvider(app.Services);

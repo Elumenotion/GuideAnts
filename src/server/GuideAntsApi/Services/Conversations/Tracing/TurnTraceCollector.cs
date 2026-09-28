@@ -177,6 +177,14 @@ public sealed class TurnTraceCollector : IThreadRunTraceCollector
         }
     }
 
+    public void CaptureCompaction(int boundaryTurnIndex)
+    {
+        lock (_sync)
+        {
+            _segment.CompactionBoundaryTurnIndex = boundaryTurnIndex;
+        }
+    }
+
     public TurnTraceSegment BuildFinalizedSegment(string captureState, string? errorMessage = null)
     {
         lock (_sync)

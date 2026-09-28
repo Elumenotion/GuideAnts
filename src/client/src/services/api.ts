@@ -15,6 +15,7 @@ import {
     SettingsSectionDto,
     SettingsSectionSummaryDto,
     UpdateSettingsModelRequest,
+    ContextWindowProbeResult,
     UpdateSettingsSectionRequest,
     EmbeddingsRebuildResponse,
     LlamaRuntimeInventoryItemDto,
@@ -1193,6 +1194,11 @@ export const api = {
                         `/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/title/generate`,
                         { method: 'POST' }
                     ),
+                compact: (projectId: string, notebookId: string, convoId: string) =>
+                    callApi<import('../types/notebook').ConversationCompactionResult>(
+                        `/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/compact`,
+                        { method: 'POST' }
+                    ),
                 checkLlamaRuntime: (_projectId: string, notebookId: string, assistantId?: string) =>
                     callApi<any>(`/notebooks/${notebookId}/llama-runtime${assistantId ? `?assistantId=${assistantId}` : ''}`),
                 loadLlamaRuntime: (_projectId: string, notebookId: string, assistantId?: string) =>
@@ -1599,6 +1605,12 @@ export const api = {
                 method: 'PUT',
                 body: JSON.stringify(request),
             }),
+
+        probeModelContextWindow: (modelId: string, provider: string) =>
+            callApi<ContextWindowProbeResult>(
+                `/settings/models:probe-context-window?modelId=${encodeURIComponent(modelId)}&provider=${encodeURIComponent(provider)}`,
+                { method: 'POST' },
+            ),
 
         deleteModel: (modelId: string) =>
             callApi<void>(`/settings/models/${encodeURIComponent(modelId)}`, {

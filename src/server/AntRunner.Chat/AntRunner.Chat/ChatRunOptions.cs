@@ -64,6 +64,18 @@ namespace AntRunner.Chat
         public IReadOnlyList<ChatToolDefinition>? ClientToolDefinitions { get; set; }
 
         /// <summary>
+        /// When true, this run advertises the server-executed <c>conversation_recall</c> tool so the
+        /// model can search the part of the conversation that compaction replaced with a summary.
+        ///
+        /// It is a run-scoped flag rather than an entry in the assistant's tool list because
+        /// <see cref="AssistantUtility"/> caches definitions per assistant name and shares one
+        /// instance process-wide — "this conversation has a compaction boundary" is a property of
+        /// the conversation, not of the guide. Defaults to false, so every caller that does not set
+        /// it (published, sandbox-wire, agent invocations) keeps its current behavior.
+        /// </summary>
+        public bool EnableConversationRecall { get; set; }
+
+        /// <summary>
         /// Optional diagnostics collector for capturing request/response prompt traces.
         /// This collector is for internal observability only and must not mutate execution behavior.
         /// </summary>

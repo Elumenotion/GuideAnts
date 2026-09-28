@@ -3,8 +3,9 @@ namespace AntRunner.Chat.Abstractions;
 /// <summary>
 /// Thrown when a chat provider rejects a request because the assembled prompt exceeds the model's
 /// context window (e.g. llama.cpp's <c>exceed_context_size_error</c>). Unlike a transport failure
-/// or a runtime crash this is a recoverable, request-shaping problem: the execution engine can
-/// unwind the oversized message from the turn and retry with a smaller request.
+/// or a runtime crash this is a request-shaping problem: the exception propagates cleanly so the
+/// user can address it (e.g. using the Compact feature), rather than causing a silent retry or
+/// runtime crash.
 /// </summary>
 public sealed class ChatContextOverflowException : Exception
 {

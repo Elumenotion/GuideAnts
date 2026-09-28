@@ -72,6 +72,21 @@ namespace AntRunner.Chat
 
         // TODO: Refactor this for general use
         public int? CachedPromptTokens { get; set; }
+
+        /// <summary>
+        /// Provider-reported prompt size of the final round - the actual context size at that
+        /// point. <see cref="PromptTokens"/> is a cross-round sum (cumulative spend) and must
+        /// not be read as context size.
+        /// </summary>
+        [JsonPropertyName("last_round_prompt_tokens")]
+        public int? LastRoundPromptTokens { get; set; }
+
+        /// <summary>
+        /// Characters in the request messages of the same round as
+        /// <see cref="LastRoundPromptTokens"/>; the pair calibrates chars-per-token.
+        /// </summary>
+        [JsonPropertyName("last_round_prompt_chars")]
+        public int? LastRoundPromptChars { get; set; }
     }
 
     /// <summary>

@@ -481,7 +481,8 @@ public sealed class ThreadRunTests
                 CompletionTokens = 50,
                 TotalTokens = 150,
                 PromptTokensDetails = new ChatPromptTokensDetails { CachedTokens = 10 }
-            });
+            },
+            400);
 
         first.PromptTokens.Should().Be(100);
         first.CompletionTokens.Should().Be(50);
@@ -497,7 +498,8 @@ public sealed class ThreadRunTests
                 CompletionTokens = 75,
                 TotalTokens = 275,
                 PromptTokensDetails = new ChatPromptTokensDetails { CachedTokens = 5 }
-            });
+            },
+            900);
 
         combined.PromptTokens.Should().Be(300);
         combined.CompletionTokens.Should().Be(125);

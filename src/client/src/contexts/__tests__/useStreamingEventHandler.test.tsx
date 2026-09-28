@@ -213,6 +213,52 @@ describe('useStreamingEventHandler error branch', () => {
     }));
   });
 
+  it('names Compact as the remedy for chat_context_overflow', () => {
+    const { handler, showToast } = mountHandler();
+
+    handler({
+      type: 'error',
+      data: {
+        code: 'chat_context_overflow',
+        message: "The request was too large for the model's context window. Retry with a smaller message or a different approach.",
+        type: 'ChatContextOverflowException',
+        promptTokens: 9000,
+        contextSize: 8192,
+      },
+    });
+
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'error',
+      title: 'Context window full',
+      message: expect.stringMatching(/compact/i),
+    }));
+  });
+
+  it('uses the same sharpened Compact-naming text for the persistent banner and the toast on chat_context_overflow', () => {
+    const { handler, dispatch, showToast } = mountHandler();
+
+    handler({
+      type: 'error',
+      data: {
+        code: 'chat_context_overflow',
+        message: "The request was too large for the model's context window. Retry with a smaller message or a different approach.",
+        type: 'ChatContextOverflowException',
+        promptTokens: 9000,
+        contextSize: 8192,
+      },
+    });
+
+    const toastCall = showToast.mock.calls.find(([opts]) => opts.title === 'Context window full');
+    expect(toastCall).toBeDefined();
+    const toastMessage = toastCall![0].message;
+    expect(toastMessage).toMatch(/compact/i);
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'SET_STREAMING_ERROR',
+      payload: toastMessage,
+    });
+  });
+
   it('includes action text in error display message', () => {
     const { handler, dispatch } = mountHandler();
 
@@ -674,5 +720,63 @@ describe('useStreamingEventHandler streaming branches', () => {
     expect(dispatch).not.toHaveBeenCalledWith({ type: 'CLEAR_ATTACHMENTS' });
     expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_ATTACHMENTS', payload: expect.anything() });
     expect(sendStreamStateRef.current).not.toBeNull();
+  });
+});
+
+describe('useStreamingEventHandler compaction_boundary_marker', () => {
+  it('updates contextStatus.boundaryTurnIndex, merging into an existing status', () => {
+    const { handler, dispatch } = mountHandler({
+      contextStatus: {
+        contextWindowTokens: 8192,
+        estimatedPromptTokens: 4096,
+        boundaryTurnIndex: null,
+        estimateSource: 'ProviderUsage',
+        modelDeploymentId: 'gpt-4o-mini',
+        contextWindowSource: 'Catalog',
+      },
+    } as any);
+
+    handler({ type: 'compaction_boundary_marker', data: { turnId: 't1', boundaryTurnIndex: 4, timestamp: '2026-01-01T00:00:00Z' } });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'SET_CONTEXT_STATUS',
+      payload: {
+        contextWindowTokens: 8192,
+        estimatedPromptTokens: 4096,
+        boundaryTurnIndex: 4,
+        estimateSource: 'ProviderUsage',
+        modelDeploymentId: 'gpt-4o-mini',
+        contextWindowSource: 'Catalog',
+      },
+    });
+  });
+
+  it('builds a minimal contextStatus when none exists yet', () => {
+    const { handler, dispatch } = mountHandler({ contextStatus: null } as any);
+
+    handler({ type: 'compaction_boundary_marker', data: { turnId: 't1', boundaryTurnIndex: 2, timestamp: '2026-01-01T00:00:00Z' } });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'SET_CONTEXT_STATUS',
+      payload: {
+        contextWindowTokens: null,
+        estimatedPromptTokens: null,
+        boundaryTurnIndex: 2,
+        estimateSource: 'None',
+        modelDeploymentId: null,
+        contextWindowSource: 'Unknown',
+      },
+    });
+  });
+
+  it('is not turn-scoped: fires even when the event belongs to a different turn', () => {
+    const { handler, dispatch } = mountHandler(
+      { contextStatus: null } as any,
+      { getActiveStreamTurnId: () => 'active-turn' },
+    );
+
+    handler({ type: 'compaction_boundary_marker', data: { turnId: 'some-other-turn', boundaryTurnIndex: 2, timestamp: '2026-01-01T00:00:00Z' } });
+
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'SET_CONTEXT_STATUS' }));
   });
 });

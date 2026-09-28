@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using AntRunner.Chat;
+using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.LlamaCpp;
 using FluentAssertions;
 using GuideAntsApi.Services.Conversations;
@@ -125,6 +126,36 @@ public sealed class StreamingErrorEnvelopeTests
 
     json.GetProperty("turnId").GetGuid().Should().Be(turnId);
     json.GetProperty("message").GetString().Should().Be("boom");
+  }
+
+  [TestMethod]
+  public void Build_Maps_context_overflow_to_chat_context_overflow_code_naming_compaction()
+  {
+    var ex = new ChatContextOverflowException(
+      "The request exceeded the model's context window.",
+      promptTokens: 9001,
+      contextSize: 4096,
+      upstreamDetail: "upstream detail text");
+
+    var json = Serialize(StreamingErrorEnvelope.Build(ex));
+
+    json.GetProperty("code").GetString().Should().Be("chat_context_overflow");
+    json.GetProperty("type").GetString().Should().Be(nameof(ChatContextOverflowException));
+    json.GetProperty("message").GetString().Should().ContainEquivalentOf("compact");
+    json.GetProperty("promptTokens").GetInt32().Should().Be(9001);
+    json.GetProperty("contextSize").GetInt32().Should().Be(4096);
+    json.GetProperty("innerMessage").GetString().Should().Be("upstream detail text");
+  }
+
+  [TestMethod]
+  public void Build_Wraps_chat_conversation_exception_inner_context_overflow()
+  {
+    var inner = new ChatContextOverflowException("too large", promptTokens: 100, contextSize: 50);
+    var ex = new ChatConversationException(inner, chatRunOutput: null);
+
+    var json = Serialize(StreamingErrorEnvelope.Build(ex));
+
+    json.GetProperty("code").GetString().Should().Be("chat_context_overflow");
   }
 
   private static JsonElement Serialize(object envelope) =>

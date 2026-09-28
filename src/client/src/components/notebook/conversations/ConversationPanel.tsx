@@ -53,7 +53,8 @@ const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?:
     isEditLoading,
     streamingError,
     onPreviewFile,
-    onPreviewFileByPath
+    onPreviewFileByPath,
+    contextStatus,
   } = useConversation();
 
   const sendBlocked = !canEdit || !!isRuntimeLoading || !!isChatModelMissing || !!isUndoing;
@@ -103,6 +104,7 @@ const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?:
         turnBasedMode={true}
         onPreviewFile={onPreviewFile}
         onPreviewFileByPath={onPreviewFileByPath}
+        compactionBoundaryTurnIndex={contextStatus?.boundaryTurnIndex ?? null}
       />
     </div>
   );

@@ -59,6 +59,8 @@ public sealed partial class ApplicationSettingsService
                 "{}"),
             IsActive = request.IsActive,
             DisplayOrder = request.DisplayOrder,
+            ContextWindowTokens = request.ContextWindowTokens,
+            MaxOutputTokens = request.MaxOutputTokens,
             Created = DateTime.UtcNow,
             Updated = DateTime.UtcNow
         };
@@ -108,6 +110,8 @@ public sealed partial class ApplicationSettingsService
             model.RequestFieldsWhenToolsPresentJson);
         model.IsActive = request.IsActive;
         model.DisplayOrder = request.DisplayOrder;
+        model.ContextWindowTokens = request.ContextWindowTokens;
+        model.MaxOutputTokens = request.MaxOutputTokens;
         model.Updated = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -356,6 +360,8 @@ public sealed partial class ApplicationSettingsService
             model.ThoughtBlockPattern,
             model.SamplingParametersJson,
             model.ThinkingControlJson,
-            model.RequestFieldsWhenToolsPresentJson);
+            model.RequestFieldsWhenToolsPresentJson,
+            model.ContextWindowTokens,
+            model.MaxOutputTokens);
     }
 }

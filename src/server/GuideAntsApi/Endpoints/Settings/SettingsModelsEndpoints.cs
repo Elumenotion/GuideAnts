@@ -113,6 +113,21 @@ public static class SettingsModelsEndpoints
         .Produces<AddModelResponse>(StatusCodes.Status200OK)
         .Produces<AddModelErrorDto>(StatusCodes.Status400BadRequest);
 
+        // Returns provider-published values for the admin to review; never writes to the catalog.
+        // Query parameters (not a catch-all) because model ids contain slashes and a catch-all
+        // must be the last route segment.
+        group.MapPost("/models:probe-context-window", async (
+            [FromQuery] string modelId,
+            [FromQuery] string provider,
+            IModelContextWindowProbe probe,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await probe.ProbeAsync(modelId, provider, cancellationToken);
+            return Results.Ok(result);
+        })
+        .WithName("ProbeSettingsModelContextWindow")
+        .Produces<ContextWindowProbeResult>(StatusCodes.Status200OK);
+
         group.MapPut("/models/{**modelId}", async (
             string modelId,
             [FromBody] UpdateSettingsModelRequest request,
