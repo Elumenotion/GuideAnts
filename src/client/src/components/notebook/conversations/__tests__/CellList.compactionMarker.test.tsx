@@ -55,6 +55,30 @@ describe('CellList compaction boundary marker', () => {
     expect(screen.getByTestId('compaction-boundary-marker')).toBeInTheDocument();
   });
 
+  it('sits between the boundary turn and the turn after it', () => {
+    render(
+      <CellList {...baseProps} messages={messagesForTurns([1, 2, 3])} compactionBoundaryTurnIndex={2} />,
+      { wrapper: ToastProvider },
+    );
+
+    const marker = screen.getByTestId('compaction-boundary-marker');
+    const boundaryAssistant = screen.getByText('assistant 2');
+    const nextUser = screen.getByText('user 3');
+    expect(boundaryAssistant.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(marker.compareDocumentPosition(nextUser) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('renders the marker right after compacting, before any later turn exists', () => {
+    render(
+      <CellList {...baseProps} messages={messagesForTurns([1, 2, 3])} compactionBoundaryTurnIndex={3} />,
+      { wrapper: ToastProvider },
+    );
+
+    const marker = screen.getByTestId('compaction-boundary-marker');
+    const lastAssistant = screen.getByText('assistant 3');
+    expect(lastAssistant.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('renders no marker when the conversation has never been compacted', () => {
     render(
       <CellList {...baseProps} messages={messagesForTurns([1, 2, 3])} compactionBoundaryTurnIndex={null} />,

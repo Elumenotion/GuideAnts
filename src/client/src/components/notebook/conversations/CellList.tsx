@@ -905,22 +905,13 @@ const CellList = React.memo(function CellList({
                 : workflowMessages.filter(m => m.id !== finalAssistantMessage?.id);
               const isLastTurn = idx === groupedTurns.length - 1;
               const turnIndexOfThisTurn = turn.allMessages[0]?.turnIndex;
+              // Anchored after the boundary turn rather than before the one following it, so the
+              // marker appears as soon as Compact succeeds — the next turn doesn't exist yet then.
               const showCompactionMarker = compactionBoundaryTurnIndex != null
-                && turnIndexOfThisTurn === compactionBoundaryTurnIndex + 1;
+                && turnIndexOfThisTurn === compactionBoundaryTurnIndex;
 
               return (
                 <React.Fragment key={`turn-${idx}`}>
-                  {showCompactionMarker && (
-                    <div
-                      key={`compaction-marker-${idx}`}
-                      className="col-span-3 flex items-center gap-2 my-2 text-xs text-gray-500"
-                      data-testid="compaction-boundary-marker"
-                    >
-                      <div className="flex-1 border-t border-gray-200" />
-                      <span>Conversation compacted — earlier messages summarized</span>
-                      <div className="flex-1 border-t border-gray-200" />
-                    </div>
-                  )}
                   {/* User message(s) for this turn */}
                   {turn.userMessages.map((um, uidx) => {
                     const isLastUser = uidx === turn.userMessages.length - 1;
@@ -969,6 +960,17 @@ const CellList = React.memo(function CellList({
                       canEdit={canEdit}
                       onTurnFileClick={onPreviewFileByPath}
                     />
+                  )}
+                  {showCompactionMarker && (
+                    <div
+                      key={`compaction-marker-${idx}`}
+                      className="col-span-3 flex items-center gap-2 my-2 text-xs text-gray-500"
+                      data-testid="compaction-boundary-marker"
+                    >
+                      <div className="flex-1 border-t border-gray-200" />
+                      <span>Conversation compacted — earlier messages summarized</span>
+                      <div className="flex-1 border-t border-gray-200" />
+                    </div>
                   )}
                 </React.Fragment>
               );
