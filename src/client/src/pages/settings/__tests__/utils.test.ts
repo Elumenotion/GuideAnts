@@ -279,6 +279,8 @@ describe('buildCatalogEditRequest', () => {
         combineSystemAndDeveloperMessages: true,
         thoughtBlockPattern: '',
         runtimeConfigJson: '{"baseUrl":"http://localhost:8000/v1","apiKey":"encv2::tests::abc"}',
+        contextWindowTokens: '',
+        maxOutputTokens: '',
       },
       { runtimeConfigJson: '{"baseUrl":"http://localhost:8000/v1","apiKey":"encv2::tests::abc"}' },
     );
