@@ -661,7 +661,7 @@ describe('conversation reducer', () => {
   it('SET_CONTEXT_STATUS with null clears a previously-known status', () => {
     const withStatus = reducer(initialState, {
       type: 'SET_CONTEXT_STATUS',
-      payload: { contextWindowTokens: 100, estimatedPromptTokens: 10, boundaryTurnIndex: null, estimateSource: 'Characters' as const, modelDeploymentId: null, contextWindowSource: 'Unknown' as const },
+      payload: { contextWindowTokens: 100, estimatedPromptTokens: 10, boundaryTurnIndex: null, estimateSource: 'ProviderUsage' as const, modelDeploymentId: null, contextWindowSource: 'Unknown' as const },
     });
 
     const cleared = reducer(withStatus, { type: 'SET_CONTEXT_STATUS', payload: null });

@@ -165,6 +165,7 @@ get_latest_variant_image() {
     rocm) pattern='^rocm-([0-9]{5}\.[0-9]{4})$' ;;
     slim) pattern='^slim-([0-9]{5}\.[0-9]{4})$' ;;
     vulkan) pattern='^vulkan-([0-9]{5}\.[0-9]{4})$' ;;
+    spark) pattern='^spark-([0-9]{5}\.[0-9]{4})$' ;;
     *) echo "Unsupported variant: $variant" >&2; return 1 ;;
   esac
 
@@ -266,6 +267,10 @@ vulkan_info=""
 if ! vulkan_info="$(get_latest_variant_image vulkan 2>/dev/null)"; then
   echo "Warning: No local Vulkan AI image found; skipping Vulkan push. Build it first with docker/build/build_guideants_ai.sh --backend vulkan." >&2
 fi
+spark_info=""
+if ! spark_info="$(get_latest_variant_image spark 2>/dev/null)"; then
+  echo "Warning: No local Spark AI image found; skipping Spark push. Build it first with docker/build/build_guideants_ai.sh --backend spark." >&2
+fi
 
 CPU_SOURCE="${cpu_info%%|*}"
 CPU_BUILD="${cpu_info#*|}"
@@ -290,6 +295,11 @@ if [[ -n "$vulkan_info" ]]; then
   VULKAN_SOURCE="${vulkan_info%%|*}"
   VULKAN_BUILD="${vulkan_info#*|}"
   targets+=("vulkan|guideants-ai-vulkan|$VULKAN_SOURCE|$VULKAN_BUILD")
+fi
+if [[ -n "$spark_info" ]]; then
+  SPARK_SOURCE="${spark_info%%|*}"
+  SPARK_BUILD="${spark_info#*|}"
+  targets+=("spark|guideants-ai-spark|$SPARK_SOURCE|$SPARK_BUILD")
 fi
 
 for target in "${targets[@]}"; do

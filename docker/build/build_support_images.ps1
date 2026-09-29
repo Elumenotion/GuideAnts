@@ -1,5 +1,6 @@
 param(
-    [switch]$RebuildBase
+    [switch]$RebuildBase,
+    [switch]$Spark
 )
 
 $ErrorActionPreference = 'Stop'
@@ -139,6 +140,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Building GuideAnts Support Images" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Rebuild base:  $RebuildBase"
+Write-Host "Spark mode:    $Spark"
 Write-Host ""
 
 $scriptAgentPublish = Build-ScriptExecutionAgent -ServerPath $serverPath -RepoRoot $repoRoot
@@ -176,30 +178,35 @@ else {
     Set-Content -Path $plantumlHashFile -Value $plantumlHash -Encoding UTF8
 }
 
-$mssqlBuildContext = Join-Path $PSScriptRoot "mssql-fts"
-$mssqlDockerfilePath = Join-Path $mssqlBuildContext "Dockerfile"
-$mssqlImageTag = "mssql2025-express-fts"
-$mssqlHashFile = Join-Path $buildStateDir "mssql-fts.hash"
-if (-not (Test-Path $mssqlDockerfilePath)) {
-    Write-Error "MSSQL Dockerfile not found at $mssqlDockerfilePath"
-    exit 1
-}
-$mssqlHash = Get-CombinedHash -Paths (Get-FilePathsRecursive -Root $mssqlBuildContext) -RelativeTo $repoRoot
-$mssqlCanReuse =
-    (-not $RebuildBase) -and
-    (Test-DockerImageExists -ImageTag $mssqlImageTag) -and
-    ((Get-HashFromFile -Path $mssqlHashFile) -eq $mssqlHash)
-if ($mssqlCanReuse) {
-    Write-Host "MSSQL unchanged; reusing existing image: $mssqlImageTag" -ForegroundColor Green
+if ($Spark) {
+    Write-Host "Skipping mssql (x86-only; not part of the Spark stack)." -ForegroundColor Yellow
 }
 else {
-    Write-Host "Building mssql image: $mssqlImageTag"
-    docker build @dockerBuildArgs -t $mssqlImageTag -f $mssqlDockerfilePath --build-arg MSSQL_PID=Express $mssqlBuildContext
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "MSSQL image build failed with exit code $LASTEXITCODE"
+    $mssqlBuildContext = Join-Path $PSScriptRoot "mssql-fts"
+    $mssqlDockerfilePath = Join-Path $mssqlBuildContext "Dockerfile"
+    $mssqlImageTag = "mssql2025-express-fts"
+    $mssqlHashFile = Join-Path $buildStateDir "mssql-fts.hash"
+    if (-not (Test-Path $mssqlDockerfilePath)) {
+        Write-Error "MSSQL Dockerfile not found at $mssqlDockerfilePath"
         exit 1
     }
-    Set-Content -Path $mssqlHashFile -Value $mssqlHash -Encoding UTF8
+    $mssqlHash = Get-CombinedHash -Paths (Get-FilePathsRecursive -Root $mssqlBuildContext) -RelativeTo $repoRoot
+    $mssqlCanReuse =
+        (-not $RebuildBase) -and
+        (Test-DockerImageExists -ImageTag $mssqlImageTag) -and
+        ((Get-HashFromFile -Path $mssqlHashFile) -eq $mssqlHash)
+    if ($mssqlCanReuse) {
+        Write-Host "MSSQL unchanged; reusing existing image: $mssqlImageTag" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Building mssql image: $mssqlImageTag"
+        docker build @dockerBuildArgs -t $mssqlImageTag -f $mssqlDockerfilePath --build-arg MSSQL_PID=Express $mssqlBuildContext
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "MSSQL image build failed with exit code $LASTEXITCODE"
+            exit 1
+        }
+        Set-Content -Path $mssqlHashFile -Value $mssqlHash -Encoding UTF8
+    }
 }
 
 $searxngDockerfilePath = Join-Path $PSScriptRoot "searxng\Dockerfile"
@@ -229,51 +236,56 @@ else {
     Set-Content -Path $searxngHashFile -Value $searxngHash -Encoding UTF8
 }
 
-$webApiUiBuildScript = Join-Path $PSScriptRoot "build_webapi_ui.ps1"
-$webApiUiHashFile = Join-Path $buildStateDir "webapi-ui.hash"
-$envFile = Join-Path $dockerRoot '.env'
-if (-not (Test-Path $webApiUiBuildScript)) {
-    Write-Error "WebAPI+UI build script not found at $webApiUiBuildScript"
-    exit 1
-}
-
-$webApiUiInputs = @(
-    $webApiUiBuildScript,
-    (Join-Path $PSScriptRoot "webapi-ui\Dockerfile")
-) + (Get-FilePathsRecursive -Root (Join-Path $repoRoot "src\client")) + (Get-FilePathsRecursive -Root (Join-Path $repoRoot "src\server"))
-$webApiUiHash = Get-CombinedHash -Paths $webApiUiInputs -RelativeTo $repoRoot
-
-$existingWebApiUiImage = $null
-if (Test-Path $envFile) {
-    $line = Get-Content -Path $envFile | Where-Object { $_ -match '^GA_WEBAPI_UI_IMAGE=' } | Select-Object -First 1
-    if ($line) {
-        $existingWebApiUiImage = ($line -split '=', 2)[1].Trim()
-    }
-}
-$webApiUiCanReuse =
-    (-not $RebuildBase) -and
-    (-not [string]::IsNullOrWhiteSpace($existingWebApiUiImage)) -and
-    (Test-DockerImageExists -ImageTag $existingWebApiUiImage) -and
-    ((Get-HashFromFile -Path $webApiUiHashFile) -eq $webApiUiHash)
-
-if ($webApiUiCanReuse) {
-    Write-Host "WebAPI+UI unchanged; reusing existing image: $existingWebApiUiImage" -ForegroundColor Green
+if ($Spark) {
+    Write-Host "Skipping webapi-ui (not part of the Spark backend stack)." -ForegroundColor Yellow
 }
 else {
-    Write-Host "Building WebAPI+UI image via build_webapi_ui.ps1" -ForegroundColor Cyan
-    if ($RebuildBase) {
-        & $webApiUiBuildScript -NoCache -NoRecreate
-    }
-    else {
-        & $webApiUiBuildScript -NoRecreate
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "WebAPI+UI image build failed with exit code $LASTEXITCODE"
+    $webApiUiBuildScript = Join-Path $PSScriptRoot "build_webapi_ui.ps1"
+    $webApiUiHashFile = Join-Path $buildStateDir "webapi-ui.hash"
+    $envFile = Join-Path $dockerRoot '.env'
+    if (-not (Test-Path $webApiUiBuildScript)) {
+        Write-Error "WebAPI+UI build script not found at $webApiUiBuildScript"
         exit 1
     }
 
-    Set-Content -Path $webApiUiHashFile -Value $webApiUiHash -Encoding UTF8
+    $webApiUiInputs = @(
+        $webApiUiBuildScript,
+        (Join-Path $PSScriptRoot "webapi-ui\Dockerfile")
+    ) + (Get-FilePathsRecursive -Root (Join-Path $repoRoot "src\client")) + (Get-FilePathsRecursive -Root (Join-Path $repoRoot "src\server"))
+    $webApiUiHash = Get-CombinedHash -Paths $webApiUiInputs -RelativeTo $repoRoot
+
+    $existingWebApiUiImage = $null
+    if (Test-Path $envFile) {
+        $line = Get-Content -Path $envFile | Where-Object { $_ -match '^GA_WEBAPI_UI_IMAGE=' } | Select-Object -First 1
+        if ($line) {
+            $existingWebApiUiImage = ($line -split '=', 2)[1].Trim()
+        }
+    }
+    $webApiUiCanReuse =
+        (-not $RebuildBase) -and
+        (-not [string]::IsNullOrWhiteSpace($existingWebApiUiImage)) -and
+        (Test-DockerImageExists -ImageTag $existingWebApiUiImage) -and
+        ((Get-HashFromFile -Path $webApiUiHashFile) -eq $webApiUiHash)
+
+    if ($webApiUiCanReuse) {
+        Write-Host "WebAPI+UI unchanged; reusing existing image: $existingWebApiUiImage" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Building WebAPI+UI image via build_webapi_ui.ps1" -ForegroundColor Cyan
+        if ($RebuildBase) {
+            & $webApiUiBuildScript -NoCache -NoRecreate
+        }
+        else {
+            & $webApiUiBuildScript -NoRecreate
+        }
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "WebAPI+UI image build failed with exit code $LASTEXITCODE"
+            exit 1
+        }
+
+        Set-Content -Path $webApiUiHashFile -Value $webApiUiHash -Encoding UTF8
+    }
 }
 
 Write-Host ""

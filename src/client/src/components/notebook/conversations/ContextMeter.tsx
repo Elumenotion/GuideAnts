@@ -7,11 +7,10 @@ interface ContextMeterProps {
 const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
 
 export default function ContextMeter({ contextStatus }: ContextMeterProps) {
-  if (
-    contextStatus == null ||
-    contextStatus.contextWindowTokens == null ||
-    contextStatus.estimatedPromptTokens == null
-  ) {
+  const hasTokens = contextStatus != null && contextStatus.estimatedPromptTokens != null;
+  const hasWindow = contextStatus != null && contextStatus.contextWindowTokens != null;
+
+  if (!hasTokens && !hasWindow) {
     return (
       <span className="text-xs text-gray-500" data-testid="context-meter">
         Context: unknown
@@ -19,8 +18,17 @@ export default function ContextMeter({ contextStatus }: ContextMeterProps) {
     );
   }
 
-  const { estimatedPromptTokens, contextWindowTokens, boundaryTurnIndex } = contextStatus;
-  const percent = Math.min(100, Math.round((estimatedPromptTokens / contextWindowTokens) * 100));
+  // Tokens are known, the window is not: show the real token count without a limit.
+  if (hasTokens && !hasWindow) {
+    return (
+      <span className="text-xs text-gray-500" data-testid="context-meter">
+        {formatNumber(contextStatus!.estimatedPromptTokens!)} tokens
+      </span>
+    );
+  }
+
+  const { estimatedPromptTokens, contextWindowTokens, boundaryTurnIndex } = contextStatus!;
+  const percent = Math.min(100, Math.round((estimatedPromptTokens! / contextWindowTokens!) * 100));
   const utilizationColorClass = percent >= 90 ? 'text-red-600' : percent >= 75 ? 'text-amber-600' : 'text-gray-500';
 
   return (
@@ -30,7 +38,7 @@ export default function ContextMeter({ contextStatus }: ContextMeterProps) {
           Compacted ·
         </span>
       )}
-      {formatNumber(estimatedPromptTokens)} / {formatNumber(contextWindowTokens)} tokens (<span>{percent}%</span>)
+      {formatNumber(estimatedPromptTokens!)} / {formatNumber(contextWindowTokens!)} tokens (<span>{percent}%</span>)
     </span>
   );
 }

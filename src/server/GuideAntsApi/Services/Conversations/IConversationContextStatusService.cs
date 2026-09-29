@@ -9,8 +9,7 @@ namespace GuideAntsApi.Services.Conversations;
 public enum ContextEstimateSource
 {
     None,
-    ProviderUsage,
-    Characters
+    ProviderUsage
 }
 
 /// <summary>

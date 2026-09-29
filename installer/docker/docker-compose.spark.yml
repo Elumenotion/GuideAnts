@@ -1,0 +1,267 @@
+# =============================================================================
+# GuideAnts Spark backend stack  (linux/arm64 - NVIDIA DGX Spark / GB10 Blackwell sm_121)
+#
+# Everything in the installer stack EXCEPT the UI (guideants-webapi-ui) and the
+# database (mssql-express). Intended to run natively on an NVIDIA DGX Spark
+# (aarch64 + CUDA 13). All GPU compute is the native C++ engine set (no torch):
+#   - llama.cpp              (llama-server)     -> /llama-cpp  (LLM)  + /emb
+#   - audio.cpp              (audiocpp_server)  -> /asr  +  /tts
+#   - stable-diffusion.cpp   (sd-cli/sd-server) -> /sd
+#
+# Each service publishes its OWN host port (overridable) so every engine can be
+# probed directly without the UI layer:
+#   guideants-ai     5110:80      (nginx front: /llama-cpp /asr /tts /emb /sd /media /sandbox /llama-admin)
+#   docling-serve    5111:5001
+#   documentserver   5112:8000
+#   plantuml         5113:80
+#   searxng          5114:8080
+#
+# Volume mappings mirror the other installer stack options
+# (docker/docker-compose.ghcr-cuda13.yml): content-files, ai_local_models,
+# script_agent_admin_state, and the searxng config/data binds.
+#
+# Images:
+#   - guideants-ai:spark  -> built locally on the Spark (docker/build); pull_policy: never.
+#   - support images      -> arm64 GHCR / quay builds (searxng, plantuml, docling, documentserver).
+#
+# Single GPU (GB10): CUDA_VISIBLE_DEVICES=0, no tensor split.
+#
+# Bring up:  ./guideants-spark.sh      (from the installer/ directory)
+# =============================================================================
+name: guideants
+
+services:
+  guideants-ai:
+    image: ${GA_AI_SPARK_IMAGE:-guideants-ai:spark-latest}
+    pull_policy: never
+    container_name: guideants-ai
+    cap_drop:
+      - SYS_PTRACE
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    shm_size: "8gb"
+    ports:
+      - "${GA_AI_PORT:-5110}:80"
+    volumes:
+      - ai_local_models:/models-local
+      - script_agent_admin_state:/var/lib/guideants/script-agent-admin
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
+        target: /app/ContentFiles
+    environment:
+      - FILE_STORAGE_ROOT=/app/ContentFiles
+      # Single GB10 GPU: the global ordering is the only GPU seam that matters.
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
+      - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
+      - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
+      - GA_LLAMA_MODELS_PRESET=/models-local/router-models.ini
+      - GA_LLAMA_MODEL_DIR=/models-local/llama
+      - GA_LLAMA_ADMIN_PORT=8086
+      - GA_LLAMA_MODELS_MAX=${GA_LLAMA_MODELS_MAX:-1}
+      - GA_LLAMA_NO_AUTOLOAD=${GA_LLAMA_NO_AUTOLOAD:-1}
+      - GA_LLAMA_CTX_SIZE=${GA_LLAMA_CTX_SIZE:-262144}
+      - GA_LLAMA_CACHE_RAM=${GA_LLAMA_CACHE_RAM:-8192}
+      - GA_LLAMA_JINJA=${GA_LLAMA_JINJA:-1}
+      - GA_LLAMA_CONT_BATCH=${GA_LLAMA_CONT_BATCH:-1}
+      - GA_LLAMA_KV_UNIFIED=${GA_LLAMA_KV_UNIFIED:-1}
+      - GA_LLAMA_FLASH_ATTN=${GA_LLAMA_FLASH_ATTN:-on}
+      - GA_LLAMA_NO_MMAP=${GA_LLAMA_NO_MMAP:-0}
+      - GA_LLAMA_THREADS=${GA_LLAMA_THREADS:-}
+      - GA_LLAMA_PARALLEL=${GA_LLAMA_PARALLEL:-}
+      - GA_LLAMA_GPU_LAYERS=${GA_LLAMA_GPU_LAYERS:-}
+      - GA_LLAMA_KV_OFFLOAD=${GA_LLAMA_KV_OFFLOAD:-}
+      - GA_LLAMA_CACHE_TYPE_K=${GA_LLAMA_CACHE_TYPE_K:-}
+      - GA_LLAMA_CACHE_TYPE_V=${GA_LLAMA_CACHE_TYPE_V:-}
+      # Single GPU: no layer split, no per-service physical pinning.
+      - GA_LLAMA_TENSOR_SPLIT=${GA_LLAMA_TENSOR_SPLIT:-}
+      - GA_LLAMA_CUDA_VISIBLE_DEVICES=${GA_LLAMA_CUDA_VISIBLE_DEVICES:-}
+      - GA_ASR_HOST=127.0.0.1
+      - GA_ASR_PORT=8082
+      - GA_ASR_MODEL_DIR=/models-local/asr
+      - GA_ASR_DEFAULT_MODEL_PATH=Qwen3-ASR-0.6B
+      - GA_ASR_DEFAULT_MODEL_ID=Qwen/Qwen3-ASR-0.6B
+      - GA_ASR_WAIT_FOR_READY_ON_STARTUP=${GA_ASR_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_ASR_READY_TIMEOUT_SECONDS=${GA_ASR_READY_TIMEOUT_SECONDS:-1800}
+      - GA_ASR_DEVICE_MAP=auto
+      - GA_ASR_BACKEND=cuda
+      - GA_ASR_DTYPE=bfloat16
+      - GA_ASR_CUDA_VISIBLE_DEVICES=${GA_ASR_CUDA_VISIBLE_DEVICES:-}
+      - GA_ASR_MAX_INFERENCE_BATCH_SIZE=8
+      - GA_ASR_MAX_NEW_TOKENS=512
+      - GA_ASR_WARMUP_ON_LOAD=${GA_ASR_WARMUP_ON_LOAD:-1}
+      - GA_ASR_WARMUP_AUDIO_PATH=${GA_ASR_WARMUP_AUDIO_PATH:-/app/asr-service/warmup.webm}
+      - GA_ASR_WARMUP_LANGUAGE=${GA_ASR_WARMUP_LANGUAGE:-}
+      - GA_TTS_HOST=127.0.0.1
+      - GA_TTS_PORT=8084
+      - GA_TTS_MODEL_DIR=/models-local/tts
+      - GA_TTS_DEFAULT_MODEL_PATH=chatterbox
+      - GA_TTS_DEFAULT_MODEL_ID=chatterbox
+      - GA_TTS_WAIT_FOR_READY_ON_STARTUP=${GA_TTS_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_TTS_READY_TIMEOUT_SECONDS=${GA_TTS_READY_TIMEOUT_SECONDS:-1800}
+      - GA_TTS_DEVICE_MAP=auto
+      - GA_TTS_BACKEND=cuda
+      - GA_TTS_DTYPE=float32
+      - GA_TTS_CUDA_VISIBLE_DEVICES=${GA_TTS_CUDA_VISIBLE_DEVICES:-}
+      - GA_TTS_TIMEOUT_SECONDS=${GA_TTS_TIMEOUT_SECONDS:-300}
+      - GA_TTS_MAX_NEW_TOKENS=512
+      - GA_TTS_SAMPLE_RATE=24000
+      - GA_TTS_VOICE=af_alloy
+      - GA_TTS_LANG_CODE=a
+      - GA_TTS_SPEED=1.0
+      - GA_EMB_HOST=127.0.0.1
+      - GA_EMB_PORT=8085
+      - GA_EMB_MODEL_DIR=/models-local/emb
+      - GA_EMB_DEFAULT_MODEL_PATH=${GA_EMB_DEFAULT_MODEL_PATH}
+      - GA_EMB_DEVICE=${GA_EMB_DEVICE:-cuda}
+      # Single GPU: embed on cuda:0 only.
+      - GA_EMB_TARGET_DEVICES=${GA_EMB_TARGET_DEVICES:-cuda:0}
+      - GA_EMB_CUDA_VISIBLE_DEVICES=${GA_EMB_CUDA_VISIBLE_DEVICES:-}
+      - GA_EMB_FIX_MISTRAL_REGEX=${GA_EMB_FIX_MISTRAL_REGEX:-1}
+      - GA_EMB_WARMUP_ON_LOAD=${GA_EMB_WARMUP_ON_LOAD}
+      - GA_EMB_WAIT_FOR_READY_ON_STARTUP=${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_EMB_READY_TIMEOUT_SECONDS=${GA_EMB_READY_TIMEOUT_SECONDS:-1800}
+      - GA_MEDIA_HOST=127.0.0.1
+      - GA_MEDIA_PORT=8087
+      - GA_SD_HOST=127.0.0.1
+      - GA_SD_PORT=8083
+      - GA_SD_MODEL_DIR=/models-local/sd
+      - GA_SD_TIMEOUT_SECONDS=${GA_SD_TIMEOUT_SECONDS:-900}
+      - GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=${GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS:-120}
+      - GA_SD_STRENGTH=0.75
+      - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
+      - "GA_SD_BACKEND=${GA_SD_BACKEND:-}"
+      - "GA_SD_PARAMS_BACKEND=${GA_SD_PARAMS_BACKEND:-}"
+      - "GA_SD_SPLIT_MODE=${GA_SD_SPLIT_MODE:-}"
+      - "GA_SD_MAX_VRAM=${GA_SD_MAX_VRAM:-}"
+      # Single GPU: let auto-fit use the one device.
+      - GA_SD_AUTO_FIT=${GA_SD_AUTO_FIT:-1}
+      - GA_SD_DIFFUSION_FA=1
+      - GA_SD_WARMUP_PROMPT=${GA_SD_WARMUP_PROMPT:-startup-warmup}
+      - GA_SD_WARMUP_SIZE=${GA_SD_WARMUP_SIZE:-512x512}
+      - GA_SD_WARMUP_STEPS=${GA_SD_WARMUP_STEPS:-1}
+      - GA_SD_WARMUP_OUTPUT_FORMAT=${GA_SD_WARMUP_OUTPUT_FORMAT:-png}
+      - GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS=${GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS:-180}
+      - GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP=${GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP:-1}
+      - GA_SD_WAIT_FOR_READY_ON_STARTUP=${GA_SD_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_SD_READY_TIMEOUT_SECONDS=${GA_SD_READY_TIMEOUT_SECONDS:-1800}
+      - GA_SD_CUDA_VISIBLE_DEVICES=${GA_SD_CUDA_VISIBLE_DEVICES:-}
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  docling-serve:
+    image: ${DOCLING_SERVE_CUDA_IMAGE:-quay.io/docling-project/docling-serve-cu130:v1.29.0}
+    pull_policy: missing
+    container_name: docling-serve
+    ports:
+      - "${GA_DOCLING_PORT:-5111}:5001"
+    environment:
+      - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
+      - DOCLING_SERVE_MAX_FILE_SIZE=${DOCLING_SERVE_MAX_FILE_SIZE:-524288000}
+      - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=${DOCLING_SERVE_ENG_LOC_NUM_WORKERS:-2}
+      - DOCLING_SERVE_ENG_LOC_SHARE_MODELS=${DOCLING_SERVE_ENG_LOC_SHARE_MODELS:-false}
+      - DOCLING_NUM_THREADS=${DOCLING_NUM_THREADS:-4}
+      - DOCLING_SERVE_LOAD_MODELS_AT_BOOT=${DOCLING_SERVE_LOAD_MODELS_AT_BOOT:-true}
+      - DOCLING_SERVE_OPTIONS_CACHE_SIZE=${DOCLING_SERVE_OPTIONS_CACHE_SIZE:-2}
+      - DOCLING_SERVE_LOG_LEVEL=${DOCLING_SERVE_LOG_LEVEL:-WARNING}
+      - DOCLING_SERVE_LOG_FORMAT=${DOCLING_SERVE_LOG_FORMAT:-text}
+      - DOCLING_SERVE_OTEL_ENABLE_METRICS=${DOCLING_SERVE_OTEL_ENABLE_METRICS:-true}
+      - DOCLING_SERVE_OTEL_ENABLE_TRACES=${DOCLING_SERVE_OTEL_ENABLE_TRACES:-false}
+      - DOCLING_DEBUG_PROFILE_PIPELINE_TIMINGS=${DOCLING_DEBUG_PROFILE_PIPELINE_TIMINGS:-false}
+      - CUDA_VISIBLE_DEVICES=${GA_DOCLING_CUDA_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES:-0}}
+      - DOCLING_DEVICE=${DOCLING_DEVICE:-cuda}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/version"]
+      interval: 30s
+      retries: 5
+      start_period: 120s
+      timeout: 10s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  documentserver:
+    image: ${GA_DOCUMENTSERVER_IMAGE:-documentserver:latest}
+    container_name: documentserver
+    ports:
+      - "${GA_DOCUMENTSERVER_PORT:-5112}:8000"
+    environment:
+      - JWT_ENABLED=${GA_DOCUMENTSERVER_JWT_ENABLED:-false}
+      - JWT_SECRET=${DOCUMENTSERVER_JWT_SECRET:-}
+      - JWT_HEADER=${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}
+      - JWT_IN_BODY=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}
+      - ALLOW_PRIVATE_IP_ADDRESS=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/info/info.json"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+      timeout: 10s
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  plantuml:
+    image: ${GA_PLANTUML_IMAGE:-plantuml-1.2025.2}
+    pull_policy: never
+    container_name: plantuml
+    ports:
+      - "${GA_PLANTUML_PORT:-5113}:80"
+    environment:
+      - FILE_STORAGE_ROOT=/app/ContentFiles
+      - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
+      - PLANTUML_LIMIT_SIZE=8192
+    volumes:
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
+        target: /app/ContentFiles
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  searxng:
+    image: ${GA_SEARXNG_IMAGE:-guideants-searxng:latest}
+    pull_policy: never
+    container_name: readweb-searxng
+    restart: unless-stopped
+    ports:
+      - "${GA_SEARXNG_PORT:-5114}:8080"
+    volumes:
+      - type: bind
+        source: ${GA_SEARXNG_CONFIG_HOST_PATH:-./volumes/searxng/config}
+        target: /etc/searxng
+      - type: bind
+        source: ${GA_SEARXNG_DATA_HOST_PATH:-./volumes/searxng/data}
+        target: /var/cache/searxng
+    environment:
+      - FORCE_OWNERSHIP=true
+      - BROWSER_RENDER_PORT=3001
+    networks:
+      - guideants-network
+
+volumes:
+  ai_local_models:
+  script_agent_admin_state:
+
+networks:
+  guideants-network:
+    driver: bridge

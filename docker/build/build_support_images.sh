@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REBUILD_BASE=false
+SPARK_MODE=false
 
 usage() {
   cat <<'EOF'
@@ -9,6 +10,8 @@ Usage: build_support_images.sh [options]
 
 Options:
   --rebuild-base         Rebuild support images without cache where supported
+  --spark                Build only the arm64 support images for the Spark stack
+                         (searxng + plantuml); skips mssql (x86-only) and webapi-ui.
   -h, --help             Show help
 EOF
 }
@@ -17,6 +20,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --rebuild-base)
       REBUILD_BASE=true
+      shift
+      ;;
+    --spark)
+      SPARK_MODE=true
       shift
       ;;
     -h|--help)
@@ -47,6 +54,7 @@ echo "============================================"
 echo "  Building GuideAnts Support Images"
 echo "============================================"
 echo "Rebuild base:  $REBUILD_BASE"
+echo "Spark mode:    $SPARK_MODE"
 echo
 
 SCRIPT_AGENT_PROJECT="$SERVER_PATH/ScriptExecutionAgent"
@@ -72,24 +80,32 @@ fi
 timestamp="$(date +%Y%m%d%H%M%S)"
 docker build "${docker_build_args[@]}" -t plantuml-1.2025.2 -f "$SCRIPT_DIR/Sandboxes/PlantUml/dockerfile" --build-arg "SCRIPT_AGENT_VERSION=$timestamp" "$SCRIPT_DIR/Sandboxes/PlantUml"
 
-MSSQL_BUILD_CONTEXT="$SCRIPT_DIR/mssql-fts"
-MSSQL_DOCKERFILE_PATH="$MSSQL_BUILD_CONTEXT/Dockerfile"
-[[ -f "$MSSQL_DOCKERFILE_PATH" ]] || { echo "MSSQL Dockerfile not found at $MSSQL_DOCKERFILE_PATH" >&2; exit 1; }
-echo "Building mssql image: mssql2025-express-fts"
-docker build "${docker_build_args[@]}" -t mssql2025-express-fts -f "$MSSQL_DOCKERFILE_PATH" --build-arg MSSQL_PID=Express "$MSSQL_BUILD_CONTEXT"
+if [[ "$SPARK_MODE" == "true" ]]; then
+  echo "Skipping mssql (x86-only; not part of the Spark stack)."
+else
+  MSSQL_BUILD_CONTEXT="$SCRIPT_DIR/mssql-fts"
+  MSSQL_DOCKERFILE_PATH="$MSSQL_BUILD_CONTEXT/Dockerfile"
+  [[ -f "$MSSQL_DOCKERFILE_PATH" ]] || { echo "MSSQL Dockerfile not found at $MSSQL_DOCKERFILE_PATH" >&2; exit 1; }
+  echo "Building mssql image: mssql2025-express-fts"
+  docker build "${docker_build_args[@]}" -t mssql2025-express-fts -f "$MSSQL_DOCKERFILE_PATH" --build-arg MSSQL_PID=Express "$MSSQL_BUILD_CONTEXT"
+fi
 
 SEARXNG_DOCKERFILE_PATH="$SCRIPT_DIR/searxng/Dockerfile"
 [[ -f "$SEARXNG_DOCKERFILE_PATH" ]] || { echo "SearXNG Dockerfile not found at $SEARXNG_DOCKERFILE_PATH" >&2; exit 1; }
 echo "Building searxng image: guideants-searxng:latest"
 docker build "${docker_build_args[@]}" -t guideants-searxng:latest -f "$SEARXNG_DOCKERFILE_PATH" "$REPO_ROOT"
 
-WEBAPI_UI_BUILD_SCRIPT="$SCRIPT_DIR/build_webapi_ui.sh"
-[[ -f "$WEBAPI_UI_BUILD_SCRIPT" ]] || { echo "WebAPI+UI build script not found at $WEBAPI_UI_BUILD_SCRIPT" >&2; exit 1; }
-echo "Building WebAPI+UI image via build_webapi_ui.sh"
-if [[ "$REBUILD_BASE" == "true" ]]; then
-  bash "$WEBAPI_UI_BUILD_SCRIPT" --no-cache --no-recreate
+if [[ "$SPARK_MODE" == "true" ]]; then
+  echo "Skipping webapi-ui (not part of the Spark backend stack)."
 else
-  bash "$WEBAPI_UI_BUILD_SCRIPT" --no-recreate
+  WEBAPI_UI_BUILD_SCRIPT="$SCRIPT_DIR/build_webapi_ui.sh"
+  [[ -f "$WEBAPI_UI_BUILD_SCRIPT" ]] || { echo "WebAPI+UI build script not found at $WEBAPI_UI_BUILD_SCRIPT" >&2; exit 1; }
+  echo "Building WebAPI+UI image via build_webapi_ui.sh"
+  if [[ "$REBUILD_BASE" == "true" ]]; then
+    bash "$WEBAPI_UI_BUILD_SCRIPT" --no-cache --no-recreate
+  else
+    bash "$WEBAPI_UI_BUILD_SCRIPT" --no-recreate
+  fi
 fi
 
 echo

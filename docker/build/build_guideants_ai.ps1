@@ -1,7 +1,7 @@
 param(
     [switch]$RebuildBase,
     [switch]$All,
-    [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
+    [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan', 'spark')]
     [string]$Backend
 )
 
@@ -202,15 +202,17 @@ if ([string]::IsNullOrWhiteSpace($Backend)) {
     Write-Host "  3) ROCm"
     Write-Host "  4) Slim"
     Write-Host "  5) Vulkan"
-    $choice = Read-Host "Enter choice [1-5]"
+    Write-Host "  6) CUDA 13 Spark (arm64 / GB10 Blackwell)"
+    $choice = Read-Host "Enter choice [1-6]"
     switch ($choice) {
         '1' { $Backend = 'cpu' }
         '2' { $Backend = 'cuda13' }
         '3' { $Backend = 'rocm' }
         '4' { $Backend = 'slim' }
         '5' { $Backend = 'vulkan' }
+        '6' { $Backend = 'spark' }
         default {
-            Write-Error "Invalid choice '$choice'. Valid values: 1-5."
+            Write-Error "Invalid choice '$choice'. Valid values: 1-6."
             exit 1
         }
     }
@@ -256,8 +258,16 @@ switch ($Backend) {
         $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchVulkan\requirements.txt'
         $dockerfilePath = Join-Path $buildContext 'Dockerfile.vulkan'
     }
+    'spark' {
+        $Backend = 'spark'
+        $fullTarget = 'final-cuda-spark'
+        $depsTarget = 'deps-cuda-spark'
+        $depsImageArg = 'GA_DEPS_CUDA_SPARK_IMAGE'
+        $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchCUDA\requirements.txt'
+        $dockerfilePath = Join-Path $buildContext 'Dockerfile.cuda-spark'
+    }
     default {
-        Write-Error "Invalid backend '$Backend'. Valid values: cpu, cuda13, rocm, slim, vulkan."
+        Write-Error "Invalid backend '$Backend'. Valid values: cpu, cuda13, rocm, slim, vulkan, spark."
         exit 1
     }
 }
@@ -269,6 +279,7 @@ $llamaCppImageByBackend = @{
     rocm   = 'ghcr.io/ggml-org/llama.cpp:server-rocm-v0.5.0'
     slim   = 'ghcr.io/ggml-org/llama.cpp:server-v0.5.0'
     vulkan = 'ghcr.io/ggml-org/llama.cpp:server-vulkan-v0.5.0'
+    spark  = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-v0.5.0'
 }
 
 # Build a unique tag per build, and also maintain a stable backend-specific latest tag.
@@ -517,6 +528,7 @@ $imageEnvKey = switch ($Backend) {
     'rocm' { 'GA_AI_ROCM_IMAGE' }
     'slim' { 'GA_AI_SLIM_IMAGE' }
     'vulkan' { 'GA_AI_VULKAN_IMAGE' }
+    'spark'  { 'GA_AI_SPARK_IMAGE' }
     default { 'GA_AI_CPU_IMAGE' }
 }
 $envLine = "$imageEnvKey=$latestImageTag"

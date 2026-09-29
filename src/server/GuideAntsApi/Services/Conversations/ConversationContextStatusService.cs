@@ -21,18 +21,18 @@ public sealed class ConversationContextStatusService : IConversationContextStatu
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IContextWindowResolver _resolver;
-    private readonly IRouterModelsConfigService _routerModels;
+    private readonly ILlamaStackRuntimeClientProvider _runtimeClients;
     private readonly ILogger<ConversationContextStatusService> _logger;
 
     public ConversationContextStatusService(
         IServiceScopeFactory scopeFactory,
         IContextWindowResolver resolver,
-        IRouterModelsConfigService routerModels,
+        ILlamaStackRuntimeClientProvider runtimeClients,
         ILogger<ConversationContextStatusService> logger)
     {
         _scopeFactory = scopeFactory;
         _resolver = resolver;
-        _routerModels = routerModels;
+        _runtimeClients = runtimeClients;
         _logger = logger;
     }
 
@@ -61,7 +61,11 @@ public sealed class ConversationContextStatusService : IConversationContextStatu
 
         var modelId = turns[0].ModelDeploymentId;
 
-        var usages = new List<(int TurnIndex, int Tokens, int Chars)>();
+        // Token count: the provider-reported prompt size of the final round of the newest
+        // completed turn. This is the real number of tokens the model saw, not an estimate.
+        // No estimation from character counts is performed here.
+        int? estimatedPromptTokens = null;
+        var estimateSource = ContextEstimateSource.None;
         foreach (var turn in turns)
         {
             if (string.IsNullOrWhiteSpace(turn.UsageJson))
@@ -74,7 +78,9 @@ public sealed class ConversationContextStatusService : IConversationContextStatu
                 var usage = JsonSerializer.Deserialize<UsageResponse>(turn.UsageJson, JsonOptions);
                 if (usage?.LastRoundPromptTokens is > 0)
                 {
-                    usages.Add((turn.TurnIndex, usage.LastRoundPromptTokens.Value, usage.LastRoundPromptChars ?? 0));
+                    estimatedPromptTokens = usage.LastRoundPromptTokens.Value;
+                    estimateSource = ContextEstimateSource.ProviderUsage;
+                    break;
                 }
             }
             catch (JsonException ex)
@@ -83,64 +89,41 @@ public sealed class ConversationContextStatusService : IConversationContextStatu
             }
         }
 
-        var charsPerToken = PromptTokenEstimator.CharsPerToken(usages.Select(u => (u.Tokens, u.Chars)));
-
-        // Lengths only; never materialize message bodies.
-        var messages = await db.NotebookConversationMessages
-            .AsNoTracking()
-            .Where(m => m.NotebookConversationId == conversationId && m.IsStreaming != true)
-            .Select(m => new
-            {
-                m.TurnIndex,
-                m.Role,
-                m.MessageSequence,
-                Len = m.Content == null ? 0 : m.Content.Length
-            })
-            .ToListAsync(ct);
-
-        int? estimate;
-        ContextEstimateSource source;
-        if (usages.Count > 0)
-        {
-            var baseline = usages.OrderByDescending(u => u.TurnIndex).First();
-            long trailingChars = messages.Where(m => m.TurnIndex > baseline.TurnIndex).Sum(m => (long)m.Len);
-            var finalReply = messages
-                .Where(m => m.TurnIndex == baseline.TurnIndex && m.Role == DataModelChatRole.Assistant)
-                .OrderByDescending(m => m.MessageSequence)
-                .FirstOrDefault();
-            trailingChars += finalReply?.Len ?? 0;
-
-            estimate = (int)Math.Min(
-                (long)int.MaxValue,
-                (long)baseline.Tokens + PromptTokenEstimator.EstimateTokens(ClampToInt(trailingChars), charsPerToken));
-            source = ContextEstimateSource.ProviderUsage;
-        }
-        else
-        {
-            // Match ConversationHistoryBuilder's own pre-boundary cut: once compacted, only the
-            // verbatim tail is what the model actually sees. Summing everything here would show a
-            // stale, uncompacted estimate next to a meter that already says "Compacted".
-            var postBoundaryChars = boundaryTurnIndex.HasValue
-                ? messages.Where(m => m.TurnIndex > boundaryTurnIndex.Value).Sum(m => (long)m.Len)
-                : messages.Sum(m => (long)m.Len);
-            estimate = PromptTokenEstimator.EstimateTokens(ClampToInt(postBoundaryChars), charsPerToken);
-            source = ContextEstimateSource.Characters;
-        }
-
         int? window = null;
         var windowSource = ContextWindowSource.Unknown;
         if (!string.IsNullOrWhiteSpace(modelId))
         {
-            var live = await TryGetLiveContextSizeAsync(db, modelId, ct);
-            var info = _resolver.Resolve(modelId, live);
-            window = info.ContextWindowTokens;
-            windowSource = info.Source;
+            var isLlama = await IsLlamaModelAsync(db, modelId, ct);
+            if (isLlama)
+            {
+                // Local llama models: the loaded model's server is the single source of truth for
+                // the window. meta.n_ctx from that server is the runtime value (after memory-based
+                // auto-derivation). When the model is not loaded (or the query fails) the window
+                // stays null -- no catalog/learned fallback is applied to llama rows.
+                var live = await TryGetLiveContextSizeAsync(db, modelId, ct);
+                window = live;
+                windowSource = live is > 0 ? ContextWindowSource.LiveRuntime : ContextWindowSource.Unknown;
+            }
+            else
+            {
+                var info = _resolver.Resolve(modelId, null);
+                window = info.ContextWindowTokens;
+                windowSource = info.Source;
+            }
         }
 
-        return new ConversationContextStatusDto(window, estimate, boundaryTurnIndex, source, modelId, windowSource);
+        return new ConversationContextStatusDto(window, estimatedPromptTokens, boundaryTurnIndex, estimateSource, modelId, windowSource);
     }
 
-    private static int ClampToInt(long value) => (int)Math.Min(value, int.MaxValue);
+    private static async Task<bool> IsLlamaModelAsync(ApplicationDbContext db, string modelId, CancellationToken ct)
+    {
+        var provider = await db.Models
+            .AsNoTracking()
+            .Where(m => m.ModelId == modelId)
+            .Select(m => m.Provider)
+            .FirstOrDefaultAsync(ct);
+        return string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase);
+    }
 
     private async Task<int?> TryGetLiveContextSizeAsync(ApplicationDbContext db, string modelId, CancellationToken ct)
     {
@@ -159,11 +142,19 @@ public sealed class ConversationContextStatusService : IConversationContextStatu
                 return null;
             }
 
-            var routerModelId = LocalRuntimeConfigurationParser.Parse(modelId, row.RuntimeConfigJson).RouterModelId;
-            var entries = await _routerModels.GetEntriesAsync(ct);
-            return entries
-                .FirstOrDefault(e => string.Equals(e.Alias, routerModelId, StringComparison.OrdinalIgnoreCase))
-                ?.ContextSize;
+            var config = LocalRuntimeConfigurationParser.Parse(modelId, row.RuntimeConfigJson);
+            var client = _runtimeClients.GetClientForStack(config.StackBaseUrl, config.StackApiKey)
+                ?? _runtimeClients.Global;
+
+            // The model's own server is the single source of truth for the effective context
+            // size. meta.n_ctx is the runtime value (after memory-based auto-derivation), not
+            // the ini's configured value, and is non-null only while the model is loaded.
+            var response = await client.ListModelsAsync(ct);
+            return response.Data
+                .FirstOrDefault(m =>
+                    string.Equals(m.Id, config.RouterModelId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(m.Status?.Value, "loaded", StringComparison.OrdinalIgnoreCase))
+                ?.Meta?.NCtx;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
