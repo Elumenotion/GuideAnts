@@ -331,7 +331,7 @@ export interface ConversationStreamingPreviewDto {
     turnIndex: number;
 }
 
-export type ContextEstimateSource = 'None' | 'ProviderUsage' | 'Characters';
+export type ContextEstimateSource = 'None' | 'ProviderUsage';
 
 export type ContextWindowSource = 'Unknown' | 'Learned' | 'Catalog' | 'LiveRuntime';
 

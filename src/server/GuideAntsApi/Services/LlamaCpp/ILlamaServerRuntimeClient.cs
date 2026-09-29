@@ -53,6 +53,13 @@ public class LlamaModelStatus
 
 public class LlamaModelMeta
 {
+    /// <summary>
+    /// Effective context size of the loaded model (the runtime value after
+    /// memory-based auto-derivation). Null when the model is not loaded.
+    /// </summary>
+    [JsonPropertyName("n_ctx")]
+    public int? NCtx { get; set; }
+
     [JsonPropertyName("n_ctx_train")]
     public int? NCtxTrain { get; set; }
 }

@@ -19,12 +19,12 @@ public sealed class ConversationContextStatusDtoSerializationTests
     public void Deserialize_StringEnumsWithDefaultWebOptions_ReadsBothEnums()
     {
         const string json =
-            """{"contextWindowTokens":8192,"estimatedPromptTokens":1200,"boundaryTurnIndex":3,"estimateSource":"Characters","modelDeploymentId":"m","contextWindowSource":"LiveRuntime"}""";
+            """{"contextWindowTokens":8192,"estimatedPromptTokens":1200,"boundaryTurnIndex":3,"estimateSource":"ProviderUsage","modelDeploymentId":"m","contextWindowSource":"LiveRuntime"}""";
 
         var dto = JsonSerializer.Deserialize<ConversationContextStatusDto>(json, WebDefaults);
 
         dto.Should().NotBeNull();
-        dto!.EstimateSource.Should().Be(ContextEstimateSource.Characters);
+        dto!.EstimateSource.Should().Be(ContextEstimateSource.ProviderUsage);
         dto.ContextWindowSource.Should().Be(ContextWindowSource.LiveRuntime);
     }
 

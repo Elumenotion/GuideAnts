@@ -12,7 +12,7 @@ Usage: build_guideants_ai.sh [options]
 Options:
   --rebuild-base         Rebuild dependency/base layers without cache
   --all                  Removed; use build_support_images.sh after backend builds
-  --backend <value>      Backend: cpu | cuda13 | rocm | slim | vulkan
+  --backend <value>      Backend: cpu | cuda13 | rocm | slim | vulkan | spark
   -h, --help             Show help
 EOF
 }
@@ -120,7 +120,8 @@ if [[ -z "$BACKEND" ]]; then
   echo "  3) ROCm"
   echo "  4) Slim"
   echo "  5) Vulkan"
-  read -r -p "Enter choice [1-5]: " choice
+  echo "  6) CUDA 13 Spark (arm64 / GB10 Blackwell)"
+  read -r -p "Enter choice [1-6]: " choice
 else
   case "$BACKEND" in
     cpu) choice="1" ;;
@@ -128,8 +129,9 @@ else
     rocm) choice="3" ;;
     slim) choice="4" ;;
     vulkan) choice="5" ;;
+    spark) choice="6" ;;
     *)
-      echo "Invalid backend: $BACKEND (expected cpu|cuda13|rocm|slim|vulkan)" >&2
+      echo "Invalid backend: $BACKEND (expected cpu|cuda13|rocm|slim|vulkan|spark)" >&2
       exit 1
       ;;
   esac
@@ -175,6 +177,14 @@ case "$choice" in
     DEPS_IMAGE_ARG="GA_DEPS_VULKAN_IMAGE"
     REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311TorchVulkan/requirements.txt"
     DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.vulkan"
+    ;;
+  6)
+    BACKEND="spark"
+    FULL_TARGET="final-cuda-spark"
+    DEPS_TARGET="deps-cuda-spark"
+    DEPS_IMAGE_ARG="GA_DEPS_CUDA_SPARK_IMAGE"
+    REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311TorchCUDA/requirements.txt"
+    DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.cuda-spark"
     ;;
   *)
     echo "Invalid choice." >&2
@@ -352,6 +362,7 @@ case "$BACKEND" in
   rocm) IMAGE_ENV_KEY="GA_AI_ROCM_IMAGE" ;;
   slim) IMAGE_ENV_KEY="GA_AI_SLIM_IMAGE" ;;
   vulkan) IMAGE_ENV_KEY="GA_AI_VULKAN_IMAGE" ;;
+  spark) IMAGE_ENV_KEY="GA_AI_SPARK_IMAGE" ;;
   *) IMAGE_ENV_KEY="GA_AI_CPU_IMAGE" ;;
 esac
 ENV_LINE="$IMAGE_ENV_KEY=$LATEST_IMAGE_TAG"

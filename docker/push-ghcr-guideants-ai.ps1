@@ -3,7 +3,7 @@ param(
     [string]$Registry = 'ghcr.io',
     [string]$ComposeTag = 'main',
     [string]$ReleaseTag = '',
-    [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
+    [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan', 'spark')]
     [string[]]$Variant = @(),
     [string]$Username = $env:GHCR_USERNAME,
     [string]$Token = $(if ($env:CR_PAT) { $env:CR_PAT } elseif ($env:GHCR_PAT) { $env:GHCR_PAT } elseif ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $null }),
@@ -125,7 +125,7 @@ function Get-DefaultGhcrUsername {
 function Get-LatestVariantImage {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
+        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan', 'spark')]
         [string]$Variant
     )
 
@@ -135,6 +135,7 @@ function Get-LatestVariantImage {
         'rocm' { '^rocm-(?<build>\d{5}\.\d{4})$' }
         'slim' { '^slim-(?<build>\d{5}\.\d{4})$' }
         'vulkan' { '^vulkan-(?<build>\d{5}\.\d{4})$' }
+        'spark'  { '^spark-(?<build>\d{5}\.\d{4})$' }
     }
 
     $rows = docker image ls guideants-ai --format "{{.Repository}}|{{.Tag}}"
@@ -172,7 +173,7 @@ function Get-LatestVariantImage {
 function Get-VariantPackageName {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
+        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan', 'spark')]
         [string]$Variant
     )
 
@@ -182,13 +183,14 @@ function Get-VariantPackageName {
         'rocm' { return 'guideants-ai-rocm' }
         'slim' { return 'guideants-ai-slim' }
         'vulkan' { return 'guideants-ai-vulkan' }
+        'spark'  { return 'guideants-ai-spark' }
     }
 }
 
 function New-VariantTarget {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
+        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan', 'spark')]
         [string]$Variant,
         [switch]$Required
     )
@@ -288,7 +290,7 @@ if (-not $SkipLogin) {
 }
 
 $pushSupportImages = $Variant.Count -eq 0
-$variantFilter = if ($Variant.Count -gt 0) { $Variant } else { @('cpu', 'cuda13', 'rocm', 'slim', 'vulkan') }
+$variantFilter = if ($Variant.Count -gt 0) { $Variant } else { @('cpu', 'cuda13', 'rocm', 'slim', 'vulkan', 'spark') }
 
 $targets = @()
 foreach ($variantName in $variantFilter) {

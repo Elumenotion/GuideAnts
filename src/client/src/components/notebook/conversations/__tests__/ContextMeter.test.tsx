@@ -20,8 +20,15 @@ describe('ContextMeter', () => {
     expect(screen.getByText(/context.*unknown/i)).toBeInTheDocument();
   });
 
-  it('renders an explicit unknown state when contextWindowTokens is null', () => {
+  it('shows the real token count (no limit) when contextWindowTokens is null', () => {
     render(<ContextMeter contextStatus={{ ...knownStatus, contextWindowTokens: null }} />);
+
+    expect(screen.getByText(/4,096 tokens/)).toBeInTheDocument();
+    expect(screen.queryByText(/context.*unknown/i)).not.toBeInTheDocument();
+  });
+
+  it('renders an explicit unknown state when both the window and tokens are null', () => {
+    render(<ContextMeter contextStatus={{ ...knownStatus, contextWindowTokens: null, estimatedPromptTokens: null }} />);
 
     expect(screen.getByText(/context.*unknown/i)).toBeInTheDocument();
   });
