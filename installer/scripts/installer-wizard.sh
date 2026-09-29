@@ -312,6 +312,17 @@ installer_progressive_pull() {
       installer_log "  docker pull $img"
       if ! installer_docker pull "$img"; then
         pull_failures+=("$img")
+        continue
+      fi
+      # Digest-pulled images carry no tag, so `docker images` shows <none>.
+      # Label them repo:<channel> for a readable name (best-effort, non-fatal).
+      if [[ "$img" == *@* ]]; then
+        local t_repo t_tag
+        t_repo="$(installer_image_repository "$img")"
+        t_tag="${GA_UPDATE_CHANNEL:-main}"
+        if installer_docker tag "$img" "${t_repo}:${t_tag}" >/dev/null 2>&1; then
+          installer_log "  docker tag $img ${t_repo}:${t_tag}"
+        fi
       fi
     done
   fi

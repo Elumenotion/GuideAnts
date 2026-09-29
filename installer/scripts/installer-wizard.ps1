@@ -402,7 +402,7 @@ function Save-InstallerState {
         [Parameter(Mandatory = $true)][string]$StateFile,
         [Parameter(Mandatory = $true)][string]$DbLayout,
         [Parameter(Mandatory = $true)][string]$AiBackend,
-        [Parameter(Mandatory = $true)][string[]]$Components,
+        [string[]]$Components = @(),
         [Parameter(Mandatory = $true)][string[]]$ComposeFiles,
         [Parameter(Mandatory = $true)][string]$ComposeMode,
         [Parameter(Mandatory = $true)][string]$StartCommand
@@ -607,6 +607,20 @@ function Invoke-InstallerProgressivePull {
             catch {
                 $pullFailures.Add($image) | Out-Null
                 Write-InstallerWarn "Pull failed: $image"
+                continue
+            }
+            # Digest-pulled images carry no tag, so `docker images` shows <none>.
+            # Label them repo:<channel> for a readable name (best-effort, non-fatal).
+            if ($image -like '*@*') {
+                $tagRepo = Get-InstallerImageRepository -ImageRef $image
+                $tagChannel = Get-InstallerUpdateChannelName
+                try {
+                    Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('tag', $image, "${tagRepo}:${tagChannel}")
+                    Write-InstallerLog "  docker tag $image ${tagRepo}:${tagChannel}"
+                }
+                catch {
+                    # Non-fatal: the image is present by digest; the tag is cosmetic.
+                }
             }
         }
     }
@@ -661,7 +675,7 @@ function Invoke-InstallerStartStack {
         [Parameter(Mandatory = $true)][string]$EnvFile,
         [Parameter(Mandatory = $true)][string]$DbLayout,
         [Parameter(Mandatory = $true)][string]$AiBackend,
-        [Parameter(Mandatory = $true)][string[]]$Components,
+        [string[]]$Components = @(),
         [string]$ComposeMode = 'ghcr',
         [switch]$AssumeYes
     )
@@ -819,7 +833,7 @@ function Get-InstallerActiveServices {
     param(
         [Parameter(Mandatory = $true)][string]$DbLayout,
         [Parameter(Mandatory = $true)][string]$AiBackend,
-        [Parameter(Mandatory = $true)][string[]]$Components
+        [string[]]$Components = @()
     )
 
     $services = New-Object System.Collections.Generic.List[string]
