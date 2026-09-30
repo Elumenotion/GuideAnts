@@ -397,6 +397,9 @@ EMB_PID=$!
 /app/start-media.sh &
 MEDIA_PID=$!
 
+/app/start-audiocpp-skill.sh &
+AUDIOCPP_SKILL_PID=$!
+
 render_nginx_config() {
     local template="/etc/nginx/nginx.conf.template"
     local output="/etc/nginx/nginx.conf"
