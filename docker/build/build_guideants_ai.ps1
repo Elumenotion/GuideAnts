@@ -263,7 +263,7 @@ switch ($Backend) {
         $fullTarget = 'final-cuda-spark'
         $depsTarget = 'deps-cuda-spark'
         $depsImageArg = 'GA_DEPS_CUDA_SPARK_IMAGE'
-        $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchCUDA\requirements.txt'
+        $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchCUDA\requirements.spark.txt'
         $dockerfilePath = Join-Path $buildContext 'Dockerfile.cuda-spark'
     }
     default {
@@ -271,6 +271,10 @@ switch ($Backend) {
         exit 1
     }
 }
+
+# The spark backend targets linux/arm64 (DGX Spark / GB10). Cross-compile from
+# x86 hosts via buildx + QEMU; native arm64 builds (on the Spark) also work.
+$buildPlatform = if ($Backend -eq 'spark') { 'linux/arm64' } else { $null }
 
 # Upstream llama.cpp server images copied into each backend's deps image.
 $llamaCppImageByBackend = @{
@@ -420,7 +424,7 @@ try {
     $depsCacheExists = Test-DockerImageExists -ImageTag $depsCacheTag
     if ($RebuildBase -or -not $depsExists) {
         if ($RebuildBase) {
-            Write-Host "Rebuilding dependency image without cache..." -ForegroundColor Yellow
+            Write-Host "Rebuilding dependency image (layer cache preserved)..." -ForegroundColor Yellow
             $llamaCppImage = $llamaCppImageByBackend[$Backend]
             Write-Host "RebuildBase: pulling latest upstream llama.cpp image ($llamaCppImage)..." -ForegroundColor Yellow
             docker pull $llamaCppImage
@@ -434,15 +438,13 @@ try {
         }
 
         $depsBuildArgs = @('buildx', 'build', '--load')
-        if ($RebuildBase) {
-            $depsBuildArgs += '--no-cache'
-            $depsBuildArgs += '--pull'
+        if ($buildPlatform) { $depsBuildArgs += @('--platform', $buildPlatform) }
+        $depsBuildArgs += @(Get-LocalBuildxCacheFromArgs -CachePaths @($depsCachePath, $finalCachePath))
+        if ($depsCacheExists) {
+            $depsBuildArgs += @('--cache-from', $depsCacheTag)
         }
-        else {
-            $depsBuildArgs += @(Get-LocalBuildxCacheFromArgs -CachePaths @($depsCachePath, $finalCachePath))
-            if ($depsCacheExists) {
-                $depsBuildArgs += @('--cache-from', $depsCacheTag)
-            }
+        if ($RebuildBase) {
+            $depsBuildArgs += '--pull'
         }
         $depsBuildArgs += @(
             '--label', "${depsInputHashLabel}=$depsCanonicalFullHash",
@@ -482,9 +484,7 @@ try {
 
     # --- Build final image (one Dockerfile, backend selected by target) ---
     $dockerArgs = @('buildx', 'build', '--load')
-    if ($RebuildBase) {
-        $dockerArgs += '--no-cache'
-    }
+    if ($buildPlatform) { $dockerArgs += @('--platform', $buildPlatform) }
     $dockerArgs += @(Get-LocalBuildxCacheFromArgs -CachePaths @($depsCachePath, $finalCachePath))
     $dockerArgs += @(
         '--build-arg', "$depsImageArg=$depsTag",

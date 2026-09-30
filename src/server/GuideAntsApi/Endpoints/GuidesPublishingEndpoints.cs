@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -244,6 +244,11 @@ var guide = await db.Assistants
                 BillingPeriodChargeLimitUsd = dto.BillingPeriodChargeLimitUsd,
                 AuthValidationWebhookUrl = dto.AuthValidationWebhookUrl,
                 AuthWebhookTimeoutSeconds = dto.AuthWebhookTimeoutSeconds,
+                AuthMode = PublishedGuideAuthService.EffectiveAuthMode(new DataModel.Models.PublishedGuide
+                {
+                    ApiKeyHash = null,
+                    AuthValidationWebhookUrl = dto.AuthValidationWebhookUrl
+                }),
                 FriendlyName = dto.FriendlyName,
                 DisplayMode = dto.DisplayMode ?? "full",
                 CommandMode = dto.CommandMode,
@@ -404,6 +409,7 @@ var publishedGuide = await db.PublishedGuides
             publishedGuide.BillingPeriodChargeLimitUsd = dto.BillingPeriodChargeLimitUsd;
             publishedGuide.AuthValidationWebhookUrl = dto.AuthValidationWebhookUrl;
             publishedGuide.AuthWebhookTimeoutSeconds = dto.AuthWebhookTimeoutSeconds;
+            publishedGuide.AuthMode = PublishedGuideAuthService.EffectiveAuthMode(publishedGuide);
             publishedGuide.FriendlyName = dto.FriendlyName;
             publishedGuide.DisplayMode = dto.DisplayMode ?? "full";
             publishedGuide.CommandMode = dto.CommandMode;
@@ -530,6 +536,7 @@ publishedGuide.Active = false;
             var hashedApiKey = PublishedGuideAuthService.HashApiKey(plainApiKey);
 
             publishedGuide.ApiKeyHash = hashedApiKey;
+            publishedGuide.AuthMode = PublishedGuideAuthMode.ApiKey;
             await db.SaveChangesAsync();
 
             return Results.Ok(new ApiKeyGenerationResultDto
@@ -621,8 +628,9 @@ publishedGuide.Active = false;
 
             // Verify project access (must be contributor)
 
-publishedGuide.ApiKeyHash = null;
+            publishedGuide.ApiKeyHash = null;
             publishedGuide.McpEnabled = false;
+            publishedGuide.AuthMode = PublishedGuideAuthService.EffectiveAuthMode(publishedGuide);
             await db.SaveChangesAsync();
 
             return Results.NoContent();

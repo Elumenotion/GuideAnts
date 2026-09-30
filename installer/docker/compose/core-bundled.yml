@@ -45,7 +45,7 @@ services:
       - ScriptExecution__TimeoutSeconds=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
       - LlamaCpp__BaseUrl=http://127.0.0.1:9/llama-cpp
       - LlamaCpp__TimeoutSeconds=${GA_LLAMA_CPP_TIMEOUT_SECONDS:-600}
-      - ServiceRouting__Containers__guideants-ai__BaseUrl=http://127.0.0.1:9
+      - ServiceRouting__Containers__guideants-ai__BaseUrl=http://127.0.0.1:9/sandbox
       - ServiceRouting__Containers__plantuml__BaseUrl=http://127.0.0.1:9
       - HF_TOKEN=${HF_TOKEN:-}
       - SettingsSecrets__ActiveKeyId=local-dev

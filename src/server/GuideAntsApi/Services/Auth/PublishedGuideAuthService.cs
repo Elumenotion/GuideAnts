@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -61,7 +61,11 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
             };
         }
 
-        return publishedGuide.AuthMode switch
+        // Auth is derived from the credential columns, not the stored AuthMode
+        // (which is redundant and was the source of the auth bypass). A configured
+        // API key or webhook URL always enforces; AppIdentity is preserved for
+        // internal guides; only a guide with no credential is anonymous.
+        return EffectiveAuthMode(publishedGuide) switch
         {
             PublishedGuideAuthMode.AppIdentity => await ValidateAppIdentityAsync(
                 authorizationHeader,
@@ -75,9 +79,34 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
                 projectId,
                 notebookId,
                 ct),
-            PublishedGuideAuthMode.Anonymous => new AuthValidationResult { IsValid = true },
             _ => new AuthValidationResult { IsValid = true }
         };
+    }
+
+    /// <summary>
+    /// Derives the effective authentication mode from the credential columns.
+    /// <see cref="PublishedGuide.ApiKeyHash"/> and
+    /// <see cref="PublishedGuide.AuthValidationWebhookUrl"/> are the source of
+    /// truth: a guide with a configured API key or webhook URL is never
+    /// anonymous, regardless of the stored <c>AuthMode</c> value. Precedence
+    /// matches the legacy behavior (API key wins if both are set). The stored
+    /// <c>AuthMode</c> is honored only for <see cref="PublishedGuideAuthMode.AppIdentity"/>
+    /// (settable solely via internal/server paths); everything else falls back to
+    /// <see cref="PublishedGuideAuthMode.Anonymous"/>.
+    /// </summary>
+    public static PublishedGuideAuthMode EffectiveAuthMode(DataModel.Models.PublishedGuide pg)
+    {
+        if (!string.IsNullOrWhiteSpace(pg.ApiKeyHash))
+        {
+            return PublishedGuideAuthMode.ApiKey;
+        }
+        if (!string.IsNullOrWhiteSpace(pg.AuthValidationWebhookUrl))
+        {
+            return PublishedGuideAuthMode.Webhook;
+        }
+        return pg.AuthMode == PublishedGuideAuthMode.AppIdentity
+            ? PublishedGuideAuthMode.AppIdentity
+            : PublishedGuideAuthMode.Anonymous;
     }
 
     private async Task<AuthValidationResult> ValidateAppIdentityAsync(

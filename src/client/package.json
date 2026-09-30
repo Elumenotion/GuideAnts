@@ -23,6 +23,7 @@
     "docker:up": "cd ../server && docker compose up -d",
     "docker:down": "cd ../server && docker compose down",
     "server:rebuild": "cd ../server && pwsh -File ./rebuild_server.ps1",
+    "server:build:local": "npm run browser:build:docker && cd ../server && pwsh -File ./build_local.ps1 -NoUiBuild",
     "db:reset": "cd ../server && pwsh -File ./reset_dev_env.ps1",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.browser.json --noEmit",
     "test": "npm run typecheck && vitest",

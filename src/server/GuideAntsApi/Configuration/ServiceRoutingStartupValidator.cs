@@ -15,10 +15,23 @@ using GuideAntsApi.Settings;
 /// key. Provider-section readiness is now computed from
 /// <c>ApplicationSettings.ServiceModes</c> at runtime.
 /// </para>
+/// <para>
+/// The guideants-ai <c>/sandbox</c> base-URL check is a routing-shape concern,
+/// not a boot-critical invariant: <c>Validate</c> (the startup path) excludes it
+/// so a misconfigured AI endpoint degrades to readiness/dispatch-time failures
+/// instead of blocking the entire app from starting. <c>Evaluate</c> (the
+/// readiness path) still reports it so the Settings UI can surface the blocker.
+/// </para>
 /// </summary>
 public static class ServiceRoutingStartupValidator
 {
-    public static IReadOnlyList<string> Evaluate(IConfiguration configuration)
+    /// <summary>
+    /// Evaluates all shape constraints. Pass <c>includeReadinessOnly: false</c>
+    /// for the startup path to exclude findings that must not block boot.
+    /// </summary>
+    public static IReadOnlyList<string> Evaluate(
+        IConfiguration configuration,
+        bool includeReadinessOnly = true)
     {
         var errors = new List<string>();
 
@@ -57,18 +70,34 @@ public static class ServiceRoutingStartupValidator
             }
         }
 
+        if (!includeReadinessOnly)
+        {
+            errors.RemoveAll(IsReadinessOnlyError);
+        }
+
         return errors;
     }
 
     public static void Validate(IConfiguration configuration)
     {
-        var errors = Evaluate(configuration);
+        // Readiness-only findings (e.g. the guideants-ai /sandbox prefix) must
+        // never block app startup; they surface via readiness/dispatch instead.
+        var errors = Evaluate(configuration, includeReadinessOnly: false);
 
         if (errors.Count > 0)
         {
             throw new InvalidOperationException(
                 "Invalid service routing configuration:\n - " + string.Join("\n - ", errors));
         }
+    }
+
+    /// <summary>
+    /// True for findings that are routing-shape concerns only: they block the
+    /// affected service at dispatch time but must not block app startup.
+    /// </summary>
+    private static bool IsReadinessOnlyError(string error)
+    {
+        return error.Contains("guideants-ai:BaseUrl", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ValidateSettingsSecrets(IConfiguration configuration, List<string> errors)
