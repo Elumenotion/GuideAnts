@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Guides;
@@ -226,7 +226,7 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
     }
 
     private static PublishedApiAuthMode ResolveAuthMode(DataModel.Models.PublishedGuide publishedGuide)
-        => publishedGuide.AuthMode switch
+        => PublishedGuideAuthService.EffectiveAuthMode(publishedGuide) switch
         {
             DataModel.Models.PublishedGuideAuthMode.AppIdentity => PublishedApiAuthMode.AppIdentity,
             DataModel.Models.PublishedGuideAuthMode.ApiKey => PublishedApiAuthMode.ApiKey,

@@ -76,7 +76,7 @@ public sealed class ServiceRoutingStartupValidatorTests
     }
 
     [TestMethod]
-    public void Validate_RejectsLegacyGuideantsScriptBaseUrl()
+    public void Validate_AllowsLegacyGuideantsScriptBaseUrl_ReadinessOnly()
     {
         var configuration = BuildConfiguration(new Dictionary<string, string?>
         {
@@ -85,10 +85,10 @@ public sealed class ServiceRoutingStartupValidatorTests
         });
 
         Action act = () => ServiceRoutingStartupValidator.Validate(configuration);
-        act
-            .Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage("*ServiceRouting:Containers:guideants-ai:BaseUrl must include the '/sandbox' prefix*");
+        act.Should().NotThrow();
+
+        var errors = ServiceRoutingStartupValidator.Evaluate(configuration);
+        errors.Should().Contain(e => e.Contains("ServiceRouting:Containers:guideants-ai:BaseUrl", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]

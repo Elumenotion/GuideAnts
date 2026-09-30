@@ -1,4 +1,4 @@
-using AntRunner.Chat;
+﻿using AntRunner.Chat;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
@@ -79,7 +79,7 @@ public static class PublishedGuidesEndpoints
                 dailyChargeLimitUsd = publishedGuide.DailyChargeLimitUsd,
                 billingPeriodChargeLimitUsd = publishedGuide.BillingPeriodChargeLimitUsd,
                 authMode = publishedGuide.AuthMode.ToString(),
-                requiresAuth = publishedGuide.AuthMode != PublishedGuideAuthMode.Anonymous,
+                requiresAuth = PublishedGuideAuthService.EffectiveAuthMode(publishedGuide) != PublishedGuideAuthMode.Anonymous,
                 requiresApiKey = requiresApiKey,
                 displayMode = publishedGuide.DisplayMode,
                 commandMode = publishedGuide.CommandMode,
@@ -169,7 +169,7 @@ public static class PublishedGuidesEndpoints
                 dailyChargeLimitUsd = publishedGuide.DailyChargeLimitUsd,
                 billingPeriodChargeLimitUsd = publishedGuide.BillingPeriodChargeLimitUsd,
                 authMode = publishedGuide.AuthMode.ToString(),
-                requiresAuth = publishedGuide.AuthMode != PublishedGuideAuthMode.Anonymous,
+                requiresAuth = PublishedGuideAuthService.EffectiveAuthMode(publishedGuide) != PublishedGuideAuthMode.Anonymous,
                 requiresApiKey = requiresApiKey,
                 displayMode = publishedGuide.DisplayMode,
                 commandMode = publishedGuide.CommandMode,

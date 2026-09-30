@@ -10,7 +10,7 @@ usage() {
 Usage: build_guideants_ai.sh [options]
 
 Options:
-  --rebuild-base         Rebuild dependency/base layers without cache
+  --rebuild-base         Rebuild dependency image (layer cache preserved, upstream re-pulled)
   --all                  Removed; use build_support_images.sh after backend builds
   --backend <value>      Backend: cpu | cuda13 | rocm | slim | vulkan | spark
   -h, --help             Show help
@@ -99,6 +99,7 @@ if buildx_supports_cache_export; then
   BUILDX_CACHE_EXPORT_SUPPORTED=true
 fi
 
+
 # shellcheck source=lib/combined-hash.sh
 source "$SCRIPT_DIR/lib/combined-hash.sh"
 
@@ -183,7 +184,7 @@ case "$choice" in
     FULL_TARGET="final-cuda-spark"
     DEPS_TARGET="deps-cuda-spark"
     DEPS_IMAGE_ARG="GA_DEPS_CUDA_SPARK_IMAGE"
-    REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311TorchCUDA/requirements.txt"
+    REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311TorchCUDA/requirements.spark.txt"
     DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.cuda-spark"
     ;;
   *)
@@ -191,6 +192,13 @@ case "$choice" in
     exit 1
     ;;
 esac
+
+# The spark backend targets linux/arm64 (DGX Spark / GB10). Cross-compile from
+# x86 hosts via buildx + QEMU; native arm64 builds (on the Spark) also work.
+BUILD_PLATFORM=""
+if [[ "$BACKEND" == "spark" ]]; then
+  BUILD_PLATFORM="linux/arm64"
+fi
 
 # Build a unique tag per build, and also maintain a stable backend-specific latest tag.
 JULIAN_DAY="$(date +%y%j)"
@@ -285,24 +293,24 @@ if docker_image_exists "$DEPS_CACHE_TAG"; then DEPS_CACHE_EXISTS=true; fi
 
 if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
   if [[ "$REBUILD_BASE" == "true" ]]; then
-    echo "Rebuilding dependency image without cache..."
+    echo "Rebuilding dependency image (layer cache preserved)..."
   else
     echo "Dependency image not found. Building $DEPS_TAG..."
   fi
 
   DEPS_BUILD_ARGS=(buildx build --load)
+  [[ -n "$BUILD_PLATFORM" ]] && DEPS_BUILD_ARGS+=("--platform" "$BUILD_PLATFORM")
+  if [[ -f "$DEPS_CACHE_PATH/index.json" ]]; then
+    DEPS_BUILD_ARGS+=(--cache-from "type=local,src=$DEPS_CACHE_PATH")
+  fi
+  if [[ -f "$FINAL_CACHE_PATH/index.json" ]]; then
+    DEPS_BUILD_ARGS+=(--cache-from "type=local,src=$FINAL_CACHE_PATH")
+  fi
+  if [[ "$DEPS_CACHE_EXISTS" == "true" ]]; then
+    DEPS_BUILD_ARGS+=(--cache-from "$DEPS_CACHE_TAG")
+  fi
   if [[ "$REBUILD_BASE" == "true" ]]; then
-    DEPS_BUILD_ARGS+=(--no-cache)
-  else
-    if [[ -f "$DEPS_CACHE_PATH/index.json" ]]; then
-      DEPS_BUILD_ARGS+=(--cache-from "type=local,src=$DEPS_CACHE_PATH")
-    fi
-    if [[ -f "$FINAL_CACHE_PATH/index.json" ]]; then
-      DEPS_BUILD_ARGS+=(--cache-from "type=local,src=$FINAL_CACHE_PATH")
-    fi
-    if [[ "$DEPS_CACHE_EXISTS" == "true" ]]; then
-      DEPS_BUILD_ARGS+=(--cache-from "$DEPS_CACHE_TAG")
-    fi
+    DEPS_BUILD_ARGS+=(--pull)
   fi
   DEPS_BUILD_ARGS+=(
     --label "${DEPS_INPUT_HASH_LABEL}=${DEPS_CANONICAL_FULL_HASH}"
@@ -329,9 +337,8 @@ else
 fi
 
 DOCKER_ARGS=(buildx build --load)
-if [[ "$REBUILD_BASE" == "true" ]]; then
-  DOCKER_ARGS+=(--no-cache)
-fi
+[[ -n "$BUILD_PLATFORM" ]] && DOCKER_ARGS+=("--platform" "$BUILD_PLATFORM")
+
 if [[ -f "$DEPS_CACHE_PATH/index.json" ]]; then
   DOCKER_ARGS+=(--cache-from "type=local,src=$DEPS_CACHE_PATH")
 fi

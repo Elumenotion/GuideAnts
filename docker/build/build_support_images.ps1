@@ -136,6 +136,13 @@ if ($RebuildBase) {
     $dockerBuildArgs += '--no-cache'
 }
 
+# In -Spark mode, build arm64 images (for the DGX Spark). Cross-compile from
+# x86 hosts via buildx + QEMU; native arm64 builds (on the Spark) also work.
+$platformArgs = @()
+if ($Spark) {
+    $platformArgs = @('--platform', 'linux/arm64')
+}
+
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Building GuideAnts Support Images" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
@@ -170,7 +177,7 @@ else {
         Write-Host "Copied ScriptExecutionAgent to PlantUML container directory" -ForegroundColor Green
     }
 
-    docker build @dockerBuildArgs -t $plantumlImageTag -f $plantumlDockerfilePath $plantumlContainerPath
+    docker buildx build --load @dockerBuildArgs @platformArgs -t $plantumlImageTag -f $plantumlDockerfilePath $plantumlContainerPath
     if ($LASTEXITCODE -ne 0) {
         Write-Error "PlantUML image build failed with exit code $LASTEXITCODE"
         exit 1
@@ -228,7 +235,7 @@ if ($searxngCanReuse) {
 }
 else {
     Write-Host "Building searxng image: $searxngImageTag"
-    docker build @dockerBuildArgs -t $searxngImageTag -f $searxngDockerfilePath $searxngBuildContext
+    docker buildx build --load @dockerBuildArgs @platformArgs -t $searxngImageTag -f $searxngDockerfilePath $searxngBuildContext
     if ($LASTEXITCODE -ne 0) {
         Write-Error "SearXNG image build failed with exit code $LASTEXITCODE"
         exit 1

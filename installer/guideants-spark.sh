@@ -12,8 +12,7 @@
 #   1. Detects the host arch (warns if not aarch64; the Spark is aarch64).
 #   2. Checks Docker + Compose are installed and running.
 #   3. Checks the NVIDIA driver / CUDA (the GB10 needs the CUDA 13 driver).
-#   4. Verifies the local 'guideants-ai:spark' image exists (built on the Spark;
-#      this launcher does NOT build it -- see docker/build/build_guideants_ai.sh).
+#   4. Pulls the 'guideants-ai-spark' image from GHCR (built with the spark backend).
 #   5. Ensures the bind-mount volume directories exist.
 #   6. Pulls the arm64 support images (searxng, plantuml, docling, documentserver).
 #   7. Starts the stack, then health-checks each service on its published port.
@@ -40,8 +39,8 @@ GA_DOCUMENTSERVER_PORT="${GA_DOCUMENTSERVER_PORT:-5112}"
 GA_PLANTUML_PORT="${GA_PLANTUML_PORT:-5113}"
 GA_SEARXNG_PORT="${GA_SEARXNG_PORT:-5114}"
 
-# The locally-built Spark AI image (pull_policy: never in the compose file).
-AI_IMAGE="${GA_AI_SPARK_IMAGE:-guideants-ai:spark-latest}"
+# The Spark AI image (pulled from GHCR; built with the spark backend).
+AI_IMAGE="${GA_AI_SPARK_IMAGE:-ghcr.io/elumenotion/guideants-ai-spark:main}"
 
 MODE="up"
 ASSUME_YES="0"
@@ -133,25 +132,17 @@ check_gpu() {
 check_gpu
 
 # =============================================================================
-# 4. Local Spark AI image
+# 4. Spark AI image (pull from GHCR)
 # =============================================================================
-check_ai_image() {
+pull_ai_image() {
   hr
-  log "Checking local Spark AI image: $AI_IMAGE"
-  if docker image inspect "$AI_IMAGE" >/dev/null 2>&1; then
-    local arch
-    arch="$(docker image inspect --format '{{.Architecture}}' "$AI_IMAGE" 2>/dev/null || echo '?')"
-    log "Found $AI_IMAGE (architecture: $arch)."
-    if [[ "$arch" != "arm64" && "$arch" != "aarch64" ]]; then
-      warn "$AI_IMAGE is not an arm64 image. Build the arm64/spark image on the Spark first:"
-      warn "  docker/build/build_guideants_ai.sh --backend spark"
-    fi
-  else
-    fail "Local image '$AI_IMAGE' not found. The Spark launcher does not build the AI image."
-    fail "Build it on the Spark first:  docker/build/build_guideants_ai.sh --backend spark"
-  fi
+  log "Pulling Spark AI image: $AI_IMAGE"
+  docker pull "$AI_IMAGE" || fail "Pull failed for '$AI_IMAGE'. Check GHCR access (docker login ghcr.io) and that the spark image is published."
+  local arch
+  arch="$(docker image inspect --format '{{.Architecture}}' "$AI_IMAGE" 2>/dev/null || echo '?')"
+  log "  $AI_IMAGE (architecture: $arch)"
 }
-check_ai_image
+pull_ai_image
 
 # =============================================================================
 # 5. Volume directories (bind mounts)
@@ -171,38 +162,22 @@ ensure_volume_dirs() {
 ensure_volume_dirs
 
 # =============================================================================
-# 6. Pull arm64 support images
+# 6. Pull support images
 # =============================================================================
-# Local support images (built by docker/build/build_support_images.sh --spark).
-LOCAL_SUPPORT_IMAGES=(
-  "${GA_SEARXNG_IMAGE:-guideants-searxng:latest}"
-  "${GA_PLANTUML_IMAGE:-plantuml-1.2025.2}"
-)
-
-# Registry images that are multi-arch (arm64 available) and can be pulled.
-PULL_SUPPORT_IMAGES=(
+# All pulled from the registry (no local builds). searxng + plantuml are
+# amd64-only on GHCR; the compose file pins them to linux/amd64 (emulated).
+SUPPORT_IMAGES=(
   "${DOCLING_SERVE_CUDA_IMAGE:-quay.io/docling-project/docling-serve-cu130:v1.29.0}"
+  "${GA_DOCUMENTSERVER_IMAGE:-ghcr.io/euro-office/documentserver:latest}"
+  "${GA_PLANTUML_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}"
+  "${GA_SEARXNG_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}"
 )
 
-check_local_support_images() {
+pull_support_images() {
   hr
-  log "Checking local arm64 support images..."
+  log "Pulling support images..."
   local img
-  for img in "${LOCAL_SUPPORT_IMAGES[@]}"; do
-    if docker image inspect "$img" >/dev/null 2>&1; then
-      log "  OK   $img"
-    else
-      fail "Local image '$img' not found."
-      fail "Build it first:  docker/build/build_support_images.sh --spark"
-    fi
-  done
-}
-
-pull_registry_support_images() {
-  hr
-  log "Pulling multi-arch registry images..."
-  local img
-  for img in "${PULL_SUPPORT_IMAGES[@]}"; do
+  for img in "${SUPPORT_IMAGES[@]}"; do
     log "  $img"
     docker pull "$img" || warn "  pull failed for $img (will retry at up; continue)"
   done
@@ -283,8 +258,7 @@ case "$MODE" in
     ;;
 esac
 
-check_local_support_images
-pull_registry_support_images
+pull_support_images
 compose up -d
 health_check
 print_port_map
