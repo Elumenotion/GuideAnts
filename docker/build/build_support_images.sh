@@ -85,7 +85,10 @@ if [[ -d "$PUBLISH_OUTPUT" && -d "$PLANTUML_CONTAINER_PATH" ]]; then
 fi
 
 timestamp="$(date +%Y%m%d%H%M%S)"
-docker buildx build --load "${docker_build_args[@]}" "${platform_args[@]}" -t plantuml-1.2025.2 -f "$SCRIPT_DIR/Sandboxes/PlantUml/dockerfile" --build-arg "SCRIPT_AGENT_VERSION=$timestamp" "$SCRIPT_DIR/Sandboxes/PlantUml"
+# Architecture-specific local tag so amd64 and arm64 builds never overwrite
+# each other: spark mode produces :arm64, normal mode produces :latest.
+if [[ "$SPARK_MODE" == "true" ]]; then PLANTUML_TAG="plantuml-1.2025.2:arm64"; else PLANTUML_TAG="plantuml-1.2025.2:latest"; fi
+docker buildx build --load "${docker_build_args[@]}" "${platform_args[@]}" -t "$PLANTUML_TAG" -f "$SCRIPT_DIR/Sandboxes/PlantUml/dockerfile" --build-arg "SCRIPT_AGENT_VERSION=$timestamp" "$SCRIPT_DIR/Sandboxes/PlantUml"
 
 if [[ "$SPARK_MODE" == "true" ]]; then
   echo "Skipping mssql (x86-only; not part of the Spark stack)."
@@ -99,8 +102,9 @@ fi
 
 SEARXNG_DOCKERFILE_PATH="$SCRIPT_DIR/searxng/Dockerfile"
 [[ -f "$SEARXNG_DOCKERFILE_PATH" ]] || { echo "SearXNG Dockerfile not found at $SEARXNG_DOCKERFILE_PATH" >&2; exit 1; }
-echo "Building searxng image: guideants-searxng:latest"
-docker buildx build --load "${docker_build_args[@]}" "${platform_args[@]}" -t guideants-searxng:latest -f "$SEARXNG_DOCKERFILE_PATH" "$REPO_ROOT"
+if [[ "$SPARK_MODE" == "true" ]]; then SEARXNG_TAG="guideants-searxng:arm64"; else SEARXNG_TAG="guideants-searxng:latest"; fi
+echo "Building searxng image: $SEARXNG_TAG"
+docker buildx build --load "${docker_build_args[@]}" "${platform_args[@]}" -t "$SEARXNG_TAG" -f "$SEARXNG_DOCKERFILE_PATH" "$REPO_ROOT"
 
 if [[ "$SPARK_MODE" == "true" ]]; then
   echo "Skipping webapi-ui (not part of the Spark backend stack)."

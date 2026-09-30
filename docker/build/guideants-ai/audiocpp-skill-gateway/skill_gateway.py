@@ -477,7 +477,8 @@ def pid_alive(pid: int) -> bool:
 def assert_skill_model_path(raw_path: str | Path) -> Path:
     """Validate and resolve a path under the models root.
 
-    Rejects traversal (``..``), absolute paths, and null bytes.
+    Accepts both absolute paths (must be under root) and relative paths
+    (resolved under root). Rejects traversal (``..``) and null bytes.
     Uses the shared ``guideants_hf.path_safety`` containment check
     so CodeQL can trace untrusted input → validated root.
     """
@@ -487,11 +488,16 @@ def assert_skill_model_path(raw_path: str | Path) -> Path:
     # Reject null bytes early (OS-level bypass)
     if "\x00" in path_str:
         raise HTTPException(status_code=400, detail="model path contains null byte")
-    # Reject absolute paths and .. traversal
-    if os.path.isabs(path_str) or ".." in path_str.split(os.sep):
-        raise HTTPException(status_code=400, detail="model path must be relative")
-    resolved = Path(path_str).resolve()
     root = models_root().resolve()
+    # Reject .. traversal in all cases
+    if ".." in path_str.split(os.sep):
+        raise HTTPException(status_code=400, detail="model path must not contain ..")
+    if os.path.isabs(path_str):
+        # Absolute: must resolve under root
+        resolved = Path(path_str).resolve()
+    else:
+        # Relative: resolve under models root (not CWD)
+        resolved = (root / path_str).resolve()
     try:
         ensure_inside_root(str(root), str(resolved))
     except PathSafetyError:

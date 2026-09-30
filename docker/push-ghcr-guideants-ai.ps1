@@ -215,6 +215,15 @@ function New-VariantTarget {
     }
 }
 
+function Get-ImageArch {
+    param([Parameter(Mandatory = $true)][string]$ImageRef)
+    $arch = docker image inspect $ImageRef --format '{{.Architecture}}'
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($arch)) {
+        throw "Unable to determine architecture of '$ImageRef'."
+    }
+    return $arch.Trim()
+}
+
 function Get-LocalImageRef {
     param(
         [Parameter(Mandatory = $true)]
@@ -346,60 +355,73 @@ foreach ($target in $targets) {
 }
 
 if ($pushSupportImages) {
-    $plantUmlSourceRef = Get-LocalImageRef `
-        -Repository 'plantuml-1.2025.2' `
-        -MissingMessage "No local plantuml-1.2025.2:latest image found. Build it first with docker/build/build_support_images.ps1."
+    # --- Architecture-aware support-image push -----------------------------------
+    # Shared mutable tags (ComposeTag / latest) must stay amd64: the amd64 stacks
+    # consume them with pull_policy: always. arm64 (spark) builds get arch-suffixed
+    # tags only, so neither stack can clobber the other's tags. The arch check is a
+    # hard guard: it refuses to push an image under tags owned by the other arch.
+    function Push-SupportImage {
+        param(
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][string]$LocalRepository,
+            [Parameter(Mandatory = $true)][string]$PackageName,
+            [Parameter(Mandatory = $true)][string[]]$Amd64Tags,
+            [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Arm64Tags,
+            [Parameter(Mandatory = $true)][string]$MissingMessage
+        )
+        $amd64Ref = $null; $arm64Ref = $null
+        try { $amd64Ref = Get-LocalImageRef -Repository $LocalRepository -Tag 'latest' -MissingMessage 'not-found' } catch { }
+        try { $arm64Ref = Get-LocalImageRef -Repository $LocalRepository -Tag 'arm64'  -MissingMessage 'not-found' } catch { }
+        if (-not $amd64Ref -and -not $arm64Ref) { throw $MissingMessage }
 
-    $mssqlSourceRef = Get-LocalImageRef `
-        -Repository 'mssql2025-express-fts' `
+        foreach ($pair in @(
+            @{ Arch = 'amd64'; Tags = $Amd64Tags;   SourceRef = $amd64Ref },
+            @{ Arch = 'arm64'; Tags = $Arm64Tags;   SourceRef = $arm64Ref }
+        )) {
+            if (-not $pair.SourceRef) { continue }
+            $arch = Get-ImageArch -ImageRef $pair.SourceRef
+            if ($arch -ne $pair.Arch) {
+                $msg = ("Local '{0}' is '{1}' but was selected as the {2} source for {3}. Refusing to push: this would publish a {1} image under {2}-owned tags." -f $pair.SourceRef, $arch, $pair.Arch, $PackageName)
+                throw $msg
+            }
+            Write-Host ""
+            Write-Host "Pushing $Name image ($arch)" -ForegroundColor Cyan
+            Write-Host "  Source:      $($pair.SourceRef)"
+            foreach ($tag in $pair.Tags) {
+                $targetRef = "$Registry/$Owner/${PackageName}:$tag"
+                Write-Host "  Target tag:  $targetRef"
+                Invoke-DockerCommand -Arguments @('tag', $pair.SourceRef, $targetRef)
+                Invoke-DockerCommand -Arguments @('push', $targetRef)
+            }
+        }
+    }
+
+    $plantUmlAmd64Tags = @($cpuImage.BuildTag, '1.2025.2', $ComposeTag, 'latest')
+    $mssqlAmd64Tags    = @($cpuImage.BuildTag, $ComposeTag, 'latest')
+    $searxngAmd64Tags  = @($cpuImage.BuildTag, $ComposeTag, 'latest')
+    $plantUmlArm64Tags = @('1.2025.2-arm64', "$ComposeTag-arm64", 'latest-arm64')
+    $searxngArm64Tags  = @("$ComposeTag-arm64", 'latest-arm64')
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseTag)) {
+        $plantUmlAmd64Tags = @($plantUmlAmd64Tags + $ReleaseTag | Select-Object -Unique)
+        $mssqlAmd64Tags    = @($mssqlAmd64Tags + $ReleaseTag | Select-Object -Unique)
+        $searxngAmd64Tags  = @($searxngAmd64Tags + $ReleaseTag | Select-Object -Unique)
+        $plantUmlArm64Tags = @($plantUmlArm64Tags + "$ReleaseTag-arm64" | Select-Object -Unique)
+        $searxngArm64Tags  = @($searxngArm64Tags + "$ReleaseTag-arm64" | Select-Object -Unique)
+    }
+
+    Push-SupportImage -Name 'plantuml' -LocalRepository 'plantuml-1.2025.2' -PackageName 'guideants-plantuml' `
+        -Amd64Tags $plantUmlAmd64Tags `
+        -Arm64Tags $plantUmlArm64Tags `
+        -MissingMessage "No local guideants-plantuml image found. Build it first with docker/build/build_support_images.ps1."
+
+    Push-SupportImage -Name 'mssql' -LocalRepository 'mssql2025-express-fts' -PackageName 'mssql2025-express-fts' `
+        -Amd64Tags $mssqlAmd64Tags -Arm64Tags @() `
         -MissingMessage "No local mssql2025-express-fts:latest image found. Build it first with docker/build/build_support_images.ps1."
 
-    $searxngSourceRef = Get-LocalImageRef `
-        -Repository 'guideants-searxng' `
-        -MissingMessage "No local guideants-searxng:latest image found. Build it first with docker/build/build_support_images.ps1."
-
-    $extraTargets = @(
-        [pscustomobject]@{
-            Name        = 'plantuml'
-            SourceRef   = $plantUmlSourceRef
-            PackageName = 'guideants-plantuml'
-            Tags        = @($cpuImage.BuildTag, '1.2025.2', $ComposeTag, 'latest')
-        },
-        [pscustomobject]@{
-            Name        = 'mssql'
-            SourceRef   = $mssqlSourceRef
-            PackageName = 'mssql2025-express-fts'
-            Tags        = @($cpuImage.BuildTag, $ComposeTag, 'latest')
-        },
-        [pscustomobject]@{
-            Name        = 'searxng'
-            SourceRef   = $searxngSourceRef
-            PackageName = 'guideants-searxng'
-            Tags        = @($cpuImage.BuildTag, $ComposeTag, 'latest')
-        }
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($ReleaseTag)) {
-        foreach ($target in $extraTargets) {
-            $target.Tags = @($target.Tags + @($ReleaseTag) | Select-Object -Unique)
-        }
-    }
-
-    foreach ($target in $extraTargets) {
-        $targetRefs = @()
-        foreach ($tag in $target.Tags) {
-            $targetRefs += "$Registry/$Owner/$($target.PackageName):$tag"
-        }
-
-        Write-Host ""
-        Write-Host "Pushing $($target.Name) image" -ForegroundColor Cyan
-        Write-Host "  Source:      $($target.SourceRef)"
-        foreach ($targetRef in $targetRefs) {
-            Write-Host "  Target tag:  $targetRef"
-            Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $targetRef)
-            Invoke-DockerCommand -Arguments @('push', $targetRef)
-        }
-    }
+    Push-SupportImage -Name 'searxng' -LocalRepository 'guideants-searxng' -PackageName 'guideants-searxng' `
+        -Amd64Tags $searxngAmd64Tags `
+        -Arm64Tags $searxngArm64Tags `
+        -MissingMessage "No local guideants-searxng image found. Build it first with docker/build/build_support_images.ps1."
 }
 
 Write-Host ""

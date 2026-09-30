@@ -3,11 +3,11 @@
 # (Max) while keeping LLM, SD, media, and sandbox on local guideants-ai.
 #
 # Set GA_REMOTE_AUDIO_EMB_BASE_URL in docker/.env, e.g.
-#   GA_REMOTE_AUDIO_EMB_BASE_URL=http://192.168.0.111:8112
+#   GA_REMOTE_AUDIO_EMB_BASE_URL=http://192.0.2.1:8112
 services:
   guideants-webapi-ui:
     extra_hosts:
-      - "max:${GA_REMOTE_AUDIO_EMB_HOST_IP:-192.168.0.111}"
+      - "max:${GA_REMOTE_AUDIO_EMB_HOST_IP:-192.0.2.1}"
     environment:
       - LocalServiceHosts__EmbeddingsBaseUrl=${GA_REMOTE_AUDIO_EMB_BASE_URL}
       - LocalServiceHosts__SpeechTranscriptionBaseUrl=${GA_REMOTE_AUDIO_EMB_BASE_URL}

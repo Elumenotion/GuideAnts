@@ -202,6 +202,10 @@ get_latest_variant_image() {
   echo "${best_source}|${best_build}"
 }
 
+get_image_arch() {
+  docker image inspect "$1" --format '{{.Architecture}}' 2>/dev/null || true
+}
+
 get_local_image_ref() {
   local repository="$1"
   local tag="${2:-latest}"
@@ -331,30 +335,66 @@ for target in "${targets[@]}"; do
   docker_cmd push "$latest_ref"
 done
 
-plantuml_source_ref="$(get_local_image_ref 'plantuml-1.2025.2' 'latest' 'No local plantuml-1.2025.2:latest image found. Build it first with docker/build/build_support_images.sh.')"
-mssql_source_ref="$(get_local_image_ref 'mssql2025-express-fts' 'latest' 'No local mssql2025-express-fts:latest image found. Build it first with docker/build/build_support_images.sh.')"
-searxng_source_ref="$(get_local_image_ref 'guideants-searxng' 'latest' 'No local guideants-searxng:latest image found. Build it first with docker/build/build_support_images.sh.')"
+# --- Architecture-aware support-image push -------------------------------------
+# Shared mutable tags ($COMPOSE_TAG / latest) must stay amd64: the amd64 stacks
+# consume them with pull_policy: always. arm64 (spark) builds get arch-suffixed
+# tags only, so neither stack can clobber the other's tags. The arch check is a
+# hard guard: it refuses to push an image under tags owned by the other arch.
+push_support_image() {
+  local name="$1" local_repo="$2" package="$3" amd64_tags="$4" arm64_tags="$5" missing_message="$6"
+  local amd64_ref arm64_ref
+  amd64_ref="$(get_local_image_ref "$local_repo" 'latest' 'not-found' 2>/dev/null || true)"
+  arm64_ref="$(get_local_image_ref "$local_repo" 'arm64'  'not-found' 2>/dev/null || true)"
 
-extra_targets=(
-  "plantuml|$plantuml_source_ref|guideants-plantuml|$CPU_BUILD,1.2025.2,$COMPOSE_TAG,latest${RELEASE_TAG:+,$RELEASE_TAG}"
-  "mssql|$mssql_source_ref|mssql2025-express-fts|$CPU_BUILD,$COMPOSE_TAG,latest${RELEASE_TAG:+,$RELEASE_TAG}"
-  "searxng|$searxng_source_ref|guideants-searxng|$CPU_BUILD,$COMPOSE_TAG,latest${RELEASE_TAG:+,$RELEASE_TAG}"
-)
+  if [[ -z "$amd64_ref" && -z "$arm64_ref" ]]; then
+    echo "$missing_message" >&2
+    exit 1
+  fi
 
-for target in "${extra_targets[@]}"; do
-  IFS='|' read -r name source_ref package tags_csv <<< "$target"
-  IFS=',' read -ra tags <<< "$tags_csv"
-
-  echo
-  echo "Pushing $name image"
-  echo "  Source:      $source_ref"
-  for tag in "${tags[@]}"; do
-    target_ref="$REGISTRY/$OWNER/$package:$tag"
-    echo "  Target tag:  $target_ref"
-    docker_cmd tag "$source_ref" "$target_ref"
-    docker_cmd push "$target_ref"
+  local pair_arch pair_tags source_ref
+  for pair in "amd64|$amd64_tags|$amd64_ref" "arm64|$arm64_tags|$arm64_ref"; do
+    IFS='|' read -r pair_arch pair_tags source_ref <<< "$pair"
+    [[ -z "$source_ref" || -z "$pair_tags" ]] && continue
+    local arch
+    arch="$(get_image_arch "$source_ref")"
+    if [[ "$arch" != "$pair_arch" ]]; then
+      echo "Local '$source_ref' is '$arch' but was selected as the $pair_arch source for $package." >&2
+      echo "Refusing to push: this would publish a $arch image under $pair_arch-owned tags." >&2
+      exit 1
+    fi
+    echo
+    echo "Pushing $name image ($arch)"
+    echo "  Source:      $source_ref"
+    IFS=',' read -ra tags_arr <<< "$pair_tags"
+    for tag in "${tags_arr[@]}"; do
+      local target_ref="$REGISTRY/$OWNER/$package:$tag"
+      echo "  Target tag:  $target_ref"
+      docker_cmd tag "$source_ref" "$target_ref"
+      docker_cmd push "$target_ref"
+    done
   done
-done
+}
+
+plantuml_amd64_tags="$CPU_BUILD,1.2025.2,$COMPOSE_TAG,latest${RELEASE_TAG:+,$RELEASE_TAG}"
+mssql_amd64_tags="$CPU_BUILD,$COMPOSE_TAG,latest${RELEASE_TAG:+,$RELEASE_TAG}"
+searxng_amd64_tags="$CPU_BUILD,$COMPOSE_TAG,latest${RELEASE_TAG:+,$RELEASE_TAG}"
+plantuml_arm64_tags="1.2025.2-arm64,$COMPOSE_TAG-arm64,latest-arm64${RELEASE_TAG:+,$RELEASE_TAG-arm64}"
+searxng_arm64_tags="$COMPOSE_TAG-arm64,latest-arm64${RELEASE_TAG:+,$RELEASE_TAG-arm64}"
+
+push_support_image 'plantuml' 'plantuml-1.2025.2' 'guideants-plantuml' \
+  "$plantuml_amd64_tags" \
+  "$plantuml_arm64_tags" \
+  "No local guideants-plantuml image found. Build it first with docker/build/build_support_images.sh."
+
+push_support_image 'mssql' 'mssql2025-express-fts' 'mssql2025-express-fts' \
+  "$mssql_amd64_tags" \
+  "" \
+  "No local mssql2025-express-fts:latest image found. Build it first with docker/build/build_support_images.sh."
+
+push_support_image 'searxng' 'guideants-searxng' 'guideants-searxng' \
+  "$searxng_amd64_tags" \
+  "$searxng_arm64_tags" \
+  "No local guideants-searxng image found. Build it first with docker/build/build_support_images.sh."
 
 echo
 pushed_variants=()

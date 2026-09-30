@@ -155,11 +155,16 @@ $scriptAgentPublish = Build-ScriptExecutionAgent -ServerPath $serverPath -RepoRo
 $plantumlContainerPath = Join-Path $PSScriptRoot "Sandboxes" "PlantUml"
 $plantumlScriptAgentPath = Join-Path $plantumlContainerPath "ScriptExecutionAgent"
 $plantumlDockerfilePath = Join-Path $plantumlContainerPath "dockerfile"
-$plantumlImageTag = "plantuml-1.2025.2"
+# Local tag is architecture-specific so amd64 and arm64 builds never overwrite
+# each other: spark mode produces :arm64, normal mode produces :latest.
+if ($Spark) { $plantumlImageTag = "plantuml-1.2025.2:arm64" } else { $plantumlImageTag = "plantuml-1.2025.2:latest" }
 $plantumlHashFile = Join-Path $buildStateDir "plantuml.hash"
 
 $plantumlInputFiles = @($plantumlDockerfilePath) + (Get-FilePathsRecursive -Root $scriptAgentPublish)
 $plantumlHash = Get-CombinedHash -Paths $plantumlInputFiles -RelativeTo $repoRoot
+# Reuse is per-mode: a stored hash from an amd64 build must never satisfy a
+# spark-mode reuse check, and vice versa.
+if ($Spark) { $plantumlHash = "arm64:$plantumlHash" } else { $plantumlHash = "amd64:$plantumlHash" }
 $plantumlCanReuse =
     (-not $RebuildBase) -and
     (Test-DockerImageExists -ImageTag $plantumlImageTag) -and
@@ -218,7 +223,8 @@ else {
 
 $searxngDockerfilePath = Join-Path $PSScriptRoot "searxng\Dockerfile"
 $searxngBuildContext = $repoRoot
-$searxngImageTag = "guideants-searxng:latest"
+# Architecture-specific local tag (see plantuml note above).
+if ($Spark) { $searxngImageTag = "guideants-searxng:arm64" } else { $searxngImageTag = "guideants-searxng:latest" }
 $searxngHashFile = Join-Path $buildStateDir "searxng.hash"
 if (-not (Test-Path $searxngDockerfilePath)) {
     Write-Error "SearXNG Dockerfile not found at $searxngDockerfilePath"
@@ -226,6 +232,7 @@ if (-not (Test-Path $searxngDockerfilePath)) {
 }
 $searxngInputFiles = @($searxngDockerfilePath) + (Get-FilePathsRecursive -Root (Join-Path $PSScriptRoot "searxng"))
 $searxngHash = Get-CombinedHash -Paths $searxngInputFiles -RelativeTo $repoRoot
+if ($Spark) { $searxngHash = "arm64:$searxngHash" } else { $searxngHash = "amd64:$searxngHash" }
 $searxngCanReuse =
     (-not $RebuildBase) -and
     (Test-DockerImageExists -ImageTag $searxngImageTag) -and
