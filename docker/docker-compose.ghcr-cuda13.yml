@@ -269,6 +269,7 @@ services:
   plantuml:
     image: ${GA_PLANTUML_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}
     pull_policy: always
+    platform: linux/amd64
     container_name: plantuml
     environment:
       - FILE_STORAGE_ROOT=/app/ContentFiles
@@ -287,6 +288,7 @@ services:
   searxng:
     image: ${GA_SEARXNG_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}
     pull_policy: always
+    platform: linux/amd64
     container_name: readweb-searxng
     restart: unless-stopped
     volumes:
