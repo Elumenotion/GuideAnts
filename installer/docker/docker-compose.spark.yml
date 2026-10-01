@@ -23,7 +23,7 @@
 # Images:
 #   - guideants-ai-spark     -> arm64 AI image from GHCR (built with the spark backend).
 #   - docling / documentserver -> arm64 images from quay / GHCR.
-#   - searxng / plantuml       -> amd64-only on GHCR; pinned to linux/amd64 and run under emulation.
+#   - searxng / plantuml       -> arm64-native via the -arm64 tags on GHCR.
 #
 # Single GPU (GB10): CUDA_VISIBLE_DEVICES=0, no tensor split.
 #
@@ -221,9 +221,8 @@ services:
     restart: unless-stopped
 
   plantuml:
-    image: ${GA_PLANTUML_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}
+    image: ${GA_PLANTUML_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main-arm64}
     pull_policy: missing
-    platform: linux/amd64
     container_name: plantuml
     ports:
       - "${GA_PLANTUML_PORT:-5113}:80"
@@ -242,9 +241,8 @@ services:
     restart: unless-stopped
 
   searxng:
-    image: ${GA_SEARXNG_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}
+    image: ${GA_SEARXNG_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main-arm64}
     pull_policy: missing
-    platform: linux/amd64
     container_name: readweb-searxng
     restart: unless-stopped
     ports:

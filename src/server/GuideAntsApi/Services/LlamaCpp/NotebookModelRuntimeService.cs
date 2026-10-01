@@ -22,8 +22,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     private readonly IMemoryCache _cache;
     private readonly ILlamaRuntimeCoordinator _coordinator;
     private readonly IChatModelResolver _chatModelResolver;
-    private readonly ILocalAiStartupWarmupService _localAiWarmupService;
-    private readonly ILocalAiWarmupService _localAiWarmup;
     private readonly INotebookChatAliasState _notebookChatAliasState;
     private readonly ILocalAiStackHostResolver _stackHostResolver;
     private readonly ILlamaStackRuntimeClientProvider _stackClients;
@@ -43,8 +41,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         IMemoryCache cache,
         ILlamaRuntimeCoordinator coordinator,
         IChatModelResolver chatModelResolver,
-        ILocalAiStartupWarmupService localAiWarmupService,
-        ILocalAiWarmupService localAiWarmup,
         INotebookChatAliasState notebookChatAliasState,
         ILocalAiStackHostResolver stackHostResolver,
         ILlamaStackRuntimeClientProvider stackClients,
@@ -56,8 +52,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         _cache = cache;
         _coordinator = coordinator;
         _chatModelResolver = chatModelResolver;
-        _localAiWarmupService = localAiWarmupService;
-        _localAiWarmup = localAiWarmup;
         _notebookChatAliasState = notebookChatAliasState;
         _stackHostResolver = stackHostResolver;
         _stackClients = stackClients;
@@ -187,9 +181,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             {
                 status.State = "loading";
                 status.ActiveOperation = CreateExternalLoadingOperation(
-                    _localAiWarmupService.IsWarmupInProgress
-                        ? "loading"
-                        : ResolveExternalLoadPhase(instances, requiredByInstance));
+                    ResolveExternalLoadPhase(instances, requiredByInstance));
             }
             else
             {
@@ -389,8 +381,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
     private async Task ProcessLoadOperationAsync(ModelLoadOperationDto op, List<ModelDto> requiredModels)
     {
-        var warmup = _localAiWarmup;
-        var drainedAuxForChat = false;
 
         try
         {
@@ -517,27 +507,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         }
         finally
         {
-            if (drainedAuxForChat
-                && !string.Equals(op.State, "ready", StringComparison.Ordinal))
-            {
-                try
-                {
-                    _logger.LogInformation(
-                        "Load operation {OperationId} failed after auxiliary drain; restoring routed warmup desired state.",
-                        op.OperationId);
-                    await warmup.SyncDesiredAndApplyAsync(
-                        waitForCompletion: false,
-                        cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception reloadEx)
-                {
-                    _logger.LogError(
-                        reloadEx,
-                        "Failed restoring warmup desired state after operation {OperationId} failure.",
-                        op.OperationId);
-                }
-            }
-
             _loadLock.Release();
         }
     }
@@ -799,17 +768,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 && IsRouterModelFailed(m))))
         {
             return false;
-        }
-
-        if (_localAiWarmupService.IsWarmupInProgress
-            && requiredByInstance.Any(pair =>
-                instances.Any(i => string.Equals(i.CanonicalKey, pair.Key, StringComparison.OrdinalIgnoreCase)
-                    && !pair.Value.IsSubsetOf(i.Snapshot.Data
-                        .Where(IsRouterModelLoaded)
-                        .Select(m => NormalizeRouterModelId(m.Id))
-                        .ToHashSet(StringComparer.Ordinal)))))
-        {
-            return true;
         }
 
         foreach (var pair in requiredByInstance)

@@ -385,7 +385,7 @@ public sealed class SpeechSynthesisServiceTests
     public async Task SynthesizeToWavAsync_Local_Fails_WhenTextEmptyAfterStripping()
     {
         using var httpClient = new HttpClient(new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)));
-        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        var recovery = new Mock<ILocalServiceLoadService>(MockBehavior.Strict);
         var service = CreateService(
             httpClient,
             "LocalServiceHosts:SpeechSynthesisBaseUrl",
@@ -397,7 +397,8 @@ public sealed class SpeechSynthesisServiceTests
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("empty after SSML stripping");
-        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        recovery.Verify(x => x.UnloadServiceAsync("SpeechSynthesis", It.IsAny<CancellationToken>()), Times.Never);
+            recovery.Verify(x => x.EnsureLoadedAsync("SpeechSynthesis", It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -425,10 +426,13 @@ public sealed class SpeechSynthesisServiceTests
             };
         });
         using var httpClient = new HttpClient(handler);
-        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        var recovery = new Mock<ILocalServiceLoadService>(MockBehavior.Strict);
         recovery
-            .Setup(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Setup(x => x.UnloadServiceAsync("SpeechSynthesis", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(OkResult());
+        recovery
+            .Setup(x => x.EnsureLoadedAsync("SpeechSynthesis", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(OkResult());
         var service = CreateService(
             httpClient,
             "LocalServiceHosts:SpeechSynthesisBaseUrl",
@@ -442,7 +446,8 @@ public sealed class SpeechSynthesisServiceTests
 
             result.Success.Should().BeTrue();
             calls.Should().Be(2);
-            recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Once);
+            recovery.Verify(x => x.UnloadServiceAsync("SpeechSynthesis", It.IsAny<CancellationToken>()), Times.Once);
+            recovery.Verify(x => x.EnsureLoadedAsync("SpeechSynthesis", It.IsAny<CancellationToken>()), Times.Once);
         }
         finally
         {
@@ -461,7 +466,7 @@ public sealed class SpeechSynthesisServiceTests
             Content = new StringContent("bad voice", Encoding.UTF8, "text/plain")
         });
         using var httpClient = new HttpClient(handler);
-        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        var recovery = new Mock<ILocalServiceLoadService>(MockBehavior.Strict);
         var service = CreateService(
             httpClient,
             "LocalServiceHosts:SpeechSynthesisBaseUrl",
@@ -472,7 +477,8 @@ public sealed class SpeechSynthesisServiceTests
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("BadRequest");
-        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        recovery.Verify(x => x.UnloadServiceAsync("SpeechSynthesis", It.IsAny<CancellationToken>()), Times.Never);
+            recovery.Verify(x => x.EnsureLoadedAsync("SpeechSynthesis", It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -540,7 +546,7 @@ public sealed class SpeechSynthesisServiceTests
         IDictionary<string, string?>? configurationValues = null,
         string? modelId = null,
         string? requestPresetJson = null,
-        ILocalAiStartupWarmupService? localSpeechEngineRecovery = null)
+        ILocalServiceLoadService? localSpeechEngineRecovery = null)
     {
         var azureOptionsMonitor = new Mock<IOptionsMonitor<AzureSpeechServiceOptions>>();
         azureOptionsMonitor.SetupGet(x => x.CurrentValue).Returns(new AzureSpeechServiceOptions
@@ -598,4 +604,8 @@ public sealed class SpeechSynthesisServiceTests
             return _responder(request);
         }
     }
+
+    private static LocalServiceOperationResult OkResult() =>
+        new() { ServiceId = "SpeechSynthesis", Success = true };
+
 }

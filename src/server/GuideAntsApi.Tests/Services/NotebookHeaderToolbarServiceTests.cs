@@ -132,9 +132,6 @@ public sealed class NotebookHeaderToolbarServiceTests
             .Build();
         var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: true);
 
-        var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
-        warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
-
         var sut = new NotebookHeaderToolbarService(
             db,
             settings.Object,
@@ -145,7 +142,6 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatDefaults,
             configuration,
             Mock.Of<IHttpClientFactory>(),
-            warmup.Object,
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
@@ -241,9 +237,6 @@ public sealed class NotebookHeaderToolbarServiceTests
         var configuration = new ConfigurationBuilder().Build();
         var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: false);
 
-        var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
-        warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
-
         var sut = new NotebookHeaderToolbarService(
             db,
             settings.Object,
@@ -254,7 +247,6 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatDefaults,
             configuration,
             Mock.Of<IHttpClientFactory>(),
-            warmup.Object,
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
@@ -348,9 +340,6 @@ public sealed class NotebookHeaderToolbarServiceTests
         var configuration = new ConfigurationBuilder().Build();
         var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: false);
 
-        var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
-        warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
-
         var sut = new NotebookHeaderToolbarService(
             db,
             settings.Object,
@@ -361,7 +350,6 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatDefaults,
             configuration,
             Mock.Of<IHttpClientFactory>(),
-            warmup.Object,
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
@@ -487,9 +475,6 @@ public sealed class NotebookHeaderToolbarServiceTests
         var configuration = new ConfigurationBuilder().Build();
         var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: false);
 
-        var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
-        warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
-
         var sut = new NotebookHeaderToolbarService(
             db,
             settings.Object,
@@ -500,7 +485,6 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatDefaults,
             configuration,
             Mock.Of<IHttpClientFactory>(),
-            warmup.Object,
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
@@ -612,9 +596,6 @@ public sealed class NotebookHeaderToolbarServiceTests
         var configuration = new ConfigurationBuilder().Build();
         var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: false);
 
-        var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
-        warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
-
         var sut = new NotebookHeaderToolbarService(
             db,
             settings.Object,
@@ -625,7 +606,6 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatDefaults,
             configuration,
             Mock.Of<IHttpClientFactory>(),
-            warmup.Object,
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
@@ -1034,9 +1014,8 @@ public sealed class NotebookHeaderToolbarServiceTests
         INotebookModelRuntimeService? llamaRuntime = null,
         IConfiguration? configuration = null,
         IChatDefaultsStore? chatDefaultsStore = null,
-        IHttpClientFactory? httpClientFactory = null,
-        ILocalAiStartupWarmupService? warmupService = null)
-    {
+        IHttpClientFactory? httpClientFactory = null)
+{
         var readinessMock = readiness ?? CreateDefaultReadinessMock().Object;
         var chatModelResolverMock = chatModelResolver ?? CreateDefaultChatModelResolver().Object;
         var conversationsMock = conversations ?? new Mock<IConversationManager>(MockBehavior.Strict).Object;
@@ -1051,8 +1030,6 @@ public sealed class NotebookHeaderToolbarServiceTests
             })
             .Build();
         var chatDefaults = chatDefaultsStore ?? CreateDefaultChatDefaultsStore(overrideAllChatModels: true);
-        var warmup = warmupService ?? CreateDefaultWarmupService().Object;
-
         return new NotebookHeaderToolbarService(
             db,
             settings,
@@ -1063,7 +1040,6 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatDefaults,
             config,
             httpClientFactory ?? Mock.Of<IHttpClientFactory>(),
-            warmup,
             NullLogger<NotebookHeaderToolbarService>.Instance);
     }
 
@@ -1124,13 +1100,6 @@ public sealed class NotebookHeaderToolbarServiceTests
                 State = "ready"
             });
         return llamaRuntime;
-    }
-
-    private static Mock<ILocalAiStartupWarmupService> CreateDefaultWarmupService()
-    {
-        var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
-        warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
-        return warmup;
     }
 
     private static IHttpClientFactory CreateHttpClientFactory(

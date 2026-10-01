@@ -154,11 +154,13 @@ public static class SettingsCoreEndpoints
         .Produces(StatusCodes.Status409Conflict);
 
         group.MapPost("/local-ai/warmup", async (
-            ILocalAiStartupWarmupService localAiWarmup,
+            ILocalServiceLoadService loadService,
             CancellationToken cancellationToken) =>
         {
-            await localAiWarmup.WarmupAllAsync(cancellationToken).ConfigureAwait(false);
-            return Results.Ok();
+            // Compatibility endpoint: performs direct per-service ensure-loaded for
+            // every local service with a persisted model ref. No plan.
+            var results = await loadService.StartupEnsureAsync(cancellationToken).ConfigureAwait(false);
+            return Results.Ok(results.Select(r => new { r.ServiceId, r.Success, r.Error }));
         })
         .WithName("WarmupLocalAiStack")
         .Produces(StatusCodes.Status200OK);

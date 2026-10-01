@@ -120,10 +120,13 @@ public sealed class SpeechTranscriptionServiceDeepTests
             return Json("{\"text\":\"after recycle\",\"durationSeconds\":3}");
         });
         using var httpClient = new HttpClient(handler);
-        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        var recovery = new Mock<ILocalServiceLoadService>(MockBehavior.Strict);
         recovery
-            .Setup(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Setup(x => x.UnloadServiceAsync("SpeechTranscription", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(OkResult());
+        recovery
+            .Setup(x => x.EnsureLoadedAsync("SpeechTranscription", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(OkResult());
         var service = CreateService(
             httpClient,
             LocalProviderSection,
@@ -135,7 +138,8 @@ public sealed class SpeechTranscriptionServiceDeepTests
 
         result.Text.Should().Be("after recycle");
         calls.Should().Be(2);
-        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        recovery.Verify(x => x.UnloadServiceAsync("SpeechTranscription", It.IsAny<CancellationToken>()), Times.Once);
+        recovery.Verify(x => x.EnsureLoadedAsync("SpeechTranscription", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [TestMethod]
@@ -146,7 +150,7 @@ public sealed class SpeechTranscriptionServiceDeepTests
             Content = new StringContent("bad request", Encoding.UTF8, "text/plain")
         });
         using var httpClient = new HttpClient(handler);
-        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        var recovery = new Mock<ILocalServiceLoadService>(MockBehavior.Strict);
         var service = CreateService(
             httpClient,
             LocalProviderSection,
@@ -157,7 +161,8 @@ public sealed class SpeechTranscriptionServiceDeepTests
         var act = async () => await service.TranscribeAudioWithDurationAsync(content, "rec.wav", "audio/wav");
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*BadRequest*");
-        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        recovery.Verify(x => x.UnloadServiceAsync("SpeechTranscription", It.IsAny<CancellationToken>()), Times.Never);
+        recovery.Verify(x => x.EnsureLoadedAsync("SpeechTranscription", It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -165,7 +170,7 @@ public sealed class SpeechTranscriptionServiceDeepTests
     {
         var handler = new StubHandler(_ => Json("{\"text\":\"\",\"durationSeconds\":1}"));
         using var httpClient = new HttpClient(handler);
-        var recovery = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
+        var recovery = new Mock<ILocalServiceLoadService>(MockBehavior.Strict);
         var service = CreateService(
             httpClient,
             LocalProviderSection,
@@ -176,7 +181,8 @@ public sealed class SpeechTranscriptionServiceDeepTests
         var result = await service.TranscribeAudioWithDurationAsync(content, "rec.wav", "audio/wav");
 
         result.Text.Should().BeEmpty();
-        recovery.Verify(x => x.RecycleSharedSpeechEnginesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        recovery.Verify(x => x.UnloadServiceAsync("SpeechTranscription", It.IsAny<CancellationToken>()), Times.Never);
+        recovery.Verify(x => x.EnsureLoadedAsync("SpeechTranscription", It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -360,7 +366,7 @@ public sealed class SpeechTranscriptionServiceDeepTests
         string? modelId = null,
         string? requestPresetJson = null,
         int maxFileSizeMB = 500,
-        ILocalAiStartupWarmupService? localSpeechEngineRecovery = null)
+        ILocalServiceLoadService? localSpeechEngineRecovery = null)
     {
         var speechOptionsMonitor = new StaticOptionsMonitor<AzureSpeechServiceOptions>(
             azureOptions ?? new AzureSpeechServiceOptions { Endpoint = "https://speech.example.com", ApiKey = "k" });
@@ -425,4 +431,8 @@ public sealed class SpeechTranscriptionServiceDeepTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(responder(request));
     }
+
+    private static LocalServiceOperationResult OkResult() =>
+        new() { ServiceId = "SpeechTranscription", Success = true };
+
 }

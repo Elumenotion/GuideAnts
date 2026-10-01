@@ -271,9 +271,8 @@ public static class SettingsServiceLocalModelsEndpoints
         // Image Generation).
         //
         // GuideAntsApi is the loading-policy authority. This endpoint persists the
-        // selection in ServiceModes; LocalAiStartupWarmupService derives a complete
-        // plan from live routing and sends it to ga-admin for mechanical execution.
-        // A load requested while the local provider is inactive is refused (409).
+        // selection in ServiceModes and loads it directly on the service's own admin
+        // endpoint. There is no multi-service plan and no cross-service coupling.
         //
         //  - ASR / TTS / Embeddings: optional model_path or model_id selects a specific
         //    downloaded model folder; the ref is persisted verbatim on ServiceModes
@@ -283,7 +282,8 @@ public static class SettingsServiceLocalModelsEndpoints
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/load", async (
             string serviceId,
             [FromBody] JsonElement payload,
-            ILocalAiStartupWarmupService warmup,
+            IApplicationSettingsService settings,
+            ILocalServiceLoadService loadService,
             CancellationToken cancellationToken) =>
         {
             var isImageGeneration = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal);
@@ -320,16 +320,40 @@ public static class SettingsServiceLocalModelsEndpoints
                 requestedModelRef = modelId;
             }
 
-            var result = await warmup
-                .ReconcileLocalServiceAsync(serviceId, requestedModelRef, cancellationToken)
+            // Persist the selection in ServiceModes when a specific ref was requested
+            // (a model selected in config is the API-owned selection authority).
+            if (!string.IsNullOrWhiteSpace(requestedModelRef))
+            {
+                if (!LocalServiceModelRefRules.IsLoadableLocalModelRef(requestedModelRef))
+                {
+                    var refKind = isImageGeneration ? "bundle id" : "local model path";
+                    return Results.BadRequest(new { error = $@"Model reference '{requestedModelRef}' is not a valid {refKind}." });
+                }
+
+                await settings
+                    .SetServiceModeModelIdAsync(serviceId, requestedModelRef, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var effectiveRef = !string.IsNullOrWhiteSpace(requestedModelRef)
+                ? requestedModelRef
+                : await LocalServiceModeSelectionReader.TryReadLocalModelRefAsync(settings, serviceId, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(effectiveRef))
+            {
+                var refKind = isImageGeneration ? "bundle" : "model";
+                return Results.Conflict(new { error = $@"No local {refKind} is selected in ServiceModes. Select an active local {refKind} before loading." });
+            }
+
+            var result = await loadService
+                .LoadServiceAsync(serviceId, effectiveRef, cancellationToken)
                 .ConfigureAwait(false);
-            return MapReconcileResult(serviceId, result);
+            return MapLoadResult(serviceId, result);
         })
         .WithName("LoadServiceLocalModel");
 
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/unload", async (
             string serviceId,
-            ILocalAiStartupWarmupService warmup,
+            ILocalServiceLoadService loadService,
             CancellationToken cancellationToken) =>
         {
             var isImageGeneration = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal);
@@ -341,10 +365,10 @@ public static class SettingsServiceLocalModelsEndpoints
                 return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose a local model unload endpoint." });
             }
 
-            var result = await warmup
-                .PowerOffLocalServiceEngineAsync(serviceId, cancellationToken)
+            var result = await loadService
+                .UnloadServiceAsync(serviceId, cancellationToken)
                 .ConfigureAwait(false);
-            return MapReconcileResult(serviceId, result);
+            return MapLoadResult(serviceId, result);
         })
         .WithName("UnloadServiceLocalModel");
 
@@ -354,13 +378,17 @@ public static class SettingsServiceLocalModelsEndpoints
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/{modelRef}/select-active", async (
             string serviceId,
             string modelRef,
-            ILocalAiStartupWarmupService warmup,
+            IApplicationSettingsService settings,
+            ILocalServiceLoadService loadService,
             CancellationToken cancellationToken) =>
         {
-            var result = await warmup
-                .ReconcileLocalServiceAsync(serviceId, modelRef, cancellationToken)
+            await settings
+                .SetServiceModeModelIdAsync(serviceId, modelRef, cancellationToken)
                 .ConfigureAwait(false);
-            return MapReconcileResult(serviceId, result);
+            var result = await loadService
+                .LoadServiceAsync(serviceId, modelRef, cancellationToken)
+                .ConfigureAwait(false);
+            return MapLoadResult(serviceId, result);
         })
         .WithName("SelectServiceLocalModel");
 
@@ -409,27 +437,16 @@ public static class SettingsServiceLocalModelsEndpoints
         .WithName("DeleteServiceLocalModel");
     }
 
-    private static IResult MapReconcileResult(string serviceId, LocalServiceReconcileResult result)
+    private static IResult MapLoadResult(string serviceId, LocalServiceOperationResult result)
     {
-        return result.Outcome switch
+        if (result.Success)
         {
-            LocalServiceReconcileOutcome.Warm => Results.Ok(new { serviceId, status = "loaded" }),
-            LocalServiceReconcileOutcome.Idle => Results.Ok(new { serviceId, status = "unloaded" }),
-            LocalServiceReconcileOutcome.NotActiveProvider => Results.Conflict(new
-            {
-                error = result.Detail ?? $"'{serviceId}' is not the active provider; nothing was loaded.",
-            }),
-            LocalServiceReconcileOutcome.Unavailable => SettingsGroupFactory.LocalServiceUnavailable(serviceId),
-            LocalServiceReconcileOutcome.RoutingUnknown => Results.Conflict(new
-            {
-                error = result.Detail ?? $"Routing for '{serviceId}' could not be resolved.",
-            }),
-            LocalServiceReconcileOutcome.Timeout => Results.Json(
-                new { error = result.Detail ?? $"'{serviceId}' did not reach the desired state in time." },
-                statusCode: StatusCodes.Status504GatewayTimeout),
-            _ => Results.Json(
-                new { error = result.Detail ?? $"Reconcile for '{serviceId}' failed." },
-                statusCode: StatusCodes.Status502BadGateway),
-        };
+            var loaded = result.Readiness?.Loaded ?? false;
+            return Results.Ok(new { serviceId, status = loaded ? "loaded" : "unloaded" });
+        }
+
+        return Results.Json(
+            new { serviceId, error = result.Error ?? $"Operation for '{serviceId}' failed." },
+            statusCode: StatusCodes.Status502BadGateway);
     }
 }

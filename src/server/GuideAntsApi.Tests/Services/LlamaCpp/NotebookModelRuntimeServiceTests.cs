@@ -19,8 +19,6 @@ public class NotebookModelRuntimeServiceTests
 {
     private Mock<ILlamaServerRuntimeClient> _mockLlamaClient = null!;
     private Mock<IChatModelResolver> _mockChatModelResolver = null!;
-    private Mock<ILocalAiStartupWarmupService> _mockLocalAiWarmupService = null!;
-    private Mock<ILocalAiWarmupService> _mockLocalAiWarmup = null!;
     private Mock<ILocalAiStackHostResolver> _mockStackHostResolver = null!;
     private Mock<ILlamaStackRuntimeClientProvider> _mockStackClientProvider = null!;
     private Mock<ILogger<NotebookModelRuntimeService>> _mockLogger = null!;
@@ -35,7 +33,6 @@ public class NotebookModelRuntimeServiceTests
 
         _mockLlamaClient = new Mock<ILlamaServerRuntimeClient>();
         _mockChatModelResolver = new Mock<IChatModelResolver>();
-        _mockLocalAiWarmupService = new Mock<ILocalAiStartupWarmupService>();
         // Default: pass the entity id through unchanged (Direct), which preserves the
         // legacy "preload exactly what the assistant references" contract these tests
         // were originally written against. Override per-test when asserting the new
@@ -50,23 +47,6 @@ public class NotebookModelRuntimeServiceTests
                     "openai-chat",
                     ParameterAuthority.AssistantDefinition,
                     new Dictionary<string, System.Text.Json.JsonElement>())));
-        _mockLocalAiWarmupService
-            .Setup(s => s.UnloadAuxiliaryServicesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _mockLocalAiWarmupService
-            .Setup(s => s.EnsureAuxiliaryServicesLoadedAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _mockLocalAiWarmupService
-            .Setup(s => s.IsWarmupInProgress)
-            .Returns(false);
-        _mockLocalAiWarmup = new Mock<ILocalAiWarmupService>();
-        _mockLocalAiWarmup.SetupGet(s => s.IsApplyInProgress).Returns(false);
-        _mockLocalAiWarmup
-            .Setup(s => s.SyncDesiredAndApplyAsync(
-                It.IsAny<WarmupDesiredBuildOptions?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
         _mockStackHostResolver = new Mock<ILocalAiStackHostResolver>();
         _mockStackHostResolver
             .Setup(r => r.GetAllConfiguredStackBases())
@@ -270,7 +250,6 @@ public class NotebookModelRuntimeServiceTests
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
 
-        _mockLocalAiWarmupService.Setup(s => s.IsWarmupInProgress).Returns(true);
         _mockLlamaClient.Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LlamaModelsResponse
             {
@@ -295,36 +274,6 @@ public class NotebookModelRuntimeServiceTests
     }
 
     [TestMethod]
-    public async Task GetRuntimeStatusAsync_StartupWarmupInProgress_ReturnsLoadingWithExternalOperation()
-    {
-        var notebookId = Guid.NewGuid();
-        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
-        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
-
-        _context.Assistants.Add(guide);
-        _context.Notebooks.Add(notebook);
-
-        var model = new Model
-        {
-            ModelId = "qwen-local",
-            Provider = "llama-cpp",
-            IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
-        };
-        _context.Models.Add(model);
-        await _context.SaveChangesAsync();
-
-        _mockLocalAiWarmupService.Setup(s => s.IsWarmupInProgress).Returns(true);
-        _mockLlamaClient.Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new LlamaModelsResponse { Data = new List<LlamaModelData>() });
-
-        var status = await _service.GetRuntimeStatusAsync(notebookId);
-
-        Assert.AreEqual("loading", status.State);
-        Assert.AreEqual(NotebookModelRuntimeService.ExternalLoadingOperationId, status.ActiveOperation?.OperationId);
-    }
-
-    [TestMethod]
     public async Task GetRuntimeStatusAsync_StartupWarmupInProgressButRequiredModelLoaded_ReturnsReady()
     {
         var notebookId = Guid.NewGuid();
@@ -344,7 +293,6 @@ public class NotebookModelRuntimeServiceTests
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
 
-        _mockLocalAiWarmupService.Setup(s => s.IsWarmupInProgress).Returns(true);
         _mockLlamaClient.Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LlamaModelsResponse
             {
@@ -362,37 +310,6 @@ public class NotebookModelRuntimeServiceTests
 
         Assert.AreEqual("ready", status.State);
         Assert.IsNull(status.ActiveOperation);
-    }
-
-    [TestMethod]
-    public async Task StartLoadOperationAsync_WhenExternalLoadInProgress_ReturnsExistingOperation()
-    {
-        var notebookId = Guid.NewGuid();
-        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
-        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
-
-        _context.Assistants.Add(guide);
-        _context.Notebooks.Add(notebook);
-
-        var model = new Model
-        {
-            ModelId = "qwen-local",
-            Provider = "llama-cpp",
-            IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
-        };
-        _context.Models.Add(model);
-        await _context.SaveChangesAsync();
-
-        _mockLocalAiWarmupService.Setup(s => s.IsWarmupInProgress).Returns(true);
-        _mockLlamaClient.Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new LlamaModelsResponse { Data = new List<LlamaModelData>() });
-
-        var op = await _service.StartLoadOperationAsync(notebookId);
-
-        Assert.AreEqual("loading", op.State);
-        Assert.AreEqual(NotebookModelRuntimeService.ExternalLoadingOperationId, op.OperationId);
-        _mockLocalAiWarmupService.Verify(s => s.UnloadAuxiliaryServicesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -572,8 +489,6 @@ public class NotebookModelRuntimeServiceTests
             cache,
             new LlamaRuntimeCoordinator(),
             _mockChatModelResolver.Object,
-            _mockLocalAiWarmupService.Object,
-            _mockLocalAiWarmup.Object,
             new NotebookChatAliasState(),
             _mockStackHostResolver.Object,
             _mockStackClientProvider.Object,
@@ -655,13 +570,6 @@ public class NotebookModelRuntimeServiceTests
             c => c.UnloadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
 
-        // No lifecycle-plan apply on a load path - ever.
-        _mockLocalAiWarmup.Verify(
-            s => s.SyncDesiredAndApplyAsync(
-                It.IsAny<WarmupDesiredBuildOptions?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()),
-            Times.Never);
     }
 
     [TestMethod]

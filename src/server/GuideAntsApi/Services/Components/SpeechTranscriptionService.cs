@@ -36,7 +36,7 @@ namespace GuideAntsApi.Services.Components
         private readonly IServiceModeResolver _serviceModeResolver;
         private readonly IConfiguration _configuration;
         private readonly ILogger<SpeechTranscriptionService> _logger;
-        private readonly ILocalAiStartupWarmupService? _localSpeechEngineRecovery;
+        private readonly ILocalServiceLoadService? _localSpeechEngineRecovery;
 
         public SpeechTranscriptionService(
             HttpClient httpClient,
@@ -48,7 +48,7 @@ namespace GuideAntsApi.Services.Components
             IServiceModeResolver serviceModeResolver,
             IConfiguration configuration,
             ILogger<SpeechTranscriptionService> logger,
-            ILocalAiStartupWarmupService? localSpeechEngineRecovery = null)
+            ILocalServiceLoadService? localSpeechEngineRecovery = null)
         {
             _httpClient = httpClient;
             _speechOptionsMonitor = speechOptions;
@@ -814,8 +814,12 @@ namespace GuideAntsApi.Services.Components
                     payloadSizeBytes,
                     payloadSizeBucket,
                     ex.GetType().Name);
+                // Per-service engine recovery: unload and reload this ASR engine.
                 await _localSpeechEngineRecovery
-                    .RecycleSharedSpeechEnginesAsync(cancellationToken)
+                    .UnloadServiceAsync("SpeechTranscription", cancellationToken)
+                    .ConfigureAwait(false);
+                await _localSpeechEngineRecovery
+                    .EnsureLoadedAsync("SpeechTranscription", cancellationToken)
                     .ConfigureAwait(false);
                 return await PostLocalAsrOnceAsync(
                     audioBytes,
