@@ -25,7 +25,6 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
     private readonly IChatDefaultsStore _chatDefaultsStore;
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILocalAiStartupWarmupService _warmupService;
     private readonly ILogger<NotebookHeaderToolbarService> _logger;
 
     public NotebookHeaderToolbarService(
@@ -38,7 +37,6 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         IChatDefaultsStore chatDefaultsStore,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
-        ILocalAiStartupWarmupService warmupService,
         ILogger<NotebookHeaderToolbarService> logger)
     {
         _db = db;
@@ -50,7 +48,6 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         _chatDefaultsStore = chatDefaultsStore;
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
-        _warmupService = warmupService;
         _logger = logger;
     }
 
@@ -614,7 +611,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
 
         if (supportsPower)
         {
-            var startupLoading = _warmupService.IsWarmupInProgress && !runtimeProbe.Loaded;
+            var startupLoading = runtimeProbe.Loading && !runtimeProbe.Loaded;
             var operationActive = runtimeProbe.Loading
                 || runtimeProbe.PostLoadWarming
                 || runtimeProbe.StartupWarmupRunning

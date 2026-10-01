@@ -255,27 +255,25 @@ public class Program
 
         ServiceRoutingStartupValidator.Validate(app.Services.GetRequiredService<IConfiguration>());
 
-        // API startup owns lifecycle policy: derive a complete plan from live routing and
-        // POST /warmup/apply. The AI container starts with no retained plan and cannot
-        // load or warm engines until this API sends an explicit command.
+        // API startup owns lifecycle policy: for each local service with a persisted
+        // model ref, ensure the engine is loaded directly on that service. No plan, no
+        // cross-service coupling - a failure on one service logs and continues.
         app.Lifetime.ApplicationStarted.Register(() =>
         {
             _ = Task.Run(async () =>
             {
                 using var warmupScope = app.Services.CreateScope();
-                var localAiWarmup = warmupScope.ServiceProvider
-                    .GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService>();
+                var loadService = warmupScope.ServiceProvider
+                    .GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalServiceLoadService>();
                 try
                 {
-                    // Must wait + verify: fire-and-forget startup left engines loaded under
-                    // cloud routing when ga-admin was still on retired INI autoload.
-                    await localAiWarmup.SyncDesiredAndApplyAsync(waitForCompletion: true).ConfigureAwait(false);
-                    LogPhase("LocalAiStartupWarmup (background)");
+                    await loadService.StartupEnsureAsync(CancellationToken.None).ConfigureAwait(false);
+                    LogPhase("LocalServiceStartupEnsure (background)");
                 }
                 catch (Exception ex)
                 {
                     var startupLogger = warmupScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-                    startupLogger.LogWarning(ex, "Local AI startup warmup failed; continuing application startup.");
+                    startupLogger.LogWarning(ex, "Local AI startup ensure failed; continuing application startup.");
                 }
             });
         });

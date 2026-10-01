@@ -53,7 +53,7 @@ public static class SettingsServiceEditorEndpoints
             string serviceId,
             [FromBody] SetActiveProviderRequest request,
             IApplicationSettingsService settingsService,
-            ILocalAiStartupWarmupService localAiWarmup,
+            ILocalServiceLoadService loadService,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -72,17 +72,54 @@ public static class SettingsServiceEditorEndpoints
                 var updated = await settingsService.SetServiceActiveProviderAsync(serviceId, request.ProviderId, cancellationToken);
                 var providerChanged = previousState == null
                     || !string.Equals(previousState.ActiveProviderId, request.ProviderId, StringComparison.Ordinal);
+
+                // Config-change lifecycle, per service: if the previously active provider
+                // was local, unload that service's model. If the newly active provider is
+                // local, ensure that service's model is loaded. Independent per service.
                 if (providerChanged && !request.DeferWarmup)
                 {
-                    try
+                    var localSection = LocalServiceModeSelectionReader.ResolveLocalProviderSection(serviceId);
+                    var oldWasLocal = localSection is not null
+                        && previousState is not null
+                        && string.Equals(previousState.ActiveProviderId, localSection, StringComparison.Ordinal);
+                    var newIsLocal = localSection is not null
+                        && string.Equals(request.ProviderId, localSection, StringComparison.Ordinal);
+
+                    var logger = loggerFactory.CreateLogger("ServiceModesRuntimeReload");
+                    if (oldWasLocal)
                     {
-                        await localAiWarmup.WarmupAllAsync(cancellationToken).ConfigureAwait(false);
+                        try
+                        {
+                            var unloadResult = await loadService.UnloadServiceAsync(serviceId, cancellationToken).ConfigureAwait(false);
+                            if (!unloadResult.Success)
+                            {
+                                logger.LogWarning(
+                                    "Failed to unload {ServiceId} after provider changed away from local: {Error}",
+                                    serviceId, unloadResult.Error);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "Failed to unload {ServiceId} after provider changed away from local.", serviceId);
+                        }
                     }
-                    catch (Exception ex)
+
+                    if (newIsLocal)
                     {
-                        loggerFactory
-                            .CreateLogger("ServiceModesRuntimeReload")
-                            .LogWarning(ex, "Failed to reconcile local AI stack after service routing change.");
+                        try
+                        {
+                            var ensureResult = await loadService.EnsureLoadedAsync(serviceId, cancellationToken).ConfigureAwait(false);
+                            if (!ensureResult.Success)
+                            {
+                                logger.LogWarning(
+                                    "Failed to ensure {ServiceId} loaded after provider changed to local: {Error}",
+                                    serviceId, ensureResult.Error);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "Failed to ensure {ServiceId} loaded after provider changed to local.", serviceId);
+                        }
                     }
                 }
 

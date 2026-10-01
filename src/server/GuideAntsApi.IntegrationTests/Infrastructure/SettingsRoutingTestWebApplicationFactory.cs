@@ -39,8 +39,8 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
             services.RemoveAll<IRouterModelsConfigService>();
             services.AddSingleton<IRouterModelsConfigService>(RouterStub);
 
-            services.RemoveAll<ILocalAiStartupWarmupService>();
-            services.AddSingleton<ILocalAiStartupWarmupService>(_ => new StubLocalAiWarmupService());
+            services.RemoveAll<ILocalServiceLoadService>();
+            services.AddSingleton<ILocalServiceLoadService>(_ => new StubLocalServiceLoadService());
 
             // Restore production chat factory so chat resolver + validator
             // chain is observable in Phase G tests. The base factory installs
@@ -52,61 +52,37 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
     }
 
     /// <summary>
-    /// Stand-in for ga-admin warmup apply. The lifecycle plan carries no llama
-    /// section - llama actuation is API-direct (settings <c>/runtime/load</c>
-    /// and the global-default reconciler call the runtime client themselves) -
-    /// so this stub must never load an alias. Keeping it a no-op is what makes
-    /// the contract observable: any test that needs a load sees it only because
-    /// the endpoint reached <see cref="StubLlamaServerRuntimeClient"/> directly.
+    /// No-op stand-in for the direct per-service load service. Integration
+    /// tests do not contact real local AI backends; this stub keeps the DI
+    /// graph resolvable without any HTTP calls.
     /// </summary>
-    private sealed class StubLocalAiWarmupService
-        : ILocalAiStartupWarmupService, ILocalAiWarmupService
+    private sealed class StubLocalServiceLoadService : ILocalServiceLoadService
     {
-        public bool IsWarmupInProgress => false;
+        public IReadOnlyCollection<string> AllServiceIds { get; } =
+            new[] { "SpeechTranscription", "Embeddings", "SpeechSynthesis", "ImageGeneration" };
 
-        public bool IsApplyInProgress => false;
+        public Task<LocalServiceReadiness> ProbeAsync(string serviceId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new LocalServiceReadiness
+            {
+                ServiceId = serviceId,
+                Configured = false,
+            });
 
-        public Task WarmupAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<LocalServiceOperationResult> LoadServiceAsync(
+            string serviceId, string modelRef, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new LocalServiceOperationResult { ServiceId = serviceId, Success = true });
 
-        public Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<LocalServiceOperationResult> UnloadServiceAsync(
+            string serviceId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new LocalServiceOperationResult { ServiceId = serviceId, Success = true });
 
-        public Task EnsureAuxiliaryServicesLoadedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<LocalServiceOperationResult> EnsureLoadedAsync(
+            string serviceId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new LocalServiceOperationResult { ServiceId = serviceId, Success = true });
 
-        public Task UnloadAuxiliaryServicesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task<LocalServiceReconcileResult> ReconcileLocalServiceAsync(
-            string serviceId,
-            string? requestedModelRef = null,
+        public Task<IReadOnlyList<LocalServiceOperationResult>> StartupEnsureAsync(
             CancellationToken cancellationToken = default) =>
-            Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Warm));
-
-        public Task<LocalServiceReconcileResult> PowerOffLocalServiceEngineAsync(
-            string serviceId,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle));
-
-        public Task RecycleSharedSpeechEnginesAsync(CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task EnsureLlamaStacksMatchDefaultAsync(CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task SyncDesiredAndApplyAsync(
-            WarmupDesiredBuildOptions? options = null,
-            bool waitForCompletion = false,
-            CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task<WarmupStatusDocument> GetStatusAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new WarmupStatusDocument(
-                SchemaVersion: 1,
-                DesiredRevision: 0,
-                AppliedRevision: 0,
-                InProgressRevision: null,
-                ApplyStatus: "idle",
-                ApplyError: null,
-                DesiredSha256: string.Empty,
-                WrittenAt: string.Empty,
-                Services: new Dictionary<string, WarmupServiceStatus>()));
+            Task.FromResult<IReadOnlyList<LocalServiceOperationResult>>(
+                AllServiceIds.Select(id => new LocalServiceOperationResult { ServiceId = id, Success = true }).ToList());
     }
 }

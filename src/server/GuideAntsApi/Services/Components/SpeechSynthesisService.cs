@@ -44,7 +44,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
     private readonly IServiceModeResolver _serviceModeResolver;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SpeechSynthesisService> _logger;
-    private readonly ILocalAiStartupWarmupService? _localSpeechEngineRecovery;
+    private readonly ILocalServiceLoadService? _localSpeechEngineRecovery;
 
     public SpeechSynthesisService(
         HttpClient httpClient,
@@ -54,7 +54,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         IServiceModeResolver serviceModeResolver,
         IConfiguration configuration,
         ILogger<SpeechSynthesisService> logger,
-        ILocalAiStartupWarmupService? localSpeechEngineRecovery = null)
+        ILocalServiceLoadService? localSpeechEngineRecovery = null)
     {
         _httpClient = httpClient;
         _azureOptionsMonitor = azureOptionsMonitor;
@@ -747,7 +747,10 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
                     requestId,
                     ex.GetType().Name);
                 await _localSpeechEngineRecovery
-                    .RecycleSharedSpeechEnginesAsync(cancellationToken)
+                    .UnloadServiceAsync("SpeechSynthesis", cancellationToken)
+                    .ConfigureAwait(false);
+                await _localSpeechEngineRecovery
+                    .EnsureLoadedAsync("SpeechSynthesis", cancellationToken)
                     .ConfigureAwait(false);
                 return await SynthesizeViaLocalTtsAsync(
                     ssml, outputPath, requestId, mode, cancellationToken, allowRecycle: false)
@@ -774,7 +777,10 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
                         requestId,
                         (int)response.StatusCode);
                     await _localSpeechEngineRecovery
-                        .RecycleSharedSpeechEnginesAsync(cancellationToken)
+                        .UnloadServiceAsync("SpeechSynthesis", cancellationToken)
+                        .ConfigureAwait(false);
+                    await _localSpeechEngineRecovery
+                        .EnsureLoadedAsync("SpeechSynthesis", cancellationToken)
                         .ConfigureAwait(false);
                     return await SynthesizeViaLocalTtsAsync(
                         ssml, outputPath, requestId, mode, cancellationToken, allowRecycle: false)

@@ -44,7 +44,7 @@ internal static class LocalServiceModeSelectionReader
         return string.IsNullOrWhiteSpace(selected) ? null : selected;
     }
 
-    private static string? ResolveLocalProviderSection(string serviceId) =>
+    internal static string? ResolveLocalProviderSection(string serviceId) =>
         serviceId switch
         {
             RoutedServiceNames.SpeechTranscription =>

@@ -117,20 +117,13 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IImageGenerationBundleDefinitionBootstrapper, GuideAntsApi.Services.Bootstrap.ImageGenerationBundleDefinitionBootstrapper>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
         services.AddSingleton<GuideAntsApi.Services.LlamaCpp.INotebookChatAliasState, GuideAntsApi.Services.LlamaCpp.NotebookChatAliasState>();
-        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiDesiredStateBuilder, GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStackHostResolver, GuideAntsApi.Services.Bootstrap.LocalAiStackHostResolver>();
-        services.AddSingleton<GuideAntsApi.Services.Bootstrap.LocalAiWarmupPlanSplitter>();
-        services.AddHttpClient(GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient.HttpClientName, client =>
+        services.AddHttpClient(GuideAntsApi.Services.Bootstrap.LocalServiceLoadService.HttpClientName, client =>
         {
-            client.Timeout = TimeSpan.FromHours(4);
+            client.Timeout = TimeSpan.FromMinutes(5);
         });
-        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupOrchestrationClient, GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient>();
-        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiRuntimeAlignmentVerifier, GuideAntsApi.Services.Bootstrap.LocalAiRuntimeAlignmentVerifier>();
-        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalServiceLoadService, GuideAntsApi.Services.Bootstrap.LocalServiceLoadService>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.IGlobalDefaultLlamaReconciler, GuideAntsApi.Services.Bootstrap.GlobalDefaultLlamaReconciler>();
-        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService>(
-            static sp => (GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService)sp.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService>());
-        services.AddHostedService<GuideAntsApi.Services.Bootstrap.LocalAiRuntimeWatchdogHostedService>();
         phaseLogger?.Invoke("ConfigureServices.RegisterServices.CoreServices");
 
  

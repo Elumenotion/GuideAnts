@@ -31,7 +31,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
     private readonly IApplicationSettingsService _settings;
     private readonly ILlamaRuntimeInventoryService _inventory;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILocalAiWarmupOrchestrationClient? _warmupOrchestrationClient;
+    private readonly ILocalServiceLoadService? _loadService;
     private readonly GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider? _stackClients;
     private readonly ILogger<RoutingReadinessService> _logger;
 
@@ -40,14 +40,14 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         ILlamaRuntimeInventoryService inventory,
         IServiceScopeFactory scopeFactory,
         ILogger<RoutingReadinessService> logger,
-        ILocalAiWarmupOrchestrationClient? warmupOrchestrationClient = null,
+        ILocalServiceLoadService? loadService = null,
         GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider? stackClients = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _warmupOrchestrationClient = warmupOrchestrationClient;
+        _loadService = loadService;
         _stackClients = stackClients;
     }
 
@@ -376,7 +376,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         ServiceModeDto mode,
         CancellationToken cancellationToken)
     {
-        if (_warmupOrchestrationClient is null
+        if (_loadService is null
             || string.IsNullOrWhiteSpace(mode.ProviderSection)
             || !IsLocalServiceProviderSection(mode.ProviderSection))
         {
@@ -385,53 +385,31 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
 
         try
         {
-            var status = await _warmupOrchestrationClient.GetStatusAsync(cancellationToken).ConfigureAwait(false);
-            if (!status.Services.TryGetValue(service, out var serviceStatus))
+            var readiness = await _loadService.ProbeAsync(service, cancellationToken).ConfigureAwait(false);
+            if (!readiness.Configured)
             {
                 return Array.Empty<string>();
             }
 
-            if (!string.IsNullOrWhiteSpace(serviceStatus.PlanRef)
-                && !string.Equals(serviceStatus.Phase, "ready", StringComparison.OrdinalIgnoreCase))
+            if (!readiness.Loaded)
             {
-                var detail = string.IsNullOrWhiteSpace(serviceStatus.Error)
-                    ? $"phase={serviceStatus.Phase}"
-                    : serviceStatus.Error;
+                var detail = string.IsNullOrWhiteSpace(readiness.Error)
+                    ? "engine not loaded"
+                    : readiness.Error;
                 return
                 [
-                    $"{BlockerKeys.RuntimeState}: runtime plan not loaded for '{service}' ({detail})."
+                    $"{BlockerKeys.RuntimeState}: local engine not loaded for '{service}' ({detail})."
                 ];
             }
 
-            if (!string.IsNullOrWhiteSpace(serviceStatus.PlanRef)
-                && !LoadedRefMatchesPlan(serviceStatus))
-            {
-                return
-                [
-                    $"{BlockerKeys.RuntimeState}: loaded model does not match runtime plan for '{service}'."
-                ];
-            }
+            return Array.Empty<string>();
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Warmup orchestrator status unavailable for service '{Service}'.", service);
+            _logger.LogDebug(ex, "Readiness probe unavailable for service '{Service}'.", service);
         }
 
         return Array.Empty<string>();
-    }
-
-    private static bool LoadedRefMatchesPlan(WarmupServiceStatus serviceStatus)
-    {
-        var planRef = serviceStatus.PlanRef?.Trim();
-        if (string.IsNullOrWhiteSpace(planRef))
-        {
-            return true;
-        }
-
-        var loadedRef = serviceStatus.RouterAlias?.Trim()
-            ?? serviceStatus.ModelId?.Trim()
-            ?? serviceStatus.BundleId?.Trim();
-        return string.Equals(planRef, loadedRef, StringComparison.Ordinal);
     }
 
     private static bool IsLocalServiceProviderSection(string providerSection) =>
