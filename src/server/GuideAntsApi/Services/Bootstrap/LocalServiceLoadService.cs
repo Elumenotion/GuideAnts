@@ -329,7 +329,11 @@ public sealed class LocalServiceLoadService : ILocalServiceLoadService
     {
         var client = _httpClientFactory.CreateClient(HttpClientName);
         client.Timeout = HttpTimeout;
-        client.BaseAddress = new Uri(adminBase);
+        // BaseAddress must end with '/' so that relative request URIs
+        // ("ready", "health", "admin/load", "admin/unload") resolve under the
+        // per-service admin prefix (e.g. /asr/ready) instead of collapsing to the
+        // server root (/ready), which nginx answers with a 404 HTML page.
+        client.BaseAddress = new Uri(adminBase.EndsWith('/') ? adminBase : adminBase + "/");
         return client;
     }
 
