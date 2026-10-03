@@ -92,10 +92,14 @@ describe('useOpenRouterWizardState', () => {
 
     act(() => {
       result.current.setDraftModelId('minimax/minimax-m3');
+    });
+    act(() => {
       result.current.addDraftModel(snapshot, 0, 0);
     });
     act(() => {
       result.current.setDraftModelId('minimax/minimax-m3');
+    });
+    act(() => {
       result.current.addDraftModel(snapshot, 0, 0);
     });
 
@@ -164,6 +168,8 @@ describe('useOpenRouterWizardState', () => {
 
     act(() => {
       result.current.setDraftModelId('minimax/minimax-m3');
+    });
+    act(() => {
       result.current.addDraftModel(snapshot, 0, 0);
     });
 
@@ -224,6 +230,8 @@ describe('useOpenRouterWizardState', () => {
 
     act(() => {
       result.current.setDraftModelId('minimax/minimax-m3');
+    });
+    act(() => {
       result.current.addDraftModel(createWizardSnapshot(), 1, 0);
     });
 
