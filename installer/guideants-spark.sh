@@ -40,6 +40,11 @@ GA_PLANTUML_PORT="${GA_PLANTUML_PORT:-5113}"
 GA_SEARXNG_PORT="${GA_SEARXNG_PORT:-5114}"
 
 # The Spark AI image (pulled from GHCR; built with the spark backend).
+# Release zips pin it in docker/images.env (GA_AI_SPARK_IMAGE=ghcr.io/.../guideants-ai-spark:<release-tag>).
+IMAGES_ENV_FILE="$DOCKER_DIR/images.env"
+if [[ -z "${GA_AI_SPARK_IMAGE:-}" && -f "$IMAGES_ENV_FILE" ]]; then
+  GA_AI_SPARK_IMAGE="$(grep -E '^GA_AI_SPARK_IMAGE=' "$IMAGES_ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+fi
 AI_IMAGE="${GA_AI_SPARK_IMAGE:-ghcr.io/elumenotion/guideants-ai-spark:main}"
 
 MODE="up"

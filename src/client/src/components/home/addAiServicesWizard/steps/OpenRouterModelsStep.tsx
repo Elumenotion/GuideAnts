@@ -45,7 +45,7 @@ export function OpenRouterModelsStep({
             id="wizard-openrouter-model-id"
             value={draftModelId}
             onChange={(event) => onDraftModelIdChange(event.target.value)}
-            placeholder="minimax/minimax-m3"
+            placeholder="deepseek/deepseek-v4.1-flash"
             className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>

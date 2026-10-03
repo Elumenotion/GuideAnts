@@ -145,7 +145,7 @@ export const HUGGINGFACE_CHAT_MODEL_PROVIDER_ID = 'hf-inference-chat';
 export const HUGGINGFACE_DEFAULT_CHAT_MODEL_ID = 'zai-org/GLM-5.2';
 export const HUGGINGFACE_DEFAULT_PARAMETER_SURFACE_SEED = 'huggingface_chat_standard';
 export const OPENROUTER_CHAT_MODEL_PROVIDER_ID = 'openrouter-chat';
-export const OPENROUTER_DEFAULT_CHAT_MODEL_ID = 'minimax/minimax-m3';
+export const OPENROUTER_DEFAULT_CHAT_MODEL_ID = 'deepseek/deepseek-v4.1-flash';
 export const OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED = 'openai_chat_standard';
 
 export const OPENAI_MODEL_PROVIDER_LABEL_TO_ID: Readonly<Record<OpenAiModelProviderLabel, string>> = {
@@ -227,11 +227,11 @@ export const HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS = {
 } as const;
 
 export const OPENROUTER_OPTIONAL_SERVICE_DEFAULTS = {
-  embeddingsModelId: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
+  embeddingsModelId: 'qwen/qwen3-embedding-8b',
   embeddingsTimeoutSeconds: '300',
-  imagesModelId: 'recraft/recraft-v4',
+  imagesModelId: 'bytedance-seed/seedream-4.5',
   imagesTimeoutSeconds: '600',
-  speechTranscriptionModelId: 'nvidia/parakeet-tdt-0.6b-v3',
+  speechTranscriptionModelId: 'qwen/qwen3-asr-0.6b',
   speechTranscriptionTimeoutSeconds: '300',
   speechSynthesisModelId: 'hexgrad/kokoro-82m',
   speechSynthesisTimeoutSeconds: '300',

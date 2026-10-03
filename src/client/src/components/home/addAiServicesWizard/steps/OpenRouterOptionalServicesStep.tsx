@@ -105,7 +105,7 @@ export function OpenRouterOptionalServicesStep({
           value={value.embeddingsModelId}
           onChange={(next) => onChange({ embeddingsModelId: next })}
           error={errors.embeddingsModelId}
-          placeholder="nvidia/llama-nemotron-embed-vl-1b-v2:free"
+          placeholder="qwen/qwen3-embedding-8b"
         />
         <Field
           id="openrouter-embeddings-timeout"
@@ -129,7 +129,7 @@ export function OpenRouterOptionalServicesStep({
           value={value.imagesModelId}
           onChange={(next) => onChange({ imagesModelId: next })}
           error={errors.imagesModelId}
-          placeholder="recraft/recraft-v4"
+          placeholder="bytedance-seed/seedream-4.5"
           helperText="OpenRouter uses one image model id for both generation and image edits."
         />
         <Field
@@ -154,7 +154,7 @@ export function OpenRouterOptionalServicesStep({
           value={value.speechTranscriptionModelId}
           onChange={(next) => onChange({ speechTranscriptionModelId: next })}
           error={errors.speechTranscriptionModelId}
-          placeholder="nvidia/parakeet-tdt-0.6b-v3"
+          placeholder="qwen/qwen3-asr-0.6b"
         />
         <Field
           id="openrouter-transcription-timeout"

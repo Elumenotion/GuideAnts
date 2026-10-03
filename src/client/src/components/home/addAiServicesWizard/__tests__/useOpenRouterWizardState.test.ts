@@ -92,10 +92,14 @@ describe('useOpenRouterWizardState', () => {
 
     act(() => {
       result.current.setDraftModelId('minimax/minimax-m3');
+    });
+    act(() => {
       result.current.addDraftModel(snapshot, 0, 0);
     });
     act(() => {
       result.current.setDraftModelId('minimax/minimax-m3');
+    });
+    act(() => {
       result.current.addDraftModel(snapshot, 0, 0);
     });
 
@@ -164,6 +168,8 @@ describe('useOpenRouterWizardState', () => {
 
     act(() => {
       result.current.setDraftModelId('minimax/minimax-m3');
+    });
+    act(() => {
       result.current.addDraftModel(snapshot, 0, 0);
     });
 
@@ -224,6 +230,8 @@ describe('useOpenRouterWizardState', () => {
 
     act(() => {
       result.current.setDraftModelId('minimax/minimax-m3');
+    });
+    act(() => {
       result.current.addDraftModel(createWizardSnapshot(), 1, 0);
     });
 
@@ -253,7 +261,7 @@ describe('useOpenRouterWizardState', () => {
     expect(api.settings.services.updateProviderFields).toHaveBeenCalledWith(
       'Embeddings',
       OPENROUTER_SERVICE_PROVIDER_IDS.Embeddings,
-      expect.objectContaining({ ModelId: 'nvidia/llama-nemotron-embed-vl-1b-v2:free' })
+      expect.objectContaining({ ModelId: 'qwen/qwen3-embedding-8b' })
     );
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'SpeechTranscription',

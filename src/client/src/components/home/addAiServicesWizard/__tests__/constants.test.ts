@@ -67,15 +67,15 @@ describe('Add AI Services wizard OpenRouter constants', () => {
 
   it('locks openrouter optional defaults to the planned model set', () => {
     expect(OPENROUTER_OPTIONAL_SERVICE_DEFAULTS).toMatchObject({
-      embeddingsModelId: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
-      imagesModelId: 'recraft/recraft-v4',
-      speechTranscriptionModelId: 'nvidia/parakeet-tdt-0.6b-v3',
+      embeddingsModelId: 'qwen/qwen3-embedding-8b',
+      imagesModelId: 'bytedance-seed/seedream-4.5',
+      speechTranscriptionModelId: 'qwen/qwen3-asr-0.6b',
       speechSynthesisModelId: 'hexgrad/kokoro-82m',
     });
   });
 
   it('defines openrouter chat defaults', () => {
-    expect(OPENROUTER_DEFAULT_CHAT_MODEL_ID).toBe('minimax/minimax-m3');
+    expect(OPENROUTER_DEFAULT_CHAT_MODEL_ID).toBe('deepseek/deepseek-v4.1-flash');
     expect(OPENROUTER_DEFAULT_PARAMETER_SURFACE_SEED).toBe('openai_chat_standard');
   });
 });

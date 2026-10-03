@@ -208,30 +208,29 @@ installer_update_channel_ref() {
   esac
 }
 
-installer_rewrite_image_pin() {
-  local repo="$1" digest="$2"
-  local file tmp key val vrepo
+installer_pinned_ref() {
+  # Print the ref pinned in images.env for a given repository (e.g. repo:v1.1.4).
+  local repo="$1"
+  local file line key val
   file="$(installer_images_env_path)"
-  [[ -f "$file" && -n "$digest" ]] || return 0
-  tmp="$(mktemp)"
+  [[ -f "$file" ]] || return 0
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
     if [[ "$line" =~ ^([A-Za-z0-9_]+)=(.*)$ ]]; then
       key="${BASH_REMATCH[1]}"
       val="${BASH_REMATCH[2]}"
+      [[ -n "${val// /}" && ! "$val" =~ ^# ]] || continue
       case "$key" in
         GA_*IMAGE*|GA_MSSQL_IMAGE)
-          vrepo="$(installer_image_repository "$val")"
-          if [[ "$vrepo" == "$repo" ]]; then
-            printf '%s=%s@%s\n' "$key" "$repo" "$digest" >> "$tmp"
-            continue
+          if [[ "$(installer_image_repository "$val")" == "$repo" ]]; then
+            printf '%s\n' "$val"
+            return 0
           fi
           ;;
       esac
     fi
-    printf '%s\n' "$line" >> "$tmp"
   done < "$file"
-  mv "$tmp" "$file"
+  return 0
 }
 
 installer_compose_args() {
@@ -249,7 +248,7 @@ installer_compose_args() {
 }
 
 installer_progressive_pull() {
-  local images img l r channel_ref missing=0 stale=0 dig repo
+  local images img l r channel_ref missing=0 stale=0 repo pinned_ref
   local -a missing_images=() stale_compose=() stale_channel=() pull_images=() update_channels=() pull_failures=()
   installer_compose_env_args
   installer_load_images_env_meta
@@ -314,16 +313,6 @@ installer_progressive_pull() {
         pull_failures+=("$img")
         continue
       fi
-      # Digest-pulled images carry no tag, so `docker images` shows <none>.
-      # Label them repo:<channel> for a readable name (best-effort, non-fatal).
-      if [[ "$img" == *@* ]]; then
-        local t_repo t_tag
-        t_repo="$(installer_image_repository "$img")"
-        t_tag="${GA_UPDATE_CHANNEL:-main}"
-        if installer_docker tag "$img" "${t_repo}:${t_tag}" >/dev/null 2>&1; then
-          installer_log "  docker tag $img ${t_repo}:${t_tag}"
-        fi
-      fi
     done
   fi
 
@@ -336,12 +325,15 @@ installer_progressive_pull() {
         pull_failures+=("$channel_ref")
         continue
       fi
-      dig="$(local_digest "$channel_ref" 2>/dev/null || true)"
+      # The :channel pull is the running image. Locally retag it to the release
+      # tag from the pin so `docker images` shows the version, not :main.
+      # Best-effort and non-fatal.
       repo="$(installer_image_repository "$channel_ref")"
-      if [[ -n "$dig" ]]; then
-        installer_rewrite_image_pin "$repo" "$dig"
-        # Ensure compose digest refs resolve immediately after pin rewrite.
-        installer_docker pull "${repo}@${dig}" >/dev/null 2>&1 || true
+      pinned_ref="$(installer_pinned_ref "$repo" 2>/dev/null || true)"
+      if [[ -n "$pinned_ref" && "$pinned_ref" != "$channel_ref" ]]; then
+        if installer_docker tag "$channel_ref" "$pinned_ref" >/dev/null 2>&1; then
+          installer_log "  docker tag $channel_ref $pinned_ref"
+        fi
       fi
     done
   fi
