@@ -341,36 +341,22 @@ function Get-InstallerUpdateChannelRef {
     return $ImageRef
 }
 
-function Update-InstallerImagePin {
-    param(
-        [Parameter(Mandatory = $true)][string]$Repository,
-        [Parameter(Mandatory = $true)][string]$Digest
-    )
+function Get-InstallerPinnedRef {
+    param([Parameter(Mandatory = $true)][string]$Repository)
 
     $file = Get-InstallerImagesEnvPath
-    if (-not (Test-Path -LiteralPath $file)) { return }
-    if ([string]::IsNullOrWhiteSpace($Digest)) { return }
-
-    $newRef = "${Repository}@${Digest}"
-    $lines = Get-Content -LiteralPath $file
-    $out = New-Object System.Collections.Generic.List[string]
-    foreach ($raw in $lines) {
+    if (-not (Test-Path -LiteralPath $file)) { return '' }
+    foreach ($raw in (Get-Content -LiteralPath $file)) {
         $line = [string]$raw
         if ($line -match '^(?<key>[A-Za-z0-9_]+)=(?<val>.*)$') {
-            $key = $Matches['key']
             $val = $Matches['val']
-            if ($key -like 'GA_*IMAGE*' -or $key -eq 'GA_MSSQL_IMAGE') {
-                $vrepo = Get-InstallerImageRepository -ImageRef $val
-                if ($vrepo -eq $Repository) {
-                    $out.Add("$key=$newRef") | Out-Null
-                    continue
-                }
+            if ($val -match '^\s*$' -or $val.StartsWith('#')) { continue }
+            if ((Get-InstallerImageRepository -ImageRef $val) -eq $Repository) {
+                return $val
             }
         }
-        $out.Add($line) | Out-Null
     }
-    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllLines($file, $out.ToArray(), $utf8NoBom)
+    return ''
 }
 
 function Resolve-InstallerComposeArgs {
@@ -609,19 +595,6 @@ function Invoke-InstallerProgressivePull {
                 Write-InstallerWarn "Pull failed: $image"
                 continue
             }
-            # Digest-pulled images carry no tag, so `docker images` shows <none>.
-            # Label them repo:<channel> for a readable name (best-effort, non-fatal).
-            if ($image -like '*@*') {
-                $tagRepo = Get-InstallerImageRepository -ImageRef $image
-                $tagChannel = Get-InstallerUpdateChannelName
-                try {
-                    Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('tag', $image, "${tagRepo}:${tagChannel}")
-                    Write-InstallerLog "  docker tag $image ${tagRepo}:${tagChannel}"
-                }
-                catch {
-                    # Non-fatal: the image is present by digest; the tag is cosmetic.
-                }
-            }
         }
     }
 
@@ -632,22 +605,24 @@ function Invoke-InstallerProgressivePull {
             Write-InstallerLog "  docker pull $channelRef"
             try {
                 Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $channelRef)
-                $digest = Invoke-InstallerGetLocalDigest -ImageRef $channelRef
-                $repo = Get-InstallerImageRepository -ImageRef $channelRef
-                if (-not [string]::IsNullOrWhiteSpace($digest)) {
-                    Update-InstallerImagePin -Repository $repo -Digest $digest
-                    $digestRef = "${repo}@${digest}"
-                    try {
-                        Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('pull', $digestRef)
-                    }
-                    catch {
-                        # Layers already present from channel pull; digest pull is best-effort.
-                    }
-                }
             }
             catch {
                 $pullFailures.Add($channelRef) | Out-Null
                 Write-InstallerWarn "Pull failed: $channelRef"
+                continue
+            }
+            # The :channel pull is the running image. Locally retag it to the release
+            # tag from the pin so `docker images` shows the version, not :main.
+            # Best-effort and non-fatal.
+            $pinnedRef = Get-InstallerPinnedRef -Repository (Get-InstallerImageRepository -ImageRef $channelRef)
+            if (-not [string]::IsNullOrWhiteSpace($pinnedRef) -and $pinnedRef -ne $channelRef) {
+                try {
+                    Invoke-InstallerDocker -FilePath 'docker' -ArgumentList @('tag', $channelRef, $pinnedRef)
+                    Write-InstallerLog "  docker tag $channelRef $pinnedRef"
+                }
+                catch {
+                    # Non-fatal: the image runs fine as :$channelName.
+                }
             }
         }
     }

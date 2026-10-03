@@ -8,7 +8,7 @@ function ProviderInfo() {
         <span className="font-mono">ApiKey</span> and optional <span className="font-mono">BaseUrl</span>).
       </p>
       <p>
-        Add a chat model id such as <span className="font-mono">minimax/minimax-m3</span>. OpenRouter image routing uses one model id for
+        Add a chat model id such as <span className="font-mono">deepseek/deepseek-v4.1-flash</span>. OpenRouter image routing uses one model id for
         both generation and edit flows.
       </p>
     </div>

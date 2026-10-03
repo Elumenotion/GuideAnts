@@ -23,9 +23,6 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Normalize image owner
         shell: bash
         run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"

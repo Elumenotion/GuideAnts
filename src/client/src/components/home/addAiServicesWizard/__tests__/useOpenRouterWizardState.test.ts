@@ -253,7 +253,7 @@ describe('useOpenRouterWizardState', () => {
     expect(api.settings.services.updateProviderFields).toHaveBeenCalledWith(
       'Embeddings',
       OPENROUTER_SERVICE_PROVIDER_IDS.Embeddings,
-      expect.objectContaining({ ModelId: 'nvidia/llama-nemotron-embed-vl-1b-v2:free' })
+      expect.objectContaining({ ModelId: 'qwen/qwen3-embedding-8b' })
     );
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'SpeechTranscription',
