@@ -14,6 +14,7 @@ vi.mock('../authService', () => ({
 import {
   createDocumentServerEditorConfig,
   getDocumentServerCapabilities,
+  isDocumentServerLive,
   isDocumentServerSupportedByContentType,
   isDocumentServerSupportedByExtension,
   looksLikeDocumentServerFile,
@@ -202,5 +203,65 @@ describe('documentServer API', () => {
     await expect(getDocumentServerCapabilities(true)).rejects.toThrow(
       'DocumentServer request timed out after 10000ms.'
     );
+  });
+});
+
+describe('isDocumentServerLive', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // @ts-expect-error test override
+    global.fetch = mockFetch;
+  });
+
+  const respondWith = (payload: Partial<DocumentServerCapabilities>) => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        publicUrl: 'http://localhost:8082',
+        supportedExtensions: ['docx'],
+        supportedContentTypes: [],
+        ...payload,
+      }),
+    });
+  };
+
+  it.each<[Partial<DocumentServerCapabilities>, boolean]>([
+    [{ enabled: true, reachable: true }, true],
+    [{ enabled: true, reachable: false }, false],
+    [{ enabled: false, reachable: true }, false],
+    [{ enabled: false, reachable: false }, false],
+    // Older API servers don't send `reachable`; treat that as not live.
+    [{ enabled: true }, false],
+  ])('capabilities %o → %s', async (payload, expected) => {
+    respondWith(payload);
+
+    await expect(isDocumentServerLive()).resolves.toBe(expected);
+  });
+
+  it('asks the server every time instead of reusing cached capabilities', async () => {
+    respondWith({ enabled: true, reachable: true });
+    await expect(isDocumentServerLive()).resolves.toBe(true);
+
+    respondWith({ enabled: true, reachable: false });
+    await expect(isDocumentServerLive()).resolves.toBe(false);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns false when the capabilities request throws', async () => {
+    mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    await expect(isDocumentServerLive()).resolves.toBe(false);
+  });
+
+  it('returns false when the capabilities request returns an error status', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: vi.fn().mockResolvedValue(''),
+    });
+
+    await expect(isDocumentServerLive()).resolves.toBe(false);
   });
 });

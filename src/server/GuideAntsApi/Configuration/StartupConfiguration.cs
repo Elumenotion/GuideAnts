@@ -249,6 +249,7 @@ public static class StartupConfiguration
         services.AddSingleton<INotebookLockService, InMemoryNotebookLockService>();
         services.AddScoped<INotebookFileService, NotebookFileService>();
         services.AddScoped<IDocumentServerService, DocumentServerService>();
+        services.AddScoped<IDocumentServerHealthProbe, DocumentServerHealthProbe>();
         services.AddScoped<IFileLineageService, FileLineageService>();
         services.AddScoped<IExcludedHostService, ExcludedHostService>();
         services.AddHttpClient<IBrowserRenderingClient, SearXngBrowserRenderingClient>((serviceProvider, client) =>

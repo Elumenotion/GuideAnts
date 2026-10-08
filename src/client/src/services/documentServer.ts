@@ -6,6 +6,8 @@ export type DocumentServerScope = 'project' | 'notebook';
 
 export interface DocumentServerCapabilities {
     enabled: boolean;
+    /** True when the API reached the DocumentServer container recently. Absent on older APIs. */
+    reachable?: boolean;
     publicUrl: string;
     supportedExtensions: string[];
     supportedContentTypes: string[];
@@ -86,6 +88,20 @@ export async function getDocumentServerCapabilities(forceRefresh = false): Promi
         supportedContentTypesCount: cachedCapabilities.supportedContentTypes?.length ?? 0,
     });
     return cachedCapabilities;
+}
+
+/**
+ * Whether DocumentServer is enabled and its container currently answers. Always
+ * asks the API (the server caches its probe), and never throws: any failure
+ * means "not live".
+ */
+export async function isDocumentServerLive(): Promise<boolean> {
+    try {
+        const capabilities = await getDocumentServerCapabilities(true);
+        return capabilities.enabled && capabilities.reachable === true;
+    } catch {
+        return false;
+    }
 }
 
 export async function createDocumentServerEditorConfig(
