@@ -265,7 +265,16 @@ public static class NotebookConversationsEndpoints
             // A not-ready state is reported as a 409 with the live runtimeStatus so the client
             // can restore the draft and surface the dialog (e.g. after an AI container restart
             // where no dialog is currently showing).
-            var runtimeStatus = await runtimeService.GetRuntimeStatusAsync(notebookId, targetAssistantId, CancellationToken.None);
+            // Include the per-conversation model override (client-local, sent as
+            // ModelDeploymentId) in the preflight's required set. Without this the
+            // preflight checks only the notebook/assistant-derived models and can
+            // report "ready" while the dispatch resolves the override and hits a
+            // 400 "model is not loaded" from the llama runtime.
+            var runtimeStatus = await runtimeService.GetRuntimeStatusAsync(
+                notebookId,
+                targetAssistantId,
+                CancellationToken.None,
+                request.ModelDeploymentId);
             if (runtimeStatus.State != "ready"
                 && (runtimeStatus.RequiredModels.Any(m => m.RuntimeConfig != null)
                     || string.Equals(runtimeStatus.State, "invalid", StringComparison.OrdinalIgnoreCase)))

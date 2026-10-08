@@ -471,6 +471,7 @@ public static class StartupConfiguration
         // Background Jobs - replaces individual hosted services with queue-based processing
         services.AddBackgroundJobs(configuration);
         services.AddSingleton<GuideAntsApi.BackgroundJobs.IConversationLockGateEligibility, GuideAntsApi.Services.ConversationLockGate.ConversationLockGateEligibility>();
+        services.AddSingleton<GuideAntsApi.BackgroundJobs.IEmbeddingsReadinessGate, GuideAntsApi.Services.EmbeddingsGate.EmbeddingsReadinessGate>();
         
         // Register job handlers
         services.AddJobHandler<GuideAntsApi.BackgroundJobs.Jobs.TestJobHandler>();

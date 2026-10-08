@@ -56,6 +56,7 @@ vi.mock('../../../../services/api', () => ({
         conversations: {
           loadLlamaRuntime: vi.fn(async () => ({ operationId: 'op1', state: 'ready' })),
           pollLlamaRuntimeOperation: vi.fn(async () => ({ operationId: 'op1', state: 'ready' })),
+          checkLlamaRuntime: vi.fn(async () => ({ state: 'ready' })),
         },
       },
     },
@@ -572,7 +573,7 @@ describe('ChatToolbarPanel', () => {
 
     await waitFor(
       () => {
-        expect(api.projects.notebooks.conversations.loadLlamaRuntime).toHaveBeenCalledWith('p1', 'n1', 'asst-1');
+        expect(api.projects.notebooks.conversations.loadLlamaRuntime).toHaveBeenCalledWith('p1', 'n1', 'asst-1', undefined);
         expect(api.projects.notebooks.conversations.pollLlamaRuntimeOperation).toHaveBeenCalled();
         expect(onRefresh).toHaveBeenCalled();
       },

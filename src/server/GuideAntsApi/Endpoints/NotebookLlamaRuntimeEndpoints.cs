@@ -15,9 +15,10 @@ public static class NotebookLlamaRuntimeEndpoints
             [FromServices] INotebookModelRuntimeService runtimeService,
             Guid notebookId,
             [FromQuery] Guid? assistantId,
+            [FromQuery] string? modelId,
             CancellationToken cancellationToken) =>
         {
-            var status = await runtimeService.GetRuntimeStatusAsync(notebookId, assistantId, cancellationToken);
+            var status = await runtimeService.GetRuntimeStatusAsync(notebookId, assistantId, cancellationToken, modelId);
             return Results.Ok(status);
         })
         .Produces<NotebookLlamaRuntimeStatusDto>(StatusCodes.Status200OK);
@@ -30,7 +31,11 @@ public static class NotebookLlamaRuntimeEndpoints
         {
             try
             {
-                var op = await runtimeService.StartLoadOperationAsync(notebookId, request.AssistantId, cancellationToken);
+                var op = await runtimeService.StartLoadOperationAsync(
+                    notebookId,
+                    request.AssistantId,
+                    cancellationToken,
+                    request.ModelId);
                 return Results.Accepted($"/api/notebooks/{notebookId}/llama-runtime/operations/{op.OperationId}", op);
             }
             catch (InvalidOperationException ex)
@@ -53,7 +58,8 @@ public static class NotebookLlamaRuntimeEndpoints
                 var op = await runtimeService.StartUnloadForNotebookContextAsync(
                     notebookId,
                     request?.AssistantId,
-                    cancellationToken);
+                    cancellationToken,
+                    request?.ModelId);
                 return Results.Accepted(
                     $"/api/notebooks/{notebookId}/llama-runtime/operations/{op.OperationId}",
                     op);
@@ -126,9 +132,9 @@ public static class NotebookLlamaRuntimeEndpoints
         .Produces(StatusCodes.Status504GatewayTimeout);
     }
 
-    public record LoadRuntimeRequest(Guid? AssistantId);
+    public record LoadRuntimeRequest(Guid? AssistantId, string? ModelId = null);
 
-    public record UnloadRuntimeRequest(Guid? AssistantId);
+    public record UnloadRuntimeRequest(Guid? AssistantId, string? ModelId = null);
 
     // Marker type: gives the restart endpoint a stable, descriptive logger category without
     // taking a dependency on a service-layer class.

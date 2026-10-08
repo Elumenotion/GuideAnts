@@ -118,7 +118,7 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         var llamaRuntime = new Mock<INotebookModelRuntimeService>(MockBehavior.Strict);
         llamaRuntime
-            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(new NotebookLlamaRuntimeStatusDto
             {
                 State = "ready"
@@ -228,7 +228,7 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         var llamaRuntime = new Mock<INotebookModelRuntimeService>(MockBehavior.Strict);
         llamaRuntime
-            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(new NotebookLlamaRuntimeStatusDto
             {
                 State = "requires_load"
@@ -331,7 +331,7 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         var llamaRuntime = new Mock<INotebookModelRuntimeService>(MockBehavior.Strict);
         llamaRuntime
-            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(new NotebookLlamaRuntimeStatusDto
             {
                 State = "requires_load"
@@ -452,7 +452,7 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         var llamaRuntime = new Mock<INotebookModelRuntimeService>(MockBehavior.Strict);
         llamaRuntime
-            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(new NotebookLlamaRuntimeStatusDto
             {
                 State = "requires_load",
@@ -573,7 +573,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         var llamaRuntime = new Mock<INotebookModelRuntimeService>(MockBehavior.Strict);
         // Simulate stale cached snapshot claiming ready/local-on while readiness probe says unloaded.
         llamaRuntime
-            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(new NotebookLlamaRuntimeStatusDto
             {
                 State = "ready",
@@ -1094,7 +1094,7 @@ public sealed class NotebookHeaderToolbarServiceTests
     {
         var llamaRuntime = new Mock<INotebookModelRuntimeService>(MockBehavior.Strict);
         llamaRuntime
-            .Setup(x => x.GetRuntimeStatusAsync(notebookId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetRuntimeStatusAsync(notebookId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(new NotebookLlamaRuntimeStatusDto
             {
                 State = "ready"
