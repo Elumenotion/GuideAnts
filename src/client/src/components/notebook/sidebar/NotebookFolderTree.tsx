@@ -10,6 +10,12 @@ import { useListKeyboardNavigation } from '../../../hooks/useListKeyboardNavigat
 import { useSidebarKeyboardShortcuts } from '../../../hooks/useSidebarKeyboardShortcuts';
 import { useLongPress } from '../../../hooks/useLongPress';
 import { useCopyPath } from '../../../hooks/useCopyPath';
+import { isDocumentServerLive } from '../../../services/documentServer';
+import {
+  BLANK_OFFICE_DOCUMENTS,
+  createBlankOfficeFile,
+  type BlankOfficeDocumentDefinition,
+} from '../../../services/blankOfficeDocuments';
 
 import { getContentTypeFromFileName, formatFileSize } from '../../../utils/fileUtils';
 import { notebookPathMatches } from '../../../utils/notebookPath';
@@ -331,6 +337,8 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   const [isCreatingMd, setIsCreatingMd] = useState(false);
   const [creatingMdFolderPath, setCreatingMdFolderPath] = useState<string>('');
   const [creatingMdFileName, setCreatingMdFileName] = useState<string>('');
+  const [officeDocsAvailable, setOfficeDocsAvailable] = useState(false);
+  const officeDocsCheckRef = useRef(0);
 
   const { projectId, notebookId } = useParams<{ projectId: string; notebookId: string }>();
 
@@ -352,7 +360,7 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
                 setContextMenuPosition({ x: newX, y: newY });
             }
         }
-    }, [showContextMenu, showFileContextMenu, contextMenuPosition]);
+    }, [showContextMenu, showFileContextMenu, contextMenuPosition, officeDocsAvailable]);
 
   const [showDeleteFolderConfirm, setShowDeleteFolderConfirm] = useState(false);
   const [showDeleteFileConfirm, setShowDeleteFileConfirm] = useState(false);
@@ -422,7 +430,16 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
     }
     setContextMenuPosition({ x: e.clientX, y: e.clientY });
     setShowContextMenu(true);
-  }, [registerOpenMenu, context, folder.relativePath]);
+    if (canEdit && !isLinkedFolder) {
+      // Only the latest open's answer counts, so an older, slower check can't
+      // switch the items on after a newer one found DocumentServer down.
+      const check = ++officeDocsCheckRef.current;
+      setOfficeDocsAvailable(false);
+      void isDocumentServerLive().then((live) => {
+        if (officeDocsCheckRef.current === check) setOfficeDocsAvailable(live);
+      });
+    }
+  }, [registerOpenMenu, context, folder.relativePath, canEdit, isLinkedFolder]);
 
   const handleStartRename = useCallback(() => {
     setIsEditing(true);
@@ -573,6 +590,22 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
       setMdEditorLoading(false);
     }
   }, [canEdit, projectId, notebookId, folder.relativePath, getUniqueMarkdownFileName]);
+
+  const handleNewOfficeDocument = useCallback(async (definition: BlankOfficeDocumentDefinition) => {
+    if (!canEdit || !projectId || !notebookId) return;
+    setShowContextMenu(false);
+    try {
+      const file = await createBlankOfficeFile(definition.kind, folder.files.map(f => f.fileName));
+      const result = await notebookFilesApi.uploadFiles(projectId, notebookId, [file], folder.relativePath || '', false);
+      // The server may store it under another name; open whatever it actually stored.
+      const created = result?.find?.(f => f.fileName === file.name) ?? result?.[0] ?? null;
+      try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
+      if (created) onPreviewFile?.(created);
+    } catch (err) {
+      console.error(`Failed to create ${definition.displayName}:`, err);
+      showToast({ type: 'error', title: `Couldn't create ${definition.displayName}`, message: 'Please try again.' });
+    }
+  }, [canEdit, projectId, notebookId, folder.files, folder.relativePath, onPreviewFile, showToast]);
 
   const handleFileContextMenu = useCallback((e: React.MouseEvent, file: NotebookFileDto) => {
     window.dispatchEvent(new Event('close-context-menus'));
@@ -1226,6 +1259,9 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
             <>
               {onRenameFolder && !isMountRoot && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
               {canEdit && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>}
+              {canEdit && !isLinkedFolder && officeDocsAvailable && BLANK_OFFICE_DOCUMENTS.map(definition => (
+                <button key={definition.kind} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { void handleNewOfficeDocument(definition); }}>{definition.menuLabel}</button>
+              ))}
               {onCreateFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={openCreateSubfolderInput}>Create Subfolder</button>}
               {onUploadToFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onUploadToFolder(folder.relativePath); }}>Upload Files</button>}
               {!isRootFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => handleCopyPaths([folder.relativePath])}>Copy path</button>}

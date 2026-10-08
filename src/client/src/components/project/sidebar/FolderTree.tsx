@@ -9,6 +9,12 @@ import { useListKeyboardNavigation } from '../../../hooks/useListKeyboardNavigat
 import { useSidebarKeyboardShortcuts } from '../../../hooks/useSidebarKeyboardShortcuts';
 import { useLongPress } from '../../../hooks/useLongPress';
 import { useCopyPath } from '../../../hooks/useCopyPath';
+import { isDocumentServerLive } from '../../../services/documentServer';
+import {
+  BLANK_OFFICE_DOCUMENTS,
+  createBlankOfficeFile,
+  type BlankOfficeDocumentDefinition,
+} from '../../../services/blankOfficeDocuments';
 
 import { getContentTypeFromFileName, formatFileSize } from '../../../utils/fileUtils';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
@@ -360,6 +366,8 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     const [isCreatingMd, setIsCreatingMd] = useState(false);
     const [creatingMdFolderId, setCreatingMdFolderId] = useState<string | undefined>(undefined);
     const [creatingMdFileName, setCreatingMdFileName] = useState<string>('');
+    const [officeDocsAvailable, setOfficeDocsAvailable] = useState(false);
+    const officeDocsCheckRef = useRef(0);
 
     const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -379,7 +387,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                 setContextMenuPosition({ x: newX, y: newY });
             }
         }
-    }, [showContextMenu, showFileContextMenu, contextMenuPosition]);
+    }, [showContextMenu, showFileContextMenu, contextMenuPosition, officeDocsAvailable]);
 
     const [showDeleteFolderConfirm, setShowDeleteFolderConfirm] = useState(false);
     const [showDeleteFileConfirm, setShowDeleteFileConfirm] = useState(false);
@@ -418,7 +426,16 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         }
         setContextMenuPosition({ x: e.clientX, y: e.clientY });
         setShowContextMenu(true);
-    }, [disabled, registerOpenMenu, context, folder.id]);
+        if (!insideMount) {
+            // Only the latest open's answer counts, so an older, slower check can't
+            // switch the items on after a newer one found DocumentServer down.
+            const check = ++officeDocsCheckRef.current;
+            setOfficeDocsAvailable(false);
+            void isDocumentServerLive().then((live) => {
+                if (officeDocsCheckRef.current === check) setOfficeDocsAvailable(live);
+            });
+        }
+    }, [disabled, registerOpenMenu, context, folder.id, insideMount]);
 
     const handleStartRename = useCallback(() => {
         setIsEditing(true);
@@ -747,6 +764,37 @@ const FolderNode: React.FC<FolderNodeProps> = ({
             setMdEditorLoading(false);
         }
     }, [projectId, folder.id, level, getUniqueMarkdownFileName]);
+
+    const handleNewOfficeDocument = useCallback(async (definition: BlankOfficeDocumentDefinition) => {
+        setShowContextMenu(false);
+        try {
+            const file = await createBlankOfficeFile(definition.kind, localFiles.map(f => f.fileName));
+            const targetFolderId = level === 0 ? undefined : folder.id;
+            const results = await api.projects.uploadFiles(projectId, [file], targetFolderId);
+            const created = (Array.isArray(results) && results.length > 0 ? results[0] : null) as Partial<ProjectContentFile> | null;
+            try { window.dispatchEvent(new Event('refresh-project-files')); } catch {}
+            if (!created?.id) return;
+            const newFile: ProjectContentFile = {
+                id: created.id,
+                fileName: created.fileName || file.name,
+                path: created.relativePath || file.name,
+                relativePath: created.relativePath || file.name,
+                contentType: created.contentType || definition.contentType,
+                index: created.index ?? false,
+                documentId: created.documentId || '',
+                created: created.created || new Date().toISOString(),
+                fileSize: created.fileSize ?? file.size,
+                folderId: created.folderId || targetFolderId,
+                folderPath: created.folderPath,
+                latestVersion: created.latestVersion,
+            };
+            setLocalFiles(prev => prev.some(f => f.id === newFile.id) ? prev : [...prev, newFile]);
+            onFileSelect?.(newFile.id);
+        } catch (err) {
+            console.error(`Failed to create ${definition.displayName}:`, err);
+            showToast({ type: 'error', title: `Couldn't create ${definition.displayName}`, message: 'Please try again.' });
+        }
+    }, [localFiles, level, folder.id, projectId, onFileSelect, showToast]);
 
     const closeMarkdownEditor = useCallback((_current?: string) => {
         setIsMdEditorOpen(false);
@@ -1126,6 +1174,9 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                     ) : (
                         <>
                             <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>
+                            {officeDocsAvailable && !insideMount && BLANK_OFFICE_DOCUMENTS.map(definition => (
+                                <button key={definition.kind} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { void handleNewOfficeDocument(definition); }}>{definition.menuLabel}</button>
+                            ))}
                             {onRenameFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
                             {onCreateFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleCreateSubfolder}>Create Subfolder</button>}
                             {onUploadToFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); const isRootFolder = level === 0; const targetFolderId = isRootFolder ? undefined : folder.id; onUploadToFolder?.(targetFolderId); }}>Upload Files</button>}
