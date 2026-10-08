@@ -59,7 +59,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         _logger = logger;
     }
 
-    public async Task<NotebookLlamaRuntimeStatusDto> GetRuntimeStatusAsync(Guid notebookId, Guid? assistantId = null, CancellationToken cancellationToken = default)
+    public async Task<NotebookLlamaRuntimeStatusDto> GetRuntimeStatusAsync(Guid notebookId, Guid? assistantId = null, CancellationToken cancellationToken = default, string? requiredModelId = null)
     {
         var notebook = await _context.Notebooks
             .Include(n => n.Guide)
@@ -73,7 +73,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         List<ModelDto> requiredModels;
         try
         {
-            requiredModels = await GetRequiredLlamaModelsAsync(notebook, assistantId, cancellationToken);
+            requiredModels = await GetRequiredLlamaModelsAsync(notebook, assistantId, cancellationToken, requiredModelId);
         }
         catch (InvalidOperationException ex)
         {
@@ -208,9 +208,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         return status;
     }
 
-    public async Task<ModelLoadOperationDto> StartLoadOperationAsync(Guid notebookId, Guid? assistantId = null, CancellationToken cancellationToken = default)
+    public async Task<ModelLoadOperationDto> StartLoadOperationAsync(Guid notebookId, Guid? assistantId = null, CancellationToken cancellationToken = default, string? requiredModelId = null)
     {
-        var status = await GetRuntimeStatusAsync(notebookId, assistantId, cancellationToken);
+        var status = await GetRuntimeStatusAsync(notebookId, assistantId, cancellationToken, requiredModelId);
         
         if (status.State == "invalid")
             throw new InvalidOperationException("Cannot load incompatible models: " + string.Join(", ", status.Conflicts));
@@ -289,7 +289,8 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     public async Task<ModelLoadOperationDto> StartUnloadForNotebookContextAsync(
         Guid notebookId,
         Guid? assistantId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? requiredModelId = null)
     {
         var notebook = await _context.Notebooks
             .Include(n => n.Guide)
@@ -326,7 +327,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     List<ModelDto> requiredModels;
                     try
                     {
-                        requiredModels = await GetRequiredLlamaModelsAsync(notebook, assistantId, CancellationToken.None).ConfigureAwait(false);
+                        requiredModels = await GetRequiredLlamaModelsAsync(notebook, assistantId, CancellationToken.None, requiredModelId).ConfigureAwait(false);
                     }
                     catch (InvalidOperationException)
                     {
@@ -644,7 +645,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         )).ToList();
     }
 
-    private async Task<List<ModelDto>> GetRequiredLlamaModelsAsync(Notebook notebook, Guid? assistantId, CancellationToken cancellationToken)
+    private async Task<List<ModelDto>> GetRequiredLlamaModelsAsync(Notebook notebook, Guid? assistantId, CancellationToken cancellationToken, string? requiredModelId = null)
     {
         // R-1.6 / R-9.1: go through IChatModelResolver for every entity-level model id so the
         // preload path is identical to the dispatch path. Without this the notebook would
@@ -686,6 +687,13 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 // candidate. Surface the real error at dispatch time rather than blocking
                 // notebook open; preload is best-effort.
             }
+        }
+
+        // A client-supplied required model (e.g. a per-conversation override) must be
+        // included even when it is not referenced by the notebook/assistant chain.
+        if (!string.IsNullOrWhiteSpace(requiredModelId))
+        {
+            resolvedModelIds.Add(requiredModelId);
         }
 
         var allLlamaModels = await GetLlamaModelsFromCatalogAsync(cancellationToken);

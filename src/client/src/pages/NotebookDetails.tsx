@@ -21,6 +21,7 @@ import { ConversationProvider } from '../contexts/ConversationContext';
 import { LlamaRuntimeModal } from '../components/notebook/conversations/LlamaRuntimeModal';
 import { LlamaCrashedModal, LlamaCrashReason } from '../components/notebook/conversations/LlamaCrashedModal';
 import { NoChatModelDialog } from '../components/notebook/conversations/NoChatModelDialog';
+import { getConversationModelOverride } from '../contexts/conversation/conversationModelOverride';
 import MarkdownViewer from '../components/common/MarkdownViewer';
 import { NotebookAuthInterstitial } from '../components/notebook/auth/NotebookAuthInterstitial';
 import { checkNotebookAuthRequirements } from '../utils/notebookAuth';
@@ -230,6 +231,19 @@ function NotebookDetailsContent() {
         !!activeConversationId &&
         !noChatModelDialogDismissed;
 
+    // The per-conversation model override (set in the header toolbar) must be part of
+    // the llama-runtime model set this page checks/loads. Without it the modal would
+    // load the assistant/default model (already loaded) and the conversation's override
+    // would never be ready, so every send 409s.
+    //
+    // IMPORTANT: read fresh on every call. The override is written by the header
+    // picker at any time while this page is mounted, and nothing else in the
+    // component's state changes when it is picked (activeConversationId is stable),
+    // so a memo keyed on it goes stale: the modal's recheck would keep querying the
+    // default model set, see "ready", and close the modal while the override is
+    // still loading (the flicker loop). The store read is cheap and synchronous.
+    const overrideModelId = () => getConversationModelOverride(activeConversationId) ?? undefined;
+
     const applyRuntimeStatus = useCallback((status: any, assistantId?: string) => {
         if (!status?.state) return;
         if (assistantId) {
@@ -291,7 +305,8 @@ function NotebookDetailsContent() {
                 const status = await api.projects.notebooks.conversations.checkLlamaRuntime(
                     projectId,
                     notebookId,
-                    targetAssistantId
+                    targetAssistantId,
+                    overrideModelId()
                 );
                 if (!cancelled) {
                     applyRuntimeStatus(status, targetAssistantId);
@@ -365,7 +380,8 @@ function NotebookDetailsContent() {
                         const status = await api.projects.notebooks.conversations.checkLlamaRuntime(
                             projectId,
                             notebookId,
-                            targetAssistantId
+                            targetAssistantId,
+                            overrideModelId()
                         );
                         applyRuntimeStatus(status, targetAssistantId);
                         return;
@@ -392,7 +408,8 @@ function NotebookDetailsContent() {
                         const status = await api.projects.notebooks.conversations.checkLlamaRuntime(
                             projectId,
                             notebookId,
-                            targetAssistantId
+                            targetAssistantId,
+                            overrideModelId()
                         );
                         if (status?.state === 'failed' || status?.state === 'requires_load' || status?.state === 'ready') {
                             applyRuntimeStatus(status, targetAssistantId);
@@ -431,7 +448,7 @@ function NotebookDetailsContent() {
     const handleStartLoad = async () => {
         if (!projectId || !notebookId) return;
         try {
-            const op = await api.projects.notebooks.conversations.loadLlamaRuntime(projectId, notebookId, targetAssistantId);
+            const op = await api.projects.notebooks.conversations.loadLlamaRuntime(projectId, notebookId, targetAssistantId, overrideModelId());
             if (op?.state === 'ready') {
                 setRuntimeStatus((prev: any) => ({ ...prev, state: 'ready', activeOperation: op }));
                 setIsPolling(false);

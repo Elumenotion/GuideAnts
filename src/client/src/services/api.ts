@@ -1199,19 +1199,24 @@ export const api = {
                         `/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/compact`,
                         { method: 'POST' }
                     ),
-                checkLlamaRuntime: (_projectId: string, notebookId: string, assistantId?: string) =>
-                    callApi<any>(`/notebooks/${notebookId}/llama-runtime${assistantId ? `?assistantId=${assistantId}` : ''}`),
-                loadLlamaRuntime: (_projectId: string, notebookId: string, assistantId?: string) =>
+                checkLlamaRuntime: (_projectId: string, notebookId: string, assistantId?: string, modelId?: string) => {
+                        const params = new URLSearchParams();
+                        if (assistantId) params.set('assistantId', assistantId);
+                        if (modelId) params.set('modelId', modelId);
+                        const qs = params.toString();
+                        return callApi<any>(`/notebooks/${notebookId}/llama-runtime${qs ? `?${qs}` : ''}`);
+                    },
+                loadLlamaRuntime: (_projectId: string, notebookId: string, assistantId?: string, modelId?: string) =>
                     callApi<any>(`/notebooks/${notebookId}/llama-runtime/load`, {
                         method: 'POST',
-                        body: JSON.stringify({ assistantId })
+                        body: JSON.stringify({ assistantId, modelId })
                     }),
-                unloadLlamaRuntime: (_projectId: string, notebookId: string, assistantId?: string) =>
+                unloadLlamaRuntime: (_projectId: string, notebookId: string, assistantId?: string, modelId?: string) =>
                     callApi<import('../types/notebookToolbar').ModelLoadOperationDto>(
                         `/notebooks/${notebookId}/llama-runtime/unload`,
                         {
                             method: 'POST',
-                            body: JSON.stringify({ assistantId: assistantId ?? null }),
+                            body: JSON.stringify({ assistantId: assistantId ?? null, modelId }),
                         }
                     ),
                 pollLlamaRuntimeOperation: (_projectId: string, notebookId: string, operationId: string) =>

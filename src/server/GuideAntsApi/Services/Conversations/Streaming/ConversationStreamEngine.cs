@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -132,7 +133,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 {
                     if (releaseTask != null)
                     {
-                        _ = ObserveTaskAsync(releaseTask);
+                        _ = ObserveTaskAsync(releaseTask, "release stream lock", context.ConversationId);
                     }
 
                     _logger.LogWarning(
@@ -792,11 +793,16 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     }
                 }
 
-                await RegisterAndQueueNotebookSyncIfNeededAsync(context, output, workerCt);
+                // The trace write uses CancellationToken.None, so it is immune to the
+                // worker token. It must precede the notebook-sync call: that call is
+                // workerCt-gated at multiple awaits, and a cancellation mid-call throws
+                // OperationCanceledException past the trace write, leaving a completed
+                // turn with no trace segment.
                 await RunBestEffortLifecycleOperationAsync(
                     () => PersistTraceSegmentAsync("completed", ct: noneCt),
                     "completed prompt trace",
                     context.ConversationId);
+                await RegisterAndQueueNotebookSyncIfNeededAsync(context, output, workerCt);
                 streamingSucceeded = true;
             }
             catch (OperationCanceledException ex)
@@ -1060,7 +1066,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         _logger.LogWarning(
                             "Timed out draining stream broadcasts for {ConversationId}; continuing lifecycle cleanup",
                             context.ConversationId);
-                        _ = ObserveTaskAsync(hubPump);
+                        _ = ObserveTaskAsync(hubPump, "drain stream broadcasts", context.ConversationId);
                     }
                     catch (Exception ex)
                     {
@@ -1533,15 +1539,24 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             ct);
     }
 
-    private static async Task ObserveTaskAsync(Task task)
+    private async Task ObserveTaskAsync(Task task, string operationName, Guid conversationId)
     {
         try
         {
             await task.ConfigureAwait(false);
+            _logger.LogInformation(
+                "Background lifecycle operation {OperationName} for {ConversationId} settled after the lifecycle timeout",
+                operationName,
+                conversationId);
         }
-        catch
+        catch (Exception ex)
         {
             // Best-effort lifecycle telemetry must not become an unobserved task exception.
+            _logger.LogWarning(
+                ex,
+                "Background lifecycle operation {OperationName} for {ConversationId} failed after the lifecycle timeout",
+                operationName,
+                conversationId);
         }
     }
 
@@ -1550,28 +1565,42 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
         string operationName,
         Guid conversationId)
     {
+        _logger.LogInformation(
+            "Lifecycle operation {OperationName} started for conversation {ConversationId}",
+            operationName,
+            conversationId);
+        var stopwatch = Stopwatch.StartNew();
         Task? operationTask = null;
         try
         {
             operationTask = operation();
             await operationTask.WaitAsync(LifecycleBestEffortTimeout);
+            _logger.LogInformation(
+                "Lifecycle operation {OperationName} completed for conversation {ConversationId} in {ElapsedMs}ms (best-effort budget {BudgetMs}ms)",
+                operationName,
+                conversationId,
+                stopwatch.ElapsedMilliseconds,
+                (int)LifecycleBestEffortTimeout.TotalMilliseconds);
         }
         catch (TimeoutException)
         {
+            // The operation is left running in the background; report its final outcome as soon as it settles.
             _logger.LogWarning(
-                "Timed out while recording {OperationName} for {ConversationId}; continuing stream lifecycle cleanup",
+                "Timed out after {BudgetMs}ms while recording {OperationName} for {ConversationId}; continuing stream lifecycle cleanup",
+                (int)LifecycleBestEffortTimeout.TotalMilliseconds,
                 operationName,
                 conversationId);
             if (operationTask != null)
             {
-                _ = ObserveTaskAsync(operationTask);
+                _ = ObserveTaskAsync(operationTask, operationName, conversationId);
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Failed while recording {OperationName} for {ConversationId}",
+                "Failed after {ElapsedMs}ms while recording {OperationName} for {ConversationId}",
+                stopwatch.ElapsedMilliseconds,
                 operationName,
                 conversationId);
         }
@@ -1672,7 +1701,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             {
                 if (operationTask != null)
                 {
-                    _ = ObserveTaskAsync(operationTask);
+                    _ = ObserveTaskAsync(operationTask, "terminalization", request.ConversationId);
                 }
 
                 _logger.LogError(

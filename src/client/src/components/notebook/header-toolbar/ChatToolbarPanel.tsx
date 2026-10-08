@@ -53,11 +53,43 @@ export function ChatToolbarPanel({
   const isDefaultedToGlobalDefault =
     !overrideAllChatModels && chat.effectiveModelSource === 'defaultedTo';
   const modelListLocked = !overrideAllChatModels && !isDefaultedToGlobalDefault;
+  // When a per-conversation override is active, the server's chat.localRuntimeOn
+  // reflects the assistant/global-default model (the override is client-local and
+  // never sent to the toolbar GET). Probe the override's real runtime state so the
+  // pill answers "is the model THIS conversation will dispatch loaded?"
+  const [overrideRuntime, setOverrideRuntime] = useState<any>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (conversationModelOverride) {
+      setOverrideRuntime(null);
+      api.projects.notebooks.conversations
+        .checkLlamaRuntime(projectId, notebookId, undefined, conversationModelOverride)
+        .then((s) => {
+          if (!cancelled) setOverrideRuntime(s);
+        })
+        .catch(() => {
+          // Probe failure is non-fatal; the send preflight remains the safety net.
+        });
+    } else {
+      setOverrideRuntime(null);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationModelOverride, projectId, notebookId]);
+
+  const localModelLoading = Boolean(conversationModelOverride && !overrideRuntime);
+  const localOn = conversationModelOverride
+    ? overrideRuntime?.state === 'ready'
+    : chat.localRuntimeOn;
+
   const loadButtonLabel = hasPendingOp
     ? 'Switching...'
-    : chat.localRuntimeOn
-      ? 'Loaded'
-      : 'Load model';
+    : localModelLoading
+      ? 'Loading...'
+      : localOn
+        ? 'Loaded'
+        : 'Load model';
 
   const loadChatDefaults = useCallback(async () => {
     try {
@@ -155,6 +187,55 @@ export function ChatToolbarPanel({
   const selectConversationModel = (modelId: string) => {
     setConversationModelOverride(modelId);
     storeSetConversationModelOverride(conversationId, modelId);
+    // A pick of a local model must be loadable before the next send, not after the
+    // 400. Start the load now and hand progress to the notebook's LlamaRuntimeModal
+    // (via the llama-runtime-loading window event) so the user sees the same blocking
+    // "Loading Local Models..." screen the default/assistant model paths show. The
+    // notebook page owns polling + completion; the send preflight remains the safety net.
+    const picked = catalogModelById.get(modelId);
+    if (picked?.runtimeConfig?.routerModelId) {
+      void startConversationModelLoad(modelId);
+    }
+  };
+
+  const startConversationModelLoad = async (modelId: string) => {
+    setInFlight(true);
+    try {
+      const op = await api.projects.notebooks.conversations.loadLlamaRuntime(
+        projectId,
+        notebookId,
+        assistantIdForLlama,
+        modelId
+      );
+      if (op?.state === 'ready') {
+        await onRefresh();
+        return;
+      }
+      if (op?.state === 'failed') {
+        window.dispatchEvent(
+          new CustomEvent('llama-runtime-requires-load', {
+            detail: {
+              assistantId: assistantIdForLlama,
+              runtimeStatus: {
+                state: 'failed',
+                activeOperation: op,
+                conflicts: [op?.errorDetails ?? 'Local model load operation failed.'],
+              },
+            },
+          })
+        );
+        return;
+      }
+      // Hand off to the modal: it polls op.operationId to ready/failed.
+      window.dispatchEvent(
+        new CustomEvent('llama-runtime-loading', {
+          detail: { operation: op },
+        })
+      );
+      await onRefresh();
+    } finally {
+      setInFlight(false);
+    }
   };
 
   const clearConversationModel = () => {
@@ -168,7 +249,8 @@ export function ChatToolbarPanel({
       let op = await api.projects.notebooks.conversations.loadLlamaRuntime(
         projectId,
         notebookId,
-        assistantIdForLlama
+        assistantIdForLlama,
+        conversationModelOverride ?? undefined
       );
       for (let i = 0; i < 120; i += 1) {
         if (!op || op.state === 'ready' || op.state === 'failed') break;
@@ -297,25 +379,25 @@ export function ChatToolbarPanel({
           <button
             type="button"
             className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium ${
-              chat.localRuntimeOn
+              localOn
                 ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                 : 'border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50'
             } disabled:cursor-not-allowed disabled:opacity-70`}
-            aria-label={chat.localRuntimeOn ? 'Selected local chat model is loaded' : 'Load selected local chat model'}
-            title={chat.localRuntimeOn ? 'Selected local chat model is loaded' : 'Load selected local chat model'}
-            disabled={Boolean(hasPendingOp) || chat.localRuntimeOn}
+            aria-label={localOn ? 'Selected local chat model is loaded' : 'Load selected local chat model'}
+            title={localOn ? 'Selected local chat model is loaded' : 'Load selected local chat model'}
+            disabled={Boolean(hasPendingOp) || localModelLoading || localOn}
             onClick={() => void powerOn()}
           >
-            {hasPendingOp ? (
+            {hasPendingOp || localModelLoading ? (
               <FaSpinner className="h-3.5 w-3.5 animate-spin" />
-            ) : chat.localRuntimeOn ? (
+            ) : localOn ? (
               <FaCheck className="h-3.5 w-3.5" />
             ) : (
               <FaPlay className="h-3.5 w-3.5" />
             )}
             {loadButtonLabel}
           </button>
-          {chat.localRuntimeOn ? (
+          {localOn ? (
             <button
               type="button"
               className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"

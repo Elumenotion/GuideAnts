@@ -1050,14 +1050,7 @@ public sealed class ConversationPersistence : IConversationPersistence
             request.ExpectedExecutionId,
             AppendTraceAsync,
             ct);
-    }
 
-    private static async Task ExecuteSerializableWriteAsync(
-        ApplicationDbContext db,
-        Func<Task> operation,
-        CancellationToken ct)
-    {
-        await ExecuteWriteAsync(db, operation, IsolationLevel.Serializable, ct);
     }
 
     private static async Task<T> ExecuteSerializableWriteAsync<T>(

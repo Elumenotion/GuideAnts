@@ -24,8 +24,23 @@ public class ModelLoadOperationDto
 
 public interface INotebookModelRuntimeService
 {
-    Task<NotebookLlamaRuntimeStatusDto> GetRuntimeStatusAsync(Guid notebookId, Guid? assistantId = null, CancellationToken cancellationToken = default);
-    Task<ModelLoadOperationDto> StartLoadOperationAsync(Guid notebookId, Guid? assistantId = null, CancellationToken cancellationToken = default);
+    ///<summary>
+    /// Gets the runtime status for this notebook context. When
+    ///<paramref name="requiredModelId"/> is supplied (e.g. a per-conversation model
+    /// override sent by the client), that model is included in the required set in
+    /// addition to the notebook/assistant-derived models, so readiness reflects the
+    /// model the next dispatch will actually use.
+    ///</summary>
+    Task<NotebookLlamaRuntimeStatusDto> GetRuntimeStatusAsync(
+        Guid notebookId,
+        Guid? assistantId = null,
+        CancellationToken cancellationToken = default,
+        string? requiredModelId = null);
+    Task<ModelLoadOperationDto> StartLoadOperationAsync(
+        Guid notebookId,
+        Guid? assistantId = null,
+        CancellationToken cancellationToken = default,
+        string? requiredModelId = null);
 
     /// <summary>
     /// Unloads the llama router models required for this notebook context, releasing memory
@@ -35,7 +50,8 @@ public interface INotebookModelRuntimeService
     Task<ModelLoadOperationDto> StartUnloadForNotebookContextAsync(
         Guid notebookId,
         Guid? assistantId = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? requiredModelId = null);
 
     Task<ModelLoadOperationDto?> GetOperationStatusAsync(Guid notebookId, string operationId, CancellationToken cancellationToken = default);
 }

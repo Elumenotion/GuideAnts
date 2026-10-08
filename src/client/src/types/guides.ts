@@ -430,6 +430,13 @@ export interface ModelDto {
   reasoningChoicesJson?: string;
   isActive: boolean;
   displayOrder?: number;
+  /**
+   * Set for models served by the local llama-cpp runtime (router model id).
+   * The /catalogs/models endpoint sends this as `runtimeConfig` (server
+   * ModelRuntimeConfigDto); null/absent for cloud models. Use this to tell
+   * whether a pick needs a local model load.
+   */
+  runtimeConfig?: { routerModelId?: string | null; stackBaseUrl?: string | null } | null;
   localRuntime?: LocalRuntimeDescriptorDto;
   samplingParameterPolicy?: SamplingParameterPolicyDto[];
   reasoningChoices?: string[];

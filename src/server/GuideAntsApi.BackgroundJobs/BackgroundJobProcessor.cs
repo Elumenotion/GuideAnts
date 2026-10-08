@@ -17,8 +17,11 @@ public class BackgroundJobProcessor : BackgroundService
     private readonly Dictionary<string, SemaphoreSlim> _concurrencyLimits;
     private readonly Dictionary<string, IJobHandler> _jobHandlers;
     private readonly HashSet<string> _lockGatedJobTypes;
+    private readonly HashSet<string> _embeddingsGatedJobTypes;
+    private readonly IEmbeddingsReadinessGate? _embeddingsReadinessGate;
     private readonly AdaptiveLoopBackoff _loopBackoff;
     private DateTime _lastLockGateLogUtc = DateTime.MinValue;
+    private DateTime _lastEmbeddingsGateLogUtc = DateTime.MinValue;
 
     public BackgroundJobProcessor(
         IServiceProvider serviceProvider,
@@ -43,6 +46,10 @@ public class BackgroundJobProcessor : BackgroundService
         _lockGatedJobTypes = _options.ConversationLockGate.Enabled
             ? new HashSet<string>(_options.ConversationLockGate.GatedJobTypes, StringComparer.Ordinal)
             : [];
+        _embeddingsGatedJobTypes = _options.EmbeddingsGate.Enabled
+            ? new HashSet<string>(_options.EmbeddingsGate.GatedJobTypes, StringComparer.Ordinal)
+            : [];
+        _embeddingsReadinessGate = (IEmbeddingsReadinessGate?)serviceProvider.GetService(typeof(IEmbeddingsReadinessGate));
 
         // Initialize job handlers dictionary
         _jobHandlers = new Dictionary<string, IJobHandler>();
@@ -125,12 +132,32 @@ public class BackgroundJobProcessor : BackgroundService
         var tasks = new List<Task>();
         bool? hasActiveConversationLock = null;
         bool? bothChatAndEmbeddingsUseLocalAi = null;
+        bool? embeddingsGateActive = null;
+        bool? embeddingsLoadedOrNotLocal = null;
         
         // Process each job type within its concurrency limit
         foreach (var (jobType, jobOptions) in _options.JobTypes)
         {
             if (!_concurrencyLimits.TryGetValue(jobType, out var limit))
                 continue;
+
+            if (_embeddingsGatedJobTypes.Contains(jobType))
+            {
+                embeddingsGateActive ??= await EmbeddingsGateActiveAsync(ct);
+                if (embeddingsGateActive.Value)
+                {
+                    embeddingsLoadedOrNotLocal ??= await EnsureLocalEmbeddingsLoadedAsync(ct);
+                    if (EmbeddingsJobGate.ShouldDeferJobType(
+                            jobType,
+                            _options.EmbeddingsGate,
+                            embeddingsGateActive.Value,
+                            embeddingsLoadedOrNotLocal.Value))
+                    {
+                        MaybeLogEmbeddingsGateActive();
+                        continue;
+                    }
+                }
+            }
 
             if (_lockGatedJobTypes.Contains(jobType))
             {
@@ -206,6 +233,48 @@ public class BackgroundJobProcessor : BackgroundService
         }
 
         return await eligibility.BothUseLocalAiAsync(ct);
+    }
+
+    private async Task<bool> EmbeddingsGateActiveAsync(CancellationToken ct)
+    {
+        if (_embeddingsReadinessGate is null)
+        {
+            return false;
+        }
+
+        return await _embeddingsReadinessGate.UsesLocalEmbeddingsAsync(ct);
+    }
+
+    private async Task<bool> EnsureLocalEmbeddingsLoadedAsync(CancellationToken ct)
+    {
+        if (_embeddingsReadinessGate is null)
+        {
+            return true;
+        }
+
+        var (loaded, error) = await _embeddingsReadinessGate.EnsureLocalEmbeddingsLoadedAsync(ct);
+        if (!loaded && error is not null)
+        {
+            _logger.LogWarning(
+                "Embeddings gate: engine not loaded and load did not confirm loaded. Error={Error}",
+                error);
+        }
+
+        return loaded;
+    }
+
+    private void MaybeLogEmbeddingsGateActive()
+    {
+        var now = DateTime.UtcNow;
+        var throttle = TimeSpan.FromSeconds(Math.Max(5, _options.EmbeddingsGate.LogThrottleSeconds));
+        if (now - _lastEmbeddingsGateLogUtc < throttle)
+        {
+            return;
+        }
+
+        _lastEmbeddingsGateLogUtc = now;
+        _logger.LogDebug(
+            "Deferring indexing job claims while the local embeddings engine is not loaded");
     }
 
     private void MaybeLogLockGateActive()

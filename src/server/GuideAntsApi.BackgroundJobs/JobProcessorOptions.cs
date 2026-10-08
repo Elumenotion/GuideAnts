@@ -20,6 +20,8 @@ public class JobProcessorOptions
     public Dictionary<string, JobTypeOptions> JobTypes { get; set; } = new();
 
     public ConversationLockGateOptions ConversationLockGate { get; set; } = new();
+
+    public EmbeddingsJobGateOptions EmbeddingsGate { get; set; } = new();
 }
 
 public class JobTypeOptions
