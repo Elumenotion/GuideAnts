@@ -116,23 +116,28 @@ public static class DocumentServerEndpoints
             .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
-        group.MapGet("/capabilities", (
+        group.MapGet("/capabilities", async (
             HttpContext httpContext,
             IOptions<DocumentServerOptions> options,
             IDocumentServerService service,
-            ILoggerFactory loggerFactory) =>
+            IDocumentServerHealthProbe healthProbe,
+            ILoggerFactory loggerFactory,
+            CancellationToken cancellationToken) =>
         {
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             var documentServerOptions = options.Value;
             var publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(documentServerOptions, httpContext);
             var sanitizedPublicUrl = LogValueSanitizer.Sanitize(publicUrl);
+            var reachable = await healthProbe.IsReachableAsync(cancellationToken);
             logger.LogInformation(
-                "DocumentServer capabilities requested. enabled={Enabled} publicUrl={PublicUrl}",
+                "DocumentServer capabilities requested. enabled={Enabled} reachable={Reachable} publicUrl={PublicUrl}",
                 documentServerOptions.Enabled,
+                reachable,
                 sanitizedPublicUrl);
             return Results.Ok(new
             {
                 enabled = documentServerOptions.Enabled,
+                reachable,
                 publicUrl,
                 supportedExtensions = service.SupportedExtensions,
                 supportedContentTypes = service.SupportedContentTypes
