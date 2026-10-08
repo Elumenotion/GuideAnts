@@ -70,7 +70,7 @@ public sealed class MarsTransactionCharacterizationTests
             ExtractMethod(
                 persistenceSource,
                 "public async Task AppendTurnTraceSegmentAsync",
-                "private static async Task ExecuteSerializableWriteAsync")
+                "private static async Task<T> ExecuteSerializableWriteAsync<T>")
         };
 
         foreach (var method in streamingMethods)
