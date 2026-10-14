@@ -172,6 +172,59 @@ public sealed class OpenAiCompatibleChatClientTests
     }
 
     [TestMethod]
+    public async Task StreamCompletionAsync_StreamsReasoningContent_AsThinkingChunks()
+    {
+        var sse =
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"I should \"}}]}\n\n" +
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"check.\"}}]}\n\n" +
+            "data: {\"choices\":[{\"delta\":{\"content\":\"2 is \"}}]}\n\n" +
+            "data: {\"choices\":[{\"delta\":{\"content\":\"even.\"}}]}\n\n" +
+            "data: {\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n" +
+            "data: [DONE]\n\n";
+        var handler = new CapturingHandler(_ => SseResponse(sse));
+        using var httpClient = new HttpClient(handler);
+        var client = CreateClient(httpClient);
+
+        var events = new List<(string? FinishReason, string? Content)>();
+        var response = await client.StreamCompletionAsync(
+            new ChatCompletionRequest(messages: [new ChatMessage(ChatRole.User, "2 + 2")], model: null),
+            onChunk: chunk =>
+            {
+                var delta = chunk.FirstChoice!;
+                events.Add((delta.FinishReason, delta.Delta.Content));
+            });
+
+        events.Should().HaveCount(4);
+        events[0].Should().Be(("thinking", "I should "));
+        events[1].Should().Be(("thinking", "check."));
+        events[2].Should().Be((null, "2 is "));
+        events[3].Should().Be((null, "even."));
+
+        var message = response.FirstChoice!.Message;
+        message.GetText().Should().Be("2 is even.");
+        message.ThinkingBlocks.Should().ContainSingle();
+        message.ThinkingBlocks![0].IsThinking.Should().BeTrue();
+        message.ThinkingBlocks[0].Thinking.Should().Be("I should check.");
+        response.FirstChoice.FinishReason.Should().Be("stop");
+    }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_NonStreamingReasoningContent_BecomesThinkingBlocks()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(
+            "{ \"choices\": [ { \"message\": { \"content\": \"hi\", \"reasoning_content\": \"because\" }, \"finish_reason\": \"stop\" } ] }"));
+        using var httpClient = new HttpClient(handler);
+        var client = CreateClient(httpClient);
+
+        var response = await client.GetCompletionAsync(new ChatCompletionRequest(messages: [new ChatMessage(ChatRole.User, "hi")], model: null));
+
+        var message = response.FirstChoice!.Message;
+        message.GetText().Should().Be("hi");
+        message.ThinkingBlocks.Should().ContainSingle();
+        message.ThinkingBlocks![0].Thinking.Should().Be("because");
+    }
+
+    [TestMethod]
     public void SupportsToolChoiceNone_IsTrue()
     {
         var handler = new CapturingHandler(_ => JsonResponse(TextResponse("hi")));

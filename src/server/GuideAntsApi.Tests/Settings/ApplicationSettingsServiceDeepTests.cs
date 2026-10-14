@@ -1,8 +1,6 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
-using GuideAntsApi.Services.LlamaCpp;
-using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;

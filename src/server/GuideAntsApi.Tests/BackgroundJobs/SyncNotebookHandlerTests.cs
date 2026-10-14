@@ -8,7 +8,6 @@ using GuideAntsApi.Services;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Components.Sync;
 using GuideAntsApi.Services.Core;
-using GuideAntsApi.Tests.BackgroundJobs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;

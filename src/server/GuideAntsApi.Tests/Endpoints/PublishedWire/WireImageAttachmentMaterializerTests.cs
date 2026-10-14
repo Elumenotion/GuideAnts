@@ -2,7 +2,6 @@ using FluentAssertions;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Endpoints.PublishedWire;
 using GuideAntsApi.Models;
-using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Components;
 using Microsoft.AspNetCore.Http;
 using Moq;

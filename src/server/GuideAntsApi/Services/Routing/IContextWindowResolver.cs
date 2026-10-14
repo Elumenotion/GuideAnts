@@ -25,6 +25,7 @@ public sealed record ContextWindowInfo(
 
 public interface IContextWindowResolver
 {
+    /// <param name="modelId">The model identifier to resolve.</param>
     /// <param name="liveRuntimeContextSize">
     /// The loaded context size reported by a local runtime, when one is serving this model.
     /// Null for cloud models. This is the loaded window, not <c>n_ctx_train</c>.

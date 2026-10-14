@@ -1,7 +1,6 @@
 using FluentAssertions;
 using GuideAntsApi.BackgroundJobs.Services.Embeddings;
 using GuideAntsApi.BackgroundJobs.Services.Indexing;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace GuideAntsApi.Tests.BackgroundJobs;
 

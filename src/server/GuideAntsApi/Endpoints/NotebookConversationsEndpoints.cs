@@ -9,7 +9,6 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.Utils;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Services.Conversations.Commands;
-using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
 
 namespace GuideAntsApi.Endpoints;

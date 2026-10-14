@@ -2,7 +2,6 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using Microsoft.AspNetCore.Hosting;

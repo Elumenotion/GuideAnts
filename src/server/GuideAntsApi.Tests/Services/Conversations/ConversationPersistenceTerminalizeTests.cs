@@ -1,5 +1,4 @@
 using AntRunner.Chat;
-using AntRunner.Chat.Abstractions;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;

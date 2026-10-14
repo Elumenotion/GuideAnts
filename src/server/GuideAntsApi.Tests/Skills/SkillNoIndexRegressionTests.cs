@@ -3,7 +3,6 @@ using System.Text;
 using AntRunner.ToolCalling.AssistantDefinitions.Storage;
 using FluentAssertions;
 using GuideAntsApi.BackgroundJobs.Jobs;
-using GuideAntsApi.BackgroundJobs.Services;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Tests.BackgroundJobs;

@@ -1,4 +1,3 @@
-using System.Text;
 using AntRunner.ToolCalling.AssistantDefinitions;
 using FluentAssertions;
 

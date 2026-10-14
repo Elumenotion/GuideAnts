@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using FluentAssertions;
 using GuideAntsApi.Models.Conversations;
-using GuideAntsApi;
 using Microsoft.AspNetCore.Http;
 
 namespace GuideAntsApi.Tests.Extensions;

@@ -5,7 +5,6 @@ using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;
-using GuideAntsApi.Services.Conversations.Mapping;
 using GuideAntsApi.Tests.BackgroundJobs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

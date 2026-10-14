@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace AntRunner.Chat.Compaction;
 
 internal sealed record ActivityLedgerEntry(string ToolName, string? KeyArgument, bool? Succeeded);

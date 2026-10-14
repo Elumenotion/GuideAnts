@@ -1,5 +1,4 @@
 using FluentAssertions;
-using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.Configuration;
 using Microsoft.Extensions.Configuration;
 

@@ -375,9 +375,17 @@ public sealed class OpenAiCompatibleChatClient : IChatCompletionClient
             var toolCalls = message.ToolCalls?.Count > 0
                 ? message.ToolCalls.Select(ToToolCall).ToList()
                 : null;
-            return toolCalls is { Count: > 0 }
-                ? new ChatMessage(ChatRole.Assistant, content, toolCalls)
-                : new ChatMessage(ChatRole.Assistant, content);
+            // Reasoning models (e.g. Strata's /v1) carry the model's thinking in
+            // message.reasoning_content, the same field the llama.cpp client reads.
+            IReadOnlyList<ChatThinkingBlock>? thinkingBlocks = string.IsNullOrWhiteSpace(message.ReasoningContent)
+                ? null
+                : [ChatThinkingBlock.ForThinking(message.ReasoningContent, string.Empty)];
+            if (toolCalls is { Count: > 0 } || thinkingBlocks is not null)
+            {
+                return new ChatMessage(ChatRole.Assistant, content, toolCalls, thinkingBlocks);
+            }
+
+            return new ChatMessage(ChatRole.Assistant, content);
         }
 
         private static IReadOnlyList<ChatContent> ExtractContent(JsonElement? contentElement)
@@ -517,6 +525,7 @@ public sealed class OpenAiCompatibleChatClient : IChatCompletionClient
     private sealed class OpenAiCompatibleStreamingAccumulator
     {
         private readonly StringBuilder _content = new();
+        private readonly StringBuilder _reasoningText = new();
         private readonly Dictionary<int, MutableToolCall> _toolCalls = [];
         private string? _finishReason;
         private ChatCompletionUsage? _usage;
@@ -539,6 +548,13 @@ public sealed class OpenAiCompatibleChatClient : IChatCompletionClient
                 }
 
                 return;
+            }
+
+            var reasoningDelta = delta.ReasoningContent;
+            if (!string.IsNullOrEmpty(reasoningDelta))
+            {
+                _reasoningText.Append(reasoningDelta);
+                EmitThinkingDelta(onChunk, reasoningDelta);
             }
 
             var textDelta = ExtractDeltaText(delta.Content);
@@ -598,8 +614,11 @@ public sealed class OpenAiCompatibleChatClient : IChatCompletionClient
         {
             var content = _content.Length == 0 ? [] : new[] { new ChatContent(_content.ToString()) };
             var toolCalls = BuildToolCalls();
-            var message = toolCalls.Count > 0
-                ? new ChatMessage(ChatRole.Assistant, content, toolCalls)
+            IReadOnlyList<ChatThinkingBlock>? thinkingBlocks = _reasoningText.Length == 0
+                ? null
+                : [ChatThinkingBlock.ForThinking(_reasoningText.ToString(), string.Empty)];
+            var message = toolCalls.Count > 0 || thinkingBlocks is not null
+                ? new ChatMessage(ChatRole.Assistant, content, toolCalls, thinkingBlocks)
                 : new ChatMessage(ChatRole.Assistant, content);
             var finishReason = _finishReason ?? (toolCalls.Count > 0 ? "tool_calls" : "stop");
             return new ChatCompletionResponse([new ChatChoice(message, finishReason)], _usage);
@@ -631,6 +650,12 @@ public sealed class OpenAiCompatibleChatClient : IChatCompletionClient
             "tool" => ChatRole.Tool,
             _ => null
         };
+
+        private static void EmitThinkingDelta(Action<ChatCompletionChunk> onChunk, string text)
+        {
+            var delta = new ChatDelta(ChatRole.Assistant, text);
+            onChunk(new ChatCompletionChunk([new ChatChoiceDelta(delta, "thinking")]));
+        }
 
         private static string? ExtractDeltaText(JsonElement? contentElement)
         {
@@ -760,6 +785,7 @@ internal sealed record OpenAiCompatibleChatChoice(
 
 internal sealed record OpenAiCompatibleChatResponseMessage(
     JsonElement? Content,
+    [property: JsonPropertyName("reasoning_content")] string? ReasoningContent,
     [property: JsonPropertyName("tool_calls")] IReadOnlyList<OpenAiCompatibleChatToolCall>? ToolCalls);
 
 internal sealed record OpenAiCompatibleUsage(
@@ -782,6 +808,7 @@ internal sealed record OpenAiCompatibleChatStreamChoice(
 internal sealed record OpenAiCompatibleChatStreamDelta(
     string? Role,
     JsonElement? Content,
+    [property: JsonPropertyName("reasoning_content")] string? ReasoningContent,
     [property: JsonPropertyName("tool_calls")] IReadOnlyList<OpenAiCompatibleChatStreamToolCall>? ToolCalls);
 
 internal sealed record OpenAiCompatibleChatStreamToolCall(

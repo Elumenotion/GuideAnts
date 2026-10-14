@@ -12,7 +12,6 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Conversations.Attachments;
 using GuideAntsApi.Services.Conversations.Mapping;
-using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 

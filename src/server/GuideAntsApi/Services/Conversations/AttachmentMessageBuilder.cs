@@ -3,16 +3,8 @@ using GuideAntsApi.DataModel.Models;
 using ChatMessageRole = AntRunner.Chat.Abstractions.ChatRole;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Core;
-using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Exceptions;
 using GuideAntsApi.Options;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Processing;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.Formats.Jpeg;
-using SixLabors.ImageSharp.Formats.Gif;
-using SixLabors.ImageSharp.Formats.Bmp;
-using SixLabors.ImageSharp.Formats.Webp;
 
 namespace GuideAntsApi.Services.Conversations;
 
@@ -455,117 +447,19 @@ public static class AttachmentMessageBuilder
     }
 
     /// <summary>
-    /// Resizes an image if it exceeds the maximum dimensions supported by Azure OpenAI vision models.
-    /// Supported dimensions: 1024x1024 (square), 1024x1792 (portrait), 1792x1024 (landscape)
+    /// Returns image bytes unchanged (no client-side resize).
+    /// All target vision backends perform server-side resizing:
+    ///  - Azure OpenAI / OpenRouter: auto-resize to tile grid (512/768/1344 px).
+    ///  - llama.cpp (llama-server): mtmd preprocessor resizes to model-native resolution.
+    /// The only hard cap is the ~20 MB input-image size on cloud vision APIs,
+    /// which is a byte limit, not a dimension limit.
     /// </summary>
     /// <param name="imageBytes">Original image bytes</param>
-    /// <param name="contentType">Content type of the image</param>
-    /// <returns>Resized image bytes if resizing was needed, otherwise original bytes</returns>
+    /// <param name="contentType">Content type of the image (unused; kept for API compatibility)</param>
+    /// <returns>The original image bytes</returns>
     public static byte[] ResizeImageIfNeeded(byte[] imageBytes, string contentType)
     {
-        try
-        {
-            using var image = Image.Load(imageBytes);
-            var width = image.Width;
-            var height = image.Height;
-
-            // Check if resizing is needed
-            var (targetWidth, targetHeight) = DetermineBestSizeForImage(width, height);
-            
-            if (width == targetWidth && height == targetHeight)
-            {
-                // No resizing needed
-                return imageBytes;
-            }
-
-            if (width <= targetWidth && height <= targetHeight)
-            {
-                // Image is already smaller than target dimensions
-                return imageBytes;
-            }
-
-            // Calculate resize dimensions maintaining aspect ratio
-            var (resizeWidth, resizeHeight) = CalculateResizeDimensions(width, height, targetWidth, targetHeight);
-
-            // Resize the image
-            image.Mutate(x => x.Resize(resizeWidth, resizeHeight));
-
-            // Encode back to bytes with appropriate format
-            using var outputStream = new MemoryStream();
-            
-            // Determine encoder based on content type
-            var encoder = contentType.ToLowerInvariant() switch
-            {
-                "image/png" => (SixLabors.ImageSharp.Formats.IImageEncoder)new PngEncoder(),
-                "image/jpeg" or "image/jpg" => new JpegEncoder { Quality = 90 },
-                "image/gif" => new GifEncoder(),
-                "image/bmp" => new BmpEncoder(),
-                "image/webp" => new WebpEncoder(),
-                _ => new PngEncoder() // Default to PNG
-            };
-
-            image.Save(outputStream, encoder);
-            return outputStream.ToArray();
-        }
-        catch
-        {
-            // If resizing fails, return original bytes
-            return imageBytes;
-        }
-    }
-
-    /// <summary>
-    /// Determines the best target size based on image dimensions.
-    /// Returns one of: (1024, 1024), (1024, 1792), or (1792, 1024)
-    /// </summary>
-    private static (int width, int height) DetermineBestSizeForImage(int width, int height)
-    {
-        if (width <= 0 || height <= 0)
-        {
-            return (1024, 1024);
-        }
-
-        double aspectRatio = (double)width / height;
-
-        // Calculate aspect ratios for our available sizes
-        const double squareRatio = 1.0;        // 1024/1024 = 1.0
-        const double portraitRatio = 0.571;    // 1024/1792 = 0.571
-        const double landscapeRatio = 1.75;    // 1792/1024 = 1.75
-
-        // Find the closest match
-        double squareDiff = Math.Abs(aspectRatio - squareRatio);
-        double portraitDiff = Math.Abs(aspectRatio - portraitRatio);
-        double landscapeDiff = Math.Abs(aspectRatio - landscapeRatio);
-
-        if (portraitDiff < squareDiff && portraitDiff < landscapeDiff)
-        {
-            return (1024, 1792);
-        }
-        else if (landscapeDiff < squareDiff && landscapeDiff < portraitDiff)
-        {
-            return (1792, 1024);
-        }
-        else
-        {
-            return (1024, 1024);
-        }
-    }
-
-    /// <summary>
-    /// Calculates resize dimensions that maintain aspect ratio and fit within target bounds
-    /// </summary>
-    private static (int width, int height) CalculateResizeDimensions(int originalWidth, int originalHeight, int targetWidth, int targetHeight)
-    {
-        double widthRatio = (double)targetWidth / originalWidth;
-        double heightRatio = (double)targetHeight / originalHeight;
-        
-        // Use the smaller ratio to ensure image fits within target bounds
-        double ratio = Math.Min(widthRatio, heightRatio);
-
-        int newWidth = (int)(originalWidth * ratio);
-        int newHeight = (int)(originalHeight * ratio);
-
-        return (newWidth, newHeight);
+        return imageBytes;
     }
 
     /// <summary>

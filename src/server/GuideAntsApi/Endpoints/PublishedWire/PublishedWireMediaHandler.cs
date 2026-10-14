@@ -7,7 +7,6 @@ using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.PublishedWireApi;
 using GuideAntsApi.Services.Routing;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.Endpoints.PublishedWire;
 

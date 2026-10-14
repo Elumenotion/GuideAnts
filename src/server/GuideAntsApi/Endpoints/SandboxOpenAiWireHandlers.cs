@@ -9,7 +9,6 @@ using GuideAntsApi.Endpoints.PublishedWire;
 using GuideAntsApi.Services.PublishedWireApi;
 using GuideAntsApi.Services.SandboxWireApi;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.Endpoints;
 

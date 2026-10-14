@@ -2,14 +2,10 @@ using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
-using GuideAntsApi.Services.Conversations;
-using GuideAntsApi.Services.Guides;
-using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Tests.Services.Guides;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.EntityFrameworkCore;
-using Moq;
 
 namespace GuideAntsApi.Tests.Services.LlamaCpp;
 

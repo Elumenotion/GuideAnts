@@ -1,5 +1,4 @@
 using GuideAntsApi.DataModel;
-using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.PublishedGuides;
 using Microsoft.EntityFrameworkCore;
 

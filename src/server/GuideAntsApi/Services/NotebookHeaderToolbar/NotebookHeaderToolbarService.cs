@@ -2,7 +2,6 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Endpoints;
-using GuideAntsApi.Endpoints.Settings;
 using GuideAntsApi.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;

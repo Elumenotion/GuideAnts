@@ -1,6 +1,5 @@
 using AntRunner.Chat.Abstractions;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Conversations.Mapping;

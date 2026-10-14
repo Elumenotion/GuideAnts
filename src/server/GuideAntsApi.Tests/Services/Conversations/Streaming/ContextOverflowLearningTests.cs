@@ -1,6 +1,5 @@
 using AntRunner.Chat;
 using AntRunner.Chat.Abstractions;
-using FluentAssertions;
 using GuideAntsApi.Services.Conversations.Streaming;
 using GuideAntsApi.Services.Routing;
 using Moq;

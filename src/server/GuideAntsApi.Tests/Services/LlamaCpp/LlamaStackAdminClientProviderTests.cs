@@ -1,9 +1,7 @@
 using Moq;
-using System.Net;
 using FluentAssertions;
 using GuideAntsApi.Services.LlamaCpp;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Tests.Services.LlamaCpp;
 

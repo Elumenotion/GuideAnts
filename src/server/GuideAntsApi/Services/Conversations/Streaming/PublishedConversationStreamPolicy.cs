@@ -1,6 +1,5 @@
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Conversations.Persistence;
 using Microsoft.EntityFrameworkCore;
 

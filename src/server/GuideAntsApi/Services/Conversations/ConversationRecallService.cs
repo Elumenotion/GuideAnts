@@ -15,9 +15,15 @@ public sealed record ConversationRecallHit(
     string Excerpt);
 
 /// <summary>One page of recall results.</summary>
+/// <param name="Query">The search query that produced this page.</param>
+/// <param name="Page">The 1-based page number returned.</param>
+/// <param name="PageSize">Number of results per page.</param>
+/// <param name="TotalMatches">Total number of matching messages across all pages.</param>
+/// <param name="HasMore">True when additional pages exist beyond this one.</param>
 /// <param name="BoundaryTurnIndex">The conversation's compaction boundary, echoed back so the model
 /// can see what it is searching. Null means the conversation was never compacted, in which case
 /// there is nothing to recall and <c>Results</c> is always empty (D7).</param>
+/// <param name="Results">The hits on this page, ordered by relevance.</param>
 public sealed record ConversationRecallPage(
     string Query,
     int Page,

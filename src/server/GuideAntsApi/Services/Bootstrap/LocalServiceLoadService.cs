@@ -1,9 +1,6 @@
-using Microsoft.Extensions.DependencyInjection;
 using GuideAntsApi.Endpoints;
-using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
-using System.Net;
 using System.Text.Json;
 
 namespace GuideAntsApi.Services.Bootstrap;

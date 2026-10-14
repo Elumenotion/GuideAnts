@@ -1,7 +1,6 @@
 using System.Text.Json;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.Compaction;
-using AntRunner.ToolCalling;
 using FluentAssertions;
 
 namespace GuideAntsApi.Tests.ChatLayer.Compaction;

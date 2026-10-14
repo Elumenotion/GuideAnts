@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net.Http;
 
 namespace GuideAntsApi.BackgroundJobs.Http;
 

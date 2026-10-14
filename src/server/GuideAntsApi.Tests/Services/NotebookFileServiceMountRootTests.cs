@@ -4,7 +4,6 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Tests.TestUtils;
 using GuideAntsApi.Services.Core;
-using GuideAnts.Usage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;

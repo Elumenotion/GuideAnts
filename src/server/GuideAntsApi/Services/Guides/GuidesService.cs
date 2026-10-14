@@ -11,11 +11,9 @@ using GuideAntsApi.Services.Mcp;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Settings;
 using AntRunner.ToolCalling.Functions;
-using AntRunner.Chat;
 using Microsoft.Extensions.Options;
 using GuideAntsApi.Services.Guides.Skills;
 using GuideAntsApi.Services.SandboxWireApi;
-using AntRunner.ToolCalling.AssistantDefinitions;
 
 namespace GuideAntsApi.Services.Guides;
 

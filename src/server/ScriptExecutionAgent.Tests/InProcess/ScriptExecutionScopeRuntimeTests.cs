@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
-using ScriptExecutionAgent.Tests.Infrastructure;
 
 namespace ScriptExecutionAgent.Tests.InProcess;
 

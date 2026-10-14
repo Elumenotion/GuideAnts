@@ -667,6 +667,230 @@ public class NotebookModelRuntimeServiceTests
         _mockLlamaClient.Verify(c => c.UnloadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [TestMethod]
+    public async Task StartLoadOperationAsync_AuxInstanceDown_OwningInstanceUp_LoadSucceeds()
+    {
+        // The sev-1 write-path contract: the header-toolbar Load button drives
+        // StartLoadOperationAsync. The load's actuation + verify must require only the
+        // instances that OWN the required model. A down aux host (refusing connections,
+        // terminal-unreachable) must neither be called nor fail the op - the load reaches
+        // "ready" on the up owning instance.
+        var auxBase = "http://192.168.0.111:8112";
+        var auxClient = new Mock<ILlamaServerRuntimeClient>();
+        var auxCalls = 0;
+        auxClient
+            .Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                auxCalls++;
+                throw new HttpRequestException("Connection refused (192.168.0.111:8112)");
+            });
+        auxClient
+            .Setup(c => c.LoadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Throws(new HttpRequestException("Connection refused (192.168.0.111:8112)"));
+        auxClient
+            .Setup(c => c.UnloadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Throws(new HttpRequestException("Connection refused (192.168.0.111:8112)"));
+
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBases())
+            .Returns(new List<string> { "http://localhost:8080", auxBase });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBasesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string> { "http://localhost:8080", auxBase });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredInstancesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<LocalAiInstance>
+            {
+                new(LocalAiStackHostResolver.CanonicalInstanceKey("http://localhost:8080"), "http://localhost:8080"),
+                new(LocalAiStackHostResolver.CanonicalInstanceKey(auxBase), auxBase)
+            });
+        _mockStackClientProvider
+            .Setup(p => p.GetClientForStack(auxBase, It.IsAny<string?>()))
+            .Returns(auxClient.Object);
+
+        var notebookId = Guid.NewGuid();
+        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
+        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
+        _context.Assistants.Add(guide);
+        _context.Notebooks.Add(notebook);
+
+        // The chat model targets the GLOBAL instance (no row-owned stackBaseUrl) and is
+        // not yet loaded there.
+        _context.Models.Add(new Model
+        {
+            ModelId = "qwen-local",
+            Provider = "llama-cpp",
+            IsActive = true,
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
+        });
+        await _context.SaveChangesAsync();
+
+        var globalLoaded = false;
+        _mockLlamaClient
+            .Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+                new LlamaModelsResponse
+                {
+                    Data = globalLoaded
+                        ? new List<LlamaModelData> { new() { Id = "qwen-model", Status = new LlamaModelStatus { Value = "loaded" } } }
+                        : new List<LlamaModelData>()
+                });
+        _mockLlamaClient
+            .Setup(c => c.LoadModelAsync("qwen-model", It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((_, _) => { globalLoaded = true; })
+            .Returns(Task.CompletedTask);
+
+        var op = await _service.StartLoadOperationAsync(notebookId);
+
+        ModelLoadOperationDto? final = null;
+        var timeoutAt = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < timeoutAt)
+        {
+            final = await _service.GetOperationStatusAsync(notebookId, op.OperationId);
+            if (final is not null && (final.State == "ready" || final.State == "failed"))
+            {
+                break;
+            }
+            await Task.Delay(50);
+        }
+
+        Assert.IsNotNull(final);
+        Assert.AreEqual("ready", final!.State, $"Load op should reach ready on the up owning instance; got {final.State}: {final.ErrorDetails}");
+        Assert.AreEqual(0, auxCalls, "The down aux host must never be probed, loaded, or unloaded by the load op.");
+        auxClient.Verify(c => c.ListModelsAsync(It.IsAny<CancellationToken>()), Times.Never);
+        auxClient.Verify(c => c.LoadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        auxClient.Verify(c => c.UnloadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task GetRuntimeStatusAsync_AuxInstanceDown_NotProbed_ReadinessUnaffected()
+    {
+        // The sev-1 regression: an aux host (image/tts/asr/embeddings base) that owns
+        // NONE of this notebook's chat models must not be probed by readiness. If it is
+        // down, readiness must still resolve (ready) and the aux client must never be
+        // called - so its unreachability can neither hang the probe nor poison the
+        // status to "failed".
+        var auxBase = "http://192.168.0.111:8112";
+        var auxClient = new Mock<ILlamaServerRuntimeClient>();
+        var auxCalls = 0;
+        auxClient
+            .Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                auxCalls++;
+                throw new HttpRequestException("Connection refused (192.168.0.111:8112)");
+            });
+
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBases())
+            .Returns(new List<string> { "http://localhost:8080", auxBase });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBasesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string> { "http://localhost:8080", auxBase });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredInstancesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<LocalAiInstance>
+            {
+                new(LocalAiStackHostResolver.CanonicalInstanceKey("http://localhost:8080"), "http://localhost:8080"),
+                new(LocalAiStackHostResolver.CanonicalInstanceKey(auxBase), auxBase)
+            });
+        _mockStackClientProvider
+            .Setup(p => p.GetClientForStack(auxBase, It.IsAny<string?>()))
+            .Returns(auxClient.Object);
+
+        var notebookId = Guid.NewGuid();
+        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
+        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
+        _context.Assistants.Add(guide);
+        _context.Notebooks.Add(notebook);
+
+        // The chat model targets the GLOBAL instance (no row-owned stackBaseUrl).
+        _context.Models.Add(new Model
+        {
+            ModelId = "qwen-local",
+            Provider = "llama-cpp",
+            IsActive = true,
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
+        });
+        await _context.SaveChangesAsync();
+
+        // The owning (global) instance reports the required model loaded.
+        _mockLlamaClient
+            .Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaModelsResponse
+            {
+                Data = new List<LlamaModelData>
+                {
+                    new() { Id = "qwen-model", Status = new LlamaModelStatus { Value = "loaded" } }
+                }
+            });
+
+        var status = await _service.GetRuntimeStatusAsync(notebookId);
+
+        Assert.AreEqual("ready", status.State);
+        Assert.AreEqual(1, status.LoadedModels.Count);
+        Assert.AreEqual(0, auxCalls, "The aux instance that owns no required model must never be probed by readiness.");
+        auxClient.Verify(c => c.ListModelsAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task GetRuntimeStatusAsync_OwningInstanceDown_ReturnsFailed()
+    {
+        // When the instance that OWNS the required model is unreachable, readiness cannot
+        // prove readiness: it reports "failed" (the live preflight gate the dispatch path
+        // relies on) and surfaces the conflict - rather than silently returning "ready".
+        // With the terminal-unreachable client this resolves in one fast attempt.
+        var auxBase = "http://192.168.0.111:8112";
+        var auxClient = new Mock<ILlamaServerRuntimeClient>();
+        auxClient
+            .Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .Throws(new HttpRequestException("Connection refused (192.168.0.111:8112)"));
+
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBases())
+            .Returns(new List<string> { "http://localhost:8080", auxBase });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredStackBasesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string> { "http://localhost:8080", auxBase });
+        _mockStackHostResolver
+            .Setup(r => r.GetAllConfiguredInstancesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<LocalAiInstance>
+            {
+                new(LocalAiStackHostResolver.CanonicalInstanceKey("http://localhost:8080"), "http://localhost:8080"),
+                new(LocalAiStackHostResolver.CanonicalInstanceKey(auxBase), auxBase)
+            });
+        _mockStackClientProvider
+            .Setup(p => p.GetClientForStack(auxBase, It.IsAny<string?>()))
+            .Returns(auxClient.Object);
+
+        var notebookId = Guid.NewGuid();
+        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
+        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
+        _context.Assistants.Add(guide);
+        _context.Notebooks.Add(notebook);
+
+        // The chat model is row-owned on the aux/owned instance (stackBaseUrl set).
+        _context.Models.Add(new Model
+        {
+            ModelId = "qwen-local",
+            Provider = "llama-cpp",
+            IsActive = true,
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"stackBaseUrl\":\"" + auxBase + "\"}"
+        });
+        await _context.SaveChangesAsync();
+
+        var status = await _service.GetRuntimeStatusAsync(notebookId);
+
+        Assert.AreEqual("failed", status.State);
+        Assert.IsTrue(
+            status.Conflicts.Any(c => c.Contains("llama", StringComparison.OrdinalIgnoreCase))
+            || status.Conflicts.Count > 0,
+            $"Expected a conflict explaining the failure, got: {string.Join("; ", status.Conflicts)}");
+        // Only the owning instance is probed; the global client is never touched.
+        _mockLlamaClient.Verify(c => c.ListModelsAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     /// <summary>Minimal scope factory that resolves nothing (no row-owned DB reads).</summary>
     private sealed class StubScopeFactory : Microsoft.Extensions.DependencyInjection.IServiceScopeFactory
     {

@@ -1,7 +1,6 @@
 using AntRunner.ToolCalling.AssistantDefinitions;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Tests.BackgroundJobs;
 using Microsoft.EntityFrameworkCore;

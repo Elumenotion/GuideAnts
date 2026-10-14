@@ -1,5 +1,4 @@
 using GuideAntsApi.Services.Bootstrap;
-using Microsoft.Extensions.Logging;
 
 namespace GuideAntsApi.Services.LlamaCpp;
 

@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Any;
-using System.Net.Http;
 using System.Reflection;
 using System.Security.Claims;
 using GuideAntsApi.DataModel;

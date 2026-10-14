@@ -4,7 +4,6 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Conversations.Attachments;
 using GuideAntsApi.Services.Conversations.Mapping;
-using GuideAntsApi.Tests.Benchmarks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;

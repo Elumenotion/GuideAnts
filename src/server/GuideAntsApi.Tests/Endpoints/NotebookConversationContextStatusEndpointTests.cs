@@ -4,7 +4,6 @@ using GuideAntsApi.Endpoints;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Conversations;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;

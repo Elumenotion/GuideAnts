@@ -1,5 +1,4 @@
 using FluentAssertions;
-using GuideAnts.Usage;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;

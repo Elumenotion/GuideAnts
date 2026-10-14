@@ -1,11 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using GuideAntsApi.Endpoints;
-using GuideAntsApi.Options;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
-using Microsoft.AspNetCore.Http;
 
 namespace GuideAntsApi.Endpoints.Settings;
 

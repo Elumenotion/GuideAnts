@@ -7,7 +7,6 @@ using GuideAntsApi.Services.Conversations.Attachments;
 using GuideAntsApi.Tests.BackgroundJobs;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Tests.Services.Conversations.Attachments;
 
