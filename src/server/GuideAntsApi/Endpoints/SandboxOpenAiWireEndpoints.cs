@@ -1,7 +1,3 @@
-using GuideAntsApi.Endpoints.PublishedWire;
-using GuideAntsApi.Services.SandboxWireApi;
-using Microsoft.AspNetCore.Mvc;
-
 namespace GuideAntsApi.Endpoints;
 
 public static class SandboxOpenAiWireEndpoints

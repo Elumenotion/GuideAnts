@@ -1,7 +1,6 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Services.Conversations.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Tests.Services.Conversations;

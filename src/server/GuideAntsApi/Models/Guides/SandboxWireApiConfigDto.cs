@@ -1,5 +1,3 @@
-using System.ComponentModel.DataAnnotations;
-
 namespace GuideAntsApi.Models.Guides;
 
 public class SandboxWireApiConfigDto

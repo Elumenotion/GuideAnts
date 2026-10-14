@@ -17,12 +17,8 @@ using Moq;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations;
-using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Tests.TestUtils;
-using ThinkingAction = GuideAntsApi.Services.LlamaCpp.ThinkingAction;
-using ThinkingActionTarget = GuideAntsApi.Services.LlamaCpp.ThinkingActionTarget;
-using ThinkingControl = GuideAntsApi.Services.LlamaCpp.ThinkingControl;
 
 namespace GuideAntsApi.Tests.Services;
 

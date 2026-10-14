@@ -8,7 +8,6 @@ using OpenAI.Responses;
 using ResponseImageContent = OpenAI.Responses.ImageContent;
 using ResponseRefusalContent = OpenAI.Responses.RefusalContent;
 using ResponseReasoningContent = OpenAI.Responses.ReasoningContent;
-using ResponseReasoningSummary = OpenAI.Responses.ReasoningSummary;
 using ResponseTextContent = OpenAI.Responses.TextContent;
 
 namespace AntRunner.Chat.OpenAI;

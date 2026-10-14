@@ -1,12 +1,9 @@
 using System.IO.Compression;
-using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Services.Guides;
 using GuideAntsApi.Tests.BackgroundJobs;
-using GuideAntsApi.Tests.TestUtils;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Tests.Services.Guides;

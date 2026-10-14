@@ -1,7 +1,4 @@
 using System.Text.Json;
-using GuideAntsApi.Endpoints;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.Endpoints.Settings;
 

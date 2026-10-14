@@ -9,7 +9,6 @@ using AntRunner.Chat.OpenRouter;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.OpenAiCompatible;
 using GuideAntsApi.Services.Routing;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using GuideAntsApi.Settings;

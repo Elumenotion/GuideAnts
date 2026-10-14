@@ -1,12 +1,10 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.SandboxWireApi;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Moq;
 
 namespace GuideAntsApi.Tests.Services.SandboxWireApi;

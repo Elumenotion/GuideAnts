@@ -1,6 +1,5 @@
 using FluentAssertions;
 using GuideAntsApi.BackgroundJobs;
-using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Sync;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;

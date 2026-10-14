@@ -101,10 +101,18 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         // Check current per-instance runtime state.
         try
         {
+            // Readiness only depends on the instances that own a required model. Grouping
+            // first and scoping the live snapshot to those instances is what decouples chat
+            // readiness from aux hosts: an aux stack in the configured universe that owns
+            // none of this notebook's chat models is never probed, so it being down (a
+            // connection refused/timeout) can neither hang the probe through retries nor
+            // poison the status to "failed" via the catch below.
+            var requiredByInstance = GroupRequiredRouterIdsByInstance(requiredModels);
+
             // Runtime readiness is used as a hard preflight gate before chat dispatch.
             // It must reflect live per-instance state, not the long-lived 5-minute cache,
             // otherwise we can return "ready" and then hit upstream 400 "model is not loaded".
-            var instances = await GetInstanceSnapshotsAsync(useCache: false, cancellationToken);
+            var instances = await GetInstanceSnapshotsAsync(useCache: false, cancellationToken, requiredByInstance.Keys);
 
             var loadedByInstance = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
             foreach (var instance in instances)
@@ -165,7 +173,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             // Per-instance readiness: every required alias must be loaded on the instance
             // that owns it. Instances are independent - one instance's load never
             // satisfies another's requirement.
-            var requiredByInstance = GroupRequiredRouterIdsByInstance(requiredModels);
             var isReady = requiredByInstance.All(pair =>
                 loadedByInstance.TryGetValue(pair.Key, out var loaded)
                 && pair.Value.IsSubsetOf(loaded));
@@ -338,7 +345,11 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     // loaded them on (within-instance only). No lifecycle-plan apply - a
                     // plan apply would send an unload for llama and the container would
                     // act on it, which must not happen.
-                    var instances = await GetInstanceSnapshotsAsync(useCache: false, CancellationToken.None).ConfigureAwait(false);
+                    // Scope to the instances this context owns, exactly like readiness: an
+                    // aux host that owns none of this context's models must not gate the
+                    // unload - it must be unreachable-independent, same as the read path.
+                    var unloadByInstance = GroupRequiredRouterIdsByInstance(requiredModels);
+                    var instances = await GetInstanceSnapshotsAsync(useCache: false, CancellationToken.None, unloadByInstance.Keys).ConfigureAwait(false);
                     var instanceByKey = instances.ToDictionary(i => i.CanonicalKey, StringComparer.OrdinalIgnoreCase);
                     foreach (var model in requiredModels.Where(m => m.RuntimeConfig is not null
                         && !string.IsNullOrWhiteSpace(m.RuntimeConfig.RouterModelId)))
@@ -404,7 +415,11 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId!))
                 .ToHashSet(StringComparer.Ordinal);
 
-            var instances = await GetInstanceSnapshotsAsync(useCache: false, CancellationToken.None);
+            // Scope the actuation snapshot to the instances that own a required model,
+            // exactly matching readiness. The load must only require ITS instances to be
+            // reachable; a down aux host must not fail the op (and with terminal-
+            // unreachable, an unscoped snapshot would now fail the op immediately).
+            var instances = await GetInstanceSnapshotsAsync(useCache: false, CancellationToken.None, requiredByInstance.Keys);
             var instanceByKey = instances
                 .ToDictionary(i => i.CanonicalKey, StringComparer.OrdinalIgnoreCase);
 
@@ -469,7 +484,10 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
                 while (DateTime.UtcNow - verifyStartedAt < verifyTimeout)
                 {
-                    var freshInstances = await GetInstanceSnapshotsAsync(useCache: false, CancellationToken.None);
+                    // Same scoping as the actuation snapshot: only the instances the op is
+                    // loading on are polled, so verify cannot be dragged through the retry
+                    // ladder (or fail) on a down aux host.
+                    var freshInstances = await GetInstanceSnapshotsAsync(useCache: false, CancellationToken.None, requiredByInstance.Keys);
                     missingByInstance = freshInstances
                         .Where(i => requiredByInstance.TryGetValue(i.CanonicalKey, out var requiredIds)
                             && !requiredIds.IsSubsetOf(i.Snapshot.Data
@@ -517,10 +535,27 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     /// </summary>
     private sealed record InstanceSnapshot(string CanonicalKey, ILlamaServerRuntimeClient Client, LlamaModelsResponse Snapshot);
 
-    private async Task<List<InstanceSnapshot>> GetInstanceSnapshotsAsync(bool useCache, CancellationToken cancellationToken)
+    private async Task<List<InstanceSnapshot>> GetInstanceSnapshotsAsync(
+        bool useCache,
+        CancellationToken cancellationToken,
+        IEnumerable<string>? onlyInstanceKeys = null)
     {
         // Deduplicated by canonical identity: one physical box = one snapshot/client.
-        var instances = await _stackHostResolver.GetAllConfiguredInstancesAsync(cancellationToken).ConfigureAwait(false);
+        var universe = await _stackHostResolver.GetAllConfiguredInstancesAsync(cancellationToken).ConfigureAwait(false);
+        List<LocalAiInstance> instances;
+        if (onlyInstanceKeys is null)
+        {
+            instances = universe.ToList();
+        }
+        else
+        {
+            // Scoped probe: only the instances that own a required model are hit. An aux
+            // host in the configured stack universe (image/tts/asr/embeddings bases) that
+            // owns none of this context's chat models is excluded, so its unreachability
+            // cannot gate readiness or drag the probe through the client's retry ladder.
+            var wantedKeys = new HashSet<string>(onlyInstanceKeys, StringComparer.OrdinalIgnoreCase);
+            instances = universe.Where(i => wantedKeys.Contains(i.CanonicalKey)).ToList();
+        }
         var globalCanonical = _stackHostResolver.GetStackBaseForService(LocalAiStackHostUrls.LlamaServiceId) is { } gb
             ? LocalAiStackHostResolver.CanonicalInstanceKey(gb)
             : null;

@@ -12,7 +12,6 @@ using GuideAntsApi.Services.Conversations.Mapping;
 using GuideAntsApi.Services.Conversations.Streaming;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
-using GuideAnts.Usage;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;

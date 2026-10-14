@@ -1,7 +1,6 @@
 using FluentAssertions;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.SandboxWireApi;
-using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Tests.Services.SandboxWireApi;
 

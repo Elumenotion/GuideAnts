@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Logging;
-
 namespace GuideAntsApi.Services.LlamaCpp;
 
 /// <summary>

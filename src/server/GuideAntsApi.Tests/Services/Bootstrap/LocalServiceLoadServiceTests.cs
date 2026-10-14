@@ -9,7 +9,6 @@ using GuideAntsApi.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Moq;
 
 namespace GuideAntsApi.Tests.Services.Bootstrap;
 

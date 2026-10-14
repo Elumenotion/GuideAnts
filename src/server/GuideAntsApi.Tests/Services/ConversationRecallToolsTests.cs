@@ -8,7 +8,6 @@ using GuideAntsApi.Services;
 using GuideAntsApi.Services.Conversations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 
 namespace GuideAntsApi.Tests.Services;
@@ -69,7 +68,7 @@ public sealed class ConversationRecallToolsTests
         document.RootElement.GetProperty("boundaryTurnIndex").GetInt32().Should().Be(3);
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("")]
     [DataRow("   ")]
     public async Task RecallConversation_BlankQuery_ReturnsAJsonErrorRatherThanAnything(string query)

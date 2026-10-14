@@ -11,7 +11,6 @@ using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Tests.TestUtils;
 using GuideAntsApi.Services.Core;
-using GuideAnts.Usage;
 
 namespace GuideAntsApi.Tests.Services;
 

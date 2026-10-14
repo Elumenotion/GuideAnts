@@ -1,6 +1,8 @@
 namespace GuideAntsApi.Services.Routing;
 
 /// <param name="Supported">False when the provider publishes no capability endpoint at all.</param>
+/// <param name="ContextWindowTokens">Total context window in tokens, when known.</param>
+/// <param name="MaxOutputTokens">Maximum output tokens the model can produce, when known.</param>
 /// <param name="Message">Human-readable explanation when values could not be determined.</param>
 public sealed record ContextWindowProbeResult(
     bool Supported,

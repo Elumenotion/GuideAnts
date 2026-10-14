@@ -2,8 +2,6 @@ using AntRunner.Chat.Abstractions;
 
 using FluentAssertions;
 
-using GuideAntsApi.BackgroundJobs;
-
 using GuideAntsApi.Services.ConversationLockGate;
 
 using GuideAntsApi.Services.Routing;

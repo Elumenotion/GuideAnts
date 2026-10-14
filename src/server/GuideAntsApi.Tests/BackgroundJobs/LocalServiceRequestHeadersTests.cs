@@ -1,4 +1,3 @@
-using System.Net.Http;
 using FluentAssertions;
 using GuideAntsApi.BackgroundJobs.Http;
 

@@ -3,7 +3,6 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 

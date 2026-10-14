@@ -3,7 +3,6 @@ using FluentAssertions;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Moq;
 
 namespace GuideAntsApi.Tests.Services.LlamaCpp;

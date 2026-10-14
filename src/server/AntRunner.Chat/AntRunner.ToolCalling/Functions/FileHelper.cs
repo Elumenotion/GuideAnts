@@ -1,7 +1,4 @@
-﻿using System.IO;
-using System.Linq;
-
-namespace AntRunner.ToolCalling.Functions
+﻿namespace AntRunner.ToolCalling.Functions
 {
     /// <summary>
     /// Class representing the content type and binary status of a file.

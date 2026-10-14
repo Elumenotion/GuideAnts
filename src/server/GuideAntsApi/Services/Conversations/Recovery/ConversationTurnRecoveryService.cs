@@ -3,9 +3,6 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations.Persistence;
 using GuideAntsApi.Services.Conversations.Streaming;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace GuideAntsApi.Services.Conversations.Recovery;
 

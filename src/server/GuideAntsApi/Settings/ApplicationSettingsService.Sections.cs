@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.LlamaCpp;

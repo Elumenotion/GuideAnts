@@ -2,7 +2,6 @@ using System.Net;
 using System.Text;
 using FluentAssertions;
 using GuideAntsApi.Services.Bootstrap;
-using GuideAntsApi.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 

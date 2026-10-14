@@ -203,21 +203,16 @@ public sealed class LlamaServerRuntimeClientTests
     }
 
     [TestMethod]
-    public async Task ListModelsAsync_RetriesTransientConnectionFailure()
+    public async Task ListModelsAsync_TreatsConnectionRefusedAsTerminal_NoRetry()
     {
+        // Unreachable is terminal: a refused connection must not burn the delay ladder.
+        // The probe fails fast so callers (readiness, load ops) can report the state they
+        // can prove instead of blocking the UI for ~36s per down instance.
         var calls = 0;
         var handler = new CapturingHandler(_ =>
         {
             calls++;
-            if (calls == 1)
-            {
-                throw new HttpRequestException("Connection refused (guideants-ai:80)");
-            }
-
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"data\":[]}", Encoding.UTF8, "application/json")
-            };
+            throw new HttpRequestException("Connection refused (192.168.0.111:8112)");
         });
 
         using var httpClient = new HttpClient(handler)
@@ -227,19 +222,68 @@ public sealed class LlamaServerRuntimeClientTests
 
         var client = new LlamaServerRuntimeClient(httpClient, NullLogger<LlamaServerRuntimeClient>.Instance);
 
-        await client.ListModelsAsync();
+        var act = async () => await client.ListModelsAsync();
 
-        calls.Should().Be(2);
+        await act.Should().ThrowAsync<HttpRequestException>();
+        calls.Should().Be(1);
     }
 
     [TestMethod]
-    public void IsNonRetryableConnectionFailure_MatchesDnsResolutionFailure()
+    public async Task ListModelsAsync_TreatsTaskCanceledAsTerminal_NoRetry()
+    {
+        // A per-attempt read timeout surfaces as a canceled task ("A task was canceled")
+        // and is likewise terminal - no retry.
+        var calls = 0;
+        var handler = new CapturingHandler(_ =>
+        {
+            calls++;
+            throw new TaskCanceledException("The operation was canceled.", new HttpRequestException("A task was canceled."));
+        });
+
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:8110/llama-cpp/")
+        };
+
+        var client = new LlamaServerRuntimeClient(httpClient, NullLogger<LlamaServerRuntimeClient>.Instance);
+
+        var act = async () => await client.ListModelsAsync();
+
+        await act.Should().ThrowAsync<TaskCanceledException>();
+        calls.Should().Be(1);
+    }
+
+    [TestMethod]
+    public void IsConnectionLevelFailure_MatchesDnsResolutionFailure()
     {
         var ex = new HttpRequestException(
             "Name or service not known (guideants-ai:80)",
             new HttpRequestException("Name or service not known"));
 
-        LlamaServerRuntimeClient.IsNonRetryableConnectionFailure(ex).Should().BeTrue();
+        LlamaServerRuntimeClient.IsConnectionLevelFailure(ex).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void IsConnectionLevelFailure_MatchesConnectionRefusedAndTimeout()
+    {
+        LlamaServerRuntimeClient.IsConnectionLevelFailure(
+            new HttpRequestException("Connection refused (192.168.0.111:8112)")).Should().BeTrue();
+        LlamaServerRuntimeClient.IsConnectionLevelFailure(
+            new TaskCanceledException("A task was canceled.")).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void IsConnectionLevelFailure_FalseForDefiniteStatusCode()
+    {
+        // A live router answered with a status: not a reachability failure.
+        LlamaServerRuntimeClient.IsConnectionLevelFailure(
+            new HttpRequestException("bad gateway", null, HttpStatusCode.BadGateway)).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void IsConnectionLevelFailure_FalseForUnrelatedExceptions()
+    {
+        LlamaServerRuntimeClient.IsConnectionLevelFailure(new InvalidOperationException("boom")).Should().BeFalse();
     }
 
     [TestMethod]

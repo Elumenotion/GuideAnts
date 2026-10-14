@@ -1,5 +1,3 @@
-using System;
-using GuideAntsApi.DataModel;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 

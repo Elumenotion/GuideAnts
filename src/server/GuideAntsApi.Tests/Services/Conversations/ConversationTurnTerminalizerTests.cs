@@ -1,5 +1,4 @@
 using AntRunner.Chat;
-using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.LlamaCpp;
 using FluentAssertions;
 using GuideAntsApi.Services.Conversations.Streaming;

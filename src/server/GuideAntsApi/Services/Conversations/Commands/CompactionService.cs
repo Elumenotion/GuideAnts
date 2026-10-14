@@ -1,8 +1,6 @@
 using AntRunner.Chat;
-using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.Compaction;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations.Mapping;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;

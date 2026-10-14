@@ -1,8 +1,6 @@
 using AntRunner.ToolCalling.AssistantDefinitions;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Skills;
-using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;

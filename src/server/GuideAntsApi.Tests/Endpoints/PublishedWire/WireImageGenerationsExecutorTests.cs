@@ -1,6 +1,5 @@
 using AntRunner.ToolCalling;
 using FluentAssertions;
-using GuideAnts.Usage;
 using GuideAntsApi.Endpoints.PublishedWire;
 using GuideAntsApi.Services;
 using GuideAntsApi.Services.Components;

@@ -3,7 +3,6 @@ using GuideAntsApi.Configuration;
 using GuideAntsApi.Services.Components;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Moq;
 using System.Diagnostics;
 using System.Net;

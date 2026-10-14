@@ -2,7 +2,6 @@ using AntRunner.Chat.Abstractions;
 using FluentAssertions;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Conversations.Attachments;
-using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Tests.Services.Conversations;
 

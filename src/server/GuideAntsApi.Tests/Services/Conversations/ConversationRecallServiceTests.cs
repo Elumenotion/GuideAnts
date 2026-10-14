@@ -143,7 +143,7 @@ public sealed class ConversationRecallServiceTests
         second.Results.Select(r => r.TurnIndex).Should().NotIntersectWith(first.Results.Select(r => r.TurnIndex));
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(0)]
     [DataRow(-3)]
     public async Task RecallAsync_NonPositivePage_ClampsToPageOne(int requestedPage)
@@ -176,7 +176,7 @@ public sealed class ConversationRecallServiceTests
         page.HasMore.Should().BeFalse();
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("")]
     [DataRow("   ")]
     [DataRow("a !")]

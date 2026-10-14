@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using AntRunner.Chat.Abstractions;
 using FluentAssertions;
-using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.IntegrationTests.Infrastructure;
 using GuideAntsApi.Models.Settings;

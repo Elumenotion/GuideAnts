@@ -177,15 +177,43 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         return responseContent.Contains("already running", StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static bool IsNonRetryableConnectionFailure(Exception ex)
+    /// <summary>
+    /// True for connection-level failures: the endpoint was not reachable (refused,
+    /// reset, DNS failure) or the per-attempt read timed out. These are treated as
+    /// TERMINAL by <see cref="ShouldRetryException"/> (no retry) so a down instance fails
+    /// fast instead of stretching every caller through the delay ladder. An
+    /// HttpRequestException carrying an HttpStatusCode is NOT connection-level: a live
+    /// router answered with a status, so the HTTP path (ShouldRetryStatus) handles it.
+    /// </summary>
+    internal static bool IsConnectionLevelFailure(Exception ex)
     {
         for (var current = ex; current is not null; current = current.InnerException)
         {
-            var message = current.Message;
-            if (message.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("No such host is known", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("No address associated with hostname", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("could not resolve host", StringComparison.OrdinalIgnoreCase))
+            if (current is HttpRequestException { StatusCode: not null })
+            {
+                continue;
+            }
+
+            if (current is HttpRequestException)
+            {
+                var message = current.Message;
+                if (message.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("No such host is known", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("No address associated with hostname", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("could not resolve host", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("Connection refused", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("Connection reset", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("no route to host", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("A task was canceled", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                // No known pattern: fall through to the type-based classification below.
+                return true;
+            }
+
+            if (current is TaskCanceledException)
             {
                 return true;
             }
@@ -325,14 +353,26 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
     private static bool ShouldRetryException(Exception ex, CancellationToken cancellationToken, int attempt)
     {
         if (attempt >= TransientRetryDelays.Length
-            || cancellationToken.IsCancellationRequested
-            || IsNonRetryableConnectionFailure(ex))
+            || cancellationToken.IsCancellationRequested)
         {
             return false;
         }
 
-        return ex is HttpRequestException { StatusCode: null }
-            || ex is TaskCanceledException;
+        // Unreachable is terminal by design. A connection-level failure (refused, reset,
+        // DNS) or a per-attempt timeout means the instance is down - retrying it only
+        // stretches every caller's wait (the full delay ladder, ~36s per probe) without
+        // new information. Callers treat a down instance as unreachable and fail fast:
+        // readiness reports the state it can prove, load/unload ops fail, and the UI stops
+        // waiting for a service that may never come back.
+        if (IsConnectionLevelFailure(ex))
+        {
+            return false;
+        }
+
+        // The only exception worth retrying from here is a live router's own in-flight
+        // state (a 5xx/408 while the router is still coming up). A definite status that
+        // is not in ShouldRetryStatus is not retried, so a hard error is not re-sent.
+        return false;
     }
 
     private async Task DelayBeforeRetryAsync(

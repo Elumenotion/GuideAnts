@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
-using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;

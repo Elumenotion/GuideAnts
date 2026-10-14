@@ -1,11 +1,8 @@
 using FluentAssertions;
-using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
-using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Tests.BackgroundJobs;
-using Moq;
 
 namespace GuideAntsApi.Tests.Services.Guides;
 

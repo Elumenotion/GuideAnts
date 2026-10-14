@@ -3,7 +3,6 @@ using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Sync;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Services.Components.Sync;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Services.Components;

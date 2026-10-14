@@ -8,10 +8,8 @@ using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Tests.BackgroundJobs;
 using GuideAntsApi.Tests.TestUtils;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 
 namespace GuideAntsApi.Tests.Services.Conversations;
 

@@ -1,5 +1,3 @@
-using GuideAntsApi.Services.Bootstrap;
-
 namespace GuideAntsApi.Services.Bootstrap;
 
 public interface IImageGenerationBundleDefinitionBootstrapper

@@ -8,7 +8,6 @@ using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.PublishedWireApi;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.SandboxWireApi;
-using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.Endpoints;
 

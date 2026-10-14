@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
-using ScriptExecutionAgent;
 using ScriptExecutionAgent.Tests.Infrastructure;
 
 namespace ScriptExecutionAgent.Tests.InProcess;

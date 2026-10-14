@@ -4,8 +4,6 @@ using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.HuggingFace;
 using GuideAntsApi.Services.Routing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 

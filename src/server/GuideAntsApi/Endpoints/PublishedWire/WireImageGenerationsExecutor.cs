@@ -4,8 +4,6 @@ using GuideAntsApi.Services;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.PublishedWireApi;
 using GuideAntsApi.Services.Routing;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.Endpoints.PublishedWire;
 

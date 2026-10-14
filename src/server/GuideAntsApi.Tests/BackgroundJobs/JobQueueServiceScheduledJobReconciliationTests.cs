@@ -4,7 +4,6 @@ using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Scheduling;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Tests.BackgroundJobs;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Tests.BackgroundJobs;

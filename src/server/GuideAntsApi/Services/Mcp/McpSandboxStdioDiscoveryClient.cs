@@ -5,7 +5,6 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.EnvironmentVariables;
 using GuideAntsApi.Settings;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Services.Mcp;

@@ -1,4 +1,3 @@
-using System.Linq;
 using GuideAntsApi.DataModel;
 
 namespace AntRunner.ToolCalling;
