@@ -4,7 +4,22 @@ COPY src/server/ ./
 RUN dotnet restore "GuideAntsApi/GuideAntsApi.csproj"
 RUN dotnet publish "GuideAntsApi/GuideAntsApi.csproj" -c Release -o /app/publish /p:UseAppHost=false --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime-base
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime-deps
+RUN apt-get update && apt-get install -y \
+    docker.io \
+    ffmpeg \
+    nginx \
+    tini && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime-slim-deps
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    nginx \
+    tini && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM runtime-deps AS runtime-base
 WORKDIR /app
 COPY --from=api-build /app/publish/ ./
 COPY src/server/GuideAntsApi/Resources/bootstrap/assistants/ ./Resources/bootstrap/assistants/
@@ -18,24 +33,17 @@ ENV ASPNETCORE_URLS=http://127.0.0.1:8081 \
 EXPOSE 8080
 
 FROM runtime-base AS runtime
-RUN apt-get update && apt-get install -y \
-    docker.io \
-    ffmpeg \
-    nginx \
-    tini && \
-    rm -rf /var/lib/apt/lists/*
-
 COPY docker/build/webapi-ui/nginx.conf /etc/nginx/nginx.conf
 COPY --chmod=755 docker/build/webapi-ui/entrypoint-webapi.sh /usr/local/bin/entrypoint-webapi.sh
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint-webapi.sh"]
 
-FROM runtime-base AS runtime-slim
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    nginx \
-    tini && \
-    rm -rf /var/lib/apt/lists/*
+FROM runtime-slim-deps AS runtime-slim
+WORKDIR /app
+COPY --from=api-build /app/publish/ ./
+COPY src/server/GuideAntsApi/Resources/bootstrap/assistants/ ./Resources/bootstrap/assistants/
+COPY src/server/GuideAntsApi/Resources/bootstrap/guides/ ./Resources/bootstrap/guides/
+COPY src/client/dist-browser/ ./ui/
 
 COPY docker/build/webapi-ui/nginx.conf /etc/nginx/nginx.conf
 COPY --chmod=755 docker/build/webapi-ui/entrypoint-webapi.sh /usr/local/bin/entrypoint-webapi.sh

@@ -119,7 +119,9 @@ public class CatalogService : ICatalogService
                 }
 
                 reasoningChoices = ParseReasoningChoices(m.ReasoningChoicesJson);
-                defaultReasoningChoice = reasoningChoices.Count > 0 ? reasoningChoices[0] : null;
+                defaultReasoningChoice = ResolveNonLocalDefaultReasoningChoice(
+                    m.ThinkingControlJson,
+                    reasoningChoices);
             }
 
             results.Add(new ModelDto(
@@ -156,6 +158,66 @@ public class CatalogService : ICatalogService
         catch
         {
             return [];
+        }
+    }
+
+    /// <summary>
+    /// Resolves the catalog default reasoning choice for non-local providers, honoring
+    /// <c>ThinkingControlJson.defaultChoice</c> the same way the llama-cpp branch does so a
+    /// row's declared default drives the UI default for OpenRouter / OpenAI-compatible too.
+    /// A declared default that is not one of the row's reasoning choices falls back to the
+    /// first declared choice, so the catalog default is always a choice the model accepts.
+    /// </summary>
+    private static string? ResolveNonLocalDefaultReasoningChoice(
+        string? thinkingControlJson,
+        IReadOnlyList<string> reasoningChoices)
+    {
+        if (reasoningChoices.Count == 0)
+        {
+            return null;
+        }
+
+        var declaredDefault = ParseThinkingControlDefaultChoice(thinkingControlJson);
+        if (!string.IsNullOrWhiteSpace(declaredDefault))
+        {
+            var matched = reasoningChoices.FirstOrDefault(choice =>
+                string.Equals(choice, declaredDefault, StringComparison.OrdinalIgnoreCase));
+            if (matched != null)
+            {
+                return matched;
+            }
+        }
+
+        return reasoningChoices[0];
+    }
+
+    /// <summary>
+    /// Reads <c>defaultChoice</c> from a <c>ThinkingControlJson</c> value, defensively. A
+    /// non-object, a missing key, or a non-string value yields null so a malformed or partial
+    /// shape (for example a <c>choiceActions</c>-only object) still resolves a default.
+    /// </summary>
+    private static string? ParseThinkingControlDefaultChoice(string? thinkingControlJson)
+    {
+        if (string.IsNullOrWhiteSpace(thinkingControlJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(thinkingControlJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("defaultChoice", out var property)
+                || property.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            return property.GetString();
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

@@ -90,6 +90,8 @@ export function OpenAiCompatibleAddForm({ value, onChange }: ProviderAddForm) {
           value={value.openAiCompatibleBaseUrl}
           onChange={(event) => onChange({ openAiCompatibleBaseUrl: event.target.value })}
           placeholder="http://localhost:8000/v1"
+          autoComplete="off"
+          spellCheck={false}
           className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </label>
@@ -99,6 +101,7 @@ export function OpenAiCompatibleAddForm({ value, onChange }: ProviderAddForm) {
           type="password"
           value={value.openAiCompatibleApiKey}
           onChange={(event) => onChange({ openAiCompatibleApiKey: event.target.value })}
+          autoComplete="new-password"
           placeholder="Optional (local servers run keyless)"
           className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
@@ -146,6 +149,8 @@ export function OpenAiCompatibleEditForm({ value, onChange }: ProviderEditForm) 
           value={baseUrl}
           onChange={(event) => commit(event.target.value, apiKey, removeKey)}
           placeholder="http://localhost:8000/v1"
+          autoComplete="off"
+          spellCheck={false}
           className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </label>
@@ -155,6 +160,7 @@ export function OpenAiCompatibleEditForm({ value, onChange }: ProviderEditForm) 
           type="password"
           value={apiKey}
           onChange={(event) => commit(baseUrl, event.target.value, removeKey)}
+          autoComplete="new-password"
           placeholder={existing.keySet ? '••• key set — enter a new value to replace' : 'Optional (local servers run keyless)'}
           disabled={removeKey}
           className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"

@@ -103,3 +103,37 @@ describe('NonLocalModelParameterSurfaceEditor - Combine system and developer mes
     ).not.toBeInTheDocument();
   });
 });
+
+describe('NonLocalModelParameterSurfaceEditor - Thinking Control JSON', () => {
+  function ShapingHarness({ provider }: { provider: string }) {
+    const [value, setValue] = useState(baseValue());
+    return (
+      <NonLocalModelParameterSurfaceEditor
+        provider={provider}
+        value={value}
+        onChange={(updates) => setValue((previous) => ({ ...previous, ...updates }))}
+      />
+    );
+  }
+
+  // The "Thinking Control JSON" + "Extra Request Fields JSON" textareas are gated by
+  // providerSupportsRowOwnedRequestShaping. Sampling Parameters JSON is always present (1), so
+  // a provider with row-owned request shaping renders 3 textareas and a typed-only provider
+  // renders 1.
+  const textareaCount = () => screen.getAllByRole('textbox').length;
+
+  it('shows the thinking control JSON field for openai-compatible (parity with llama-cpp)', () => {
+    render(<ShapingHarness provider="openai-compatible" />);
+    expect(textareaCount()).toBe(4);
+  });
+
+  it('still shows the thinking control JSON field for openrouter', () => {
+    render(<ShapingHarness provider="openrouter-chat" />);
+    expect(textareaCount()).toBe(4);
+  });
+
+  it('does not show the thinking control JSON field for typed-only providers', () => {
+    render(<ShapingHarness provider="openai-responses" />);
+    expect(textareaCount()).toBe(2);
+  });
+});

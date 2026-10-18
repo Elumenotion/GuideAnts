@@ -15,6 +15,7 @@ namespace GuideAntsApi.Tests.Services.Bootstrap;
 public sealed class GlobalDefaultLlamaReconcilerTests
 {
     private const string GlobalBase = "http://guideants-ai:80";
+    private const string GlobalLlamaStackBase = GlobalBase;
     private const string MaxBase = "http://192.0.2.1:8112";
 
     [TestMethod]
@@ -114,23 +115,203 @@ public sealed class GlobalDefaultLlamaReconcilerTests
         clients[MaxBase].Unloaded.Should().BeEmpty();
     }
 
+    [TestMethod]
+    public async Task OverrideAllOff_KeepsOtherLoadedAliases_AndStillLoadsTheDefault()
+    {
+        // Regression for the S1 defect: with override-all off, the default model is the
+        // fallback for entities that name no model of their own (ChatModelResolver
+        // "defaulted to"), so it must be warm. What must NOT happen is the sweep that
+        // unloads every other loaded alias — that rule is global-only.
+        var db = await CreateDbAsync(rows: [
+            (id: "qwen-a", provider: "llama-cpp", json: "{\"routerModelId\":\"QwenA\"}"),
+            (id: "muse-max", provider: "llama-cpp", json: "{\"routerModelId\":\"Muse\",\"stackBaseUrl\":\"http://192.0.2.1:8112\"}"),
+        ]);
+        var (provider, clients) = CreateClientProvider(
+            initialLoaded: new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                [GlobalBase] = ["QwenA"],
+                // The default's alias is NOT loaded on its own instance: the load must
+                // still happen with the flag off.
+                [MaxBase] = [],
+            });
+
+        var reconciler = CreateReconciler(db, provider, defaultModelId: "muse-max", out _, overrideAll: false);
+
+        await reconciler.ReconcileWithGlobalDefaultAsync();
+
+        clients[GlobalBase].Unloaded.Should().BeEmpty();
+        clients[MaxBase].Unloaded.Should().BeEmpty();
+        clients[MaxBase].Loaded.Should().ContainSingle().Which.Should().Be("Muse");
+        clients[GlobalBase].LoadedAliases.Should().Contain("QwenA");
+        clients[MaxBase].LoadedAliases.Should().Contain("Muse");
+    }
+
+    [TestMethod]
+    public async Task OverrideAllOff_WithCloudDefault_UnloadsNothing()
+    {
+        // Nothing to load, and the sweep is the global rule: with the flag off a cloud
+        // default implies nothing about the loaded set, so every alias is left alone.
+        var db = await CreateDbAsync(rows: [
+            (id: "qwen-a", provider: "llama-cpp", json: "{\"routerModelId\":\"QwenA\"}"),
+            (id: "gpt-cloud", provider: "openai", json: null),
+        ]);
+        var (provider, clients) = CreateClientProvider(
+            initialLoaded: new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                [GlobalBase] = ["QwenA"],
+                [MaxBase] = [],
+            });
+
+        var reconciler = CreateReconciler(db, provider, defaultModelId: "gpt-cloud", out _, overrideAll: false);
+
+        await reconciler.ReconcileWithGlobalDefaultAsync();
+
+        clients[GlobalBase].Unloaded.Should().BeEmpty();
+        clients[GlobalBase].Loaded.Should().BeEmpty();
+        clients[GlobalBase].LoadedAliases.Should().Contain("QwenA");
+    }
+
+    [TestMethod]
+    public async Task OverrideAllOn_WithCloudDefault_StillUnloadsEverything()
+    {
+        // Guards the branch split: making override-all-off a no-op must not weaken the
+        // global rule.
+        var db = await CreateDbAsync(rows: [
+            (id: "qwen-a", provider: "llama-cpp", json: "{\"routerModelId\":\"QwenA\"}"),
+            (id: "gpt-cloud", provider: "openai", json: null),
+        ]);
+        var (provider, clients) = CreateClientProvider(
+            initialLoaded: new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                [GlobalBase] = ["QwenA"],
+                [MaxBase] = [],
+            });
+
+        var reconciler = CreateReconciler(db, provider, defaultModelId: "gpt-cloud", out var aliasState, overrideAll: true);
+
+        await reconciler.ReconcileWithGlobalDefaultAsync();
+
+        clients[GlobalBase].Unloaded.Should().ContainSingle().Which.Should().Be("QwenA");
+        aliasState.Cleared.Should().BeTrue();
+    }
+
+   
+    [TestMethod]
+    public async Task OverrideAllOff_GlobalStackDefault_IsLoadedOnTheDeploymentInstance()
+    {
+        // A llama row with no row-owned stackBaseUrl lives on the deployment's own
+        // stack (LlamaCpp:BaseUrl): the single-stack case, which is the common one.
+        var db = await CreateDbAsync(rows: [
+            (id: "qwen-a", provider: "llama-cpp", json: "{\"routerModelId\":\"QwenA\"}"),
+            (id: "local-def", provider: "llama-cpp", json: "{\"routerModelId\":\"LocalDef\"}"),
+        ]);
+        var (provider, clients) = CreateClientProvider(
+            initialLoaded: new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                [GlobalBase] = ["QwenA"],
+                [MaxBase] = [],
+            });
+
+        var reconciler = CreateReconciler(db, provider, defaultModelId: "local-def", out _, overrideAll: false);
+
+        await reconciler.ReconcileWithGlobalDefaultAsync();
+
+        clients[GlobalBase].Loaded.Should().ContainSingle().Which.Should().Be("LocalDef");
+        clients[GlobalBase].Unloaded.Should().BeEmpty();
+        clients[GlobalBase].LoadedAliases.Should().Contain("QwenA");
+        clients[MaxBase].Loaded.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task OverrideAllOn_GlobalStackDefault_SweepsEveryInstanceThenLoadsIt()
+    {
+        var db = await CreateDbAsync(rows: [
+            (id: "qwen-a", provider: "llama-cpp", json: "{\"routerModelId\":\"QwenA\"}"),
+            (id: "local-def", provider: "llama-cpp", json: "{\"routerModelId\":\"LocalDef\"}"),
+        ]);
+        var (provider, clients) = CreateClientProvider(
+            initialLoaded: new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                [GlobalBase] = ["QwenA"],
+                [MaxBase] = ["Muse"],
+            });
+
+        var reconciler = CreateReconciler(db, provider, defaultModelId: "local-def", out _, overrideAll: true);
+
+        await reconciler.ReconcileWithGlobalDefaultAsync();
+
+        clients[GlobalBase].Unloaded.Should().ContainSingle().Which.Should().Be("QwenA");
+        clients[GlobalBase].Loaded.Should().ContainSingle().Which.Should().Be("LocalDef");
+        clients[MaxBase].Unloaded.Should().ContainSingle().Which.Should().Be("Muse");
+    }
+
+    [TestMethod]
+    public async Task GlobalStackDefaultWithoutUsableLlamaBaseUrl_DeclinesToAct()
+    {
+        // No usable LlamaCpp:BaseUrl: the default's stack is not addressable, so the
+        // reconciler must decline rather than guess an instance. With override-all off
+        // the sweep is not implied either, so the loaded set is left alone.
+        var db = await CreateDbAsync(rows: [
+            (id: "local-def", provider: "llama-cpp", json: "{\"routerModelId\":\"LocalDef\"}"),
+        ]);
+        var (provider, clients) = CreateClientProvider(
+            initialLoaded: new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                [GlobalBase] = ["QwenA"],
+                [MaxBase] = [],
+            });
+
+        var reconciler = CreateReconciler(
+            db, provider, defaultModelId: "local-def", out _,
+            overrideAll: false, globalLlamaStackBase: "");
+
+        await reconciler.ReconcileWithGlobalDefaultAsync();
+
+        clients[GlobalBase].Loaded.Should().BeEmpty();
+        clients[GlobalBase].Unloaded.Should().BeEmpty();
+        clients[GlobalBase].LoadedAliases.Should().Contain("QwenA");
+        clients[MaxBase].Loaded.Should().BeEmpty();
+    }
+
     private static GlobalDefaultLlamaReconciler CreateReconciler(
         ApplicationDbContext db,
         FakeClientProvider provider,
         string? defaultModelId,
-        out FakeNotebookAliasState aliasState)
+        out FakeNotebookAliasState aliasState,
+        bool overrideAll = true,
+        string? globalLlamaStackBase = null)
     {
         aliasState = new FakeNotebookAliasState();
+        // Faithful to production: the universe is keyed by CanonicalInstanceKey of the
+        // NORMALIZED stack base, and the deployment's own llama stack is published
+        // through GetStackBaseForService(llama) - the target of a row without a
+        // row-owned stack. Pass globalLlamaStackBase: "" to model a deployment with no
+        // usable LlamaCpp:BaseUrl, where that stack is absent from the universe.
+        var globalStackBase = globalLlamaStackBase switch
+        {
+            null => LocalAiStackHostUrls.NormalizeStackBaseUrl(GlobalLlamaStackBase),
+            _ when string.IsNullOrWhiteSpace(globalLlamaStackBase) => null,
+            _ => LocalAiStackHostUrls.NormalizeStackBaseUrl(globalLlamaStackBase),
+        };
+        var instances = new List<LocalAiInstance>
+        {
+            new LocalAiInstance(LocalAiStackHostResolver.CanonicalInstanceKey(MaxBase), MaxBase),
+        };
+        if (globalStackBase is not null)
+        {
+            instances.Insert(0, new LocalAiInstance(
+                LocalAiStackHostResolver.CanonicalInstanceKey(globalStackBase), GlobalLlamaStackBase));
+        }
+
         var resolver = new Mock<ILocalAiStackHostResolver>();
         resolver
+            .Setup(r => r.GetStackBaseForService(LocalAiStackHostUrls.LlamaServiceId))
+            .Returns(globalStackBase);
+        resolver
             .Setup(r => r.GetAllConfiguredInstancesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[]
-            {
-                new LocalAiInstance("guideants-ai:80", GlobalBase),
-                new LocalAiInstance("192.0.2.1:8112", MaxBase),
-            });
+            .ReturnsAsync(instances);
 
-        var defaultStore = new FakeChatDefaultsStore(defaultModelId);
+ var defaultStore = new FakeChatDefaultsStore(defaultModelId, overrideAll);
         var scopeFactory = new TestScopeFactory(db, defaultStore);
         var coordinator = new LlamaRuntimeCoordinator();
 
@@ -256,9 +437,9 @@ public sealed class GlobalDefaultLlamaReconcilerTests
 
     private sealed class FakeChatDefaultsStore : IChatDefaultsStore
     {
-        public FakeChatDefaultsStore(string? defaultModelId)
+        public FakeChatDefaultsStore(string? defaultModelId, bool overrideAll)
         {
-            Current = new ChatDefaultsSnapshot(defaultModelId, false, null, null, null, null);
+            Current = new ChatDefaultsSnapshot(defaultModelId, overrideAll, null, null, null, null);
         }
 
         public ChatDefaultsSnapshot Current { get; }
