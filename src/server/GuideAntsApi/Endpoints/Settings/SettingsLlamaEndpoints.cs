@@ -350,7 +350,8 @@ public static class SettingsLlamaEndpoints
             ILlamaRuntimeAdminClient adminClient,
             CancellationToken cancellationToken) =>
         {
-            if (!string.Equals(alias.Trim(), request.Alias.Trim(), StringComparison.Ordinal))
+            var normalizedAlias = SettingsModelOnboardingSupport.NormalizeRouteModelId(alias);
+            if (!string.Equals(normalizedAlias.Trim(), request.Alias.Trim(), StringComparison.Ordinal))
             {
                 return Results.BadRequest(new { error = "Route alias must match request alias." });
             }
@@ -361,7 +362,7 @@ public static class SettingsLlamaEndpoints
                 // written on the catalog row's own stack (row-owned stackBaseUrl), not on
                 // the deployment's default stack.
                 var entryClient = await ResolveRouterEntriesClientAsync(
-                    db, stackAdminClients, adminClient, alias, cancellationToken).ConfigureAwait(false);
+                    db, stackAdminClients, adminClient, normalizedAlias, cancellationToken).ConfigureAwait(false);
 
                 // Catalog editor Save is WYSIWYG: omitted preset keys must be deleted.
                 // Older clients still send presetMode=merge, which preserves removals.
@@ -407,8 +408,9 @@ public static class SettingsLlamaEndpoints
             IApplicationSettingsService settingsService,
             CancellationToken cancellationToken) =>
         {
+            var normalizedRouterModelId = SettingsModelOnboardingSupport.NormalizeRouteModelId(routerModelId);
             return await SettingsLlamaRouterDeleteHandler.DeleteLlamaRouterEntryAsync(
-                routerModelId,
+                normalizedRouterModelId,
                 inventoryService,
                 llamaClient,
                 coordinator,

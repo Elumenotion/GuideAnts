@@ -15,8 +15,9 @@ internal static class SettingsLlamaInstallationEndpoints
         {
             try
             {
+                var normalizedModelId = SettingsModelOnboardingSupport.NormalizeRouteModelId(modelId);
                 var detail = await lifecycleService
-                    .GetInstallationDetailAsync(modelId, cancellationToken)
+                    .GetInstallationDetailAsync(normalizedModelId, cancellationToken)
                     .ConfigureAwait(false);
                 return Results.Ok(detail);
             }
@@ -45,8 +46,9 @@ internal static class SettingsLlamaInstallationEndpoints
         {
             try
             {
+                var normalizedModelId = SettingsModelOnboardingSupport.NormalizeRouteModelId(modelId);
                 var response = await lifecycleService
-                    .StartChangeQuantAsync(modelId, request, cancellationToken)
+                    .StartChangeQuantAsync(normalizedModelId, request, cancellationToken)
                     .ConfigureAwait(false);
                 return Results.Accepted($"/api/settings/llama/operations/{response.OperationId}", response);
             }
@@ -75,8 +77,9 @@ internal static class SettingsLlamaInstallationEndpoints
         {
             try
             {
+                var normalizedModelId = SettingsModelOnboardingSupport.NormalizeRouteModelId(modelId);
                 var response = await lifecycleService
-                    .StartRepairAsync(modelId, request, cancellationToken)
+                    .StartRepairAsync(normalizedModelId, request, cancellationToken)
                     .ConfigureAwait(false);
                 return Results.Accepted($"/api/settings/llama/operations/{response.OperationId}", response);
             }
@@ -105,16 +108,17 @@ internal static class SettingsLlamaInstallationEndpoints
         {
             try
             {
+                var normalizedModelId = SettingsModelOnboardingSupport.NormalizeRouteModelId(modelId);
                 if (!request.Confirm)
                 {
                     var preview = await lifecycleService
-                        .PreviewAdoptAsync(modelId, request.CatalogId, request.CatalogVersion, cancellationToken)
+                        .PreviewAdoptAsync(normalizedModelId, request.CatalogId, request.CatalogVersion, cancellationToken)
                         .ConfigureAwait(false);
                     return Results.Ok(preview);
                 }
 
                 var detail = await lifecycleService
-                    .AdoptAsync(modelId, request, cancellationToken)
+                    .AdoptAsync(normalizedModelId, request, cancellationToken)
                     .ConfigureAwait(false);
                 return Results.Ok(detail);
             }

@@ -52,6 +52,16 @@ public sealed class GlobalDefaultLlamaReconciler : IGlobalDefaultLlamaReconciler
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetService<ApplicationDbContext>();
+
+        // The unload sweep is the *global* rule: it applies only when the default model
+        // is a mandate over every chat turn, i.e. the "override all models" flag is on.
+        // With the flag off the default is only the fallback for entities that have no
+        // model of their own (ChatModelResolver "defaulted to"), so it must still be warm
+        // on its own instance - but it is not a mandate, so no other loaded alias may be
+        // unloaded. The flag therefore gates the sweep, never the load.
+        var store = scope.ServiceProvider.GetRequiredService<IChatDefaultsStore>();
+        var overrideAll = store.Current.OverrideAllChatModels;
+
         var instances = await _stackHostResolver.GetAllConfiguredInstancesAsync(cancellationToken).ConfigureAwait(false);
         if (instances.Count == 0)
         {
@@ -60,14 +70,23 @@ public sealed class GlobalDefaultLlamaReconciler : IGlobalDefaultLlamaReconciler
 
         var defaultRow = db is null
             ? null
-            : await ResolveDefaultLlamaRowAsync(db, cancellationToken).ConfigureAwait(false);
+            : await ResolveDefaultLlamaRowAsync(db, store, cancellationToken).ConfigureAwait(false);
 
         await ResolveStackApiKeysAsync(db, cancellationToken).ConfigureAwait(false);
 
         if (defaultRow is null)
         {
-            // No local global default (cloud model, unset, or non-llama): unload every
-            // loaded llama alias on every instance.
+            // No local default model to actuate (cloud model, unset, or non-llama), so
+            // there is nothing to load. The sweep is the global rule and runs only with
+            // override-all on; with the flag off nothing about the loaded set is implied
+            // and every loaded alias is left alone.
+            if (!overrideAll)
+            {
+                _logger.LogInformation(
+                    "Override-all is off and the default model is not a llama-cpp model; nothing to load and the unload sweep does not apply. No-op.");
+                return;
+            }
+
             _logger.LogInformation(
                 "Global default model is not a llama-cpp model; unloading all loaded llama aliases on {Count} instance(s).",
                 instances.Count);
@@ -77,21 +96,44 @@ public sealed class GlobalDefaultLlamaReconciler : IGlobalDefaultLlamaReconciler
         }
 
         var defaultAlias = NormalizeRouterModelId(defaultRow.RouterModelId);
-        var defaultKey = ResolveInstanceKey(defaultRow.StackBaseUrl);
+        // A row with no row-owned stack targets the deployment's own llama stack
+        // (LlamaCpp:BaseUrl) - the same target ClientFor falls back to - so resolve
+        // that stack's canonical key instead of leaving the load unaddressable.
+        var defaultKey = ResolveInstanceKey(defaultRow.StackBaseUrl) ?? GlobalLlamaInstanceKey();
 
-        // The new default's instance keeps (or gets) its alias; every other loaded
-        // alias on every instance is unloaded.
-        _logger.LogInformation(
-            "Global default model changed to {DefaultModelId} (alias {DefaultAlias}); reconciling {Count} instance(s).",
-            defaultRow.ModelId,
-            defaultAlias,
-            instances.Count);
+        if (overrideAll)
+        {
+            // The new default's instance keeps (or gets) its alias; every other loaded
+            // alias on every instance is unloaded.
+            _logger.LogInformation(
+                "Global default model changed to {DefaultModelId} (alias {DefaultAlias}); reconciling {Count} instance(s).",
+                defaultRow.ModelId,
+                defaultAlias,
+                instances.Count);
 
-        await UnloadLoadedAliasesAsync(instances, defaultAlias, cancellationToken).ConfigureAwait(false);
+            await UnloadLoadedAliasesAsync(instances, defaultAlias, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            // Override-all off: ensure the default is loaded where it lives, and leave
+            // every other loaded alias alone. Unloading here would evict a model that
+            // some assistant still names as its own.
+            _logger.LogInformation(
+                "Override-all is off; ensuring default model {DefaultModelId} (alias {DefaultAlias}) is loaded without unloading other aliases.",
+                defaultRow.ModelId,
+                defaultAlias);
+        }
+
+        if (defaultKey is null)
+        {
+            _logger.LogWarning(
+                "Default model {DefaultModelId} has no resolvable llama stack (no row-owned stack URL and no usable global llama stack configured); skipping its load.",
+                defaultRow.ModelId);
+            return;
+        }
 
         var defaultInstance = instances.FirstOrDefault(i =>
-            defaultKey is not null
-            && string.Equals(i.CanonicalKey, defaultKey, StringComparison.OrdinalIgnoreCase));
+            string.Equals(i.CanonicalKey, defaultKey, StringComparison.OrdinalIgnoreCase));
         if (defaultInstance is null)
         {
             _logger.LogWarning(
@@ -179,9 +221,9 @@ public sealed class GlobalDefaultLlamaReconciler : IGlobalDefaultLlamaReconciler
 
     private async Task<LocalDefaultLlamaRow?> ResolveDefaultLlamaRowAsync(
         ApplicationDbContext db,
+        IChatDefaultsStore store,
         CancellationToken cancellationToken)
     {
-        var store = _scopeFactory.CreateScope().ServiceProvider.GetRequiredService<IChatDefaultsStore>();
         var defaultModelId = store.Current.DefaultModelId?.Trim();
         if (string.IsNullOrWhiteSpace(defaultModelId))
         {
@@ -270,6 +312,30 @@ public sealed class GlobalDefaultLlamaReconciler : IGlobalDefaultLlamaReconciler
         catch (UriFormatException)
         {
             return trimmed;
+        }
+    }
+
+    /// <summary>
+    /// Canonical identity of the deployment's own llama stack (LlamaCpp:BaseUrl),
+    /// resolved through the same normalization and key function the resolver uses to
+    /// build the instance universe, so a row without a row-owned stack matches its
+    /// target instance. Null when no usable global llama stack is configured.
+    /// </summary>
+    private string? GlobalLlamaInstanceKey()
+    {
+        var globalBase = _stackHostResolver.GetStackBaseForService(LocalAiStackHostUrls.LlamaServiceId);
+        if (string.IsNullOrWhiteSpace(globalBase))
+        {
+            return null;
+        }
+
+        try
+        {
+            return LocalAiStackHostResolver.CanonicalInstanceKey(globalBase);
+        }
+        catch (UriFormatException)
+        {
+            return null;
         }
     }
 

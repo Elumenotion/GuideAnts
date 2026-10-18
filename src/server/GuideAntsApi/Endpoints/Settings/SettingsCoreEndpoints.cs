@@ -100,6 +100,14 @@ public static class SettingsCoreEndpoints
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
+            // Capture the pre-save section so we can detect whether anything the
+            // llama runtime cares about actually changed. Only the default model id
+            // and the "override all models" flag decide the desired loaded set, so a
+            // temperature, sampling, or reasoning edit must not contact the node at
+            // all. Whether the change means "sweep" or "load only" is decided by the
+            // reconciler, not here.
+            var oldSection = await settingsService.GetSectionAsync(chatDefaultsSectionName, cancellationToken);
+
             var update = new UpdateSettingsSectionRequest(request.RowVersion, SettingsChatDefaultsMapper.BuildChatDefaultsPayload(request));
             var result = await settingsService.UpdateSectionAsync(chatDefaultsSectionName, update, cancellationToken);
             if (result.ConcurrencyConflict)
@@ -117,33 +125,45 @@ public static class SettingsCoreEndpoints
                 return Results.NotFound();
             }
 
-            // The global default model change is the unload signal: the API unloads
-            // every loaded alias that is not the new default on every in-use instance,
-            // and loads the new default on its own instance if not loaded.
+            // Fire whenever the default model id or the override-all flag changes; the
+            // reconciler then applies the two distinct rules:
+            // - override-all ON: the default is a mandate, so every loaded alias that
+            // is not the default is unloaded on every in-use instance, and the
+            // default is loaded on its own instance if not loaded.
+            // - override-all OFF: the default is only the fallback for entities that
+            // name no model of their own (ChatModelResolver "defaulted to"), so it
+            // is still loaded on its own instance, but no other loaded alias is
+            // touched - unloading there would evict a model some assistant still
+            // names as its own.
+            // A temperature/sampling/reasoning edit changes neither field, so it fires
+            // nothing and can never unload a loaded local model.
             //
             // Run in the background: a settings change must never block on the local AI
             // node. Synchronously awaiting the reconciler made this request hang (up to
             // its verify timeout) while the node was down, which left the settings save
             // and the header-toolbar model switch stuck in a wait state for a service
-            // that may never load. The reconciliation is idempotent and self-heals:
-            // the runtime watchdog re-applies the desired state (including the global
-            // default) once the node is reachable, and startup warmup reconciles on API
-            // boot.
-            _ = Task.Run(async () =>
+            // that may never load.
+            var (oldDefaultModelId, oldOverrideAll) = LlamaRelevantChatDefaults(oldSection);
+            var (newDefaultModelId, newOverrideAll) = LlamaRelevantChatDefaults(result.Section);
+            if (!string.Equals(oldDefaultModelId, newDefaultModelId, StringComparison.Ordinal)
+                || oldOverrideAll != newOverrideAll)
             {
-                try
+                _ = Task.Run(async () =>
                 {
-                    await globalDefaultLlamaReconciler
-                        .ReconcileWithGlobalDefaultAsync(CancellationToken.None)
-                        .ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    loggerFactory
-                        .CreateLogger("ChatDefaultsLlamaReconcile")
-                        .LogWarning(ex, "Failed to reconcile llama instances with the new global default after chat-defaults update.");
-                }
-            });
+                    try
+                    {
+                        await globalDefaultLlamaReconciler
+                            .ReconcileWithGlobalDefaultAsync(CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        loggerFactory
+                            .CreateLogger("ChatDefaultsLlamaReconcile")
+                            .LogWarning(ex, "Failed to reconcile llama instances with the new global default after chat-defaults update.");
+                    }
+                });
+            }
 
             return Results.Ok(SettingsChatDefaultsMapper.MapChatDefaults(result.Section));
         })
@@ -185,5 +205,16 @@ public static class SettingsCoreEndpoints
         .WithName("RebuildEmbeddings")
         .Produces<EmbeddingsRebuildResponse>(StatusCodes.Status202Accepted)
         .Produces<EmbeddingsRebuildConflictResponse>(StatusCodes.Status409Conflict);
+    }
+
+    // The two chat-defaults fields that decide the llama runtime's desired loaded
+    // set: which model row is the default, and whether that row is a mandate over
+    // every chat turn. ChatDefaultsSnapshot already trims and null-normalizes
+    // DefaultModelId, so a blank default reads as null (nothing to actuate).
+    internal static (string? DefaultModelId, bool OverrideAllChatModels) LlamaRelevantChatDefaults(
+        SettingsSectionDto? section)
+    {
+        var snapshot = ChatDefaultsSnapshot.FromSection(section);
+        return (snapshot.DefaultModelId, snapshot.OverrideAllChatModels);
     }
 }

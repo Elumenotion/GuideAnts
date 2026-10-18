@@ -100,6 +100,82 @@ public sealed class CatalogServiceRowAuthorityTests
         withoutValues.MaxOutputTokens.Should().BeNull();
     }
 
+    [TestMethod]
+    public async Task GetModelsAsync_NonLocalModel_HonorsThinkingControlDefaultChoice()
+    {
+        await using var context = CreateContext();
+        context.Models.Add(new Model
+        {
+            ModelId = "openai-compatible-qwen",
+            DisplayName = "Qwen (OpenAI-compatible)",
+            Provider = "openai-compatible",
+            SamplingParametersJson = "{}",
+            ReasoningChoicesJson = "[\"none\",\"low\",\"medium\",\"high\"]",
+            ThinkingControlJson = "{\"defaultChoice\":\"high\"}",
+            IsActive = true,
+        });
+        context.Models.Add(new Model
+        {
+            ModelId = "openrouter-qwen",
+            DisplayName = "Qwen (OpenRouter)",
+            Provider = "openrouter-chat",
+            SamplingParametersJson = "{}",
+            ReasoningChoicesJson = "[\"none\",\"low\",\"medium\",\"high\"]",
+            ThinkingControlJson = "{\"defaultChoice\":\"high\",\"choiceActions\":{}}",
+            IsActive = true,
+        });
+        await context.SaveChangesAsync();
+
+        var models = (await new CatalogService(context).GetModelsAsync()).ToList();
+
+        // A declared defaultChoice that is one of the row's choices wins over the first choice,
+        // for the same providers whose clients already honor it at inference.
+        models.Single(m => m.ModelId == "openai-compatible-qwen").DefaultReasoningChoice.Should().Be("high");
+        models.Single(m => m.ModelId == "openrouter-qwen").DefaultReasoningChoice.Should().Be("high");
+    }
+
+    [TestMethod]
+    public async Task GetModelsAsync_NonLocalModel_DefaultChoiceNotInChoices_FallsBackToFirstChoice()
+    {
+        await using var context = CreateContext();
+        context.Models.Add(new Model
+        {
+            ModelId = "openai-compatible-bad-default",
+            DisplayName = "Bad Default",
+            Provider = "openai-compatible",
+            SamplingParametersJson = "{}",
+            ReasoningChoicesJson = "[\"none\",\"low\"]",
+            ThinkingControlJson = "{\"defaultChoice\":\"extreme\"}",
+            IsActive = true,
+        });
+        await context.SaveChangesAsync();
+
+        var models = (await new CatalogService(context).GetModelsAsync()).ToList();
+        models.Single(m => m.ModelId == "openai-compatible-bad-default")
+            .DefaultReasoningChoice.Should().Be("none");
+    }
+
+    [TestMethod]
+    public async Task GetModelsAsync_NonLocalModel_MalformedThinkingControl_FallsBackToFirstChoice()
+    {
+        await using var context = CreateContext();
+        context.Models.Add(new Model
+        {
+            ModelId = "openai-compatible-malformed",
+            DisplayName = "Malformed",
+            Provider = "openai-compatible",
+            SamplingParametersJson = "{}",
+            ReasoningChoicesJson = "[\"none\",\"low\"]",
+            ThinkingControlJson = "{not json",
+            IsActive = true,
+        });
+        await context.SaveChangesAsync();
+
+        var models = (await new CatalogService(context).GetModelsAsync()).ToList();
+        models.Single(m => m.ModelId == "openai-compatible-malformed")
+            .DefaultReasoningChoice.Should().Be("none");
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

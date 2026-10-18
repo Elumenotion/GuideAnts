@@ -1490,7 +1490,7 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
     return response
 
 
-@APP.delete("/router/entries/{alias}")
+@APP.delete("/router/entries/{alias:path}")
 def delete_router_entry_route(alias: str) -> Response:
     alias_trimmed = alias.strip()
     if not alias_trimmed:

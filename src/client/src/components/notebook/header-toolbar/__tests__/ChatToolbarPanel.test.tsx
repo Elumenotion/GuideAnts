@@ -460,7 +460,7 @@ describe('ChatToolbarPanel', () => {
     expect(api.settings.chatDefaults.update).not.toHaveBeenCalled();
   });
 
-  it('lets a defaulted assistant pick a model and enables override in one action', async () => {
+  it('lets a defaulted assistant pick a model without touching the override flag', async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn(async () => {});
     vi.mocked(api.settings.chatDefaults.get).mockResolvedValueOnce({
@@ -513,7 +513,10 @@ describe('ChatToolbarPanel', () => {
     expect(api.settings.chatDefaults.update).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultModelId: 'gemini-2.5-flash',
-        overrideAllChatModels: true,
+        // The click changes the default only. Auto-enabling the override here would
+        // also arm the global unload sweep (every other loaded alias on every
+        // instance) from a single click in one notebook.
+        overrideAllChatModels: false,
       })
     );
     expect(onRefresh).toHaveBeenCalled();

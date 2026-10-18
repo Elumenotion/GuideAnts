@@ -170,13 +170,17 @@ export function ChatToolbarPanel({
     if (modelListLocked) return;
     const current = chatDefaults ?? await api.settings.chatDefaults.get();
     const selectedModel = await resolveCatalogModel(modelId);
-    // Picking from the list while the assistant has no model of its own sets
-    // the global override so the pick takes effect immediately.
+    // A pick changes the default model and leaves the override flag exactly as the
+    // user left it: the flag is theirs to set, and turning it on here would also
+    // trigger the global unload sweep (every other loaded alias on every instance)
+    // from one click in one notebook. With the flag off the pick still takes effect
+    // for an assistant that has no model of its own, because the resolver falls back
+    // to the default (ChatModelResolver "defaulted to").
     await updateChatDefaultsFromRequest(buildChatDefaultsModelChangeRequest(
       current,
       modelId,
       selectedModel,
-      true
+      current.overrideAllChatModels
     ));
   };
 
@@ -341,7 +345,7 @@ export function ChatToolbarPanel({
             {overrideAllChatModels
               ? 'Global override is on. Model picks below update settings for all chat paths.'
               : isDefaultedToGlobalDefault
-                ? 'This assistant has no model of its own, so the global default is in use. Picking a model turns on the override.'
+                ? 'This assistant has no model of its own, so the global default is in use. Picking a model changes that default; the override stays off until you turn it on.'
                 : 'Using assistant definitions. Turn on override to set a global model.'}
           </span>
         </span>

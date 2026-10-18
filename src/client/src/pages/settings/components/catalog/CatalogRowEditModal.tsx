@@ -353,6 +353,8 @@ export function CatalogRowEditModal({
                   value={stackBaseUrl}
                   onChange={(event) => setStackBaseUrl(event.target.value)}
                   placeholder="http://192.0.2.1:8112"
+                  autoComplete="off"
+                  spellCheck={false}
                   className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </label>
@@ -362,6 +364,7 @@ export function CatalogRowEditModal({
                   type="password"
                   value={stackApiKey}
                   onChange={(event) => setStackApiKey(event.target.value)}
+                  autoComplete="new-password"
                   placeholder="Optional (local docker networks are keyless)"
                   className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />

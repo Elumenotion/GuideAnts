@@ -87,10 +87,16 @@ export function validateReasoningChoicesJson(json: string): string | null {
 
 /**
  * Providers whose chat clients honor row-owned request shaping (ThinkingControlJson and
- * RequestFieldsWhenToolsPresentJson). The other non-local clients build their request bodies
- * from typed shapes and ignore those columns, so the editor does not offer them there.
+ * RequestFieldsWhenToolsPresentJson), including ThinkingControlJson.defaultChoice as the
+ * default reasoning choice — the same row-owned behavior llama-cpp models carry. The other
+ * non-local clients build their request bodies from typed shapes and ignore those columns,
+ * so the editor does not offer them there.
  */
-const ROW_OWNED_REQUEST_SHAPING_PROVIDERS = new Set(['hf-inference-chat', 'openrouter-chat']);
+const ROW_OWNED_REQUEST_SHAPING_PROVIDERS = new Set([
+  'hf-inference-chat',
+  'openrouter-chat',
+  'openai-compatible',
+]);
 
 export function providerSupportsRowOwnedRequestShaping(provider: string): boolean {
   return ROW_OWNED_REQUEST_SHAPING_PROVIDERS.has(provider.trim().toLowerCase());
