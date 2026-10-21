@@ -41,6 +41,11 @@ public static class AttachmentMessageBuilder
 
             var uploadType = DetermineUploadType(fileName);
             var shouldHaveMarkdownShadow = ShouldHaveMarkdownShadow(fileName);
+            // Wire API client images land in Output/.wire-attachments and are deliberately kept
+            // out of doc intelligence (see NotebookFileService.UploadFilesAsync). Waiting on a
+            // shadow that will never be produced can only burn the whole wait budget.
+            // Path-scoped: user-attached files keep the waiting behaviour.
+            var suppressShadowWait = WireAttachmentPaths.IsWireAttachmentRelativePath(notebookFile.RelativePath);
 
             var bytes = await StreamToBytesAsync(stream, cancellationToken);
 
@@ -50,8 +55,11 @@ public static class AttachmentMessageBuilder
             {
                 try
                 {
-                    // Wait up to 30 seconds for shadow to be ready
-                    var markdownShadow = await WaitForMarkdownShadowAsync(
+                    // User attachments: wait for the shadow. Wire attachments: one non-polling
+                    // read, then go straight to the image bytes (their shadow is never produced).
+                    var markdownShadow = suppressShadowWait
+                            ? await markdownExtractionService.GetNotebookMarkdownShadowAsync(notebookFile.Id, cancellationToken)
+                            : await WaitForMarkdownShadowAsync(
                         markdownExtractionService,
                         notebookFile.Id,
                         fileName,
@@ -155,6 +163,11 @@ public static class AttachmentMessageBuilder
 
             var uploadType = DetermineUploadType(fileName);
             var shouldHaveMarkdownShadow = ShouldHaveMarkdownShadow(fileName);
+            // Wire API client images land in Output/.wire-attachments and are deliberately kept
+            // out of doc intelligence (see NotebookFileService.UploadFilesAsync). Waiting on a
+            // shadow that will never be produced can only burn the whole wait budget.
+            // Path-scoped: user-attached files keep the waiting behaviour.
+            var suppressShadowWait = WireAttachmentPaths.IsWireAttachmentRelativePath(notebookFile.RelativePath);
 
             var bytes = await StreamToBytesAsync(stream, cancellationToken);
 
@@ -164,8 +177,11 @@ public static class AttachmentMessageBuilder
             {
                 try
                 {
-                    // Wait up to 30 seconds for shadow to be ready
-                    var markdownShadow = await WaitForMarkdownShadowAsync(
+                    // User attachments: wait for the shadow. Wire attachments: one non-polling
+                    // read, then go straight to the image bytes (their shadow is never produced).
+                    var markdownShadow = suppressShadowWait
+                            ? await markdownExtractionService.GetNotebookMarkdownShadowAsync(notebookFile.Id, cancellationToken)
+                            : await WaitForMarkdownShadowAsync(
                         markdownExtractionService,
                         notebookFile.Id,
                         fileName,

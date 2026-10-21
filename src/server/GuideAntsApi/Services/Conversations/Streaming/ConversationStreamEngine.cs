@@ -767,6 +767,14 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                             "chat usage",
                             context.ConversationId);
                     }
+                    else
+                    {
+                        // A provider that returns no usage makes the turn invisible in usage
+                        // reports. Surface it instead of losing the telemetry silently.
+                        _logger.LogWarning(
+                            "Completed conversation {ConversationId} turn {TurnIndex} recorded no chat usage: the provider returned no usage.",
+                            context.ConversationId, context.TurnIndex);
+                    }
                 }
                 else
                 {

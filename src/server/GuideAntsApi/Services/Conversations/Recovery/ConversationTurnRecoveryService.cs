@@ -1,4 +1,6 @@
+using System.Text.Json;
 using GuideAntsApi.DataModel;
+using AntRunner.Chat;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations.Persistence;
 using GuideAntsApi.Services.Conversations.Streaming;
@@ -111,7 +113,9 @@ public sealed class ConversationTurnRecoveryService : BackgroundService
                 t.NotebookConversationId,
                 t.TurnIndex,
                 t.ExecutionId,
-                t.TerminationCode
+                t.TerminationCode,
+                t.ModelDeploymentId,
+                t.UsageJson
             })
             .ToListAsync(ct);
 
@@ -138,6 +142,16 @@ public sealed class ConversationTurnRecoveryService : BackgroundService
                     stale.Id);
                 continue;
             }
+
+            // The owning worker died before it could record chat usage. Run before the claim:
+            // the reporter's per-turn dedup key keeps this idempotent if another instance wins.
+            await RecordRecoveredChatUsageAsync(
+                stale.NotebookConversationId,
+                stale.TurnIndex,
+                stale.Id,
+                stale.ModelDeploymentId,
+                stale.UsageJson,
+                ct);
 
             var claimed = stale.TerminationCode == "cancel_requested"
                 ? await TryClaimPendingCancellationAsync(db, stale.Id, stale.ExecutionId, ct)
@@ -188,11 +202,122 @@ public sealed class ConversationTurnRecoveryService : BackgroundService
                     stale.Id);
             }
 
+            await RecordRecoveredToolUsageAsync(stale.NotebookConversationId, stale.TurnIndex, stale.Id, ct);
+
             _logger.LogInformation(
                 "Recovered stale streaming turn {TurnId} for conversation {ConversationId} turn index {TurnIndex}",
                 stale.Id,
                 stale.NotebookConversationId,
                 stale.TurnIndex);
+        }
+    }
+
+    /// <summary>
+    /// Best-effort chat usage for a turn whose owning stream worker is gone. The terminalized
+    /// turn row may still carry the provider usage in <see cref="ConversationTurn.UsageJson"/>
+    /// even though the worker died before writing the usage event.
+    /// </summary>
+    private async Task RecordRecoveredChatUsageAsync(
+        Guid conversationId,
+        int turnIndex,
+        Guid turnId,
+        string? modelDeploymentId,
+        string? usageJson,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(usageJson) || string.IsNullOrWhiteSpace(modelDeploymentId))
+        {
+            return;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var usageReporter = scope.ServiceProvider.GetService<IConversationUsageReporter>();
+            if (usageReporter == null)
+            {
+                return;
+            }
+
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var context = await db.NotebookConversations
+                .AsNoTracking()
+                .Where(c => c.Id == conversationId)
+                .Select(c => new { c.Notebook.ProjectId, c.NotebookId, c.Notebook.GuideId })
+                .FirstOrDefaultAsync(ct);
+            if (context == null)
+            {
+                return;
+            }
+
+            var usage = JsonSerializer.Deserialize<UsageResponse>(usageJson);
+            if (usage == null)
+            {
+                return;
+            }
+
+            var metrics = new GuideAnts.Usage.UsageMetrics(
+                usage.PromptTokens ?? 0,
+                usage.CachedPromptTokens ?? 0,
+                0,
+                usage.CompletionTokens ?? 0);
+
+            await usageReporter.RecordChatCompletionUsageAsync(new ChatCompletionUsageRequest(
+                ConversationUsageMode.Private,
+                context.ProjectId,
+                context.NotebookId,
+                conversationId,
+                turnIndex,
+                modelDeploymentId,
+                context.GuideId,
+                metrics), ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to record recovered chat usage for turn {TurnId} in conversation {ConversationId} turn {TurnIndex}",
+                turnId, conversationId, turnIndex);
+        }
+    }
+
+    /// <summary>
+    /// Best-effort tool-call usage for a recovered turn. Runs only after the recovery claim
+    /// succeeded, so a still-live owning worker is never double-charged.
+    /// </summary>
+    private async Task RecordRecoveredToolUsageAsync(Guid conversationId, int turnIndex, Guid turnId, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var usageReporter = scope.ServiceProvider.GetService<IConversationUsageReporter>();
+            if (usageReporter == null)
+            {
+                return;
+            }
+
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var context = await db.NotebookConversations
+                .AsNoTracking()
+                .Where(c => c.Id == conversationId)
+                .Select(c => new { c.Notebook.ProjectId, c.NotebookId, c.Notebook.GuideId })
+                .FirstOrDefaultAsync(ct);
+            if (context != null)
+            {
+                await usageReporter.RecordToolCallUsageForTurnAsync(new ToolTurnUsageRequest(
+                    ConversationUsageMode.Private,
+                    context.ProjectId,
+                    context.NotebookId,
+                    conversationId,
+                    turnIndex,
+                    context.GuideId,
+                    ContextLabel: "turn-recovery"), ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to record recovered tool usage for turn {TurnId} in conversation {ConversationId} turn {TurnIndex}",
+                turnId, conversationId, turnIndex);
         }
     }
 

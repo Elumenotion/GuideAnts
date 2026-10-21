@@ -1185,6 +1185,20 @@ using var scope = CreateDbScope();
         // --- Create markdown shadows for uploaded files ---
         foreach (var nf in processedFiles)
         {
+            if (WireAttachmentPaths.IsWireAttachmentRelativePath(nf.RelativePath))
+            {
+                // Wire API scratch images: running doc intelligence (OCR) on a per-request
+                // image the caller is about to send as pixels is pure latency. No shadow,
+                // no extract job, no index chain.
+                _logger.LogDebug(
+                    "Skipping markdown shadow for wire attachment file. projectId={ProjectId} notebookId={NotebookId} notebookFileId={NotebookFileId} relativePath={RelativePath}",
+                    projectId,
+                    notebookId,
+                    nf.Id,
+                    LogValueSanitizer.Sanitize(nf.RelativePath));
+                continue;
+            }
+
             try
             {
                 if (changedExistingFileIds.Contains(nf.Id))

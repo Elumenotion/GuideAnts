@@ -6,7 +6,6 @@ namespace GuideAntsApi.Endpoints.PublishedWire;
 
 internal static class WireImageAttachmentMaterializer
 {
-    private const string WireAttachmentFolder = "Output/.wire-attachments";
     private const int MaxRemoteImageBytes = 20 * 1024 * 1024;
 
     internal static async Task<List<AttachmentDto>> MaterializeAsync(
@@ -51,7 +50,7 @@ internal static class WireImageAttachmentMaterializer
                 projectId,
                 notebookId,
                 files,
-                WireAttachmentFolder,
+                WireAttachmentPaths.AttachmentFolder,
                 index: false,
                 forceMarkdownExtraction: false).ConfigureAwait(false);
 

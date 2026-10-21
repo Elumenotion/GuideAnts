@@ -24,7 +24,7 @@ public sealed class ToolContractRegistryTests
         contract.OAuthPolicy.Should().Be(OAuthPolicy.None);
         contract.ToolMetadata.Should().NotBeNull();
         contract.ToolMetadata!.OperationId.Should().Be("run_python");
-        contract.ParameterMetadata.Should().ContainKey("script");
+        contract.ParameterMetadata.Should().ContainKey("arguments");
         contract.ParameterMetadata.Should().ContainKey("containerName");
         contract.ParameterMetadata.Should().ContainKey("scriptType");
         contract.ParameterMetadata["scriptType"].Hidden.Should().BeTrue();
@@ -64,7 +64,7 @@ public sealed class ToolContractRegistryTests
             .GetProperty("schema");
 
         var properties = requestSchema.GetProperty("properties");
-        properties.TryGetProperty("script", out _).Should().BeTrue();
+        properties.TryGetProperty("arguments", out _).Should().BeTrue();
         properties.TryGetProperty("containerName", out _).Should().BeTrue();
         properties.TryGetProperty("scriptType", out _).Should().BeFalse();
         properties.TryGetProperty("context", out _).Should().BeFalse();

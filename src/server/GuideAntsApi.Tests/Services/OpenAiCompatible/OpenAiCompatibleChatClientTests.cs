@@ -232,6 +232,51 @@ public sealed class OpenAiCompatibleChatClientTests
         CreateClient(httpClient).SupportsToolChoiceNone.Should().BeTrue();
     }
 
+    [TestMethod]
+    public async Task StreamCompletionAsync_SendsIncludeUsage_AndCapturesServerReportedUsage()
+    {
+        // Mirrors max/gufo behavior: the trailing usage chunk exists only when the request asked for it.
+        var handler = new CapturingHandler(request =>
+        {
+            using var doc = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var asks = doc.RootElement.TryGetProperty("stream_options", out var so)
+                       && so.TryGetProperty("include_usage", out var iu)
+                       && iu.GetBoolean();
+            var sse =
+                "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+                (asks
+                    ? "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":3,\"total_tokens\":14}}\n\n"
+                    : string.Empty) +
+                "data: [DONE]\n\n";
+            return SseResponse(sse);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = CreateClient(httpClient);
+
+        var response = await client.StreamCompletionAsync(
+            new ChatCompletionRequest(messages: [new ChatMessage(ChatRole.User, "hi")], model: null),
+            onChunk: _ => { });
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody);
+        body.RootElement.GetProperty("stream").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("stream_options").GetProperty("include_usage").GetBoolean().Should().BeTrue();
+        response.Usage!.PromptTokens.Should().Be(11);
+        response.Usage.CompletionTokens.Should().Be(3);
+    }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_DoesNotSendStreamOptions()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(TextResponse("hi")));
+        using var httpClient = new HttpClient(handler);
+        var client = CreateClient(httpClient);
+
+        await client.GetCompletionAsync(new ChatCompletionRequest(messages: [new ChatMessage(ChatRole.User, "hi")], model: null));
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody);
+        body.RootElement.TryGetProperty("stream_options", out _).Should().BeFalse();
+    }
+
     private sealed class CapturingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {
         public Uri? LastRequestUri { get; private set; }

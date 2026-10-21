@@ -144,11 +144,13 @@ public sealed class ConversationTurnRecoveryServiceTests
 
     private static ConversationTurnRecoveryService CreateService(
         DbContextOptions<ApplicationDbContext> options,
-        ConversationStreamRunRegistry registry)
+        ConversationStreamRunRegistry registry,
+        IConversationUsageReporter? usageReporter = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(options);
         services.AddScoped(sp => new ApplicationDbContext(sp.GetRequiredService<DbContextOptions<ApplicationDbContext>>()));
+        services.AddScoped<IConversationUsageReporter>(_ => usageReporter ?? Mock.Of<IConversationUsageReporter>());
         services.AddScoped<IConversationPersistence>(_ =>
         {
             var persistence = new Mock<IConversationPersistence>();
@@ -162,6 +164,97 @@ public sealed class ConversationTurnRecoveryServiceTests
             services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             registry,
             Mock.Of<ILogger<ConversationTurnRecoveryService>>());
+    }
+
+    [TestMethod]
+    public async Task RecoverStaleTurns_records_tool_usage_for_claimed_turn()
+    {
+        var (options, turnId, conversationId) = await SeedStaleStreamingTurnAsync();
+        await using (var db = new ApplicationDbContext(options))
+        {
+            var claimedTurn = await db.ConversationTurns.SingleAsync(t2 => t2.Id == turnId);
+            claimedTurn.TerminationCode = "cancel_requested";
+            claimedTurn.LastUpdated = DateTime.UtcNow;
+            db.NotebookConversationMessages.Add(new NotebookConversationMessage
+            {
+                NotebookConversationId = conversationId,
+                TurnIndex = 1,
+                MessageSequence = 2,
+                Role = ChatRole.Tool,
+                FunctionName = "run_bash",
+                ToolCallId = "call_1",
+                Content = "ok",
+                Created = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var usageReporter = new Mock<IConversationUsageReporter>();
+        var service = CreateService(options, new ConversationStreamRunRegistry(), usageReporter.Object);
+        await service.RecoverStaleTurnsAsync(CancellationToken.None);
+
+        usageReporter.Verify(r => r.RecordToolCallUsageForTurnAsync(
+            It.Is<ToolTurnUsageRequest>(q => q.ConversationId == conversationId && q.TurnIndex == 1),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task RecoverStaleTurns_records_chat_usage_from_turn_usage_json()
+    {
+        var (options, turnId, conversationId) = await SeedStaleStreamingTurnAsync();
+        await using (var db = new ApplicationDbContext(options))
+        {
+            db.Models.Add(new Model
+            {
+                ModelId = "m-recovery-test",
+                DisplayName = "Recovery test model",
+                Provider = "openai-compatible",
+                Created = DateTime.UtcNow
+            });
+            var turn = await db.ConversationTurns.SingleAsync(t => t.Id == turnId);
+            turn.ModelDeploymentId = "m-recovery-test";
+            turn.TerminationCode = "cancel_requested";
+            turn.LastUpdated = DateTime.UtcNow;
+            turn.UsageJson = "{\"prompt_tokens\":120,\"completion_tokens\":34,\"total_tokens\":154,\"CachedPromptTokens\":12}";
+            await db.SaveChangesAsync();
+        }
+
+        var usageReporter = new Mock<IConversationUsageReporter>();
+        var service = CreateService(options, new ConversationStreamRunRegistry(), usageReporter.Object);
+        await service.RecoverStaleTurnsAsync(CancellationToken.None);
+
+        usageReporter.Verify(r => r.RecordChatCompletionUsageAsync(
+            It.Is<ChatCompletionUsageRequest>(q =>
+                q.ConversationId == conversationId
+                && q.TurnIndex == 1
+                && q.ModelDeploymentId == "m-recovery-test"
+                && q.Metrics.ValueInput == 120
+                && q.Metrics.ValueOutput == 34
+                && q.Metrics.ValueCachedInput == 12),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task RecoverStaleTurns_claims_pending_cancellation_and_records_usage()
+    {
+        var (options, turnId, conversationId) = await SeedStaleStreamingTurnAsync();
+        await using (var db = new ApplicationDbContext(options))
+        {
+            var turn = await db.ConversationTurns.SingleAsync(t => t.Id == turnId);
+            turn.TerminationCode = "cancel_requested";
+            turn.LastUpdated = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+
+        var usageReporter = new Mock<IConversationUsageReporter>();
+        var service = CreateService(options, new ConversationStreamRunRegistry(), usageReporter.Object);
+        await service.RecoverStaleTurnsAsync(CancellationToken.None);
+
+        await using var verify = new ApplicationDbContext(options);
+        (await verify.ConversationTurns.SingleAsync(t => t.Id == turnId)).Status.Should().Be("cancelled");
+        usageReporter.Verify(r => r.RecordToolCallUsageForTurnAsync(
+            It.Is<ToolTurnUsageRequest>(q => q.ConversationId == conversationId && q.TurnIndex == 1),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static async Task<(DbContextOptions<ApplicationDbContext> Options, Guid TurnId, Guid ConversationId)> SeedStaleStreamingTurnAsync()
