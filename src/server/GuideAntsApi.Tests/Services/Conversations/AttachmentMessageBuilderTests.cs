@@ -2,6 +2,7 @@ using FluentAssertions;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.Core;
 using Moq;
 
 namespace GuideAntsApi.Tests.Services.Conversations;
@@ -84,6 +85,99 @@ public sealed class AttachmentMessageBuilderTests
   }
 
   [TestMethod]
+  public async Task CreateContentFromNotebookFileAsync_DoesNotPollShadow_ForWireAttachmentImage()
+  {
+    var fileId = Guid.NewGuid();
+    var notebookFile = new NotebookFile
+    {
+      Id = fileId,
+      RelativePath = "Output/.wire-attachments/wire-image-abc.jpg",
+      NotebookId = Guid.NewGuid()
+    };
+    var fileService = new Mock<INotebookFileService>();
+    fileService
+      .Setup(s => s.GetFileContentStreamAsync(fileId, It.IsAny<CancellationToken>()))
+      .ReturnsAsync((new MemoryStream(TinyPng), "image/jpeg", "wire-image-abc.jpg"));
+
+    // No shadow exists for wire attachments (doc intelligence is skipped on upload):
+    // the builder must probe once, not poll, and must still emit the image bytes.
+    var markdown = new Mock<IMarkdownExtractionService>(MockBehavior.Strict);
+    markdown
+      .Setup(s => s.GetNotebookMarkdownShadowAsync(fileId, It.IsAny<CancellationToken>()))
+      .ReturnsAsync((GuideAntsApi.DataModel.Models.NotebookFileMarkdownShadow?)null);
+
+    var contents = await AttachmentMessageBuilder.CreateContentFromNotebookFileAsync(
+      notebookFile,
+      fileService.Object,
+      markdown.Object,
+      storagePath: "/storage",
+      CancellationToken.None);
+
+    contents.Should().Contain(c => c.ImageUrl != null && c.ImageUrl.Url.StartsWith("data:image/jpeg;base64,"));
+    markdown.Verify(
+      s => s.GetNotebookMarkdownShadowAsync(fileId, It.IsAny<CancellationToken>()),
+      Times.Once,
+      "wire attachments get a single non-polling probe, never the full polling wait");
+  }
+
+  [TestMethod]
+  public async Task CreateContentFromNotebookFileAsync_StillWaitsAndInlinesMarkdown_ForUserAttachedImage()
+  {
+    var fileId = Guid.NewGuid();
+    var notebookFile = new NotebookFile
+    {
+      Id = fileId,
+      RelativePath = "Output/photo.png",
+      NotebookId = Guid.NewGuid()
+    };
+    var fileService = new Mock<INotebookFileService>();
+    fileService
+      .Setup(s => s.GetFileContentStreamAsync(fileId, It.IsAny<CancellationToken>()))
+      .ReturnsAsync((new MemoryStream(TinyPng), "image/png", "photo.png"));
+
+    var markdown = new Mock<IMarkdownExtractionService>();
+    markdown
+      .Setup(s => s.GetNotebookMarkdownShadowAsync(fileId, It.IsAny<CancellationToken>()))
+      .ReturnsAsync(new GuideAntsApi.DataModel.Models.NotebookFileMarkdownShadow
+      {
+        OriginalNotebookFileId = fileId,
+        Status = MarkdownExtractionStatus.Completed,
+        ContentHash = "h",
+        StoragePath = "/storage/md.md",
+        FileSize =3
+      });
+    markdown
+      .Setup(s => s.GetNotebookMarkdownContentAsync(fileId, It.IsAny<CancellationToken>()))
+      .ReturnsAsync((new MemoryStream("barn teal"u8.ToArray()), "text/markdown", "photo.md"));
+
+    var contents = await AttachmentMessageBuilder.CreateContentFromNotebookFileAsync(
+      notebookFile,
+      fileService.Object,
+      markdown.Object,
+      storagePath: "/storage",
+      CancellationToken.None);
+
+    contents.Should().Contain(c => c.Text != null && c.Text.Contains("barn teal"),
+      "user-attached images keep their extracted markdown");
+    contents.Should().Contain(c => c.ImageUrl != null);
+  }
+
+  [TestMethod]
+  public void WireAttachmentPaths_RecognizesOnlyWireAttachmentUploads()
+  {
+    GuideAntsApi.Services.Components.WireAttachmentPaths
+      .IsWireAttachmentRelativePath("Output/.wire-attachments/wire-image-abc.jpg").Should().BeTrue();
+    GuideAntsApi.Services.Components.WireAttachmentPaths
+      .IsWireAttachmentRelativePath("output\\.wire-attachments\\wire-image.png").Should().BeTrue();
+    GuideAntsApi.Services.Components.WireAttachmentPaths
+      .IsWireAttachmentRelativePath("Output/photo.png").Should().BeFalse();
+    GuideAntsApi.Services.Components.WireAttachmentPaths
+      .IsWireAttachmentRelativePath("Output/.wire-attachments-other/x.png").Should().BeFalse();
+    GuideAntsApi.Services.Components.WireAttachmentPaths
+      .IsWireAttachmentRelativePath(null).Should().BeFalse();
+  }
+
+ [TestMethod]
   public async Task CreateMessagesFromNotebookFileAsync_Returns_empty_when_file_service_missing()
   {
     var messages = await AttachmentMessageBuilder.CreateMessagesFromNotebookFileAsync(

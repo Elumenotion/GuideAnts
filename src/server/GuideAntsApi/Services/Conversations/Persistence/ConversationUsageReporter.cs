@@ -30,11 +30,31 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
     {
         try
         {
-            var usageService = LlmProviderResolver.ResolveUsageServiceName(request.ModelDeploymentId, _scopeFactory);
             var messageId = await ResolveAssistantMessageIdForChatUsageAsync(request, ct);
             if (messageId == null)
             {
-                return;
+                // Never drop the event because one attribution key is unresolvable: record it
+                // with the keys we have so the conversation stays visible in usage reports.
+                _logger.LogWarning(
+                    "Chat completion usage for conversation {ConversationId} turn {TurnIndex} has no assistant message id; recording without a message key.",
+                    request.ConversationId, request.TurnIndex);
+            }
+
+            // Provider resolution must not take the whole event down; degrade the service name only.
+            string usageService;
+            try
+            {
+                usageService = LlmProviderResolver.ResolveUsageServiceName(request.ModelDeploymentId, _scopeFactory);
+            }
+            catch (Exception ex)
+            {
+                usageService = "OpenAICompatible";
+                // The resolver's exception message carries the model id; keep the structured
+                // log free of raw user-provided values (CodeQL: user input in logs).
+                _logger.LogWarning(
+                    ex,
+                    "Failed to resolve the usage service name; recording chat usage with the fallback service. Conversation {ConversationId} turn {TurnIndex}.",
+                    request.ConversationId, request.TurnIndex);
             }
 
             var turnUsageRequestId = BuildTurnChatUsageRequestId(request.ConversationId, request.TurnIndex);
@@ -110,6 +130,7 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                 .ToListAsync(ct);
             var alreadyRecordedSet = new HashSet<Guid>(alreadyRecordedIds);
 
+            var failedToolUsageRecords = 0;
             foreach (var toolMsg in toolMessages)
             {
                 if (string.Equals(toolMsg.FunctionName, "InvokeAgent", StringComparison.OrdinalIgnoreCase))
@@ -122,24 +143,43 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                     continue;
                 }
 
-                await _usageRecorder.RecordToolCallAsync(
-                    projectId: request.ProjectId,
-                    notebookId: request.NotebookId,
-                    conversationId: request.ConversationId,
-                    functionName: toolMsg.FunctionName!,
-                    metadataJson: JsonSerializer.Serialize(new
-                    {
-                        toolCallId = toolMsg.ToolCallId,
-                        functionName = toolMsg.FunctionName,
-                        contentLength = toolMsg.ContentLength
-                    }),
-                    assistantId: request.AssistantId,
-                    notebookConversationMessageId: toolMsg.Id,
-                    ct: ct,
-                    publishedGuideId: attribution?.PublishedGuideId,
-                    sourceChannel: attribution?.SourceChannel,
-                    externalRequestId: attribution?.ExternalRequestId,
-                    externalUserIdentity: attribution?.ExternalUserIdentity);
+                try
+                {
+                    await _usageRecorder.RecordToolCallAsync(
+                        projectId: request.ProjectId,
+                        notebookId: request.NotebookId,
+                        conversationId: request.ConversationId,
+                        functionName: toolMsg.FunctionName!,
+                        metadataJson: JsonSerializer.Serialize(new
+                        {
+                            toolCallId = toolMsg.ToolCallId,
+                            functionName = toolMsg.FunctionName,
+                            contentLength = toolMsg.ContentLength
+                        }),
+                        assistantId: request.AssistantId,
+                        notebookConversationMessageId: toolMsg.Id,
+                        ct: ct,
+                        publishedGuideId: attribution?.PublishedGuideId,
+                        sourceChannel: attribution?.SourceChannel,
+                        externalRequestId: attribution?.ExternalRequestId,
+                        externalUserIdentity: attribution?.ExternalUserIdentity);
+                }
+                catch (Exception toolEx) when (toolEx is not OperationCanceledException)
+                {
+                    // One failing row must not zero the rest of the turn's tool usage.
+                    failedToolUsageRecords++;
+                    _logger.LogWarning(
+                        toolEx,
+                        "Failed to record tool call usage for message {ToolMessageId} in conversation {ConversationId} turn {TurnIndex}",
+                        toolMsg.Id, request.ConversationId, request.TurnIndex);
+                }
+            }
+
+            if (failedToolUsageRecords > 0)
+            {
+                _logger.LogWarning(
+                    "{FailedCount} of {TotalCount} tool call usage records failed in conversation {ConversationId} turn {TurnIndex}",
+                    failedToolUsageRecords, toolMessages.Count, request.ConversationId, request.TurnIndex);
             }
         }
         catch (Exception ex)

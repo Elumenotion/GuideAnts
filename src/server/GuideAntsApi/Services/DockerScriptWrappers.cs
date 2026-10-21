@@ -20,18 +20,18 @@ public static class DockerScriptWrappers
     [RequiresNotebookContext]
     public static async Task<object> RunPython(
         [Parameter(Description = "The script to be executed.")]
-        string script,
-        
+        string arguments,
+
         [Parameter(Description = "guideants-ai")]
         string containerName = "guideants-ai",
-        
+
         [Parameter(Description = "2", Hidden = true)]
         int scriptType = 2,
-        
+
         [Parameter(Description = "Invocation context", Hidden = true)]
         InvocationContext? context = null)
     {
-        return await CallDockerScriptService(script, containerName, scriptType, context);
+        return await CallDockerScriptService(arguments, containerName, scriptType, context);
     }
 
     /// <summary>
@@ -44,18 +44,18 @@ public static class DockerScriptWrappers
     [RequiresNotebookContext]
     public static async Task<object> RunBash(
         [Parameter(Description = "The script to be executed.")]
-        string script,
-        
+        string arguments,
+
         [Parameter(Description = "guideants-ai")]
         string containerName = "guideants-ai",
-        
+
         [Parameter(Description = "0", Hidden = true)]
         int scriptType = 0,
-        
+
         [Parameter(Description = "Invocation context", Hidden = true)]
         InvocationContext? context = null)
     {
-        return await CallDockerScriptService(script, containerName, scriptType, context);
+        return await CallDockerScriptService(arguments, containerName, scriptType, context);
     }
 
     /// <summary>
@@ -69,13 +69,13 @@ public static class DockerScriptWrappers
     public static async Task<object> MakeDiagram(
         [Parameter(Description = "A here document, followed by execution of plantuml")]
         string script,
-        
+
         [Parameter(Description = "plantuml")]
         string containerName = "plantuml",
-        
+
         [Parameter(Description = "0", Hidden = true)]
         int scriptType = 0,
-        
+
         [Parameter(Description = "Invocation context", Hidden = true)]
         InvocationContext? context = null)
     {

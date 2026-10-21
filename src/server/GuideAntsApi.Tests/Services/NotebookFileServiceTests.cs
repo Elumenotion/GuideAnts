@@ -133,6 +133,77 @@ public class NotebookFileServiceTests
     }
 
     [TestMethod]
+    public async Task UploadFilesAsync_SkipsMarkdownShadow_ForWireAttachmentUploads()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+            await ctx.SaveChangesAsync();
+
+            // Strict mock: any CreateNotebookMarkdownShadowAsync/RetryNotebookExtractionAsync
+            // call throws, so a green test proves doc intelligence was never queued for the
+            // wire attachment - while a normal upload in the same call still gets its shadow.
+            var markdown = new Mock<IMarkdownExtractionService>(MockBehavior.Strict);
+            markdown
+                .Setup(m => m.CreateNotebookMarkdownShadowAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, CancellationToken _) => new NotebookFileMarkdownShadow
+                {
+                    Id = Guid.NewGuid(),
+                    OriginalNotebookFileId = id,
+                    Status = MarkdownExtractionStatus.Pending
+                });
+
+            var svc = CreateService(ctx, tmpDir, markdown.Object);
+
+            var bytes = Convert.FromBase64String(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO0K2B0AAAAASUVORK5CYII=");
+            var wireFile = new FormFile(new MemoryStream(bytes),0, bytes.Length, "file", "wire-image-abc.png")
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = "image/png"
+            };
+            var userFile = new FormFile(new MemoryStream(bytes),0, bytes.Length, "file", "photo.png")
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = "image/png"
+            };
+
+            await svc.UploadFilesAsync(
+                project.Id,
+                notebook.Id,
+                new FormFileCollection { wireFile },
+                GuideAntsApi.Services.Components.WireAttachmentPaths.AttachmentFolder);
+            await svc.UploadFilesAsync(
+                project.Id,
+                notebook.Id,
+                new FormFileCollection { userFile },
+                "");
+
+            ctx.NotebookFiles.Count().Should().Be(2);
+            markdown.Verify(
+                m => m.CreateNotebookMarkdownShadowAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+                Times.Once,
+                "only the user-attached file may queue doc intelligence");
+            markdown.Verify(
+                m => m.CreateNotebookMarkdownShadowAsync(
+                    It.Is<Guid>(g => g == ctx.NotebookFiles.Single(f => f.RelativePath.EndsWith("photo.png")).Id),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+ [TestMethod]
     public async Task CreateFolderAsync_CreatesDirectory()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());

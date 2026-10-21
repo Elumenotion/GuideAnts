@@ -140,6 +140,15 @@ public sealed class OpenAiCompatibleChatClient : IChatCompletionClient
 
         ProviderChatBehaviorApplier.ApplyExtraRequestFields(body, _behavior);
 
+        // Streaming usage must be requested explicitly: servers such as llama.cpp (gufo)
+        // omit the trailing usage chunk unless stream_options.include_usage is set, so a
+        // completed streamed turn would record zero ChatCompletion usage events.
+        // A model-row stream_options (extra request fields) still wins.
+        if (stream && !body.ContainsKey("stream_options"))
+        {
+            body["stream_options"] = new JsonObject { ["include_usage"] = true };
+        }
+
         var thinkingActions = ProviderChatBehaviorApplier.ResolveThinkingActions(_behavior, request.ReasoningEffort);
         if (thinkingActions != null)
         {
