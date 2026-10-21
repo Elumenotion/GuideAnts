@@ -49,10 +49,12 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
             catch (Exception ex)
             {
                 usageService = "OpenAICompatible";
+                // The resolver's exception message carries the model id; keep the structured
+                // log free of raw user-provided values (CodeQL: user input in logs).
                 _logger.LogWarning(
                     ex,
-                    "Failed to resolve the usage service name for model {ModelDeploymentId}; recording chat usage as {FallbackService}. Conversation {ConversationId} turn {TurnIndex}.",
-                    request.ModelDeploymentId, usageService, request.ConversationId, request.TurnIndex);
+                    "Failed to resolve the usage service name; recording chat usage with the fallback service. Conversation {ConversationId} turn {TurnIndex}.",
+                    request.ConversationId, request.TurnIndex);
             }
 
             var turnUsageRequestId = BuildTurnChatUsageRequestId(request.ConversationId, request.TurnIndex);
@@ -168,8 +170,8 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                     failedToolUsageRecords++;
                     _logger.LogWarning(
                         toolEx,
-                        "Failed to record tool call usage for message {ToolMessageId} ({FunctionName}) in conversation {ConversationId} turn {TurnIndex}",
-                        toolMsg.Id, toolMsg.FunctionName, request.ConversationId, request.TurnIndex);
+                        "Failed to record tool call usage for message {ToolMessageId} in conversation {ConversationId} turn {TurnIndex}",
+                        toolMsg.Id, request.ConversationId, request.TurnIndex);
                 }
             }
 
