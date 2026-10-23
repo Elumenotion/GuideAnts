@@ -100,7 +100,7 @@ describe('toSendAttachment', () => {
 
   it('recovers the path from the sentinel id when relativePath is absent', () => {
     const ref = toSendAttachment({
-      notebookFileId: 'path:Assets\reference-pack',
+      notebookFileId: 'path:Assets\\reference-pack',
       uploadType: 'folder',
     });
     expect(ref).toEqual({
