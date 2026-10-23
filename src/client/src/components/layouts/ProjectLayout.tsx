@@ -10,6 +10,7 @@ import { GuideAntsGuideButton } from '../../features/guideantsGuide/GuideAntsGui
 import { HeaderUserMenu } from '../common/HeaderUserMenu';
 import { HiMenu } from 'react-icons/hi';
 import { FiEdit2 } from 'react-icons/fi';
+import {formatDateTime} from '../../lib/dateTime.ts';
 
 interface ProjectLayoutProps {
     project: ProjectDetailsDto;
@@ -90,7 +91,7 @@ function ProjectHeader({
                 </HeaderActionsBar>
             </div>
             <div className="text-sm text-gray-600 mt-0.5">
-                Created on {new Date(project.created).toLocaleDateString()}
+                Created on {formatDateTime(project.created)}
             </div>
         </div>
     );

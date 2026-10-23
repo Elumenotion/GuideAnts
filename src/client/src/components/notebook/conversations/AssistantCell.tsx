@@ -13,6 +13,7 @@ import { FileIcon } from '../../common/FileIcon';
 import { getContentTypeFromFileName } from '../../../utils/fileUtils';
 import { useLongPress } from '../../../hooks/useLongPress';
 import { decodeAssistantUnicodeEscapes } from '../../../utils/assistantUnicodeEscapes';
+import {formatDateTime} from '../../../lib/dateTime.ts';
 
 // File pill component for turn files (extracted for proper hook usage)
 interface FilePillProps {
@@ -333,7 +334,7 @@ export default function AssistantCell({
             <div className="mb-6">
               <h2 className="text-xl font-semibold mb-2">Original Assistant Message</h2>
               {editorUserName && lastEditedAt && (
-                <p className="text-sm text-gray-500">Edited by {editorUserName} on {new Date(lastEditedAt).toLocaleString()}</p>
+                <p className="text-sm text-gray-500">Edited by {editorUserName} on {formatDateTime(lastEditedAt)}</p>
               )}
               {originalContent && (
                 <button

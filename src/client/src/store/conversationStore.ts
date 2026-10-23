@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { MessageDto, ConversationTurn, ConversationMessage, ToolCall, ToolResult, AttachedFile, TokenUsage, isFileReference } from '../types/conversation';
 import { api } from '../services/api';
+import {parseUtc} from '../lib/dateTime';
 
 // --- Types --------------------------------------------------------------
 
@@ -79,7 +80,7 @@ function groupMessagesByTurns(messages: MessageDto[]): ConversationTurn[] {
         fileName: msg.content || 'file',
         fileType: 'other',
         fileSize: 0,
-        uploadedAt: new Date(msg.created),
+        uploadedAt: parseUtc(msg.created) ?? new Date()
       };
       
       if (!turnAttachments.has(currentTurnIndex)) {
@@ -111,9 +112,9 @@ function groupMessagesByTurns(messages: MessageDto[]): ConversationTurn[] {
       content: msg.content,
       messageType: msg.role === 'user' ? 'user_input' : 'final_response', // Default classification
       assistantName: msg.assistantName,
-      timestamp: new Date(msg.created),
+      timestamp: parseUtc(msg.created) ?? new Date(),
       isEdited: msg.isEdited,
-      lastEditedAt: msg.lastEditedAt ? new Date(msg.lastEditedAt) : undefined,
+      lastEditedAt: parseUtc(msg.lastEditedAt) ?? undefined,
       originalContent: msg.originalContent,
     };
     
@@ -132,7 +133,7 @@ function groupMessagesByTurns(messages: MessageDto[]): ConversationTurn[] {
         fileName: att.fileName,
         fileType: att.fileType,
         fileSize: att.fileSize,
-        uploadedAt: new Date(msg.created),
+        uploadedAt: parseUtc(msg.created) ?? new Date(),
         status: 'complete' as const,
       }));
       
@@ -150,7 +151,7 @@ function groupMessagesByTurns(messages: MessageDto[]): ConversationTurn[] {
         fileName: 'file', // Default name for legacy attachments
         fileType: 'other',
         fileSize: 0,
-        uploadedAt: new Date(msg.created),
+        uploadedAt: parseUtc(msg.created) ?? new Date(),
         status: 'complete' as const,
       };
       

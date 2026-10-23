@@ -12,6 +12,7 @@ using AntRunner.Chat;
 using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Settings;
+using GuideAntsApi.Serialization;
 
 public class Program
 {
@@ -147,7 +148,7 @@ public class Program
         // Configure parameter binding
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
-            options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+            JsonDefaults.ApplyWebApiOptions(options.SerializerOptions);
         });
         LogPhase("Configure baseline service options");
 

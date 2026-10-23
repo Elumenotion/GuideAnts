@@ -13,6 +13,7 @@ import { FeaturesTab } from './configTabs/FeaturesTab';
 import { LimitsTab } from './configTabs/LimitsTab';
 import { AuthTab } from './configTabs/AuthTab';
 import { McpTab } from './configTabs/McpTab';
+import {formatDateTime} from '../../lib/dateTime.ts';
 import {
   ApisTab,
   type WireApiAliasKey,
@@ -432,7 +433,7 @@ export function PublishGuideDialog({
                 {publishedGuide.active ? 'Active' : 'Inactive'}
               </span>
               <span className="text-xs text-gray-500">
-                Created {new Date(publishedGuide.created).toLocaleDateString()}
+                Created {formatDateTime(publishedGuide.created)}
               </span>
             </div>
           )}

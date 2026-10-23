@@ -9,6 +9,7 @@ import { SettingsButton } from '../components/common/SettingsButton';
 import { TourStartButton } from '../tour/TourStartButton';
 import { useRegisterTour } from '../tour/useRegisterTour';
 import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
+import {parseUtc} from '../lib/dateTime';
 
 type RangePreset = '7d' | '30d' | '90d' | 'custom';
 
@@ -203,7 +204,7 @@ const Usage = () => {
                           month: 'short', 
                           day: 'numeric', 
                           timeZone: 'UTC' 
-                        }).format(new Date(pt.periodStart))}
+                        }).format(parseUtc(pt.periodStart) ?? new Date())}
                       </div>
                     </div>
                   );

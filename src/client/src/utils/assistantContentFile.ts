@@ -1,4 +1,5 @@
 import { convertAbsoluteToRelative } from './markdownUrlConverter';
+import {parseUtc} from '../lib/dateTime';
 
 export interface AssistantContentMetadata {
   messageId: string;
@@ -49,16 +50,16 @@ word_count: ${metadata.wordCount}
 };
 
 const generateHeader = (metadata: AssistantContentMetadata): string => {
-  const date = new Date(metadata.generatedAt);
-  const formattedDate = date.toLocaleDateString('en-US', {
+  const date = parseUtc(metadata.generatedAt);
+  const formattedDate = date ? date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
-  });
-  const formattedTime = date.toLocaleTimeString('en-US', {
+  }) : '\u2014';
+  const formattedTime = date ? date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit'
-  });
+  }) : '\u2014';
 
   const assistantName = metadata.assistantName || metadata.selectedAssistant || 'Assistant';
   
@@ -156,16 +157,16 @@ export const buildToolCallMarkdown = ({ toolName, parameters, resultContent, met
   }
 
   // Clean header without front matter pollution
-  const date = new Date(metadata.generatedAt);
-  const formattedDate = date.toLocaleDateString('en-US', {
+  const date = parseUtc(metadata.generatedAt);
+  const formattedDate = date ? date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long', 
     day: 'numeric'
-  });
-  const formattedTime = date.toLocaleTimeString('en-US', {
+  }) : '—';
+  const formattedTime = date ? date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit'
-  });
+  }) : '—';
 
   // Convert absolute API URLs to relative paths for portability
   const portableResultContent = convertAbsoluteToRelative(

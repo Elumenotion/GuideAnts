@@ -13,6 +13,7 @@ import type {
 import { ConversationDetailPanel } from '../components/usage/ConversationDetailPanel';
 import type { GuideDto, AssistantDto } from '../types/guides';
 import { getApiOrigin } from '../config/apiConfig';
+import {parseUtc} from '../lib/dateTime';
 import {
   AreaChart,
   Area,
@@ -327,8 +328,8 @@ export default function GuideUsagePage() {
     }).format(value);
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
+    const date = parseUtc(dateStr);
+    return date ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date) : '\u2014';
   };
 
   const formatSourceLabel = (value: string) => {

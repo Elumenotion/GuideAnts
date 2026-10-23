@@ -396,7 +396,7 @@ describe('settings utility helpers', () => {
     expect(humanizeKey('routerModelId')).toBe('router Model Id');
     expect(humanizeKey('some_value-name')).toBe('some value name');
     expect(formatDateTime('not-a-date')).toBe('not-a-date');
-    expect(formatDateTime(undefined)).toBe('Unknown');
+    expect(formatDateTime(undefined)).toBe('—');
   });
 
   it('extracts error messages from API-shaped errors', () => {

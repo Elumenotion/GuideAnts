@@ -6,6 +6,7 @@ import { broadcastAuthExpired } from '../../services/authEvents';
 import { withAuthFetchInit, withAuthHeaders } from '../../services/authService';
 import { useToast } from '../common/Toast';
 import type { TurnMessagesDto, TurnMessageDto } from '../../types/usage';
+import {formatTime} from '../../lib/dateTime';
 
 interface TurnMessagesPanelProps {
   conversationId: string | null;
@@ -467,7 +468,7 @@ export function TurnMessagesPanel({
             )}
           </div>
           <span className="text-xs text-gray-500">
-            {new Date(msg.created).toLocaleTimeString()}
+            {formatTime(msg.created)}
           </span>
         </div>
         <div className="text-sm text-gray-900 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
@@ -553,9 +554,9 @@ export function TurnMessagesPanel({
               </div>
               <div className="text-xs text-gray-600 flex gap-3">
                 <span>Status: <span className="font-medium">{segment.status}</span></span>
-                <span>Started: <span className="font-medium">{new Date(segment.startedUtc).toLocaleTimeString()}</span></span>
+                <span>Started: <span className="font-medium">{formatTime(segment.startedUtc)}</span></span>
                 {segment.completedUtc && (
-                  <span>Completed: <span className="font-medium">{new Date(segment.completedUtc).toLocaleTimeString()}</span></span>
+                  <span>Completed: <span className="font-medium">{formatTime(segment.completedUtc)}</span></span>
                 )}
               </div>
             </div>
@@ -672,7 +673,7 @@ export function TurnMessagesPanel({
                       <span className={`px-2 py-0.5 text-xs font-medium rounded ${getRoleBadgeClass(event.role)}`}>
                         {event.role}
                       </span>
-                      <span className="text-xs text-gray-500">{new Date(event.createdUtc).toLocaleTimeString()}</span>
+                      <span className="text-xs text-gray-500">{formatTime(event.createdUtc)}</span>
                     </div>
                     <div className="text-sm text-gray-900 whitespace-pre-wrap break-words">
                       {event.content || <span className="text-gray-400 italic">No content</span>}

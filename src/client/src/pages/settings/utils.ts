@@ -29,6 +29,7 @@ import {
 } from '../../features/localModelOnboarding/buildCommand';
 import { mapSettingsAddModelStateToOnboardingDraft } from '../../features/localModelOnboarding/mapDraft';
 import { buildOpenAiCompatibleRuntimeConfigJson } from './components/catalog/providers/OpenAiCompatibleForm';
+import {formatDateTime as libFormatDateTime} from '../../lib/dateTime';
 
 export const SECRET_MASK = '********';
 
@@ -198,16 +199,7 @@ export function parseProblemDetails(error: unknown): ApiProblemDetails | null {
 }
 
 export function formatDateTime(value?: string): string {
-  if (!value) {
-    return 'Unknown';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleString();
+  return libFormatDateTime(value);
 }
 
 function normalizeOptionalString(value: string | undefined | null): string | undefined {

@@ -1,4 +1,5 @@
 import type { InvocationNodeDto } from '../../types/usage';
+import {parseUtc} from '../../lib/dateTime';
 
 export type InvocationNodeKind = 'agent' | 'tool' | 'service';
 
@@ -28,13 +29,13 @@ export function flattenInvocationNodes(nodes: InvocationNodeDto[]): InvocationNo
 }
 
 export function getNodeStartMs(node: InvocationNodeDto): number {
-  return new Date(node.created).getTime();
+  return parseUtc(node.created)?.getTime() ?? 0;
 }
 
 export function getNodeEndMs(node: InvocationNodeDto): number {
   const start = getNodeStartMs(node);
   if (node.completed) {
-    const end = new Date(node.completed).getTime();
+    const end = parseUtc(node.completed)?.getTime() ?? 0;
     if (end > start) {
       return end;
     }
@@ -42,7 +43,7 @@ export function getNodeEndMs(node: InvocationNodeDto): number {
   if (node.durationMs > 0) {
     return start + node.durationMs;
   }
-  return node.completed ? new Date(node.completed).getTime() : start;
+  return node.completed ? (parseUtc(node.completed)?.getTime() ?? start) : start;
 }
 
 export function getNodeDurationMs(node: InvocationNodeDto): number {
@@ -85,7 +86,7 @@ export function computeTurnTimelineSegments(
 
   const starts = flat.map(getNodeStartMs);
   const ends = flat.map(getNodeEndMs);
-  const boundsStart = Math.min(new Date(turnStarted).getTime(), ...starts);
+  const boundsStart = Math.min(parseUtc(turnStarted)?.getTime() ?? 0, ...starts);
   const boundsEnd = Math.max(...ends);
   const elapsedMs = Math.max(boundsEnd - boundsStart, 1);
 
