@@ -67,3 +67,46 @@ export function toPendingUploadType(
 export function fileTypeFromUploadType(uploadType: UploadType): 'image' | 'audio' | 'text' | 'folder' | 'other' {
   return uploadType;
 }
+
+/**
+ * Prefix for the notebookFileId value that represents a path-only attachment
+ * (host-mount files and folders that have no NotebookFile row). A pending
+ * attachment whose id starts with this prefix is a path reference; anything
+ * else is a real NotebookFile id. This is the single source of truth for the
+ * id-vs-path invariant that both the undo restore path and the send path rely
+ * on -- a real file id always round-trips by id, and the sentinel is reserved
+ * for references with no id.
+ */
+export const PATH_SENTINEL_PREFIX = 'path:';
+
+export function isPathSentinelId(id: string | null | undefined): boolean {
+  return typeof id === 'string' && id.startsWith(PATH_SENTINEL_PREFIX);
+}
+
+/**
+ * Build the wire reference for a pending attachment.
+ *
+ * Invariant (matches the restore path in useConversationActions): a pending
+ * attachment that carries a real NotebookFile id is sent BY ID (relativePath is
+ * dropped so the server expands it through the full image/text pipeline); a
+ * path-sentinel attachment is sent BY PATH (notebookFileId is null). Keying off
+ * the sentinel prefix -- not off the presence of relativePath -- is what lets a
+ * restored image keep its id and reach the model as pixels.
+ */
+export function toSendAttachment(
+  a: { notebookFileId: string; relativePath?: string; uploadType: UploadType },
+): { notebookFileId: string | null; relativePath: string | null; uploadType: ServerUploadType } {
+  if (isPathSentinelId(a.notebookFileId)) {
+    const rawPath = a.relativePath ?? a.notebookFileId.slice(PATH_SENTINEL_PREFIX.length);
+    return {
+      notebookFileId: null,
+      relativePath: normalizeRelativePath(rawPath),
+      uploadType: uploadTypeToServer(a.uploadType),
+    };
+  }
+  return {
+    notebookFileId: a.notebookFileId,
+    relativePath: null,
+    uploadType: uploadTypeToServer(a.uploadType),
+  };
+}

@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react';
 import type { AttachedFileDto, MessageDto, PendingAttachment } from '../../types/conversation';
 import { api } from '../../services/api';
-import { fileTypeFromUploadType, normalizeRelativePath, toPendingUploadType, uploadTypeToServer } from '../../utils/attachments';
+import { fileTypeFromUploadType, normalizeRelativePath, toPendingUploadType, toSendAttachment, uploadTypeToServer } from '../../utils/attachments';
 import { userService } from '../../services/userService';
 import { ensureValidTokensForTemplate } from '../../utils/notebookAuth';
 import { checkRuntimeStatus, getRuntimeBlockingMessage, dispatchRuntimeStatusWindowEvent } from './runtimeChecks';
@@ -51,11 +51,16 @@ function attachmentDtoToPendingAttachment(attachment: AttachedFileDto): PendingA
     return null;
   }
 
+  // Invariant: a persisted attachment that resolved to a real NotebookFile keeps
+  // its id (so a re-send after undo reaches the model as pixels, not a path
+  // reference). The path sentinel is reserved for references with no id
+  // (host-mount files, folders).
+  const hasRealId = !!attachment.notebookFileId && !attachment.notebookFileId.startsWith('path:');
   return {
-    notebookFileId: relativePath
-      ? `path:${relativePath}`
-      : attachment.notebookFileId!,
-    relativePath,
+    notebookFileId: hasRealId
+      ? attachment.notebookFileId!
+      : `path:${relativePath!}`,
+    relativePath: hasRealId ? undefined : relativePath,
     fileName: attachment.fileName,
     uploadType: toPendingUploadType(attachment.uploadType, attachment.fileName),
   };
@@ -589,11 +594,7 @@ export function useConversationActions(
             instructions: content,
             assistantName: state.selectedAssistant || (() => { throw new Error('No assistant selected when sending message'); })(),
             modelDeploymentId,
-            attachments: attList.map(a => ({
-              notebookFileId: a.relativePath ? null : a.notebookFileId,
-              relativePath: a.relativePath ? normalizeRelativePath(a.relativePath) : null,
-              uploadType: uploadTypeToServer(a.uploadType),
-            })),
+            attachments: attList.map(toSendAttachment),
           } as any,
           (event) => {
             if (event.type === 'turn_created' && event.data?.turnId) {

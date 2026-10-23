@@ -979,6 +979,21 @@ public class ConversationService : IConversationService
             await file.Value.Stream.DisposeAsync();
             var attachmentPath = BuildAttachmentPathForChat(normalizedPath);
             ctx.PreviousMessages.Add(new ChatMessage(AntRunner.Chat.Abstractions.ChatRole.User, $"Attachment: {attachmentPath}"));
+
+            var fileContents = await _attachmentContentService.ExpandAttachmentToChatContentsAsync(new MessageAttachment
+            {
+                NotebookFileId = attachment.NotebookFileId,
+                UploadType = attachment.UploadType
+            },
+            ct);
+
+            if (fileContents.Count > 0)
+            {
+                ctx.PreviousMessages.Add(new ChatMessage(
+                    AntRunner.Chat.Abstractions.ChatRole.User,
+                    fileContents));
+            }
+
         }
     }
 
