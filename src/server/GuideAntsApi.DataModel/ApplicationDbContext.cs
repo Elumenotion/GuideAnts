@@ -1265,9 +1265,17 @@ namespace GuideAntsApi.DataModel
         /// Validates message timestamp ordering before saving changes.
         /// Prevents creating messages with newer timestamps when higher sequence numbers already exist in the same turn.
         /// </summary>
+        public override int SaveChanges()
+        {
+            ValidateMessageTimestampOrdering();
+            EnforceUtcOnDateTimeProperties();
+            return base.SaveChanges();
+        }
+
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
         {
             ValidateMessageTimestampOrdering();
+            EnforceUtcOnDateTimeProperties();
             return base.SaveChanges(acceptAllChangesOnSuccess);
         }
 
@@ -1277,8 +1285,76 @@ namespace GuideAntsApi.DataModel
         /// </summary>
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
+            // Single override with a default parameter covers both the zero-arg and
+            // one-arg async call shapes (they are the same method signature).
             ValidateMessageTimestampOrdering();
+            EnforceUtcOnDateTimeProperties();
             return await base.SaveChangesAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// Enforces the UTC-at-rest invariant on every DateTime value about to be written.
+        /// The store's convention is UTC everywhere (DateTime.UtcNow writes, GETUTCDATE()
+        /// column defaults, datetime2 columns) and datetime2 carries no offset, so this
+        /// guard is what makes the convention real:
+        /// - DateTimeKind.Local is a bug (a local wall-clock value would be stored as if
+        ///   it were UTC and read back 0-14 hours off). It is never silently re-mapped;
+        ///   SaveChanges throws so the offending write site is fixed.
+        /// - DateTimeKind.Unspecified is the shape values arrive in from EF reads and
+        ///   JSON parsing; by convention it is a UTC instant and is marked Kind = Utc.
+        /// Added entities are scanned fully; Modified entities only for the properties
+        /// that actually changed (unrelated stored values are never touched).
+        /// </summary>
+        private void EnforceUtcOnDateTimeProperties()
+        {
+            foreach (var entry in ChangeTracker.Entries())
+            {
+                if (entry.State is not (EntityState.Added or EntityState.Modified))
+                    continue;
+
+                foreach (var property in entry.Properties)
+                {
+                    if (entry.State != EntityState.Added && !property.IsModified)
+                        continue;
+
+                    if (property.Metadata.ClrType == typeof(DateTime))
+                    {
+                        var value = (DateTime)property.CurrentValue!;
+                        property.CurrentValue = NormalizeDateTimeToUtc(property.Metadata.Name, value);
+                    }
+                    else if (property.Metadata.ClrType == typeof(DateTime?))
+                    {
+                        var value = (DateTime?)property.CurrentValue;
+                        if (value is not null)
+                        {
+                            property.CurrentValue = NormalizeDateTimeToUtc(property.Metadata.Name, value.Value);
+                        }
+                    }
+                }
+            }
+        }
+
+        private static DateTime NormalizeDateTimeToUtc(string propertyName, DateTime value)
+        {
+            return value.Kind switch
+            {
+                DateTimeKind.Utc => value,
+                DateTimeKind.Unspecified => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+                _ => throw new InvalidOperationException(
+                    $"Local DateTime '{value:o}' (Kind=Local) in property '{propertyName}': the API stores UTC instants only. " +
+                    "Use DateTime.UtcNow (or convert to UTC explicitly) before saving.")
+            };
+        }
+
+        /// <summary>
+        /// Enforces the UTC-at-rest invariant (see <see cref="EnforceUtcOnDateTimeProperties"/>)
+        /// for the explicit-acceptAllChangesOnSuccess async overload.
+        /// </summary>
+        public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        {
+            ValidateMessageTimestampOrdering();
+            EnforceUtcOnDateTimeProperties();
+            return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
         }
 
         private void ValidateMessageTimestampOrdering()

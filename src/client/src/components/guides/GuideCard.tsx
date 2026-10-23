@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { GuideDto, PublishedGuideDto } from '../../types/guides';
 import { getApiOrigin } from '../../config/apiConfig';
 import { api } from '../../services/api';
+import {parseUtc} from '../../lib/dateTime';
 
 interface GuideCardProps {
   guide: GuideDto;
@@ -18,8 +19,8 @@ export function GuideCard({ guide, publishedGuide, onEdit, onDelete, onPublish, 
   const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const date = parseUtc(dateString);
+    return date ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '\u2014';
   };
 
   const publishedBadgeTitle = publishedGuide

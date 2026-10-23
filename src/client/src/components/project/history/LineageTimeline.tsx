@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { FileLineageEvent } from '../../../types/fileLineage';
 import { FaDownload, FaUpload, FaCopy, FaArrowUp, FaArrowsAlt, FaEdit, FaFileAlt } from 'react-icons/fa';
 import { useDownloadLineage } from '../../../hooks/useDownloadLineage';
+import {formatDateTime} from '../../../lib/dateTime';
 
 interface LineageTimelineProps {
     events: FileLineageEvent[];
@@ -66,7 +67,7 @@ export const LineageTimeline: React.FC<LineageTimelineProps> = ({ events, canDow
                             </div>
                         )}
                         <div className="text-sm text-gray-600">
-                            {new Date(ev.timestamp).toLocaleString()} – {ev.userDisplayName || ev.userId}
+                            {formatDateTime(ev.timestamp)} – {ev.userDisplayName || ev.userId}
                         </div>
                     </div>
                     {/* Download */}

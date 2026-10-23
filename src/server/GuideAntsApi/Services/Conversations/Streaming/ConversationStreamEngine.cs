@@ -13,15 +13,13 @@ using GuideAntsApi.Services.Components.Sync;
 using GuideAntsApi.Services.Conversations.Persistence;
 using GuideAntsApi.Services.Conversations.Tracing;
 using GuideAntsApi.Services.Routing;
+using GuideAntsApi.Serialization;
 
 namespace GuideAntsApi.Services.Conversations.Streaming;
 
 public sealed class ConversationStreamEngine : IConversationStreamEngine
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    private static readonly JsonSerializerOptions JsonOptions = JsonDefaults.CreateSseOptions();
     private static readonly TimeSpan LifecycleBestEffortTimeout = TimeSpan.FromSeconds(1);
 
     private readonly IHttpClientFactory _httpClientFactory;

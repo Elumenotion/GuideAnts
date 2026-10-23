@@ -5,6 +5,7 @@ import { InvocationTree } from './InvocationTree';
 import { InvocationDetailPanel } from './InvocationDetailPanel';
 import { TurnInvocationTimeline } from './TurnInvocationTimeline';
 import { TurnMessagesPanel } from './TurnMessagesPanel';
+import {formatDateTime} from '../../lib/dateTime';
 
 interface ConversationDetailPanelProps {
   conversation: ConversationUsageSummaryDto | null;
@@ -71,13 +72,7 @@ export function ConversationDetailPanel({
       maximumFractionDigits: 4,
     }).format(value);
 
-  const formatDateTime = (iso: string) =>
-    new Date(iso).toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  // formatDateTime is imported from lib/dateTime (UTC-aware, browser region).
 
   const totalTokens = (conversation?.promptTokens ?? 0)
     + (conversation?.reasoningTokens ?? 0)

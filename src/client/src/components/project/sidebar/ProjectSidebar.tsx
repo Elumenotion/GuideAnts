@@ -24,6 +24,7 @@ import { ScheduledJobRunHistoryDialog } from '../dialogs/ScheduledJobRunHistoryD
 import { scheduledJobsApi } from '../../../services/scheduledJobs';
 import type { ProjectScheduledJobDetailDto, ProjectScheduledJobSummaryDto } from '../../../types/scheduledJob';
 import { formatNextRun } from '../../../lib/scheduledJobDateTime';
+import {parseUtc} from '../../../lib/dateTime';
 
 // Props for the extracted NotebookListItem component
 interface NotebookListItemProps {
@@ -898,11 +899,8 @@ export function ProjectSidebar({
     }, [notebookSortKey, notebookSort]);
 
     const parseActivityTime = useCallback((value?: string) => {
-        if (!value) return 0;
-        if (value.endsWith('Z') || value.includes('+') || value.includes('-', 10)) {
-            return new Date(value).getTime();
-        }
-        return new Date(`${value}Z`).getTime();
+        const d = parseUtc(value);
+        return d ? d.getTime() : 0;
     }, []);
 
     const sortedNotebooks = useMemo(() => {

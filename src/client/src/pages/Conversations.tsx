@@ -12,6 +12,7 @@ import ErrorScreen from '../components/ErrorScreen';
 import { TourStartButton } from '../tour/TourStartButton';
 import { useRegisterTour } from '../tour/useRegisterTour';
 import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
+import {formatRelative} from '../lib/dateTime';
 
 const Conversations = () => {
   const navigate = useNavigate();
@@ -161,65 +162,7 @@ const Conversations = () => {
     });
   };
 
-  const formatDate = (dateString: string) => {
-    // API returns UTC. Ensure proper UTC parsing - if string doesn't have timezone, assume UTC
-    let parsedDate: Date;
-    if (dateString.endsWith('Z') || dateString.includes('+') || dateString.includes('-', 10)) {
-      // Has timezone info, parse directly
-      parsedDate = new Date(dateString);
-    } else {
-      // No timezone info - assume UTC and append 'Z'
-      parsedDate = new Date(dateString + 'Z');
-    }
-    
-    const now = new Date();
-    const timeDiffMs = now.getTime() - parsedDate.getTime();
-    
-    // If date is in the future (more than 1 minute), show formatted date
-    // This handles clock skew and parsing errors
-    if (timeDiffMs < -60000) {
-      return parsedDate.toLocaleDateString();
-    }
-    
-    // Calculate time differences (timeDiffMs is positive for past dates)
-    const diffSeconds = Math.floor(timeDiffMs / 1000);
-    const diffMinutes = Math.floor(timeDiffMs / (1000 * 60));
-    const diffHours = Math.floor(timeDiffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(timeDiffMs / (1000 * 60 * 60 * 24));
-    
-    // Get local date components for calendar day comparison
-    const dateYear = parsedDate.getFullYear();
-    const dateMonth = parsedDate.getMonth();
-    const dateDay = parsedDate.getDate();
-    const nowYear = now.getFullYear();
-    const nowMonth = now.getMonth();
-    const nowDay = now.getDate();
-    
-    // Check if same calendar day (in local timezone)
-    const isSameDay = dateYear === nowYear && dateMonth === nowMonth && dateDay === nowDay;
-    
-    // Check if previous calendar day
-    const prevDate = new Date(nowYear, nowMonth, nowDay - 1);
-    const isYesterday = dateYear === prevDate.getFullYear() && 
-                       dateMonth === prevDate.getMonth() && 
-                       dateDay === prevDate.getDate();
-    
-    if (isSameDay) {
-      if (diffSeconds < 60) {
-        return 'Just now';
-      } else if (diffMinutes < 60) {
-        return `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
-      } else {
-        return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-      }
-    } else if (isYesterday) {
-      return 'Yesterday';
-    } else if (diffDays >= 1 && diffDays < 7) {
-      return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    } else {
-      return parsedDate.toLocaleDateString();
-    }
-  };
+  const formatDate = formatRelative;
 
   const renderPageNumbers = () => {
     const pages = [];

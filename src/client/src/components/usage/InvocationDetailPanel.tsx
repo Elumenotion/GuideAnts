@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { guideUsageApi } from '../../services/guideUsageApi';
 import type { InvocationNodeDto, InvocationMessageDto } from '../../types/usage';
 import { InvocationTree } from './InvocationTree';
+import {formatTime} from '../../lib/dateTime';
 
 interface InvocationDetailPanelProps {
   invocationId: string | null;
@@ -78,7 +79,7 @@ export function InvocationDetailPanel({
           {msg.functionName && ` (${msg.functionName})`}
         </span>
         <span className="text-xs text-gray-500">
-          {new Date(msg.created).toLocaleTimeString()}
+          {formatTime(msg.created)}
         </span>
       </div>
       <div className="text-sm text-gray-900 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">

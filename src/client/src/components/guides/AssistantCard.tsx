@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { AssistantDto } from '../../types/guides';
 import { getApiOrigin } from '../../config/apiConfig';
 import { api } from '../../services/api';
+import {parseUtc} from '../../lib/dateTime';
 
 interface AssistantCardProps {
   assistant: AssistantDto;
@@ -15,8 +16,8 @@ export function AssistantCard({ assistant, onEdit, onDelete, onExport, onReport 
   const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const date = parseUtc(dateString);
+    return date ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '\u2014';
   };
 
   // Load authenticated avatar

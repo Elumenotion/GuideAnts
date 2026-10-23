@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using AntRunner.Chat;
 using AntRunner.ToolCalling;
 using GuideAntsApi.Models.Conversations;
+using GuideAntsApi.Serialization;
 
 namespace GuideAntsApi.Services.Conversations.Streaming;
 
@@ -11,10 +12,7 @@ namespace GuideAntsApi.Services.Conversations.Streaming;
 /// </summary>
 public static class StreamingEvents
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    private static readonly JsonSerializerOptions JsonOptions = JsonDefaults.CreateSseOptions();
 
     public static string DetermineEventType(string role, string message)
     {
