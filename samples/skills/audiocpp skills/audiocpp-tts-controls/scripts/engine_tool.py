@@ -85,6 +85,18 @@ def resolve_tts_model(engine_url: str, explicit: str | None) -> str:
     return model
 
 
+def _parse_request_options(pairs: list[str]) -> dict:
+    """Parse repeatable KEY=VALUE pairs into the body options object."""
+    opts: dict = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key.strip():
+            sys.stderr.write(f"invalid --request-option (need KEY=VALUE): {pair!r}\n")
+            sys.exit(1)
+        opts[key.strip()] = value.strip()
+    return opts
+
+
 def cmd_speech(args: argparse.Namespace) -> None:
     engine_url = args.engine_url.rstrip("/")
     model = resolve_tts_model(engine_url, args.model)
@@ -114,6 +126,9 @@ def cmd_speech(args: argparse.Namespace) -> None:
         payload["instructions"] = args.instructions
     if args.seed is not None:
         payload["seed"] = args.seed
+    options = _parse_request_options(args.request_option)
+    if options:
+        payload["options"] = options
     try:
         if using_skill_gateway():
             prefix = gateway_engine_prefix(engine_url)
@@ -186,6 +201,7 @@ def main() -> None:
     p_speech.add_argument("--language", default=None)
     p_speech.add_argument("--instructions", default=None, help="Voice-design text (vdes-task models only)")
     p_speech.add_argument("--seed", type=int, default=None)
+    p_speech.add_argument("--request-option", action="append", default=[], metavar="KEY=VALUE", help="Repeatable model request option, merged into the body options object")
 
     p_transcribe = sub.add_parser("transcribe", help="Transcribe a workspace file by path via /v1/audio/transcriptions")
     p_transcribe.add_argument("audio_file")

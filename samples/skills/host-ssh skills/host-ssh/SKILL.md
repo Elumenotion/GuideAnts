@@ -1,23 +1,24 @@
 ---
 name: host-ssh
 description: >-
-  Run PowerShell on Windows hosts or a POSIX shell on macOS/Linux hosts over
-  SSH, via the machine registry in the guide Environment (GA_SSH_MACHINES).
-  Use when the user needs host OS tasks — drives, dotnet, Playwright,
-  processes, SSH into their laptop or desktop — not file I/O on paths
-  already visible in the workspace file list. Per-machine "os" field or
-  auto-detection (uname -s) picks the command style; hosts resolve
-  IPv4-first; paramiko fallback used when sshpass is unavailable.
+  Run PowerShell on Windows hosts, bash in a WSL distro on Windows machines,
+  or a POSIX shell on macOS/Linux hosts over SSH, via the machine registry in
+  the guide Environment (GA_SSH_MACHINES). Use when the user needs host OS
+  tasks — drives, dotnet, Playwright, processes, SSH into their laptop or
+  desktop — not file I/O on paths already visible in the workspace file list.
+  Per-machine "wsl" block (bash in the distro) or "os" field / auto-detection
+  (uname -s) picks the command style; hosts resolve IPv4-first; paramiko
+  fallback used when sshpass is unavailable.
 ---
 
-# Host SSH (Windows PowerShell + macOS/Linux POSIX shell)
+# Host SSH (Windows PowerShell / WSL bash / macOS+Linux POSIX shell)
 
 ## Sandbox paths — authoritative, do not discover
 
 Your **system context includes a file list** (`[@files]` / context options). That list,
-plus the rules below, fully defines what exists and where. **Do not run `pwd`, `find`,
-`ls /`, `cd /home`, or any other command to discover paths.** Exploration wastes turns
-and breaks working-directory assumptions.
+plus the rules below, fully defines what exists and where. **Do not run `pwd`,
+`find`, `ls /`, `cd /home`, or any other command to discover paths.** Exploration
+wastes turns and breaks working-directory assumptions.
 
 **SANDBOX CWD is already the notebook output directory** (private notebooks: the
 `Output/` folder). Every `run_bash` / `run_python` call **starts there**.
@@ -28,15 +29,15 @@ and breaks working-directory assumptions.
 | Deliverables | bare filenames in CWD | prefix `Output/` in commands |
 | Change directory | stay in CWD | `cd /home`, `cd Output`, `cd` before skill commands |
 | Inputs in the file list | use the **exact path shown** (`../repo/…`, `Skills/…`, bare names) | guess, probe, or re-derive |
-| Host repo edits | edit via **mounted paths in the file list** (bash heredoc) | `run_python` one-liners that embed `\` or `\\` |
+| Host repo edits | edit via **mounted paths in the file list** (bash heredoc) | `run_python` one-liners that embed backslashes |
 
 If `Skills/host-ssh/scripts/host_ssh.py` appears in the file list, run it **as written**
 from CWD. If a path is in the list, the file exists — **trust the list**.
 
 Host setup (OpenSSH, guide Environment variables) is in the operator README bundled with
 this skill or `samples/skills/host-ssh skills/README.md` on the repo. Missing
-`GA_HOST_SSH_*` env vars → stop and tell the user to set them in the guide editor;
-do not scan or guess credentials.
+`GA_HOST_SSH_*` env vars → stop and tell the user to set them in the guide editor; do
+not scan or guess credentials.
 
 ## Machines — the guide Environment is the source of truth
 
@@ -49,7 +50,8 @@ default (named `host`).
 ```json
 [
   {"name": "office", "host": "host.docker.internal", "default": true, "os": "windows",
-   "share": {"unc": "\\\\FILESERVER\\content", "user": "DOMAIN\\GuideAnts", "drive": "R"}},
+   "share": {"unc": "\\\\FILESERVER\\content", "user": "DOMAIN\\GuideAnts", "drive": "R"},
+   "wsl": {"distro": "Ubuntu"}},
   {"name": "laptop", "host": "192.168.1.60", "os": "mac"},
   {"name": "gpu", "host": "192.168.1.50", "os": "linux"}
 ]
@@ -62,21 +64,21 @@ commands; the skill re-maps it from `share.unc` each time. `share.password`, whe
 present, is a secret; it falls back to `GA_HOST_SSH_SHARE_PASSWORD`, then
 `GA_HOST_SSH_PASSWORD`.
 
-## Windows vs macOS/Linux targets (per-machine `os`)
+## Shell selection (per machine record)
 
-Each machine record accepts an optional `"os"` field: `"windows"`, `"mac"`, or
-`"linux"` (aliases: `win`, `macos`, `darwin`, `posix`, `unix`).
+Dispatch priority: an explicit `--shell` override, then the record:
 
-| Target `os` | Remote command style |
+| Record | Remote command style |
 |---|---|
-| `windows` | `powershell.exe -NoProfile -NonInteractive -EncodedCommand <b64>` (UTF-16LE base64, + share bootstrap) |
-| `mac` / `linux` | plain POSIX shell text via the login shell (zsh on macOS) — no encoding, no share bootstrap (SMB drive mapping is Windows-only) |
+| `"wsl": {"distro": "Ubuntu"}` | **bash inside the WSL distro** — `wsl.exe -d <distro> -- bash -c "<harness>"` over the existing Windows SSH session (no second sshd, same account) |
+| `"os": "windows"` (declared) | `powershell.exe -NoProfile -NonInteractive -EncodedCommand <b64>` (UTF-16LE base64, + share bootstrap) |
+| `"os": "mac"` / `"linux"` (declared) | plain POSIX shell text via the login shell (zsh on macOS) — no encoding, no share bootstrap (SMB drive mapping is Windows-only) |
+| no `wsl`, no `os` | OS **auto-detected once** (`uname -s`; empty output means Windows) and cached in `/tmp/ga_host_ssh_os_cache.json` for 10 minutes, then the matching style above |
 
-When `"os"` is absent it is **auto-detected once** (`uname -s`; empty output means
-Windows) and cached in `/tmp/ga_host_ssh_os_cache.json` for 10 minutes — delete that
-file to force re-detection. Hosts resolve **IPv4-first** (AF_INET lookup / `ssh -4`)
-because `host.docker.internal` can resolve to an unroutable IPv6 address from the
-sandbox.
+A `wsl` block wins over `os` (it is more specific: a Windows machine running bash in a
+distro). Aliases: `win`, `macos`, `darwin`, `posix`, `unix`. Delete the cache file to
+force re-detection. Hosts resolve **IPv4-first** (AF_INET lookup / `ssh -4`) because
+`host.docker.internal` can resolve to an unroutable IPv6 address from the sandbox.
 
 macOS targets need **Remote Login** enabled (System Settings → General → Sharing →
 Remote Login), plus **"Allow full disk access for remote users"** so SSH can read
@@ -107,8 +109,8 @@ regression. Do not use these, and do not burn round-trips discovering this**:
 | `dotnet`, `docker` | ok on both |
 | `nvidia-smi` | ok on OfficeDesktop, **absent on Max** |
 
-(Windows targets. macOS/Linux have no WMI; `probe` reports their fs/tool state
-directly.)
+(Windows PowerShell targets. WSL/POSIX targets: the Windows capability table does
+not apply inside the distro; `probe` reports their fs/tool state directly.)
 
 Consequences:
 
@@ -128,8 +130,8 @@ python3 Skills/host-ssh/scripts/host_ssh.py probe --all
 
 `probe` never fails on the denied capabilities above. If a line shows
 `remote shell OK (command error: …)` the SSH transport itself worked — the
-problem is in the PowerShell text (e.g. a bash idiom like `hostname` instead
-of `$env:COMPUTERNAME`).
+problem is in the command text (e.g. a bash idiom like `hostname` in a
+PowerShell target, or a Windows idiom in a WSL/POSIX target).
 
 ## When to use SSH vs the workspace
 
@@ -143,13 +145,39 @@ of `$env:COMPUTERNAME`).
 **Default:** file edits on a mounted repo = sandbox heredoc. SSH = run commands on the
 machine OS, not to patch source files.
 
-## Run a command on a machine (PowerShell or POSIX shell)
+## Run bash via WSL (when the record has "wsl")
 
-Windows targets get PowerShell via **`-EncodedCommand`** (pipes and quotes survive
-Windows OpenSSH). **Always use `run -` + bash heredoc** for anything non-trivial — never
-inline Python, never nested quote gymnastics, never hand-rolled `ssh`/`sshpass`. On
-mac/linux targets the script text is sent verbatim to the login shell (zsh on macOS) —
-same heredoc discipline, POSIX syntax.
+A machine record with `"wsl": {"distro": "..."}` runs **bash inside that WSL
+distro** for both `run` and `probe`. The script is base64-encoded over SSH -
+the bash equivalent of `-EncodedCommand` - so quotes, newlines and heredocs
+survive; **always use `run -` + heredoc** as usual:
+
+```bash
+python3 Skills/host-ssh/scripts/host_ssh.py run - <<'SH'
+set -euo pipefail
+cd /mnt/d/repos/repo
+dotnet build Server/Server.csproj -v q --nologo
+SH
+```
+
+Inside the distro:
+
+- Windows drives mount at **`/mnt/c`, `/mnt/d`, ...** - use those paths, not `C:\`.
+- The `share` bootstrap (`net use` / drive letter) does **not** run in WSL
+  mode; reach network shares by UNC (e.g. `\\FILESERVER\content`) or mount
+  them inside the distro.
+- You are a regular Linux user inside the distro (typically with `sudo` per
+  the distro's policy) - the Windows capability table above does **not**
+  apply. Windows tools (dotnet, node, git, ...) are reachable through the
+  bridged Windows PATH where installed.
+- `probe` on a WSL machine runs the same checks in bash; its `machine:` line
+  shows the distro's hostname, not the Windows name.
+
+## Run PowerShell on a machine (windows, no "wsl")
+
+Scripts send PowerShell via **`-EncodedCommand`** (pipes and quotes survive Windows
+OpenSSH). **Always use `run -` + bash heredoc** for anything non-trivial — never inline
+Python, never nested quote gymnastics, never hand-rolled `ssh`/`sshpass`.
 
 ```bash
 python3 Skills/host-ssh/scripts/host_ssh.py run - <<'PS'
@@ -202,15 +230,15 @@ When the file list shows a mount (e.g. `../repo/src/…`), **patch with bash
 heredoc** so backslashes and quotes are not mangled by the tool layer:
 
 ```bash
-cat > ../repo/src/example.txt <<'EOF'
+cat > ../repo/src/example.txt <<'XEOF'
 line one
 line two
-EOF
+XEOF
 ```
 
 For a partial edit, use `sed` or write a small `.sh` / `.py` **via heredoc** and run it
-once — do **not** pass Windows paths containing `\` through `run_python` string
-arguments (the platform collapses `\\` → `\` and corrupts the file).
+once — do **not** pass Windows paths containing backslashes through `run_python` string
+arguments (the platform collapses double backslashes and corrupts the file).
 
 ## Required Environment (guide → sandbox)
 
@@ -245,12 +273,13 @@ If SSH fails, report the error verbatim and point the operator at README trouble
 - **Trust the file list.** No path discovery commands.
 - **Know the machines.** `host_ssh.py machines` — do not invent hosts or IPs.
 - **Never `cd`** in the same script as `Skills/…` paths.
-- **Heredoc first** for SSH commands and for file writes on mounts.
+- **Heredoc first** — `<<'SH'` bash on wsl/posix machines, `<<'PS'` PowerShell on
+  windows, and for file writes on mounts.
 - **Never** print or log `GA_HOST_SSH_PASSWORD` (or any share password).
 - **Probe, do not guess capabilities.** `host_ssh.py probe --all` reports what the
   account can actually do (the denied set is by design; see the capability table).
-- **Declare or detect `os`.** `run`/`probe` pick PowerShell vs POSIX shell from the
-  per-machine `os` field; auto-detection caches in `/tmp` — delete the cache file
+- **Declare `wsl`/`os` when you know them.** `wsl` → bash in the distro; `os` →
+  PowerShell vs POSIX shell; auto-detection caches in `/tmp` — delete the cache file
   after a machine's OS changes.
 - **Never** run `preflight.py` unless the user explicitly asks for diagnostics — it is
   not part of the normal workflow.

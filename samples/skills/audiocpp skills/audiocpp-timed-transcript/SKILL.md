@@ -15,7 +15,12 @@ notebook's **output directory**. This skill's scripts live under
 `Skills/audiocpp-timed-transcript/scripts/` relative to it. Write deliverables with
 **bare filenames** (e.g. `-o meeting`); never prefix with `Output/`.
 
-Product ASR returns text only. Word timings come from AudioCPP’s
+**Model paths are GPU-host paths, not sandbox paths.** `/models-local/...` is on
+the GPU host. Do not `ls`/`test` it from sandbox commands — the sandbox carries
+its own empty `/models-local`, so a failing `ls` is not evidence the model is
+missing. `spawn_engine.py status` is the only readiness check.
+
+Product ASR returns text only. Word timings come from AudioCPP's
 `qwen3_forced_aligner` over the GPU host raw gateway (`/private/v1/tasks/run`), then
 words are grouped into **SRT / WebVTT / segment JSON** (industry caption formats).
 
@@ -33,7 +38,30 @@ AUDIOCPP_SKILL_TOKEN=<same as the GPU host GA_AUDIOCPP_SKILL_TOKEN>
 
 ASR must already be loaded on the GPU host (Settings / API lifecycle).
 
-## Phase 0 gate (once per GPU host image)
+## Engine lifecycle (every run)
+
+`timed_transcribe.py` **requires** the private aligner engine to be `ready`.
+The engine is ephemeral: it is `dead` at the start of every session. That is
+normal, not a setup failure — just start it.
+
+```bash
+python3 Skills/audiocpp-timed-transcript/scripts/spawn_engine.py status
+# dead -> start it (the model is already on the host):
+python3 Skills/audiocpp-timed-transcript/scripts/spawn_engine.py start \
+  --path /models-local/skill/asr/Qwen3-ForcedAligner-0.6B-GGUF \
+  --family qwen3_forced_aligner --task align --backend rocm
+# ready -> proceed to Transcribe.
+```
+
+ROCm host builds need `--backend rocm` (not cuda).
+
+When finished: `spawn_engine.py stop`.
+
+## One-time model fetch (only if `start` reports the model missing on the host)
+
+`fetch_model.py` downloads **to the GPU host** via the gateway. Run it only when
+`spawn_engine.py start` fails because the model directory is absent there — never
+on the strength of a sandbox `ls`.
 
 ```bash
 python3 Skills/audiocpp-timed-transcript/scripts/fetch_model.py \
@@ -41,19 +69,16 @@ python3 Skills/audiocpp-timed-transcript/scripts/fetch_model.py \
   --dest /models-local/skill/asr/Qwen3-ForcedAligner-0.6B-GGUF \
   --include Qwen3-ForcedAligner-0.6B-GGUF/qwen3-forced-aligner-0.6b-q8_0.gguf \
   --strip-prefix Qwen3-ForcedAligner-0.6B-GGUF/
-
-# ROCm host builds need --backend rocm (not cuda)
-python3 Skills/audiocpp-timed-transcript/scripts/spawn_engine.py start \
-  --path /models-local/skill/asr/Qwen3-ForcedAligner-0.6B-GGUF \
-  --family qwen3_forced_aligner --task align --backend rocm
-
-python3 Skills/audiocpp-timed-transcript/scripts/spawn_engine.py status
+# then spawn_engine.py start again
 ```
 
-If status is not `ready` (e.g. missing model spec), update the GPU host `guideants-ai`
-audiocpp image. Do not add a PyTorch aligner.
+If the engine still does not reach `ready` after a successful fetch (e.g. a
+missing model spec in the image), update the GPU host `guideants-ai` audiocpp
+image. Do not add a PyTorch aligner.
 
 ## Transcribe
+
+With the engine `ready`:
 
 ```bash
 python3 Skills/audiocpp-timed-transcript/scripts/timed_transcribe.py \
@@ -62,7 +87,10 @@ python3 Skills/audiocpp-timed-transcript/scripts/timed_transcribe.py \
 
 Writes `clip.srt`, `clip.vtt`, `clip.json`, `clip.transcript.txt`.
 
-When finished: `spawn_engine.py stop`.
+Model ID: `Qwen3-ForcedAligner-0.6B-GGUF` (auto-detected while the engine is
+`ready`). If `timed_transcribe.py` fails with `"Private engine status has no
+modelId; pass --model explicitly."`, the engine is not `ready` — go back to
+Engine lifecycle (or pass `--model Qwen3-ForcedAligner-0.6B-GGUF` explicitly).
 
 ## Limits
 
@@ -72,7 +100,6 @@ When finished: `spawn_engine.py stop`.
 - Long-form: raise `--budget-seconds` (e.g. 900) for multi-chunk runs.
 - Aligner languages: 11 (pass `--language` explicitly).
 - Cue text is grouped from word times (~3–8 s); not Whisper-native segment IDs.
-- ROCm hosts: `spawn_engine.py start ... --backend rocm`.
 - Multi-model private engine (align+diar): `spawn_engine.py start ... --extra path=...;family=...;task=...`
   requires the updated skill gateway on the GPU host (Gate M).
 

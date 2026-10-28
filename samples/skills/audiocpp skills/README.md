@@ -42,7 +42,7 @@ Any curl/agent can use the same paths with `X-Audiocpp-Skill-Token`.
 | Skill | What it does |
 |---|---|
 | [`audiocpp`](audiocpp/) | Umbrella skill + probe |
-| [`audiocpp-tts-controls`](audiocpp-tts-controls/) | `seed`, `language`, `instructions`, voice list |
+| [`audiocpp-tts-controls`](audiocpp-tts-controls/) | `seed`, `language`, `instructions`, voice list, per-paragraph narration with designed line-break pauses |
 | [`audiocpp-voice-clone`](audiocpp-voice-clone/) | Clone from a reference clip |
 | [`audiocpp-asr`](audiocpp-asr/) | Transcribe with language hint |
 | [`audiocpp-timed-transcript`](audiocpp-timed-transcript/) | Long-form SRT/WebVTT/JSON (ASR + ForcedAligner; 30 s chunks) |

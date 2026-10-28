@@ -182,6 +182,18 @@ def _resolve_tts_model(engine_url: str, explicit: str | None) -> str:
     return model
 
 
+def _parse_request_options(pairs: list[str]) -> dict:
+    """Parse repeatable KEY=VALUE pairs into the body options object."""
+    opts: dict = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key.strip():
+            sys.stderr.write(f"invalid --request-option (need KEY=VALUE): {pair!r}\n")
+            sys.exit(1)
+        opts[key.strip()] = value.strip()
+    return opts
+
+
 def _synth_chunk(
     *,
     model: str,
@@ -190,10 +202,13 @@ def _synth_chunk(
     text: str,
     seed: int | None,
     timeout: float,
+    options: dict | None = None,
 ) -> bytes:
     payload: dict = {"model": model, "input": text, "voice": voice}
     if seed is not None:
         payload["seed"] = seed
+    if options:
+        payload["options"] = dict(options)
     try:
         if using_skill_gateway():
             prefix = gateway_engine_prefix(engine_url)

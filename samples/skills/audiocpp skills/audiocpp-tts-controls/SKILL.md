@@ -1,6 +1,6 @@
 ---
 name: audiocpp-tts-controls
-description: "Advanced synthesis on the loaded GPU host TTS model via the raw audiocpp gateway (/tts): seed, language, voice-design instructions, builtin/voice-pack speakers, and multi-speaker dialogue with overlapping interruptions. None of which the built-in GuideAnts audio tools expose."
+description: "Advanced synthesis on the loaded GPU host TTS model via the raw audiocpp gateway (/tts): seed, language, voice-design instructions, builtin/voice-pack speakers, multi-speaker dialogue with overlapping interruptions, and per-paragraph long-form narration with designed line-break pauses and speech-protected intra-utterance pause clamping. None of which the built-in GuideAnts audio tools expose."
 metadata:
   guideants:
     enabled: true
@@ -31,39 +31,48 @@ voice-pack presets.
 
 ## Long-form single-speaker narration (video scripts)
 
-**Skill users:** write the final narration script as plain text (markdown headers
-ok) and call `narration.py`. Do **not** chunk, concat, trim silence, or run
-preflight yourself — the tool owns all of that.
-
-`start` runs preflight, creates a job, and spawns a **detached background worker**
-that synthesizes the full script. Each sandbox call returns immediately. Poll
-`status` until `"status": "done"`. Use `cancel` if the user stops the turn or
-asks to abort.
+Write the final narration script as plain text (markdown headers ok) and call
+`paragraph_tts.py`. A blank line in the script is a **beat**: each piece is
+synthesized with its own engine call and the paragraph pauses are authored by
+the join, not left to the model's generated prosody.
 
 ```bash
-python3 Skills/audiocpp-tts-controls/scripts/narration.py start script.txt \
-  -o narration.wav \
-  --voice narrator
-
-python3 Skills/audiocpp-tts-controls/scripts/narration.py status narration.wav
+python3 Skills/audiocpp-tts-controls/scripts/paragraph_tts.py script.md \
+  -o narration.wav --voice doug \
+  [--base-ms 250] [--pad-min-ms 100] [--pad-max-ms 200] [--seed N] \
+  [--clamp-min-ms 300] [--clamp-ratio 0.80] [--no-clamp]
 ```
 
-Repeat `status` until `"status": "done"`. Job state lives in `.audiocpp-narration/`
-beside the output. Status responses report **job-level** progress only (`progress`,
-`elapsed_seconds`, `eta_seconds`) — never chunk indices or segment counts.
+Locked rules (do not improvise around these):
 
-To replace a finished or failed job:
+1. **Pieces** — a blank line starts a new piece; wrapped lines (no blank
+   line) stay in the same piece; markdown headers / `---` rules /
+   `END OF SCRIPT` are ignored.
+2. **One engine call per piece**, cached under `--state-dir`
+   (default `.audiocpp-para/`) keyed by text+voice hash — an interrupted
+   run resumes without re-synthesizing finished pieces.
+3. **Interior pause clamping, per piece, BEFORE the join** — every silent
+   gap ≥ `--clamp-min-ms` inside a piece is rescaled to `--clamp-ratio` of
+   its **own original length** (default 0.80). Never a hard target length.
+4. **Speech protection** — the detector's gap span can include the decaying
+   tail of a final word (soft speech under the RMS threshold), so each cut
+   is restricted to the span's **quiet core** (frames below an
+   adaptive peak threshold). If the quiet core is shorter than the floor
+   the gap is not clamped. Removed samples are always below the quiet
+   peak — the report's `removed_peak` per gap proves it. Do not raise the
+   threshold or cut outside the quiet core: that clips final syllables.
+5. **Edge silence is never touched** — each piece's natural engine lead/
+   tail silence stays exactly as emitted (no trimming, no cutting); it is
+   reported per piece, not clamped.
+6. **Designed boundary pause** — between pieces:
+   `pause_ms = (base_ms + uniform(pad_min_ms, pad_max_ms)) * linefeeds`,
+   where `linefeeds` is the number of consecutive blank lines (a double
+   break doubles the pause). The pad RNG is seeded with `--seed`.
 
-```bash
-python3 Skills/audiocpp-tts-controls/scripts/narration.py start script.txt \
-  -o narration.wav --voice narrator --force
-```
-
-To abort a running job:
-
-```bash
-python3 Skills/audiocpp-tts-controls/scripts/narration.py cancel narration.wav
-```
+Output: the final WAV plus `<output>.para-report.json` (per-piece
+durations, clamped gaps with `removed_peak`, untouched edge gaps, designed
+boundary pauses). Verify a run by checking `removed_peak < 100` on every
+clamped gap before delivering the audio.
 
 ## Short utterances
 
@@ -166,8 +175,11 @@ fragment. A short `overlap_ms` on a clean turn is fine for pacing, but the
 
 ## Reporting
 
-End by telling the user what worked and what was blocked, quoting preflight
-evidence from `narration.py start` when using long-form narration. For
+End by telling the user what worked and what was blocked. For long-form
+narration, quote `paragraph_tts.py`'s per-piece gap report (clamped gaps with
+`removed_peak`, untouched edge gaps, designed boundary pauses, final
+`duration_seconds`) — and confirm `removed_peak < 100` on every clamped gap
+before delivering the audio. For
 multi-speaker output, state the total duration, per-speaker seeds, and which
 lines carry `overlap_ms`. For long narration, quote `status` (`progress`,
 `elapsed_seconds`, `eta_seconds`, final `result.duration_seconds`) — not

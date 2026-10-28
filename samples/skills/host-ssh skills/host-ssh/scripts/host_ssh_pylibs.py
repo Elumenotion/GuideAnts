@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Paramiko-based runner for host_ssh.py when sshpass/ssh binaries are unavailable.
 
-Reuses the official host_ssh.py CLI logic; run_remote_script is replaced
-with a paramiko implementation that supports both remote command styles:
-Windows (powershell.exe -NoProfile -NonInteractive -EncodedCommand <b64>)
-and mac/linux (plain POSIX shell text). Hosts are resolved IPv4-first and
-the target OS is auto-detected via `uname -s` when not declared.
+Reuses the official host_ssh.py CLI logic; the remote-execution entry point is
+replaced with a paramiko implementation that supports all three backends:
+windows (powershell.exe -NoProfile -NonInteractive -EncodedCommand <b64>, +
+share bootstrap), wsl (bash inside the named distro via wsl.exe, base64
+harness), and mac/linux (plain POSIX shell text). Remote commands come from
+the same composers in ssh_common, so both transports send identical strings.
+Hosts are resolved IPv4-first and the target OS is auto-detected via
+`uname -s` when not declared.
 """
 from __future__ import annotations
 
@@ -15,8 +18,9 @@ import sys
 import paramiko
 
 import host_ssh
-from ssh_common import (DETECT_SNIPPET, classify_uname, compose_remote_command,
-                        get_machine, require_ssh_config, resolve_ipv4,
+from ssh_common import (DETECT_SNIPPET, classify_uname, compose_bash,
+                        compose_powershell, compose_posix, get_machine,
+                        require_ssh_config, resolve_ipv4,
                         resolve_target_os)
 
 
@@ -37,12 +41,9 @@ def detect_os_paramiko(target: dict) -> str:
     return classify_uname(out)
 
 
-def run_remote_script_py(script: str, timeout: int, machine=None):
-    target, share = get_machine(machine)
-    user, password = require_ssh_config()
+def _exec_remote_cmd(remote_cmd: str, target: dict, user: str, password: str,
+                     timeout: int):
     port = target.get('port') or 22
-    remote_os = resolve_target_os(machine, detect=detect_os_paramiko)
-    remote_cmd = compose_remote_command(script, remote_os, share)
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
@@ -68,6 +69,32 @@ def run_remote_script_py(script: str, timeout: int, machine=None):
     return p
 
 
+def run_remote_script_py(script: str, timeout: int, machine=None, shell=None):
+    """Paramiko equivalent of run_remote_shell (same dispatch, same commands)."""
+    if shell not in (None, 'bash', 'powershell'):
+        raise ValueError(f"shell must be 'bash' or 'powershell', got {shell!r}")
+    target, share = get_machine(machine)
+    user, password = require_ssh_config()
+    wsl = (target.get('wsl') or {}).get('distro')
+    if shell is None:
+        if wsl:
+            shell = 'bash'
+        else:
+            remote_os = resolve_target_os(machine, detect=detect_os_paramiko)
+            shell = 'bash' if remote_os in ('mac', 'linux') else 'powershell'
+    if shell == 'powershell':
+        remote_cmd = compose_powershell(script, share)
+    elif wsl:
+        remote_cmd = compose_bash(script, wsl)
+    else:
+        remote_os = resolve_target_os(machine, detect=detect_os_paramiko)
+        if remote_os in ('mac', 'linux'):
+            remote_cmd = compose_posix(script)
+        else:
+            remote_cmd = compose_bash(script, None)  # bash on the host
+    return _exec_remote_cmd(remote_cmd, target, user, password, timeout)
+
+
 host_ssh.run_remote_script = run_remote_script_py
 host_ssh.detect_os = detect_os_paramiko
 
@@ -75,7 +102,7 @@ host_ssh.detect_os = detect_os_paramiko
 def main() -> int:
     parser = argparse.ArgumentParser(
         description='Run commands on a GuideAnts SSH machine (paramiko; '
-                    'PowerShell on Windows, POSIX shell on mac/linux)')
+                    'PowerShell on windows, bash in WSL, POSIX shell on mac/linux)')
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('machines', help='List machines declared in the guide Environment')
     probe_p = sub.add_parser('probe', help='Verify reachability + capability profile')
@@ -85,6 +112,7 @@ def main() -> int:
     run_p = sub.add_parser('run', help='Run a command on a machine')
     run_p.add_argument('script')
     run_p.add_argument('--machine')
+    run_p.add_argument('--shell', help="Override: 'bash' (WSL/posix) or 'powershell'")
     run_p.add_argument('-o', '--output', dest='output')
     run_p.add_argument('--timeout', type=int, default=120)
     args = parser.parse_args()
@@ -93,8 +121,9 @@ def main() -> int:
     if args.command == 'probe':
         return host_ssh.cmd_probe(args)
     try:
-        script = host_ssh.read_script(args.script)
-        proc = run_remote_script_py(script, args.timeout, machine=args.machine)
+        script = host_ssh.read_shell_script(args.script)
+        proc = run_remote_script_py(script, args.timeout, machine=args.machine,
+                                    shell=args.shell)
     except Exception as exc:
         print(f"host_ssh_pylibs: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
