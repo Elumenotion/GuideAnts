@@ -407,12 +407,11 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
       expect(onError).not.toHaveBeenCalled();
     });
 
-    it('calls onError when the stream goes silent', async () => {
+    it('surfaces the idle timeout to onError without cancelling the server turn', async () => {
       vi.useFakeTimers();
       const onError = vi.fn();
       const onComplete = vi.fn();
       const cancel = vi.fn().mockResolvedValue(undefined);
-      const requestServerCancel = vi.fn().mockResolvedValue(undefined);
       mockFetch.mockResolvedValue({
         ok: true,
         status: 200,
@@ -435,7 +434,6 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
           onError,
           onComplete,
           undefined,
-          { requestServerCancel },
         );
 
         await vi.advanceTimersByTimeAsync(CONVERSATION_STREAM_IDLE_TIMEOUT_MS);
@@ -446,7 +444,10 @@ describe('api.projects.notebooks.conversations (table-driven)', () => {
           message: expect.stringMatching(/stopped sending data/i),
         }));
         expect(onComplete).not.toHaveBeenCalled();
-        expect(requestServerCancel).toHaveBeenCalled();
+        // The transport only surfaces the interruption. It must not cancel the server's
+        // turn: the server keeps the worker alive after an SSE disconnect, and recovery
+        // (re-observing the still-running turn) is owned by the action layer.
+        expect(mockFetch.mock.calls.length).toBe(1);
         expect(cancel).toHaveBeenCalled();
       } finally {
         vi.useRealTimers();

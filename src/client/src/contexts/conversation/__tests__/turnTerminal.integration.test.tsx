@@ -28,6 +28,7 @@ let captured: {
 
 const mockApiGet = vi.fn();
 const mockCancelTurn = vi.fn();
+const mockObserveConversationEvents = vi.fn().mockResolvedValue(undefined);
 const mockUndoLast = vi.fn();
 const mockLoadNotebookFiles = vi.fn().mockResolvedValue(undefined);
 const mockShowToast = vi.fn();
@@ -39,8 +40,8 @@ vi.mock('../../../services/api', () => ({
         conversations: {
           get: (...args: any[]) => mockApiGet(...args),
           sendMessageStream: vi.fn(
-            async (_p: string, _n: string, _c: string, _payload: any, onEvent: any, onError: any, onComplete: any, _signal: any, streamControl?: any) => {
-              captured = { onEvent, onError, onComplete, requestServerCancel: streamControl?.requestServerCancel };
+            async (_p: string, _n: string, _c: string, _payload: any, onEvent: any, onError: any, onComplete: any, _signal: any) => {
+              captured = { onEvent, onError, onComplete };
               // The real transport settles when the body closes (after the terminal event).
               // Here we settle immediately so `await ctx.sendMessage(...)` completes; the test
               // then drives the captured onEvent/onComplete callbacks explicitly to mirror the
@@ -49,6 +50,7 @@ vi.mock('../../../services/api', () => ({
             },
           ),
           cancelTurn: (...args: any[]) => mockCancelTurn(...args),
+          observeConversationEvents: (...args: any[]) => mockObserveConversationEvents(...args),
           undoLast: (...args: any[]) => mockUndoLast(...args),
           checkLlamaRuntime: vi.fn().mockResolvedValue({ state: 'ready' }),
           editMessage: vi.fn().mockResolvedValue({}),
@@ -190,6 +192,8 @@ describe('turn-terminal composer ownership (provider-level)', () => {
     lastState = null;
     mockApiGet.mockResolvedValue({ messages: [], assistantName: 'Demo Guide' });
     mockCancelTurn.mockResolvedValue(undefined);
+    mockObserveConversationEvents.mockReset();
+    mockObserveConversationEvents.mockResolvedValue(undefined);
     mockUndoLast.mockResolvedValue(undefined);
   });
 
@@ -383,7 +387,7 @@ describe('turn-terminal composer ownership (provider-level)', () => {
     expect(lastState.pendingAttachments).toEqual([]);
   });
 
-  it('7. idle timeout mid-turn routes through the confirmed Stop boundary', async () => {
+  it('7. idle timeout mid-turn re-observes the running turn instead of stopping it', async () => {
     const ctx = await initialized();
 
     await act(async () => {
@@ -393,10 +397,10 @@ describe('turn-terminal composer ownership (provider-level)', () => {
       captured.onEvent?.({ type: 'turn_created', data: { turnId: 'turn-idle' } });
     });
 
-    // Idle timeout is a transport failure, not a terminal event: the same confirmed Stop
-    // boundary as the button (requestServerStop) finalizes the workflow — unchanged behavior.
-    // The confirmed cancelTurn resolves quickly, so real timers suffice (no fake timers needed,
-    // which would otherwise freeze the provider's init effects).
+    // Idle timeout is a transport interruption of THIS client (e.g. the tab was backgrounded,
+    // so SSE bytes stopped arriving): it is not proof that the server worker stopped. The
+    // server keeps the turn running, so the client must re-open the observer stream for the
+    // same turn instead of hard-stopping it.
     await act(async () => {
       captured.onError?.(Object.assign(
         new Error('The conversation stream stopped sending data. The server is no longer answering this request.'),
@@ -404,11 +408,17 @@ describe('turn-terminal composer ownership (provider-level)', () => {
       ));
     });
 
-    expect(mockCancelTurn).toHaveBeenCalledWith(PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-idle');
-    await waitFor(() => {
-      expect(lastState.isStreaming).toBe(false);
-    });
+    expect(mockCancelTurn).not.toHaveBeenCalled();
     expect(lastState.isCancelling).toBeFalsy();
+    expect(mockObserveConversationEvents).toHaveBeenCalledTimes(1);
+    expect(mockObserveConversationEvents).toHaveBeenCalledWith(
+      PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID,
+      expect.any(Function), expect.any(Function), expect.any(Function), expect.any(AbortSignal),
+    );
+    // The workflow stays visible as live (observing) until the observer's terminal arrives.
+    await waitFor(() => {
+      expect(lastState.isStreaming).toBe(true);
+    });
   });
 
   it('8. undo after success restores the draft + chips from the persisted user message', async () => {

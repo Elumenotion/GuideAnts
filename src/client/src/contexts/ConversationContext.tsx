@@ -411,6 +411,16 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     sendStreamRef, observerStreamRef,
     inflightRuntimeChecksRef, runtimeReadyCacheRef, assistantByName,
     activeStreamTurnId, setActiveStreamTurnId: assignActiveStreamTurnId, getActiveStreamTurnId, refreshConversation: refresh,
+    observeConversationEvents: (onEvent, onError, onComplete, abortSignal) =>
+      api.projects.notebooks.conversations.observeConversationEvents(
+        projectId,
+        notebookId,
+        conversationId,
+        onEvent,
+        onError,
+        onComplete,
+        abortSignal,
+      ),
     sendStreamStateRef,
     pendingStopRef,
     composerTerminalPolicy,
