@@ -190,6 +190,13 @@ function NotebookDetailsContent() {
     const [isPolling, setIsPolling] = useState(false);
     const runtimeCheckedNotebookRef = useRef<string | null>(null);
 
+    // Suppresses the crash modal for a short window right after a load completes (or
+    // while one is in flight). A chat stream that was in flight when the container restarted
+    // is orphaned and its SSE read dies only once the fresh container resolves the socket --
+    // i.e. at/just after load completion. That transport drop is misclassified as a crash and
+    // would otherwise re-surface the crash modal on a runtime that is actually healthy.
+    const lastLoadActiveAtRef = useRef<number | null>(null);
+
     // Llama runtime crash recovery (step 1 of 3):
     //   crash modal -> explicit restart -> model-load modal.
     // Populated from `llama-runtime-crashed` window events dispatched by
@@ -340,6 +347,19 @@ function NotebookDetailsContent() {
                 reason?: LlamaCrashReason;
                 upstreamDetail?: string | null;
             }>;
+            // A crash event that lands while a load is in flight or within a short window after
+            // one completes is a stale artifact of the restart we already handled -- the orphaned
+            // stream's transport drop, not a real fault in a now-healthy runtime. Drop it. The
+            // window is anchored to applyRuntimeStatus('loading' | 'ready') and is NOT keyed off
+            // the requires_load modal, so a genuine crash while idle (or while awaiting a manual
+            // load) still surfaces.
+            const sinceLoad = lastLoadActiveAtRef.current == null
+                ? null
+                : Date.now() - lastLoadActiveAtRef.current;
+            if (sinceLoad !== null && sinceLoad <= 15000) {
+                console.warn('[llama-runtime] Ignoring crash event that arrived during/just after a load window (likely an orphaned stream from a restart).', { sinceLoadMs: sinceLoad, upstreamDetail: customEvent.detail?.upstreamDetail ?? null });
+                return;
+            }
             // Close the load modal if it happened to be open — the crash modal takes
             // precedence so the user isn't presented with both stacked.
             setRuntimeModalOpen(false);
@@ -360,6 +380,19 @@ function NotebookDetailsContent() {
             window.removeEventListener('llama-runtime-crashed', handleCrashed);
         };
     }, [applyRuntimeStatus]);
+
+    // Anchor the crash-suppression window at a *real* load completion (a `loading` -> `ready`
+    // transition). Deliberately not anchored on steady-state `ready` (seen at mount and on every
+    // poll) -- that would keep the window open and suppress genuine idle crashes. This is the
+    // moment an orphaned stream's transport drop is expected to arrive (see handleCrashed).
+    const prevLoadStateRef = useRef<string | null>(null);
+    useEffect(() => {
+        const state = runtimeStatus?.state ?? null;
+        if (prevLoadStateRef.current === 'loading' && state === 'ready') {
+            lastLoadActiveAtRef.current = Date.now();
+        }
+        prevLoadStateRef.current = state;
+    }, [runtimeStatus?.state]);
 
     useEffect(() => {
         let pollInterval: NodeJS.Timeout;

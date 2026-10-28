@@ -1349,9 +1349,6 @@ export const api = {
                     onError: (error: Error) => void,
                     onComplete: (terminalEventType?: string) => void,
                     abortSignal?: AbortSignal,
-                    streamControl?: {
-                        requestServerCancel?: () => Promise<void>;
-                    },
                 ) => {
                     const response = await fetchWithAuth(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/messages`, {
                         method: 'POST',
@@ -1396,13 +1393,11 @@ export const api = {
                                     { name: 'StreamIdleTimeoutError' },
                                 );
                                 void (async () => {
-                                    try {
-                                        if (streamControl?.requestServerCancel) {
-                                            await streamControl.requestServerCancel();
-                                        }
-                                    } catch {
-                                        // Best-effort server cancel before surfacing idle timeout.
-                                    }
+                                    // The transport only SURFACES the interruption (reject +
+                                    // close the local reader). It must NOT cancel the server's
+                                    // turn: the server keeps the worker alive after an SSE
+                                    // disconnect, so recovery (re-observing the still-running
+                                    // turn) is owned by the action layer via onError.
                                     reject(idleError);
                                     void reader.cancel().catch(() => undefined);
                                 })();

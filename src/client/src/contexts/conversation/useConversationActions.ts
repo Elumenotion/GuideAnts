@@ -31,6 +31,12 @@ interface ActionDeps {
   setActiveStreamTurnId: (turnId: string | null) => void;
   getActiveStreamTurnId: () => string | null;
   refreshConversation: (options?: { force?: boolean }) => Promise<void>;
+  observeConversationEvents: (
+    onEvent: (event: { type: string; data: any }) => void,
+    onError: (error: Error) => void,
+    onComplete: () => void,
+    abortSignal: AbortSignal,
+  ) => void;
   sendStreamStateRef?: React.MutableRefObject<SendStreamState | null>;
   pendingStopRef?: React.MutableRefObject<boolean>;
   /**
@@ -79,6 +85,7 @@ export function useConversationActions(
     sendStreamRef, observerStreamRef,
     inflightRuntimeChecksRef, runtimeReadyCacheRef, assistantByName,
     activeStreamTurnId, setActiveStreamTurnId, getActiveStreamTurnId, refreshConversation,
+    observeConversationEvents,
     composerTerminalPolicy,
   } = deps;
 
@@ -131,6 +138,7 @@ export function useConversationActions(
     }
     setObserverStreamController(null);
   }, [observerStreamRef, setObserverStreamController]);
+
 
   const applyComposerTerminalPolicy = useCallback((messagePersisted: boolean) => {
     const snapshot = sendStreamStateRef.current?.snapshot;
@@ -215,6 +223,91 @@ export function useConversationActions(
         break;
     }
   }, [clearSendStreamState, composerTerminalPolicy, dispatch, sendStreamStateRef]);
+
+  /**
+   * Re-observe a turn that is still running on the server. A client transport
+   * interruption (backgrounded tab, brief network drop) disconnects ONLY this
+   * client: the server deliberately keeps the worker alive. Reopening an observer
+   * stream resumes the transcript and finalizes the composer when the turn ends.
+   * This is the correct recovery for a transport interruption; a hard Stop is
+   * reserved for the user-initiated Stop button.
+   */
+  const reattachToActiveTurn = useCallback((turnId?: string | null) => {
+    if (sendStreamRef.current && !sendStreamRef.current.signal.aborted) {
+      return;
+    }
+    if (observerStreamRef.current && !observerStreamRef.current.signal.aborted) {
+      return;
+    }
+
+    // Take over as the observer: claim the turn (so the Stop button still targets it) and
+    // leave the send state fully behind. The input was already persisted server-side, so
+    // the composer terminal is applied with a consumed outcome (draft stays empty; only
+    // undo restores it). The observer's terminal event finalizes the turn.
+    const claimedTurnId = turnId ?? getActiveStreamTurnId();
+    if (claimedTurnId) {
+      setActiveStreamTurnId(claimedTurnId);
+    }
+    applyComposerTerminalPolicy(true);
+    clearSendStreamState();
+
+    const controller = new AbortController();
+    adoptObserverStream(controller);
+    dispatch({ type: 'SET_STREAMING_MODE', payload: { mode: 'observing' } });
+    dispatch({ type: 'SET_STREAMING', payload: true });
+    dispatch({ type: 'SET_CANCELLING', payload: false });
+
+    observeConversationEvents(
+      (event) => handleStreamingEvent(event, 'observer'),
+      (error) => {
+        if (error.name === 'AbortError') {
+          return;
+        }
+        console.error('Re-observe stream error:', error);
+        dispatch({ type: 'SET_STREAMING', payload: false });
+        dispatch({ type: 'SET_CANCELLING', payload: false });
+        dispatch({ type: 'SET_STREAMING_ERROR', payload: error.message || 'Reconnecting to the stream failed' });
+      },
+      () => {
+        if (pendingStopRef.current) {
+          return;
+        }
+        if (observerStreamRef.current === controller) {
+          adoptObserverStream(null);
+        }
+        setActiveStreamTurnId(null);
+        // The SSE handler owns the terminal dispatches when a terminal event was delivered;
+        // this runs when the body closes and is the guaranteed finalizer for the re-observed
+        // turn. Finalize the streamed cell and re-read the authoritative transcript (the
+        // interruption means we may have missed late tokens).
+        dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
+        dispatch({ type: 'COMPLETE_STREAMING_TURN' });
+        dispatch({ type: 'SET_STREAMING', payload: false });
+        dispatch({ type: 'SET_CANCELLING', payload: false });
+        clearPendingStop();
+        void refreshConversation({ force: true }).catch(error => {
+          console.warn('Failed to refresh conversation after re-observed turn completed:', error);
+        });
+      },
+      controller.signal,
+    );
+  }, [
+    applyComposerTerminalPolicy,
+    clearPendingStop,
+    clearSendStreamState,
+    dispatch,
+    adoptObserverStream,
+    getActiveStreamTurnId,
+    handleStreamingEvent,
+    observerStreamRef,
+    pendingStopRef,
+    refreshConversation,
+    sendStreamRef,
+    setActiveStreamTurnId,
+    observeConversationEvents,
+  ]);
+
+
 
   const completeConfirmedCancellation = useCallback((target: {
     turnId: string;
@@ -356,14 +449,20 @@ export function useConversationActions(
     clearPendingStop,
   ]);
 
-  const reconcileLostSendAndStop = useCallback((content: string, error: Error) => {
+  const reconcileLostSendAndStop = useCallback((
+    content: string,
+    error: Error,
+    stopMode: 'hard' | 'reobserve' = 'hard',
+  ) => {
     if (stopReconcileInFlightRef.current) {
       return;
     }
 
     stopReconcileInFlightRef.current = true;
-    pendingStopRef.current = true;
-    dispatch({ type: 'SET_CANCELLING', payload: true });
+    if (stopMode === 'hard') {
+      pendingStopRef.current = true;
+      dispatch({ type: 'SET_CANCELLING', payload: true });
+    }
 
     void (async () => {
       try {
@@ -380,7 +479,15 @@ export function useConversationActions(
           if (sendStreamStateRef.current) {
             sendStreamStateRef.current.turnId = serverTurnId;
           }
-          requestServerStop(serverTurnId);
+          if (stopMode === 'hard') {
+            requestServerStop(serverTurnId);
+          } else {
+            // The turn is still running on the server and the user never asked to stop it
+            // (this was a client transport interruption). Re-observe it instead of killing it.
+            adoptSendStream(null);
+            dispatch({ type: 'SET_STREAMING_ERROR', payload: undefined });
+            reattachToActiveTurn(serverTurnId);
+          }
           return;
         }
 
@@ -424,7 +531,7 @@ export function useConversationActions(
         if (stopReconcileTimerRef.current === null) {
           stopReconcileTimerRef.current = setTimeout(() => {
             stopReconcileTimerRef.current = null;
-            reconcileLostSendAndStop(content, error);
+            reconcileLostSendAndStop(content, error, stopMode);
           }, 250);
         }
       } finally {
@@ -442,6 +549,7 @@ export function useConversationActions(
     pendingStopRef,
     projectId,
     refreshConversation,
+    reattachToActiveTurn,
     requestServerStop,
     sendStreamStateRef,
     setActiveStreamTurnId,
@@ -624,35 +732,39 @@ export function useConversationActions(
 
             if (isIdleTimeout) {
               if (idleStopRequested || pendingStopRef.current) {
-                console.log('Stream idle timeout is already stopping the server turn');
+                console.log('Stream idle timeout is already handling the interruption');
                 return;
               }
+              idleStopRequested = true;
               const persistedTurnId = streamTurn.current ?? sendStreamStateRef.current?.turnId;
               if (persistedTurnId) {
-                // An idle timeout is a transport failure, not proof that the server worker
-                // stopped. Use the same confirmed Stop boundary as an explicit button click.
-                pendingStopRef.current = true;
-                dispatch({ type: 'SET_CANCELLING', payload: true });
-                requestServerStop(persistedTurnId);
+                // An idle timeout (a backgrounded/hidden tab stops delivering SSE bytes, so
+                // reader.read() stalls past the threshold) is a CLIENT transport interruption,
+                // not proof that the server worker stopped. The server keeps the turn running,
+                // so do NOT hard-stop it; re-observe it instead.
+                adoptSendStream(null);
+                dispatch({ type: 'SET_STREAMING_ERROR', payload: undefined });
+                reattachToActiveTurn(persistedTurnId);
                 return;
               }
-              reconcileLostSendAndStop(content, error);
+              reconcileLostSendAndStop(content, error, 'reobserve');
               return;
             }
 
             const persistedTurnId = streamTurn.current ?? sendStreamStateRef.current?.turnId;
             if (persistedTurnId) {
               // A transport failure only disconnects this client. The server deliberately keeps
-              // the worker alive after SSE disconnect, so do not unlock the composer until the
-              // same hard-stop boundary used by the Stop button has completed.
-              pendingStopRef.current = true;
-              dispatch({ type: 'SET_CANCELLING', payload: true });
-              requestServerStop(persistedTurnId);
+              // the worker alive after SSE disconnect, so do NOT hard-stop it: reopen the
+              // observer stream and let the turn continue. The composer finalizes on the
+              // observer's terminal event. A hard Stop is reserved for the Stop button.
+              adoptSendStream(null);
+              dispatch({ type: 'SET_STREAMING_ERROR', payload: undefined });
+              reattachToActiveTurn(persistedTurnId);
               return;
             }
 
             console.error('Streaming error:', error);
-            reconcileLostSendAndStop(content, error);
+            reconcileLostSendAndStop(content, error, 'reobserve');
           },
           (terminalEventType?: string) => {
             // Single composer owner for transport-delivered terminal outcomes (P2): the
@@ -699,22 +811,6 @@ export function useConversationActions(
             try { window.dispatchEvent(new Event('refresh-notebook-toolbar')); } catch {}
           },
           controller.signal,
-          {
-            requestServerCancel: async () => {
-              idleStopRequested = true;
-              const turnId = streamTurn.current ?? getActiveStreamTurnId();
-              if (turnId) {
-                pendingStopRef.current = true;
-                dispatch({ type: 'SET_CANCELLING', payload: true });
-                requestServerStop(turnId);
-              } else {
-                reconcileLostSendAndStop(
-                  content,
-                  new Error('The conversation stream stopped sending data.'),
-                );
-              }
-            },
-          },
         );
       } catch (error: any) {
         if (sendStreamRef.current !== controller) {
@@ -732,9 +828,11 @@ export function useConversationActions(
 
         const persistedTurnId = streamTurn.current ?? sendStreamStateRef.current?.turnId;
         if (persistedTurnId) {
-          pendingStopRef.current = true;
-          dispatch({ type: 'SET_CANCELLING', payload: true });
-          requestServerStop(persistedTurnId);
+          // Same rule as the onError branch: a transport interruption is not a reason to
+          // kill the server's still-running turn. Re-observe it instead.
+          adoptSendStream(null);
+          dispatch({ type: 'SET_STREAMING_ERROR', payload: undefined });
+          reattachToActiveTurn(persistedTurnId);
           return;
         }
 
@@ -842,7 +940,7 @@ export function useConversationActions(
         clearSendStreamState();
       }
     },
-    [state._isUndoing, state.isStreaming, state._isCancelling, state.selectedAssistant, state.assistants, state.notebookTemplate, state.draftUserContent, projectId, notebookId, conversationId, handleStreamingEvent, state.pendingAttachments, loadNotebookFiles, showToast, abortObserverStream, adoptSendStream, applyComposerTerminalPolicy, clearPendingStop, clearSendStreamState, getActiveStreamTurnId, pendingStopRef, reconcileLostSendAndStop, refreshConversation, requestServerStop, runtimeReadyCacheRef, sendStreamRef, sendStreamStateRef, setActiveStreamTurnId]
+    [state._isUndoing, state.isStreaming, state._isCancelling, state.selectedAssistant, state.assistants, state.notebookTemplate, state.draftUserContent, projectId, notebookId, conversationId, handleStreamingEvent, state.pendingAttachments, loadNotebookFiles, showToast, abortObserverStream, adoptSendStream, applyComposerTerminalPolicy, clearPendingStop, clearSendStreamState, getActiveStreamTurnId, pendingStopRef, reconcileLostSendAndStop, reattachToActiveTurn, refreshConversation, requestServerStop, runtimeReadyCacheRef, sendStreamRef, sendStreamStateRef, setActiveStreamTurnId]
   );
 
   const editAssistantMessage = useCallback(

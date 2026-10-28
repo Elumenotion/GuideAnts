@@ -22,6 +22,9 @@ vi.mock('../../services/api', () => ({
               return Promise.resolve();
             },
           ),
+          observeConversationEvents: vi.fn().mockImplementation(
+            async (_p, _n, _c, onEvent, onError, onComplete) => Promise.resolve(),
+          ),
           editMessage: vi.fn().mockResolvedValue({}),
           undoLast: vi.fn().mockResolvedValue({}),
           getAll: vi.fn().mockResolvedValue([]),
@@ -102,13 +105,14 @@ describe('ConversationContext streaming contracts', () => {
     vi.clearAllMocks();
     capturedOnError = undefined;
     capturedOnEvent = undefined;
+    vi.mocked(api.projects.notebooks.conversations.observeConversationEvents).mockClear();
     vi.mocked(api.projects.notebooks.conversations.get).mockResolvedValue({
       messages: [],
       assistantName: 'Demo Guide',
     } as any);
   });
 
-  it('retains partial content and surfaces streamingError on idle timeout', async () => {
+  it('re-observes the running turn on an idle-timeout interruption instead of cancelling it', async () => {
     const { result } = renderHook(() => useConversation(), { wrapper: renderProvider() });
     await waitFor(() => expect(result.current.isInitialized).toBe(true));
 
@@ -117,9 +121,13 @@ describe('ConversationContext streaming contracts', () => {
     });
 
     await act(async () => {
+      capturedOnEvent?.({ type: 'turn_created', data: { turnId: 'turn-idle-1' } });
       capturedOnEvent?.({ type: 'assistant_message', data: { contentDelta: 'partial streamed thinking' } });
     });
 
+    // The stream goes silent for CONVERSATION_STREAM_IDLE_TIMEOUT_MS (e.g. the tab was
+    // backgrounded, so SSE bytes stopped arriving to this client). The server turn is
+    // still running.
     await act(async () => {
       capturedOnError?.(Object.assign(
         new Error('The conversation stream stopped sending data. The server is no longer answering this request.'),
@@ -127,16 +135,58 @@ describe('ConversationContext streaming contracts', () => {
       ));
     });
 
-    await waitFor(() => {
-      expect(result.current.isStreaming).toBe(false);
-      expect(result.current.streamingError).toMatch(/stopped sending data/i);
+    // Regression: an interruption of this client's transport must NOT hard-stop the
+    // server's still-running turn (the defect that aborted active threads when a tab
+    // was reactivated), and it must NOT present the turn as failed. The client re-opens
+    // the observer stream for the same turn instead.
+    expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
+    expect(result.current.streamingError).toBeUndefined();
+    expect(result.current.isCancelling).toBe(false);
+    expect(result.current.isStreaming).toBe(true);
+    expect(api.projects.notebooks.conversations.observeConversationEvents).toHaveBeenCalledTimes(1);
+    expect(api.projects.notebooks.conversations.observeConversationEvents).toHaveBeenCalledWith(
+      'test-project',
+      'test-notebook',
+      'test-conversation',
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('re-observes the running turn on a transport error after reactivation instead of cancelling it', async () => {
+    const { result } = renderHook(() => useConversation(), { wrapper: renderProvider() });
+    await waitFor(() => expect(result.current.isInitialized).toBe(true));
+
+    await act(async () => {
+      await result.current.sendMessage('hello');
     });
 
-    const assistant = result.current.messages.find(m => m.role.toLowerCase() === 'assistant');
-    expect(assistant?.content).toContain('partial streamed thinking');
-    expect(mockShowToast).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'Chat Request Failed',
-    }));
+    await act(async () => {
+      capturedOnEvent?.({ type: 'turn_created', data: { turnId: 'turn-net-1' } });
+    });
+
+    // The pending reader.read() rejects when the suspended tab becomes active again.
+    await act(async () => {
+      capturedOnError?.(Object.assign(new Error('The connection was reset.'), { name: 'TypeError' }));
+    });
+
+    // Same regression contract: no hard stop, no failure surface, re-observe instead.
+    expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
+    expect(result.current.streamingError).toBeUndefined();
+    expect(result.current.isCancelling).toBe(false);
+    expect(result.current.isStreaming).toBe(true);
+    expect(api.projects.notebooks.conversations.observeConversationEvents).toHaveBeenCalledTimes(1);
+    expect(api.projects.notebooks.conversations.observeConversationEvents).toHaveBeenCalledWith(
+      'test-project',
+      'test-notebook',
+      'test-conversation',
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
   });
 
   it('retains partial content without streamingError on explicit cancel', async () => {

@@ -78,6 +78,7 @@ function createDeps(overrides: Partial<Parameters<typeof useConversationActions>
     setActiveStreamTurnId: vi.fn(),
     getActiveStreamTurnId: vi.fn(() => null),
     refreshConversation: vi.fn().mockResolvedValue(undefined),
+    observeConversationEvents: vi.fn().mockResolvedValue(undefined),
     assistantByName: {
       Claude: { name: 'Claude', avatarUrl: '', id: 'asst-1' },
     },
@@ -184,7 +185,6 @@ describe('useConversationActions', () => {
         expect.any(Function),
         expect.any(Function),
         expect.any(AbortSignal),
-        expect.objectContaining({ requestServerCancel: expect.any(Function) }),
       );
       expect(deps.setCurrentStreamController).toHaveBeenCalled();
     });
@@ -211,7 +211,6 @@ describe('useConversationActions', () => {
           expect.any(Function),
           expect.any(Function),
           expect.any(AbortSignal),
-          expect.objectContaining({ requestServerCancel: expect.any(Function) }),
         );
       });
 
@@ -672,32 +671,23 @@ describe('useConversationActions', () => {
       }));
     });
 
-    it('does not unlock locally when idle-timeout cancellation is still pending', async () => {
+    it('re-observes the running turn on idle timeout when no turn id is known locally', async () => {
       let onError: ((err: Error) => void) | undefined;
-      let requestServerCancel: (() => Promise<void>) | undefined;
-      vi.mocked(api.projects.notebooks.conversations.cancelTurn).mockReturnValueOnce(
-        new Promise<void>(() => {}),
-      );
+      vi.mocked(api.projects.notebooks.conversations.get).mockResolvedValue({
+        messages: [],
+        activeTurn: { turnId: 'turn-server-1', status: 'streaming', turnIndex: 0 },
+      } as any);
       vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
         async (...args: any[]) => {
           onError = args[5];
-          requestServerCancel = args[8]?.requestServerCancel;
         },
       );
 
-      const { actions, dispatch, deps } = mountActions(
-        {},
-        {
-          activeStreamTurnId: 'turn-idle-timeout',
-          getActiveStreamTurnId: vi.fn(() => 'turn-idle-timeout'),
-        },
-      );
+      // No local turn id: the stream blipped before turn_created was observed.
+      const { actions, dispatch, deps } = mountActions();
 
       await act(async () => {
         await actions.sendMessage('hello');
-      });
-      await act(async () => {
-        await requestServerCancel?.();
       });
 
       act(() => {
@@ -707,24 +697,28 @@ describe('useConversationActions', () => {
         ));
       });
 
-      expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
-        PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-idle-timeout',
-      );
-      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
-      expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
-      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
-        type: 'SET_STREAMING',
-        payload: false,
-      }));
+      // The client reconciles against the server: the turn is still running there and the
+      // user never asked to stop it, so it must re-observe, not POST a hard stop.
+      await vi.waitFor(() => {
+        expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
+        expect(deps.observeConversationEvents).toHaveBeenCalledWith(
+          expect.any(Function), expect.any(Function), expect.any(Function), expect.any(AbortSignal),
+        );
+      });
       expect(deps.showToast).not.toHaveBeenCalled();
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_STREAMING_MODE', payload: { mode: 'observing' } });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_DRAFT', payload: 'hello' });
+      // The draft was consumed into the transcript (turn persisted server-side).
+      expect(dispatch).toHaveBeenCalledWith({ type: 'CLEAR_ATTACHMENTS' });
+      expect(deps.observerStreamRef.current).not.toBeNull();
+      // No stop in flight: the composer is busy observing, not cancelling.
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
     });
 
-    it('requests server Stop when idle timeout occurs after turn_created', async () => {
+    it('re-observes the running turn on idle timeout after turn_created', async () => {
       let onEvent: ((event: { type: string; data: any }) => void) | undefined;
       let onError: ((err: Error) => void) | undefined;
-      vi.mocked(api.projects.notebooks.conversations.cancelTurn).mockReturnValueOnce(
-        new Promise<void>(() => {}),
-      );
       vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mockImplementation(
         async (...args: any[]) => {
           onEvent = args[4];
@@ -732,7 +726,7 @@ describe('useConversationActions', () => {
         },
       );
 
-      const { actions, dispatch } = mountActions();
+      const { actions, dispatch, deps } = mountActions();
 
       await act(async () => {
         await actions.sendMessage('hello');
@@ -746,15 +740,20 @@ describe('useConversationActions', () => {
         ));
       });
 
-      expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
-        PROJECT_ID,
-        NOTEBOOK_ID,
-        CONVERSATION_ID,
-        'turn-idle-timeout',
+      // Regression: the interruption must re-open the observer stream for the running
+      // turn, not POST a hard stop. (Hard stops are reserved for the Stop button.)
+      expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: false });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_STREAMING_MODE', payload: { mode: 'observing' } });
+      expect(deps.observeConversationEvents).toHaveBeenCalledWith(
+        expect.any(Function),
+        expect.any(Function),
+        expect.any(Function),
+        expect.any(AbortSignal),
       );
-      expect(dispatch).toHaveBeenCalledWith({ type: 'SET_CANCELLING', payload: true });
+      // The turn stays claimed (the Stop button must still target it while observing).
       expect(dispatch).not.toHaveBeenCalledWith({ type: 'COMPLETE_STREAMING_TURN' });
-      expect(dispatch).not.toHaveBeenCalledWith({ type: 'SET_STREAMING', payload: false });
     });
 
     it('handles stream onError generic failure', async () => {
@@ -797,7 +796,7 @@ describe('useConversationActions', () => {
         new Error('network down'),
       );
 
-      const { actions, dispatch } = mountActions({
+      const { actions, dispatch, deps } = mountActions({
         draftUserContent: 'draft to restore',
         pendingAttachments,
       });
@@ -869,7 +868,7 @@ describe('useConversationActions', () => {
         },
       );
 
-      const { actions, dispatch } = mountActions({
+      const { actions, dispatch, deps } = mountActions({
         draftUserContent: 'draft to restore',
         pendingAttachments,
       });
@@ -883,12 +882,14 @@ describe('useConversationActions', () => {
         onError?.(new Error('stream broke'));
       });
 
+      // A generic transport interruption with a known turnId re-observes the running turn
+      // (no hard stop). Persisted input (turnId known) is consumed into the transcript:
+      // Rule 1 says the draft stays empty -- only undo restores a draft. Chips are cleared.
       await vi.waitFor(() => {
-        expect(api.projects.notebooks.conversations.cancelTurn).toHaveBeenCalledWith(
-          PROJECT_ID, NOTEBOOK_ID, CONVERSATION_ID, 'turn-1',
+        expect(api.projects.notebooks.conversations.cancelTurn).not.toHaveBeenCalled();
+        expect(deps.observeConversationEvents).toHaveBeenCalledWith(
+          expect.any(Function), expect.any(Function), expect.any(Function), expect.any(AbortSignal),
         );
-        // Persisted input (turnId known) is consumed into the transcript: Rule 1 says the
-        // draft stays empty -- only undo restores a draft. Chips are cleared with it.
         expect(dispatch).not.toHaveBeenCalledWith({
           type: 'SET_DRAFT',
           payload: 'draft to restore',
