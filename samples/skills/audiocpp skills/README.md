@@ -49,6 +49,7 @@ Any curl/agent can use the same paths with `X-Audiocpp-Skill-Token`.
 | [`audiocpp-diarize`](audiocpp-diarize/) | Who-spoke-when (overlap windows) + optional speaker SRT/RTTM merge |
 | [`audiocpp-deferred-tts`](audiocpp-deferred-tts/) | Non-catalog TTS families via private engine on the GPU host |
 | [`audiocpp-host-tts`](audiocpp-host-tts/) | User’s own host-native `audiocpp_server` (not GPU host gateway) |
+| [`audiocpp-ming3-narration`](audiocpp-ming3-narration/) | Ming-3 long-form narration: per-paragraph emotion/tempo from **English** `[emotion: happy]` annotations, sentence-safe chunking, voice-locking acoustic prefix. Direct engine call, no gateway |
 
 ## Common rules
 

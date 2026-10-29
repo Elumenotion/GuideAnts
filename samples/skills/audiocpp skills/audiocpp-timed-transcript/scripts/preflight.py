@@ -30,7 +30,7 @@ from skill_gateway_client import probe_gateway, using_skill_gateway
 WRAPPER_ASR = "http://127.0.0.1:8082"
 WRAPPER_TTS = "http://127.0.0.1:8084"
 ENGINE_ASR = "http://127.0.0.1:18082"
-ENGINE_TTS = "http://127.0.0.1:18084"
+ENGINE_TTS = os.environ.get("AUDIOCPP_ENGINE_URL") or "http://127.0.0.1:18084"
 HOST_ENGINE_DEFAULT = "http://host.docker.internal:8080"
 PRIVATE_ENGINE_PORT = 18099
 BINARY_CANDIDATES = ["/usr/local/bin/audiocpp_server"]

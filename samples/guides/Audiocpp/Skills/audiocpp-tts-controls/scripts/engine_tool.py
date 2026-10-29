@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Talk to a raw audiocpp_server engine (wrapper-spawned, skill-spawned, or host).
+"""Talk to a raw audiocpp_server engine (wrapper-spawned, skill-spawned, host, or remote gateway).
 
 Unlike the wrapper `/synthesize` contract, the engine's /v1/audio/speech accepts
 voice_ref / reference_text / language / instructions / seed — the scenario surface
 GuideAnts does not expose. Stdlib-only.
+
+Remote mode (AUDIOCPP_SKILL_BASE_URL): transparent proxy to /asr|/tts|/private
+with /files staging for path-based fields.
 """
 import argparse
 import json
@@ -12,6 +15,14 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from skill_gateway_client import (
+    fail_http,
+    gateway_engine_prefix,
+    gateway_request,
+    stage_file,
+    using_skill_gateway,
+)
 
 ENGINE_TTS_DEFAULT = "http://127.0.0.1:18084"
 ENGINE_ASR_DEFAULT = "http://127.0.0.1:18082"
@@ -32,15 +43,28 @@ def _request_json(url: str, payload: dict | None = None, timeout: int = DEFAULT_
         return response.read()
 
 
-def _fail_http(exc: urllib.error.HTTPError, context: str) -> None:
-    detail = exc.read().decode("utf-8", errors="replace")
-    sys.stderr.write(f"{context} failed with HTTP {exc.code}: {detail}\n")
-    sys.exit(1)
-
-
 def resolve_tts_model(engine_url: str, explicit: str | None) -> str:
     if explicit:
         return explicit
+    if using_skill_gateway():
+        try:
+            body = json.loads(gateway_request("/health", timeout=10).decode("utf-8"))
+        except Exception as exc:
+            sys.stderr.write(f"Could not auto-detect model from skill gateway /health: {exc}\n")
+            sys.exit(1)
+        wrappers = body.get("wrappers") or {}
+        wrapper = (wrappers.get("tts") or {}).get("body") or {}
+        # Back-compat with older gateway health shape
+        if not wrapper:
+            wrapper = ((body.get("upstream") or {}).get("wrapperTts") or {}).get("body") or {}
+        model = wrapper.get("catalogEntryId") if isinstance(wrapper, dict) else None
+        if not model:
+            sys.stderr.write(
+                f"Skill gateway TTS wrapper has no catalogEntryId (is a model loaded?): "
+                f"{json.dumps(body)[:400]}\n"
+            )
+            sys.exit(1)
+        return model
     if engine_url.rstrip("/") != ENGINE_TTS_DEFAULT:
         sys.stderr.write(
             "--model is required for non-default engines (the auto-detect only reads "
@@ -61,10 +85,23 @@ def resolve_tts_model(engine_url: str, explicit: str | None) -> str:
     return model
 
 
+def _parse_request_options(pairs: list[str]) -> dict:
+    """Parse repeatable KEY=VALUE pairs into the body options object."""
+    opts: dict = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key.strip():
+            sys.stderr.write(f"invalid --request-option (need KEY=VALUE): {pair!r}\n")
+            sys.exit(1)
+        opts[key.strip()] = value.strip()
+    return opts
+
+
 def cmd_speech(args: argparse.Namespace) -> None:
     engine_url = args.engine_url.rstrip("/")
+    model = resolve_tts_model(engine_url, args.model)
     payload: dict = {
-        "model": resolve_tts_model(engine_url, args.model),
+        "model": model,
         "input": args.text,
     }
     if args.voice:
@@ -73,7 +110,14 @@ def cmd_speech(args: argparse.Namespace) -> None:
         if not os.path.isfile(args.voice_ref):
             sys.stderr.write(f"voice_ref file not found: {args.voice_ref}\n")
             sys.exit(1)
-        payload["voice_ref"] = os.path.abspath(args.voice_ref)
+        if using_skill_gateway():
+            try:
+                payload["voice_ref"] = stage_file(args.voice_ref)
+            except urllib.error.HTTPError as exc:
+                fail_http(exc, "/files")
+                return
+        else:
+            payload["voice_ref"] = os.path.abspath(args.voice_ref)
     if args.reference_text:
         payload["reference_text"] = args.reference_text
     if args.language:
@@ -82,10 +126,17 @@ def cmd_speech(args: argparse.Namespace) -> None:
         payload["instructions"] = args.instructions
     if args.seed is not None:
         payload["seed"] = args.seed
+    options = _parse_request_options(args.request_option)
+    if options:
+        payload["options"] = options
     try:
-        wav_bytes = _request_json(f"{engine_url}/v1/audio/speech", payload)
+        if using_skill_gateway():
+            prefix = gateway_engine_prefix(engine_url)
+            wav_bytes = gateway_request(f"{prefix}/v1/audio/speech", payload=payload)
+        else:
+            wav_bytes = _request_json(f"{engine_url}/v1/audio/speech", payload)
     except urllib.error.HTTPError as exc:
-        _fail_http(exc, "/v1/audio/speech")
+        fail_http(exc, "/v1/audio/speech")
         return
     if not wav_bytes or wav_bytes[:4] != b"RIFF":
         sys.stderr.write(f"Engine returned non-WAV payload ({len(wav_bytes)} bytes): {wav_bytes[:120]!r}\n")
@@ -93,20 +144,26 @@ def cmd_speech(args: argparse.Namespace) -> None:
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "wb") as handle:
         handle.write(wav_bytes)
-    print(json.dumps({"output": args.output, "bytes": len(wav_bytes), "model": payload["model"]}))
+    print(json.dumps({"output": args.output, "bytes": len(wav_bytes), "model": model}))
 
 
 def cmd_transcribe(args: argparse.Namespace) -> None:
     if not os.path.isfile(args.audio_file):
         sys.stderr.write(f"audio file not found: {args.audio_file}\n")
         sys.exit(1)
-    payload: dict = {"model": args.model, "audio": os.path.abspath(args.audio_file)}
+    payload: dict = {"model": args.model}
     if args.language:
         payload["language"] = args.language
     try:
-        body = _request_json(f"{args.engine_url.rstrip('/')}/v1/audio/transcriptions", payload)
+        if using_skill_gateway():
+            payload["audio"] = stage_file(args.audio_file)
+            prefix = gateway_engine_prefix(args.engine_url)
+            body = gateway_request(f"{prefix}/v1/audio/transcriptions", payload=payload)
+        else:
+            payload["audio"] = os.path.abspath(args.audio_file)
+            body = _request_json(f"{args.engine_url.rstrip('/')}/v1/audio/transcriptions", payload)
     except urllib.error.HTTPError as exc:
-        _fail_http(exc, "/v1/audio/transcriptions")
+        fail_http(exc, "/v1/audio/transcriptions")
         return
     print(body.decode("utf-8", errors="replace"))
 
@@ -115,9 +172,16 @@ def cmd_voices(args: argparse.Namespace) -> None:
     engine_url = args.engine_url.rstrip("/")
     model = resolve_tts_model(engine_url, args.model)
     try:
-        body = _request_json(f"{engine_url}/v1/audio/voices?model={urllib.parse.quote(model)}")
+        if using_skill_gateway():
+            prefix = gateway_engine_prefix(engine_url)
+            body = gateway_request(
+                f"{prefix}/v1/audio/voices?model={urllib.parse.quote(model)}",
+                timeout=30,
+            )
+        else:
+            body = _request_json(f"{engine_url}/v1/audio/voices?model={urllib.parse.quote(model)}")
     except urllib.error.HTTPError as exc:
-        _fail_http(exc, "/v1/audio/voices")
+        fail_http(exc, "/v1/audio/voices")
         return
     print(body.decode("utf-8", errors="replace"))
 
@@ -137,6 +201,7 @@ def main() -> None:
     p_speech.add_argument("--language", default=None)
     p_speech.add_argument("--instructions", default=None, help="Voice-design text (vdes-task models only)")
     p_speech.add_argument("--seed", type=int, default=None)
+    p_speech.add_argument("--request-option", action="append", default=[], metavar="KEY=VALUE", help="Repeatable model request option, merged into the body options object")
 
     p_transcribe = sub.add_parser("transcribe", help="Transcribe a workspace file by path via /v1/audio/transcriptions")
     p_transcribe.add_argument("audio_file")
