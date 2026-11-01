@@ -172,7 +172,9 @@ RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/ga-script-exec /tmp/ga-script-exec.c
 # =============================================================================
 # Vulkan backend (runtime base + python deps builder + dependency image)
 # =============================================================================
-FROM ghcr.io/ggml-org/llama.cpp:server-vulkan-v0.5.0 AS runtime-vulkan-base
+# llama.cpp base image: v0.7.0. Upstream publishes its images under the build tag b11669
+# (commit 620d222 "bump version to 0.7.0"); server-*-v0.7.0 tags do not exist on ghcr.
+FROM ghcr.io/ggml-org/llama.cpp:server-vulkan-b11669 AS runtime-vulkan-base
 ARG GA_UBUNTU_MIRROR_URL
 ENV DEBIAN_FRONTEND=noninteractive
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \

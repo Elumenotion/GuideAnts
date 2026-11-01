@@ -288,5 +288,81 @@ class RouterPresetTests(unittest.TestCase):
         self.assertIn(entries["alias"].extras["ctx-size"], {"1111", "2222"})
 
 
+    # --- reload-policy gate (the active-default defect fix) -------------------------------
+    # upsert_router_entry must choose the reload mechanism from what the caller says is
+    # in use, not from "the INI changed". The admin service resolves "in use" by checking
+    # whether the edited alias is currently LOADED in the running router.
+
+    def _seed_ini(self, text: str) -> None:
+        with open(router.ROUTER_CONFIG_PATH, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def test_not_active_alias_triggers_soft_reload_only(self) -> None:
+        # Model the caller is NOT using (new setup / unused model): INI must be made
+        # visible via the non-destructive soft reload, and the destructive hard reload
+        # (SIGTERM + respawn) must NOT fire. This is the defect fix: editing a non-active
+        # model must not kill the parent router or the in-flight turns on the real active
+        # model.
+        self._seed_ini("version = 1\n\n[other]\nmodel = /m/other.gguf\nmmproj = \n")
+        events: list[str] = []
+        ini, runtime_apply = router.upsert_router_entry(
+            "other",
+            "/m/other.gguf",
+            "",
+            preset={"ctx-size": "4096"},
+            preset_mode="replace",
+            trigger_reload=False,
+            reload_callback=lambda: (events.append("hard"), router.RuntimeApplyResult(True, "h"))[1],
+            soft_reload_callback=lambda: (events.append("soft"), router.RuntimeApplyResult(True, "s"))[1],
+        )
+        self.assertEqual(events, ["soft"])
+        self.assertIsNotNone(runtime_apply)
+        assert runtime_apply is not None
+        self.assertTrue(runtime_apply.applied)
+
+    def test_active_alias_triggers_hard_reload_only(self) -> None:
+        # Model the caller IS using (currently loaded / active default): the destructive
+        # hard reload fires so its new argv takes effect, and the soft reload is bypassed.
+        self._seed_ini("version = 1\n\n[active]\nmodel = /m/a.gguf\nmmproj = \n")
+        events: list[str] = []
+        router.upsert_router_entry(
+            "active",
+            "/m/a.gguf",
+            "",
+            preset={"ctx-size": "8192"},
+            preset_mode="replace",
+            trigger_reload=True,
+            reload_callback=lambda: (events.append("hard"), router.RuntimeApplyResult(True, "h"))[1],
+            soft_reload_callback=lambda: (events.append("soft"), router.RuntimeApplyResult(True, "s"))[1],
+        )
+        self.assertEqual(events, ["hard"])
+
+    def test_unchanged_ini_triggers_no_reload(self) -> None:
+        # A no-op edit must not reload in either mode.
+        self._seed_ini("version = 1\n\n[alias]\nmodel = /m/a.gguf\nmmproj = \nctx-size = 4096\n")
+        events: list[str] = []
+        ini, runtime_apply = router.upsert_router_entry(
+            "alias",
+            "/m/a.gguf",
+            "",
+            preset={"ctx-size": "4096"},
+            preset_mode="replace",
+            trigger_reload=True,
+            reload_callback=lambda: (events.append("hard"), router.RuntimeApplyResult(True, "h"))[1],
+            soft_reload_callback=lambda: (events.append("soft"), router.RuntimeApplyResult(True, "s"))[1],
+        )
+        self.assertEqual(events, [])
+        self.assertIsNone(runtime_apply)
+
+    def test_remove_router_entry_uses_shared_lock_and_writer(self) -> None:
+        # The DELETE path now lives in the shared module: it removes from the same file the
+        # upsert writes and returns the removed (modelPath, mmprojPath).
+        self._seed_ini("version = 1\n\n[alias]\nmodel = /m/a.gguf\nmmproj = /m/mm.gguf\n")
+        removed = router.remove_router_entry("alias")
+        self.assertEqual(removed, ("/m/a.gguf", "/m/mm.gguf"))
+        self.assertNotIn("alias", router.read_router_entries())
+        self.assertIsNone(router.remove_router_entry("alias"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
-FROM docker.io/searxng/searxng:latest AS searxng-source
+FROM docker.io/searxng/searxng:2026.10.30-ffa88e3ba AS searxng-source
 
-FROM mcr.microsoft.com/playwright/python:v1.56.0-noble
+FROM mcr.microsoft.com/playwright/python:v1.64.1-noble
 
 WORKDIR /usr/local/searxng
 
@@ -13,52 +13,53 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
-        annotated-doc==0.0.4 \
-        anyio==4.13.0 \
-        async-timeout==5.0.1 \
+        annotated-doc==0.0.5 \
+        annotated-types==0.8.0 \
+        anyio==4.16.0 \
         babel==2.18.0 \
         blinker==1.9.0 \
-        certifi==2026.7.22 \
-        click==8.3.2 \
-        curl_cffi==0.16.3 \
-        Flask==3.1.3 \
+        certifi==2026.10.23 \
+        cffi==2.1.1 \
+        click==8.5.0 \
+        curl_cffi==0.17.0 \
+        fastapi==0.136.3 \
         flask-babel==4.0.0 \
-        granian==2.7.3 \
+        flask==3.1.3 \
+        granian==2.8.5 \
+        greenlet==3.5.6 \
         h11==0.16.0 \
-        h2==4.3.0 \
-        hpack==4.1.0 \
-        httpcore==1.0.9 \
-        httpx==0.28.1 \
-        httpx-socks==0.10.0 \
-        hyperframe==6.1.0 \
-        idna==3.11 \
+        idna==3.20 \
         isodate==0.7.2 \
         itsdangerous==2.2.0 \
         Jinja2==3.1.6 \
         lxml==6.1.3 \
         markdown-it-py==4.2.0 \
-        MarkupSafe==3.0.3 \
+        MarkupSafe==3.0.4 \
         mdurl==0.1.2 \
-        msgspec==0.21.1 \
+        msgspec==0.22.0 \
+        playwright==1.64.1 \
+        pycparser==3.12 \
+        pydantic-core==2.50.2 \
+        pydantic==2.14.2 \
+        pyee==13.0.1 \
         Pygments==2.21.0 \
-        python-dateutil==2.9.0.post0 \
-        python-socks==2.8.1 \
-        pytz==2026.1.post1 \
+        python-dateutil==3.0.0 \
+        pytz==2026.6 \
         PyYAML==6.0.3 \
         rich==15.0.0 \
-        setproctitle==1.3.7 \
+        setproctitle==1.3.8 \
         shellingham==1.5.4 \
         six==1.17.0 \
-        sniffio==1.3.1 \
-        typer==0.27.2 \
-        typing_extensions==4.16.0 \
-        valkey==6.1.1 \
-        Werkzeug==3.1.8 \
-        whitenoise==6.12.0 \
-        playwright==1.56.0 \
-        fastapi==0.136.3 \
         starlette==1.2.1 \
-        uvicorn==0.34.2 && \
+        typer==0.27.3 \
+        typing-inspection==0.4.4 \
+        typing_extensions==4.16.0 \
+        tzdata==2026.6 \
+        uvicorn==0.34.2 \
+        valkey==6.1.1 \
+        Werkzeug==3.1.9 \
+        whitenoise==6.12.0 \
+        granian[pname]==2.8.5 && \
     python -m playwright install --with-deps chromium
 
 COPY --from=searxng-source /usr/local/searxng/searx /usr/local/searxng/searx
