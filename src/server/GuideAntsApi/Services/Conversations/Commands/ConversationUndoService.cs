@@ -118,13 +118,21 @@ public sealed class ConversationUndoService : IConversationUndoService
                     .Where(t => t.TurnIndex >= targetMessage.TurnIndex)
                     .ToListAsync();
 
-                // Refuse undo while any in-process run for these turns is still alive so we never
-                // delete rows a worker will later try to terminalize or trace.
-                var activeTurn = turnsToRemove.FirstOrDefault(t => _streamRunRegistry.IsInFlight(t.Id));
-                if (activeTurn != null)
+                // Refuse undo while an in-process run is alive and its durable turn is still
+                // pre-terminal: that is when the worker may yet terminalize the turn or write
+                // trace segments, and the delete would race those writes. Once the hard-stop
+                // fence commits, the turn row is terminal, a detached unwinding worker is
+                // fenced out of every write by the turn's ExecutionId, and its trace appends
+                // no-op against deleted rows - its physical unwind can no longer endanger the
+                // delete, so Undo must not be held behind it.
+                var liveWorkerTurn = turnsToRemove.FirstOrDefault(t =>
+                    _streamRunRegistry.IsInFlight(t.Id)
+                    && (string.Equals(t.Status, "streaming", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(t.Status, "pending_client_tool", StringComparison.OrdinalIgnoreCase)));
+                if (liveWorkerTurn != null)
                 {
                     throw new InvalidOperationException(
-                        $"Cannot undo while turn {activeTurn.TurnIndex} is still streaming");
+                        $"Cannot undo while turn {liveWorkerTurn.TurnIndex} is still streaming");
                 }
 
                 // A worker on another API instance is invisible to this process. A durable

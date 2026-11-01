@@ -238,8 +238,11 @@ public sealed class OpenRouterChatClientDeepTests
     }
 
     [TestMethod]
-    public async Task GetCompletionAsync_ThrowsForUnsupportedContentPart()
+    public async Task GetCompletionAsync_EmptyContentPart_SerializesAsEmptyString()
     {
+        // An empty ChatContent is neither IsText nor IsImage. It used to kill the whole turn
+        // with "Unsupported OpenRouter content item." while building the request body - before a
+        // single token was sent - which took the attachment messages in the same request with it.
         var handler = new OrCapturingHandler(_ => JsonResponse(TextResponse("hi")));
         using var httpClient = new HttpClient(handler);
         var client = new OpenRouterChatClient(httpClient, new OpenRouterChatConfig { ApiKey = "k" }, "m");
@@ -248,9 +251,10 @@ public sealed class OpenRouterChatClientDeepTests
             messages: [new ChatMessage(ChatRole.User, new List<ChatContent> { new() })],
             model: null);
 
-        var act = () => client.GetCompletionAsync(request);
+        await client.GetCompletionAsync(request);
 
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Unsupported OpenRouter content item.");
+        using var json = JsonDocument.Parse(handler.LastRequestBody);
+        json.RootElement.GetProperty("messages")[0].GetProperty("content").GetString().Should().Be("");
     }
 
     [TestMethod]

@@ -30,6 +30,38 @@ public sealed class ThreadRunTests
         return (T)method.Invoke(null, args)!;
     }
 
+    // B: an attachment-only turn has empty Instructions and carries its content in `previous`.
+    [TestMethod]
+    public void ShouldAppendUserMessage_AttachmentOnlyTurn_SkipsEmptyUserMessage()
+    {
+        var previous = new List<ChatMessage>
+        {
+            new(ChatRole.User, "Attachment: notes.md"),
+            new(ChatRole.User, "The notes.md file contains:\n\n---\n# Title")
+        };
+
+        ThreadRun.ShouldAppendUserMessage(string.Empty, previous).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void ShouldAppendUserMessage_InstructionsPresent_Appends()
+    {
+        var previous = new List<ChatMessage> { new(ChatRole.User, "Attachment: notes.md") };
+
+        ThreadRun.ShouldAppendUserMessage("summarize this", previous).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void ShouldAppendUserMessage_NothingWouldSpeakForUser_StillAppends()
+    {
+        // Never leave the prompt without a user turn: if `previous` produced no user message
+        // (attachment failed to resolve), the empty instruction line is what the model gets.
+        ThreadRun.ShouldAppendUserMessage(string.Empty, new List<ChatMessage>()).Should().BeTrue();
+
+        var assistantOnly = new List<ChatMessage> { new(ChatRole.Assistant, "earlier answer") };
+        ThreadRun.ShouldAppendUserMessage(string.Empty, assistantOnly).Should().BeTrue();
+    }
+
     [TestMethod]
     public void NormalizeAssistantText_ReplacesEmDashWithEnDash()
     {

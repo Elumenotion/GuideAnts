@@ -88,7 +88,7 @@ describe('useStreamingEventHandler error branch', () => {
   });
 
   it('dispatches llama-runtime-crashed with OutOfMemory reason when code is local_llm_oom', () => {
-    const { handler, showToast } = mountHandler();
+    const { handler, showToast } = mountHandler({}, { getActiveStreamTurnId: () => 'turn-live' });
 
     handler({
       type: 'error',
@@ -112,7 +112,7 @@ describe('useStreamingEventHandler error branch', () => {
   });
 
   it('dispatches llama-runtime-crashed with Crashed reason when code is local_llm_crashed', () => {
-    const { handler, showToast } = mountHandler();
+    const { handler, showToast } = mountHandler({}, { getActiveStreamTurnId: () => 'turn-live' });
 
     handler({
       type: 'error',
@@ -130,6 +130,132 @@ describe('useStreamingEventHandler error branch', () => {
     expect(event.detail.reason).toBe('Crashed');
     expect(event.detail.code).toBe('local_llm_crashed');
     expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('shows the crash dialog for a real mid-stream crash (stream in flight when the error is processed)', () => {
+    let activeTurn: string | null = 'turn-live';
+    const { handler } = mountHandler({}, { getActiveStreamTurnId: () => activeTurn });
+
+    handler({
+      type: 'error',
+      data: {
+        code: 'local_llm_crashed',
+        reason: 'Crashed',
+        message: 'The response ended prematurely.',
+        type: 'LlamaRuntimeCrashedException',
+      },
+    });
+
+    const crashEvents = dispatchEventSpy.mock.calls.filter(
+      (c) => (c[0] as CustomEvent).type === 'llama-runtime-crashed',
+    );
+    expect(crashEvents).toHaveLength(1);
+  });
+
+  it('does not show the crash dialog when the dead stream\'s error redelivers with no stream in flight', () => {
+    let activeTurn: string | null = 'turn-live';
+    const { handler, dispatch } = mountHandler({}, { getActiveStreamTurnId: () => activeTurn });
+
+    // The crash fires while the stream is in flight — dialog shown (correct, first time).
+    handler({
+      type: 'error',
+      data: {
+        code: 'local_llm_crashed',
+        reason: 'Crashed',
+        message: 'The response ended prematurely.',
+        type: 'LlamaRuntimeCrashedException',
+      },
+    });
+    expect(
+      dispatchEventSpy.mock.calls.filter((c) => (c[0] as CustomEvent).type === 'llama-runtime-crashed'),
+    ).toHaveLength(1);
+
+    // The stream is terminalized (active turn cleared) — e.g. the user restarted the service
+    // and the model is loading. No stream exists; loading a model cannot create one.
+    activeTurn = null;
+    dispatchEventSpy.mockClear();
+
+    // The dead stream's error redelivers. No stream in flight => no dialog.
+    handler({
+      type: 'error',
+      data: {
+        code: 'local_llm_crashed',
+        reason: 'Crashed',
+        message: 'The response ended prematurely.',
+        type: 'LlamaRuntimeCrashedException',
+      },
+    });
+
+    expect(
+      dispatchEventSpy.mock.calls.filter((c) => (c[0] as CustomEvent).type === 'llama-runtime-crashed'),
+    ).toHaveLength(0);
+    // Conversation-state handling still applies to the redelivery.
+    expect(dispatch).toHaveBeenCalledWith({ type: 'SET_STREAMING_ERROR', payload: 'The response ended prematurely.' });
+    expect(dispatch).toHaveBeenCalledWith({ type: 'SET_STREAMING', payload: false });
+  });
+
+  it('shows the crash dialog again when a genuine crash hits a new stream', () => {
+    let activeTurn: string | null = 'turn-live';
+    const { handler } = mountHandler({}, { getActiveStreamTurnId: () => activeTurn });
+
+    // First crash on the in-flight stream — dialog shown.
+    handler({
+      type: 'error',
+      data: { code: 'local_llm_crashed', reason: 'Crashed', message: 'boom', type: 'LlamaRuntimeCrashedException' },
+    });
+    expect(
+      dispatchEventSpy.mock.calls.filter((c) => (c[0] as CustomEvent).type === 'llama-runtime-crashed'),
+    ).toHaveLength(1);
+
+    // Stream terminalized; the stale error redelivers — suppressed.
+    activeTurn = null;
+    handler({
+      type: 'error',
+      data: { code: 'local_llm_crashed', reason: 'Crashed', message: 'boom', type: 'LlamaRuntimeCrashedException' },
+    });
+    expect(
+      dispatchEventSpy.mock.calls.filter((c) => (c[0] as CustomEvent).type === 'llama-runtime-crashed'),
+    ).toHaveLength(1);
+
+    // The user sends a new message: a new turn is created and its stream is in flight.
+    handler({ type: 'turn_created', data: { turnId: 'turn-new' } });
+    activeTurn = 'turn-new';
+
+    // A crash on the new stream is a genuine new error — dialog shown.
+    handler({
+      type: 'error',
+      data: { code: 'local_llm_crashed', reason: 'Crashed', message: 'boom 2', type: 'LlamaRuntimeCrashedException' },
+    });
+    const crashEvents = dispatchEventSpy.mock.calls.filter(
+      (c) => (c[0] as CustomEvent).type === 'llama-runtime-crashed',
+    );
+    expect(crashEvents).toHaveLength(2);
+    expect((crashEvents[1][0] as CustomEvent).detail.message).toBe('boom 2');
+  });
+
+  it('suppresses a stale OOM redelivery through the observer path when no stream is in flight', () => {
+    let activeTurn: string | null = 'turn-live';
+    const { handler } = mountHandler({}, { getActiveStreamTurnId: () => activeTurn });
+
+    handler({
+      type: 'error',
+      data: { code: 'local_llm_oom', reason: 'OutOfMemory', message: 'OOM', type: 'LlamaRuntimeCrashedException' },
+    });
+    expect(
+      dispatchEventSpy.mock.calls.filter((c) => (c[0] as CustomEvent).type === 'llama-runtime-crashed'),
+    ).toHaveLength(1);
+
+    activeTurn = null;
+    dispatchEventSpy.mockClear();
+
+    handler({
+      type: 'error',
+      data: { code: 'local_llm_oom', reason: 'OutOfMemory', message: 'OOM', type: 'LlamaRuntimeCrashedException' },
+    }, 'observer');
+
+    expect(
+      dispatchEventSpy.mock.calls.filter((c) => (c[0] as CustomEvent).type === 'llama-runtime-crashed'),
+    ).toHaveLength(0);
   });
 
   it('dispatches llama-runtime-requires-load when code is local_llm_not_ready', () => {
@@ -280,6 +406,7 @@ describe('useStreamingEventHandler error branch', () => {
 
 describe('useStreamingEventHandler streaming branches', () => {
   let dispatchEventSpy: ReturnType<typeof vi.spyOn>;
+  let realDispatchEvent: (event: Event) => boolean;
 
   beforeEach(() => {
     vi.clearAllMocks();

@@ -1266,18 +1266,37 @@ namespace GuideAntsApi.DataModel
         /// Prevents creating messages with newer timestamps when higher sequence numbers already exist in the same turn.
         /// </summary>
         public override int SaveChanges()
-        {
-            ValidateMessageTimestampOrdering();
-            EnforceUtcOnDateTimeProperties();
-            return base.SaveChanges();
-        }
+            => SaveChangesWithGuards(base.SaveChanges);
 
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
+            => SaveChangesWithGuards(() => base.SaveChanges(acceptAllChangesOnSuccess));
+
+        /// <summary>
+        /// Runs the save-time guards exactly once per SaveChanges call. DbContext's
+        /// parameterless overloads delegate to the acceptAllChangesOnSuccess overloads
+        /// (they are the same logical save), so guarding in every overload used to run
+        /// the whole pre-save pass twice. The guard is set and cleared synchronously
+        /// around both the guards and the base call, so the nested invocation skips.
+        /// </summary>
+        private int SaveChangesWithGuards(Func<int> save)
         {
-            ValidateMessageTimestampOrdering();
-            EnforceUtcOnDateTimeProperties();
-            return base.SaveChanges(acceptAllChangesOnSuccess);
+            if (_saveGuardsRunning)
+                return save();
+
+            _saveGuardsRunning = true;
+            try
+            {
+                ValidateMessageTimestampOrdering();
+                EnforceUtcOnDateTimeProperties();
+                return save();
+            }
+            finally
+            {
+                _saveGuardsRunning = false;
+            }
         }
+
+        private bool _saveGuardsRunning;
 
         /// <summary>
         /// Validates message timestamp ordering before saving changes.
@@ -1287,9 +1306,20 @@ namespace GuideAntsApi.DataModel
         {
             // Single override with a default parameter covers both the zero-arg and
             // one-arg async call shapes (they are the same method signature).
-            ValidateMessageTimestampOrdering();
-            EnforceUtcOnDateTimeProperties();
-            return await base.SaveChangesAsync(cancellationToken);
+            if (_saveGuardsRunning)
+                return await base.SaveChangesAsync(cancellationToken);
+
+            _saveGuardsRunning = true;
+            try
+            {
+                ValidateMessageTimestampOrdering();
+                EnforceUtcOnDateTimeProperties();
+                return await base.SaveChangesAsync(cancellationToken);
+            }
+            finally
+            {
+                _saveGuardsRunning = false;
+            }
         }
 
         /// <summary>
@@ -1351,10 +1381,29 @@ namespace GuideAntsApi.DataModel
         /// for the explicit-acceptAllChangesOnSuccess async overload.
         /// </summary>
         public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+            => SaveChangesWithGuardsAsync(() => base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken));
+
+        /// <summary>
+        /// Async twin of <see cref="SaveChangesWithGuards"/>: runs the pre-save guards
+        /// once per logical save. DbContext's parameterless SaveChangesAsync delegates
+        /// to this overload, so the outer call has usually already validated.
+        /// </summary>
+        private async Task<int> SaveChangesWithGuardsAsync(Func<Task<int>> save)
         {
-            ValidateMessageTimestampOrdering();
-            EnforceUtcOnDateTimeProperties();
-            return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            if (_saveGuardsRunning)
+                return await save();
+
+            _saveGuardsRunning = true;
+            try
+            {
+                ValidateMessageTimestampOrdering();
+                EnforceUtcOnDateTimeProperties();
+                return await save();
+            }
+            finally
+            {
+                _saveGuardsRunning = false;
+            }
         }
 
         private void ValidateMessageTimestampOrdering()
@@ -1367,6 +1416,19 @@ namespace GuideAntsApi.DataModel
             if (newMessages.Count == 0)
                 return;
 
+            // Conversations being created by THIS save (a conversation copy inserts a
+            // whole transcript at once) are exempt from this check. The rule exists to
+            // stop a live append from landing ahead of higher-sequence messages already
+            // stored in a turn; a brand-new conversation has no stored rows to conflict
+            // with, and its rows are copied verbatim from another transcript - including
+            // any Created-vs-MessageSequence inversions written before this validator
+            // existed, which would otherwise make such conversations uncopyable.
+            var conversationsCreatedInThisSave = ChangeTracker
+                .Entries<NotebookConversation>()
+                .Where(e => e.State == Microsoft.EntityFrameworkCore.EntityState.Added)
+                .Select(e => e.Entity.Id)
+                .ToHashSet();
+
             // Group new messages by conversation and turn for efficient checking
             var newMessagesByTurn = newMessages
                 .GroupBy(m => new { m.NotebookConversationId, m.TurnIndex })
@@ -1376,6 +1438,18 @@ namespace GuideAntsApi.DataModel
             {
                 var conversationId = turnGroup.Key.NotebookConversationId;
                 var turnIndex = turnGroup.Key.TurnIndex;
+
+                if (conversationsCreatedInThisSave.Contains(conversationId))
+                {
+                    // Bulk import (a conversation copy): every row is new, there are no
+                    // existing rows to conflict with, and the batch's own sequence order
+                    // is copied verbatim from the source transcript - including any
+                    // Created-vs-Sequence inversions that predate this validator. Skip
+                    // the turn group entirely; append protection still applies to every
+                    // conversation that is not being created by this save.
+                    continue;
+                }
+
                 var newMessagesInTurn = turnGroup.ToList();
 
                 // Get existing messages in the database for this turn

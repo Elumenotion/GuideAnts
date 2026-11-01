@@ -1,4 +1,5 @@
 import { ModelDto } from '../../../types/guides';
+import { modelOptionLabel } from '../../../lib/modelOptionLabel';
 
 interface ModelSelectorProps {
   models: ModelDto[];
@@ -49,23 +50,27 @@ export function ModelSelector({
 
             {activeModels.length > 0 && (
               <optgroup label="Active Models">
-                {activeModels.map((model) => (
-                  <option key={model.modelId} value={model.modelId}>
-                    {model.displayName}
-                    {model.description ? ` - ${model.description}` : ''}
-                  </option>
-                ))}
+                {activeModels.map((model) => {
+                  const optionLabel = modelOptionLabel(model.displayName, model.description, ' - ');
+                  return (
+                    <option key={model.modelId} value={model.modelId} title={optionLabel.title}>
+                      {optionLabel.label}
+                    </option>
+                  );
+                })}
               </optgroup>
             )}
 
             {inactiveModels.length > 0 && (
               <optgroup label="Inactive Models">
-                {inactiveModels.map((model) => (
-                  <option key={model.modelId} value={model.modelId}>
-                    {model.displayName}
-                    {model.description ? ` - ${model.description}` : ''}
-                  </option>
-                ))}
+                {inactiveModels.map((model) => {
+                  const optionLabel = modelOptionLabel(model.displayName, model.description, ' - ');
+                  return (
+                    <option key={model.modelId} value={model.modelId} title={optionLabel.title}>
+                      {optionLabel.label}
+                    </option>
+                  );
+                })}
               </optgroup>
             )}
           </select>

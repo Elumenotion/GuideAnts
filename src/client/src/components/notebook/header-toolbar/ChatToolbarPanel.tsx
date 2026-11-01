@@ -6,6 +6,7 @@ import type { ChatPanelProps } from './types';
 import { WORKSPACE_CONTROLS_COPY, statusToneClass } from './toolbarFormatters';
 import type { ChatDefaultsDto, UpdateChatDefaultsRequest } from '../../../types/settings';
 import type { ModelDto } from '../../../types/guides';
+import { modelOptionLabel } from '../../../lib/modelOptionLabel';
 import {
   buildChatDefaultsModelChangeRequest,
   buildChatDefaultsUpdateRequest,
@@ -321,12 +322,14 @@ export function ChatToolbarPanel({
           <option value="">Use assistant's model</option>
           {catalogModels
             .filter((model) => model.isActive)
-            .map((model) => (
-              <option key={model.modelId} value={model.modelId}>
-                {model.displayName}
-                {model.description ? ` — ${model.description}` : ''}
-              </option>
-            ))}
+            .map((model) => {
+              const optionLabel = modelOptionLabel(model.displayName, model.description);
+              return (
+                <option key={model.modelId} value={model.modelId} title={optionLabel.title}>
+                  {optionLabel.label}
+                </option>
+              );
+            })}
         </select>
       </div>
 

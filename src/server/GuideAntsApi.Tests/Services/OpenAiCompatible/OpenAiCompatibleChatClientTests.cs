@@ -277,6 +277,52 @@ public sealed class OpenAiCompatibleChatClientTests
         body.RootElement.TryGetProperty("stream_options", out _).Should().BeFalse();
     }
 
+    [TestMethod]
+    public async Task GetCompletionAsync_EmptyContentPart_SerializesAsEmptyString()
+    {
+        // Repro: send a message whose only content part is empty (ChatContent("") is neither
+        // IsText nor IsImage). This used to throw "Unsupported OpenAI-compatible content item."
+        // while building the request body, so the turn died before any token was sent.
+        var handler = new CapturingHandler(_ => JsonResponse(TextResponse("hi")));
+        using var httpClient = new HttpClient(handler);
+        var client = CreateClient(httpClient);
+
+        await client.GetCompletionAsync(new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, new List<ChatContent> { new() })],
+            model: null));
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody);
+        body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString().Should().Be("");
+    }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_DropsEmptyPart_AndKeepsAttachmentContent()
+    {
+        // An attachment-only turn carries the attachment lines in their own messages, but any message
+        // that mixes an empty part with real content must still ship the real content.
+        var handler = new CapturingHandler(_ => JsonResponse(TextResponse("hi")));
+        using var httpClient = new HttpClient(handler);
+        var client = CreateClient(httpClient);
+
+        var parts = new List<ChatContent>
+        {
+            new(),
+            new("Attachment: notes.md"),
+            new(new ChatImageUrl("data:image/png;base64,AAA="))
+        };
+
+        await client.GetCompletionAsync(new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, parts)],
+            model: null));
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody);
+        var content = body.RootElement.GetProperty("messages")[0].GetProperty("content");
+        content.GetArrayLength().Should().Be(2);
+        content[0].GetProperty("type").GetString().Should().Be("text");
+        content[0].GetProperty("text").GetString().Should().Be("Attachment: notes.md");
+        content[1].GetProperty("type").GetString().Should().Be("image_url");
+    }
+
     private sealed class CapturingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {
         public Uri? LastRequestUri { get; private set; }

@@ -284,12 +284,33 @@ public sealed class OpenAiCompatibleChatClient : IChatCompletionClient
             var toolCalls = message.ToolCalls?.Count > 0
                 ? message.ToolCalls.Select(ToToolCall).ToList()
                 : null;
-            var contentText = CanUseStringContent(message.Content)
-                ? message.Content[0].Text
-                : null;
-            var contentParts = contentText == null
-                ? message.Content.Select(ToContentPart).ToList()
-                : null;
+            string? contentText;
+            IReadOnlyList<OpenAiCompatibleChatContentPart>? contentParts;
+            if (message.Content.Count == 0)
+            {
+                contentText = null;
+                contentParts = Array.Empty<OpenAiCompatibleChatContentPart>();
+            }
+            else
+            {
+                var mappableContent = GetMappableContent(message.Content);
+                if (mappableContent.Count == 0)
+                {
+                    // Nothing mappable: send an empty string rather than an unmappable part.
+                    contentText = string.Empty;
+                    contentParts = null;
+                }
+                else if (CanUseStringContent(mappableContent))
+                {
+                    contentText = mappableContent[0].Text;
+                    contentParts = null;
+                }
+                else
+                {
+                    contentText = null;
+                    contentParts = mappableContent.Select(ToContentPart).ToList();
+                }
+            }
 
             return OpenAiCompatibleChatMessage.Create(
                 role: ToRole(message.Role),
@@ -302,6 +323,25 @@ public sealed class OpenAiCompatibleChatClient : IChatCompletionClient
 
         private static bool CanUseStringContent(IReadOnlyList<ChatContent> content) =>
             content.Count == 1 && content[0].IsText;
+
+        /// <summary>
+        /// Drops empty text parts (e.g. <c>new ChatContent("")</c>) that are not <see cref="ChatContent.IsText"/>
+        /// but still appear in <see cref="ChatMessage.Content"/>: an attachment-only turn carries its text in a
+        /// separate user message and leaves an empty user part behind, which cannot be mapped to a content part.
+        /// </summary>
+        private static IReadOnlyList<ChatContent> GetMappableContent(IReadOnlyList<ChatContent> content)
+        {
+            var filtered = new List<ChatContent>(content.Count);
+            foreach (var part in content)
+            {
+                if (part.IsImage || part.IsText)
+                {
+                    filtered.Add(part);
+                }
+            }
+
+            return filtered;
+        }
 
         private static OpenAiCompatibleChatTool ToTool(ChatToolDefinition tool)
         {

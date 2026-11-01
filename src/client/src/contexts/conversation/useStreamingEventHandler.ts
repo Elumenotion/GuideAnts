@@ -69,6 +69,7 @@ export function useStreamingEventHandler(
     projectId, notebookId, conversationId, setCurrentStreamController,
   } = deps;
 
+
   return useCallback((event: { type: string; data: any }, source?: 'send' | 'observer') => {
     if (['user_message', 'tool_result', 'assistant_message'].includes(event.type)) {
       console.log('🔥 SSE Event:', event.type, event.data);
@@ -356,6 +357,15 @@ export function useStreamingEventHandler(
           }
           console.error('Streaming error received:', event.data);
 
+          // A crash error is only real if a stream is in flight at the moment it is processed.
+          // The active stream turn is set when the turn is created and cleared the instant the
+          // stream terminalizes, so a stale redelivery of a dead stream's error — which arrives
+          // with no stream in flight (e.g. as a model load completes, or after a container stop)
+          // — cannot open the crash dialog. A real mid-stream crash always arrives while its
+          // own stream is still in flight, so it always shows. Captured BEFORE the terminal
+          // state processing below clears the active turn.
+          const streamInFlight = deps.getActiveStreamTurnId?.() != null;
+
           const errorMessage = event.data?.message || 'An error occurred during the conversation';
           const errorAction = event.data?.action;
           let displayMessage = errorAction ? `${errorMessage}\n\n${errorAction}` : errorMessage;
@@ -389,18 +399,27 @@ export function useStreamingEventHandler(
           dispatch({ type: 'COMPLETE_STREAMING_TURN' });
 
           if (errorCode === 'local_llm_oom' || errorCode === 'local_llm_crashed') {
-            // Hand off to the notebook-level crash modal. We *don't* raise a toast here — the
-            // modal is the user-visible error surface in this branch, and a stacked toast just
-            // adds noise while the user is already looking at a red dialog. The reason payload
-            // is passed through so the modal copy can distinguish OOM from generic crashes.
-            window.dispatchEvent(new CustomEvent('llama-runtime-crashed', {
-              detail: {
-                reason: event.data?.reason || (errorCode === 'local_llm_oom' ? 'OutOfMemory' : 'Crashed'),
-                message: displayMessage,
-                upstreamDetail: event.data?.innerMessage || null,
-                code: errorCode
-              }
-            }));
+            if (!streamInFlight) {
+              // No stream is in flight: this is a stale redelivery of a dead stream's error,
+              // not a new failure. A model load (or a container stop) cannot create a stream,
+              // so there is nothing to report — do not open the crash dialog.
+              console.debug('Suppressing llama-runtime-crashed: no stream in flight (stale dead-stream error).', {
+                turnId: event.data?.turnId ?? null,
+              });
+            } else {
+              // Hand off to the notebook-level crash modal. We *don't* raise a toast here — the
+              // modal is the user-visible error surface in this branch, and a stacked toast just
+              // adds noise while the user is already looking at a red dialog. The reason payload
+              // is passed through so the modal copy can distinguish OOM from generic crashes.
+              window.dispatchEvent(new CustomEvent('llama-runtime-crashed', {
+                detail: {
+                  reason: event.data?.reason || (errorCode === 'local_llm_oom' ? 'OutOfMemory' : 'Crashed'),
+                  message: displayMessage,
+                  upstreamDetail: event.data?.innerMessage || null,
+                  code: errorCode
+                }
+              }));
+            }
           } else if (errorCode === 'local_llm_not_ready') {
             // Runtime is up, just no model loaded. Route through the *same* event the notebook-
             // level check uses so exactly one code path opens the load dialog. No restart — the

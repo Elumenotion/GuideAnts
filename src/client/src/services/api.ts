@@ -1175,10 +1175,10 @@ export const api = {
                     callApi<import('../types/notebook').NotebookConversationDto[]>(`/projects/${projectId}/notebooks/${notebookId}/conversations`),
                 get: (projectId: string, notebookId: string, convoId: string) =>
                     callApi<import('../types/notebook').NotebookConversationWithMessagesDto>(`/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}`),
-                create: (projectId: string, notebookId: string, title: string) =>
+                create: (projectId: string, notebookId: string, title: string, sourceConversationId?: string) =>
                     callApi<import('../types/notebook').NotebookConversationDto>(`/projects/${projectId}/notebooks/${notebookId}/conversations`, {
                         method: 'POST',
-                        body: JSON.stringify({ title }),
+                        body: JSON.stringify(sourceConversationId ? { title, sourceConversationId } : { title }),
                     }),
                 rename: (projectId: string, notebookId: string, convoId: string, title: string) =>
                     callApi<void>(`/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}`, {

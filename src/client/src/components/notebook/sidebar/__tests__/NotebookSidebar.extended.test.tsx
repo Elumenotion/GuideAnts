@@ -255,7 +255,75 @@ describe('NotebookSidebar extended coverage', () => {
 
     await user.pointer({ keys: '[MouseRight]', target: screen.getByText('First Chat') });
     await user.click(await findPortalButton('Copy'));
-    expect(mockCreateConversation).toHaveBeenCalledWith('First Chat (Copy)');
+    expect(mockCreateConversation).toHaveBeenCalledWith('First Chat (Copy)', 'convo-1');
+    // Wait for the in-flight POST to settle so the follow-up refresh fires.
+    await waitFor(() => expect(mockRefreshConversations).toHaveBeenCalled());
+  });
+
+  it('shows an in-progress toast immediately when copying a conversation', async () => {
+    let resolveCreate: (value: { id: string }) => void = () => {};
+    mockCreateConversation.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveCreate = resolve; })
+    );
+    const user = userEvent.setup();
+    renderSidebar();
+
+    await user.pointer({ keys: '[MouseRight]', target: screen.getByText('First Chat') });
+    await user.click(await findPortalButton('Copy'));
+
+    // The toast appears synchronously with the click, before the POST resolves.
+    expect(screen.getByText('Copying \"First Chat (Copy)\u2026')).toBeInTheDocument();
+
+    resolveCreate({ id: 'convo-copy-done' });
+    await waitFor(() => expect(mockRefreshConversations).toHaveBeenCalled());
+  });
+
+  it('shows a success toast and does not navigate to the copy on success', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    await user.pointer({ keys: '[MouseRight]', target: screen.getByText('First Chat') });
+    await user.click(await findPortalButton('Copy'));
+
+    await waitFor(() =>
+      expect(screen.getByText('Conversation copied')).toBeInTheDocument()
+    );
+    // The copy appears via the list refresh only - no selection/open of the new row.
+    expect(defaultProps.onItemSelect).not.toHaveBeenCalledWith('conversations', 'convo-new');
+    expect(mockRefreshConversations).toHaveBeenCalled();
+  });
+
+  it('shows an error toast when copying a conversation fails', async () => {
+    const user = userEvent.setup();
+    mockCreateConversation.mockRejectedValueOnce(new Error('boom'));
+    renderSidebar();
+
+    await user.pointer({ keys: '[MouseRight]', target: screen.getByText('First Chat') });
+    await user.click(await findPortalButton('Copy'));
+
+    await waitFor(() =>
+      expect(screen.getByText('Could not copy the conversation. Please try again.')).toBeInTheDocument()
+    );
+  });
+
+  it('does not start a second copy while one is in flight', async () => {
+    let resolveCreate: (value: { id: string }) => void = () => {};
+    mockCreateConversation.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveCreate = resolve; })
+    );
+    const user = userEvent.setup();
+    renderSidebar();
+
+    await user.pointer({ keys: '[MouseRight]', target: screen.getByText('First Chat') });
+    await user.click(await findPortalButton('Copy'));
+    expect(mockCreateConversation).toHaveBeenCalledTimes(1);
+
+    await user.pointer({ keys: '[MouseRight]', target: screen.getByText('First Chat') });
+    await user.click(await findPortalButton('Copy'));
+    expect(mockCreateConversation).toHaveBeenCalledTimes(1);
+
+    resolveCreate({ id: 'convo-copy-done' });
+    await waitFor(() => expect(mockRefreshConversations).toHaveBeenCalled());
   });
 
   it('renames conversation from context menu', async () => {
