@@ -172,7 +172,7 @@ ensure_volume_dirs
 # All pulled from the registry (no local builds). searxng + plantuml are
 # amd64-only on GHCR; the compose file pins them to linux/amd64 (emulated).
 SUPPORT_IMAGES=(
-  "${DOCLING_SERVE_CUDA_IMAGE:-quay.io/docling-project/docling-serve-cu130:v1.29.0}"
+  "${DOCLING_SERVE_CUDA_IMAGE:-quay.io/docling-project/docling-serve-cu130:v1.38.2}"
   "${GA_DOCUMENTSERVER_IMAGE:-ghcr.io/euro-office/documentserver:latest}"
   "${GA_PLANTUML_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}"
   "${GA_SEARXNG_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}"
