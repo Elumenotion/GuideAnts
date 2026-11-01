@@ -5,7 +5,7 @@ services:
   guideants-ai:
     volumes:
       - type: bind
-        source: ./volumes/voice-pack
+        source: D:/guideantsvolumes/voice-pack
         target: /opt/guideants/custom-voice-pack
         read_only: true
     environment:

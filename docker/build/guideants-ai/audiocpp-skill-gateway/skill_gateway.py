@@ -1034,6 +1034,62 @@ def fetch_model(body: FetchRequest, _: None = Depends(auth_dependency)) -> dict[
     }
 
 
+VOICE_PACK_DEFAULT_PATH = "/opt/guideants/voice-pack"
+VOICE_PACK_REF_RE = re.compile(r':"([^"]+)"\s*$')
+
+
+def build_voice_pack_presets() -> dict[str, str] | None:
+    """Voice-pack presets for a private audiocpp_server model entry.
+
+    Mirrors tts_service.build_server_voice_preset_config / VoicePackManifest so a
+    skill-spawned private engine registers the same server-side voice presets the
+    GuideAnts TTS wrapper does. Without this, `voice` ids (e.g. doug) do not exist
+    on private engines and every skill call is forced to stage a reference clip.
+
+    Returns None when the pack is absent or disabled, leaving the config as it was.
+    """
+    if (os.getenv("GA_AUDIOCPP_SKILL_PRIVATE_VOICE_PACK") or "").strip() == "0":
+        return None
+    pack_root = Path(
+        os.getenv("GA_TTS_VOICE_PACK_PATH") or VOICE_PACK_DEFAULT_PATH
+    ).resolve()
+    manifest_path = pack_root / "manifest.json"
+    if not manifest_path.is_file():
+        log_event("private_voice_pack_missing", path=str(manifest_path))
+        return None
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        log_event(
+            "private_voice_pack_unreadable",
+            path=str(manifest_path),
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        return None
+    fallback_text = str(data.get("referenceText") or "").strip()
+    presets: dict[str, str] = {}
+    for item in data.get("voices") or []:
+        if not isinstance(item, dict):
+            continue
+        voice_id = str(item.get("voiceId") or "").strip()
+        clip_rel = str(item.get("clipPath") or "").strip()
+        if not voice_id or not clip_rel:
+            continue
+        clip = (pack_root / clip_rel).resolve()
+        if pack_root not in clip.parents or not clip.is_file():
+            continue
+        quoted = VOICE_PACK_REF_RE.search(str(item.get("sourceClipRef") or ""))
+        reference_text = (quoted.group(1).strip() if quoted else "") or fallback_text
+        if not reference_text:
+            continue
+        presets[voice_id] = {"voice_ref": str(clip), "reference_text": reference_text}
+    if not presets:
+        log_event("private_voice_pack_empty", path=str(pack_root))
+        return None
+    return presets
+
+
 def build_private_model_configs(body: PrivateStartRequest) -> list[dict[str, Any]]:
     specs: list[PrivateModelSpec] = []
     if body.path and body.family:
@@ -1075,6 +1131,18 @@ def build_private_model_configs(body: PrivateStartRequest) -> list[dict[str, Any
         if spec.options:
             entry["load_options"] = dict(spec.options)
             entry["session_options"] = dict(spec.options)
+        # Voice-pack presets: only for cloning tasks, so families that cannot take
+        # a speaker reference never have clips loaded for them at startup.
+        if spec.task == "clon":
+            presets = build_voice_pack_presets()
+            if presets:
+                entry["voice_presets"] = presets
+                log_event(
+                    "private_voice_presets_registered",
+                    model=model_id,
+                    family=spec.family,
+                    count=len(presets),
+                )
         configs.append(entry)
     return configs
 

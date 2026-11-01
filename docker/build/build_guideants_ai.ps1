@@ -278,12 +278,13 @@ $buildPlatform = if ($Backend -eq 'spark') { 'linux/arm64' } else { $null }
 
 # Upstream llama.cpp server images copied into each backend's deps image.
 $llamaCppImageByBackend = @{
-    cpu    = 'ghcr.io/ggml-org/llama.cpp:server-v0.5.0'
-    cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-v0.5.0'
-    rocm   = 'ghcr.io/ggml-org/llama.cpp:server-rocm-v0.5.0'
-    slim   = 'ghcr.io/ggml-org/llama.cpp:server-v0.5.0'
-    vulkan = 'ghcr.io/ggml-org/llama.cpp:server-vulkan-v0.5.0'
-    spark  = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-v0.5.0'
+    # llama.cpp v0.7.0 = build tag b11669 (server-*-v0.7.0 does not exist on ghcr)
+    cpu    = 'ghcr.io/ggml-org/llama.cpp:server-b11669'
+    cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-b11669'
+    rocm   = 'ghcr.io/ggml-org/llama.cpp:server-rocm-b11669'
+    slim   = 'ghcr.io/ggml-org/llama.cpp:server-b11669'
+    vulkan = 'ghcr.io/ggml-org/llama.cpp:server-vulkan-b11669'
+    spark  = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-b11669'
 }
 
 # Build a unique tag per build, and also maintain a stable backend-specific latest tag.
@@ -424,7 +425,7 @@ try {
     $depsCacheExists = Test-DockerImageExists -ImageTag $depsCacheTag
     if ($RebuildBase -or -not $depsExists) {
         if ($RebuildBase) {
-            Write-Host "Rebuilding dependency image (layer cache preserved)..." -ForegroundColor Yellow
+            Write-Host "Rebuilding dependency image with --no-cache (base re-pulled, engine sources re-cloned)..." -ForegroundColor Yellow
             $llamaCppImage = $llamaCppImageByBackend[$Backend]
             Write-Host "RebuildBase: pulling latest upstream llama.cpp image ($llamaCppImage)..." -ForegroundColor Yellow
             docker pull $llamaCppImage
@@ -444,7 +445,7 @@ try {
             $depsBuildArgs += @('--cache-from', $depsCacheTag)
         }
         if ($RebuildBase) {
-            $depsBuildArgs += '--pull'
+            $depsBuildArgs += @('--pull', '--no-cache')
         }
         $depsBuildArgs += @(
             '--label', "${depsInputHashLabel}=$depsCanonicalFullHash",

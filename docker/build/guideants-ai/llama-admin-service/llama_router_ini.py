@@ -246,6 +246,7 @@ def upsert_router_entry(
     update_cache: bool = False,
     trigger_reload: bool = True,
     reload_callback: Callable[[], RuntimeApplyResult] | None = None,
+    soft_reload_callback: Callable[[], RuntimeApplyResult] | None = None,
     log_event: Callable[..., None] | None = None,
 ) -> tuple[str, RuntimeApplyResult | None]:
     alias_trimmed = normalize_alias(alias)
@@ -316,13 +317,57 @@ def upsert_router_entry(
         )
 
     runtime_apply: RuntimeApplyResult | None = None
-    if trigger_reload and changed and reload_callback is not None:
-        runtime_apply = reload_callback()
-        if log_event is not None:
-            log_event(
-                "router_entry_upsert_reload_triggered",
-                alias=alias_trimmed,
-                iniChanged=changed,
-                runtimeApplied=runtime_apply.applied,
-            )
+    if changed:
+        if trigger_reload:
+            if reload_callback is not None:
+                runtime_apply = reload_callback()
+                if log_event is not None:
+                    log_event(
+                        "router_entry_upsert_reload_triggered",
+                        alias=alias_trimmed,
+                        iniChanged=changed,
+                        runtimeApplied=runtime_apply.applied,
+                    )
+        elif soft_reload_callback is not None:
+            # Alias is not in use: make the INI visible to the running router
+            # without SIGTERMing the parent process (which would kill every
+            # in-flight turn on other loaded models).
+            runtime_apply = soft_reload_callback()
+            if log_event is not None:
+                log_event(
+                    "router_entry_upsert_soft_reload_triggered",
+                    alias=alias_trimmed,
+                    iniChanged=changed,
+                    runtimeApplied=runtime_apply.applied,
+                )
     return ini_sha256, runtime_apply
+
+def remove_router_entry(
+    alias: str,
+    *,
+    log_event: Callable[..., None] | None = None,
+) -> tuple[str, str] | None:
+    """Remove a router alias from the ini file. Returns (modelPath, mmprojPath) if removed.
+
+    Locking, parsing and the atomic write are shared with :func:`upsert_router_entry`
+    (single ``ROUTER_FILE_LOCK``) so a concurrent preset save and an alias delete can
+    never interleave on the router INI.
+    """
+    alias_trimmed = alias.strip()
+    if not alias_trimmed:
+        raise ValueError("Router alias is required.")
+
+    with ROUTER_FILE_LOCK:
+        if not os.path.exists(ROUTER_CONFIG_PATH):
+            return None
+        with open(ROUTER_CONFIG_PATH, "r", encoding="utf-8") as handle:
+            entries = parse_router_ini(handle.read())
+
+        if alias_trimmed not in entries:
+            return None
+
+        removed_sec = entries.pop(alias_trimmed)
+        removed = (removed_sec.model, removed_sec.mmproj)
+        write_router_config_pair(entries, log_event=log_event)
+
+    return removed

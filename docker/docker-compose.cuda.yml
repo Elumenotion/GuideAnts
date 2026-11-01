@@ -171,13 +171,20 @@ services:
       # Optional SD-only physical GPU pinning. Empty => inherit global
       # CUDA_VISIBLE_DEVICES ordering from this container.
       - GA_SD_CUDA_VISIBLE_DEVICES=${GA_SD_CUDA_VISIBLE_DEVICES:-}
+
+      # Sandbox side-channel for remote audiocpp skills (not ServiceModes).
+      # The gateway (start-audiocpp-skill.sh -> skill_gateway.py) refuses every
+      # request with HTTP 503 while this is unset; nginx routes /audiocpp-skill/
+      # to it on 127.0.0.1:8096. Soft default on purpose: documented compose
+      # flows in this folder run without it, and the entrypoint logs a warning.
+      - GA_AUDIOCPP_SKILL_TOKEN=${GA_AUDIOCPP_SKILL_TOKEN:-}
     networks:
       - guideants-network
     restart: unless-stopped
 
 
   docling-serve:
-    image: ${DOCLING_SERVE_CUDA_IMAGE:-quay.io/docling-project/docling-serve-cu130:v1.29.0}
+    image: ${DOCLING_SERVE_CUDA_IMAGE:-quay.io/docling-project/docling-serve-cu130:v1.38.2}
     container_name: docling-serve
     environment:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}

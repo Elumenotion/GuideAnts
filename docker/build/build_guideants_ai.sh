@@ -10,7 +10,7 @@ usage() {
 Usage: build_guideants_ai.sh [options]
 
 Options:
-  --rebuild-base         Rebuild dependency image (layer cache preserved, upstream re-pulled)
+  --rebuild-base         Fully rebuild dependency image (no layer cache; base re-pulled, engines re-cloned)
   --all                  Removed; use build_support_images.sh after backend builds
   --backend <value>      Backend: cpu | cuda13 | rocm | slim | vulkan | spark
   -h, --help             Show help
@@ -293,7 +293,7 @@ if docker_image_exists "$DEPS_CACHE_TAG"; then DEPS_CACHE_EXISTS=true; fi
 
 if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
   if [[ "$REBUILD_BASE" == "true" ]]; then
-    echo "Rebuilding dependency image (layer cache preserved)..."
+    echo "Rebuilding dependency image with --no-cache (base re-pulled, engine sources re-cloned)..."
   else
     echo "Dependency image not found. Building $DEPS_TAG..."
   fi
@@ -310,7 +310,7 @@ if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
     DEPS_BUILD_ARGS+=(--cache-from "$DEPS_CACHE_TAG")
   fi
   if [[ "$REBUILD_BASE" == "true" ]]; then
-    DEPS_BUILD_ARGS+=(--pull)
+    DEPS_BUILD_ARGS+=(--pull --no-cache)
   fi
   DEPS_BUILD_ARGS+=(
     --label "${DEPS_INPUT_HASH_LABEL}=${DEPS_CANONICAL_FULL_HASH}"
