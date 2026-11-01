@@ -307,6 +307,17 @@ namespace AntRunner.Chat
         }
 
         /// <summary>
+        /// Decides whether the run appends a user message carrying <c>options.Instructions</c>.
+        /// An attachment-only turn arrives with empty Instructions: the attachment content already travels
+        /// as its own user message inside <c>previous</c>. Appending ChatMessage(User, "") would put an empty
+        /// content part on the wire for every provider, so the user turn is appended only when it carries
+        /// text - or when nothing else in the list would speak for the user.
+        /// </summary>
+        internal static bool ShouldAppendUserMessage(string instructions, IReadOnlyList<ChatMessage> messages) =>
+            !string.IsNullOrEmpty(instructions)
+            || !messages.Any(m => m.Role == ChatRole.User);
+
+        /// <summary>
         /// Normalizes assistant-generated text emitted by the LLM stream.
         /// Currently replaces Unicode em-dash (\u2014) with ASCII hyphen-minus ('-').
         /// Applied only to assistant text at the LLM boundary (streaming deltas and final assistant message).
@@ -434,6 +445,8 @@ namespace AntRunner.Chat
             }
 
             var messages = new List<ChatMessage>();
+
+
             var hasKnowledge = assistantDef.Tools?.FirstOrDefault(t => t.Type == "file_search") != null;
 
             if (isAgentInvocation)
@@ -469,8 +482,11 @@ namespace AntRunner.Chat
                     }
                 }
 
-                messages.Add(new ChatMessage(ChatRole.User, options.Instructions));
-                tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
+                if (ShouldAppendUserMessage(options.Instructions, messages))
+                {
+                    messages.Add(new ChatMessage(ChatRole.User, options.Instructions));
+                    tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
+                }
             }
             else if (previous != null && previous.Count > 0)
             {
@@ -478,7 +494,7 @@ namespace AntRunner.Chat
                 {
                     messages.Add(previousMessage);
                 }
-                if (!resumeWithoutNewUserMessage)
+                if (!resumeWithoutNewUserMessage && ShouldAppendUserMessage(options.Instructions, messages))
                 {
                     messages.Add(new ChatMessage(ChatRole.User, options.Instructions));
                     tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
@@ -494,7 +510,10 @@ namespace AntRunner.Chat
                 {
                     messages.Add(new ChatMessage(ChatRole.System, "Use SearchAssistantFiles for extended instructions and reference guidance"));
                 }
-                messages.Add(new ChatMessage(ChatRole.User, options.Instructions));
+                if (ShouldAppendUserMessage(options.Instructions, messages))
+                {
+                    messages.Add(new ChatMessage(ChatRole.User, options.Instructions));
+                }
 
                 tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.First().Role.ToString(), messages.First().GetText()));
                 tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));

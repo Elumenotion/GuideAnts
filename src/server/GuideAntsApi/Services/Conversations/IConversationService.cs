@@ -9,6 +9,9 @@ public interface IConversationService
     Task<NotebookConversationWithMessagesDto?> GetConversationWithMessagesAsync(Guid conversationId);
     Task<IReadOnlyList<NotebookConversationListDto>> GetListAsync(Guid notebookId);
     Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title);
+
+    /// <summary>Creates a conversation, optionally as a full copy of <paramref name="sourceConversationId"/>.</summary>
+    Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title, Guid? sourceConversationId = null);
     Task RenameConversationAsync(Guid conversationId, string title);
     Task DeleteConversationAsync(Guid conversationId);
     

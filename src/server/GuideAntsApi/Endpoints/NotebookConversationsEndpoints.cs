@@ -96,7 +96,7 @@ public static class NotebookConversationsEndpoints
         // Create
         group.MapPost("/", async ([FromServices] IConversationService svc, Guid notebookId, [FromBody] CreateConversationRequest req) =>
         {
-            var dto = await svc.CreateConversationAsync(notebookId, req.Title);
+            var dto = await svc.CreateConversationAsync(notebookId, req.Title, req.SourceConversationId);
             return Results.Ok(dto);
         })
         .RequireAuthorization("RequireContributor")
@@ -477,7 +477,11 @@ public static class NotebookConversationsEndpoints
         .Produces(StatusCodes.Status400BadRequest);
     }
 
-    public record CreateConversationRequest(string Title);
+    /// <summary>
+    /// Creates a conversation. When <see cref="SourceConversationId"/> is set, the new
+    /// conversation is a full copy of that conversation (messages + turn rows cloned).
+    /// </summary>
+    public record CreateConversationRequest(string Title, Guid? SourceConversationId = null);
     public record RenameConversationRequest(string Title);
     public record EditMessageRequest(string Content);
 

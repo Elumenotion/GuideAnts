@@ -62,6 +62,9 @@ public class NotebookConversationAssistantSwitchingTests
             return Task.FromResult(dto);
         }
 
+        public Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title, Guid? sourceConversationId)
+            => CreateConversationAsync(notebookId, title);
+
         public Task RenameConversationAsync(Guid conversationId, string newTitle) => throw new NotImplementedException();
         public Task DeleteConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task EditMessageAsync(Guid messageId, string newContent) => throw new NotImplementedException();

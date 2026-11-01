@@ -581,10 +581,10 @@ export function NotebookProvider({ children, notebookId, projectId }: NotebookPr
         }
     }, [projectId, notebookId]);
 
-    const createConversation = useCallback(async (title: string) => {
+    const createConversation = useCallback(async (title: string, sourceConversationId?: string) => {
         if (!projectId || !notebookId) return null;
         try {
-            const convo = await api.projects.notebooks.conversations.create(projectId, notebookId, title);
+            const convo = await api.projects.notebooks.conversations.create(projectId, notebookId, title, sourceConversationId);
             dispatch({ type: 'ADD_CONVERSATION', payload: convo as any });
             return convo as any;
         } catch (err) {

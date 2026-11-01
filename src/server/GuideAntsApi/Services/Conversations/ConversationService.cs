@@ -110,7 +110,10 @@ public class ConversationService : IConversationService
         _queryService.GetListAsync(notebookId);
 
     public Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title) =>
-        _commandService.CreateConversationAsync(notebookId, title);
+        _commandService.CreateConversationAsync(notebookId, title, null);
+
+    public Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title, Guid? sourceConversationId) =>
+        _commandService.CreateConversationAsync(notebookId, title, sourceConversationId);
 
     public Task RenameConversationAsync(Guid conversationId, string title) =>
         _commandService.RenameConversationAsync(conversationId, title);

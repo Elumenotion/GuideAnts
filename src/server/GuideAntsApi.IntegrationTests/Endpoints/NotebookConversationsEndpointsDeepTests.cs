@@ -350,4 +350,29 @@ public sealed class NotebookConversationsEndpointsDeepTests : BaseEndpointTest
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         (await db.NotebookConversations.AnyAsync(c => c.Id == created.ConversationId)).Should().BeFalse();
     }
+
+    [TestMethod]
+    public async Task CreateConversation_WithSourceConversationId_CopiesMessages()
+    {
+        var created = await CreateProjectNotebookConversationAsync();
+        await SeedTurnWithMessagesAsync(created.ConversationId, "Do the thing", "Done.");
+
+        var copyResp = await Client.PostAsJsonAsync(
+            $"/api/projects/{created.ProjectId}/notebooks/{created.NotebookId}/conversations",
+            new { title = "Deep Test (Copy)", sourceConversationId = created.ConversationId });
+
+        copyResp.EnsureSuccessStatusCode();
+        var copy = await copyResp.Content.ReadFromJsonAsync<NotebookConversationListDto>();
+        copy!.Id.Should().NotBe(created.ConversationId);
+        copy.Title.Should().Be("Deep Test (Copy)");
+
+        var getResp = await Client.GetAsync(
+            $"/api/projects/{created.ProjectId}/notebooks/{created.NotebookId}/conversations/{copy.Id}");
+        getResp.EnsureSuccessStatusCode();
+        var convDto = await getResp.Content.ReadFromJsonAsync<NotebookConversationWithMessagesDto>();
+        convDto!.Messages.Should().NotBeNullOrEmpty();
+        convDto.Messages.Select(m => m.Content).Should().Contain("Do the thing");
+        convDto.Messages.Select(m => m.Content).Should().Contain("Done.");
+    }
+
 }

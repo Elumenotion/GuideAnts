@@ -15,6 +15,7 @@ import {
 import { FolderTreeDto } from '../../../types/project';
 import { useNotebook } from '../../../contexts/NotebookContext';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
+import { useToast } from '../../common/Toast';
 import { useConversationListPolling } from '../../../hooks/useConversationListPolling';
 import { useNotebookFilesPolling } from '../../../hooks/useNotebookFilesPolling';
 import { useParams } from 'react-router';
@@ -269,6 +270,10 @@ function NotebookSidebarInner({
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editConversationTitle, setEditConversationTitle] = useState('');
 
+  // Copy-conversation in-flight state: the copy POST can take minutes, so the
+  // sidebar shows an info toast while it runs and ignores repeat Copy clicks.
+  const [isCopyingConversation, setIsCopyingConversation] = useState(false);
+
   // Search state
   const [searchTerm, setSearchTerm] = useState('');
   const [conversationSort, setConversationSort] = useState<'recent' | 'alpha'>('recent');
@@ -289,6 +294,8 @@ function NotebookSidebarInner({
     deleteConversation,
     deleteConversations 
   } = useNotebook();
+
+  const { showToast } = useToast();
 
   // Get IDs directly from URL params to avoid waiting for notebook context to load
   const { projectId, notebookId } = useParams<{ projectId: string; notebookId: string }>();
@@ -491,14 +498,38 @@ function NotebookSidebarInner({
       setShowConversationContextMenu(false);
       return;
     }
+    if (isCopyingConversation) {
+      // A copy is already in flight (the POST can take a long time) - do not
+      // start a second one.
+      setShowConversationContextMenu(false);
+      return;
+    }
+    setIsCopyingConversation(true);
+    // The copy request can take well over a minute with no other feedback;
+    // acknowledge the click immediately with an in-progress toast.
+    showToast({
+      type: 'info',
+      title: `Copying "${convo.title} (Copy)\u2026`,
+      duration: 120000,
+    });
+    setShowConversationContextMenu(false);
     try {
-      await createConversation(`${convo.title} (Copy)`);
+      // Copy: clone the source conversation's messages via the shared create endpoint
+      // (SourceConversationId), so the new entry is a full copy rather than an empty shell.
+      await createConversation(`${convo.title} (Copy)`, convo.id);
       // Refresh conversations list immediately after successful creation
       refreshConversations();
+      showToast({ type: 'success', title: 'Conversation copied', duration: 3000 });
     } catch (error) {
       console.error('Failed to copy conversation:', error);
+      showToast({
+        type: 'error',
+        title: 'Copy failed',
+        message: 'Could not copy the conversation. Please try again.',
+        duration: 5000,
+      });
     } finally {
-      setShowConversationContextMenu(false);
+      setIsCopyingConversation(false);
     }
   };
 

@@ -183,7 +183,7 @@ export interface NotebookContextValue {
     
     // Conversations
     loadConversations: () => Promise<void>;
-    createConversation: (title: string) => Promise<NotebookConversationDto | null>;
+    createConversation: (title: string, sourceConversationId?: string) => Promise<NotebookConversationDto | null>;
     renameConversation: (id: string, title: string) => Promise<void>;
     deleteConversation: (id: string) => Promise<void>;
     deleteConversations: (ids: string[]) => Promise<void>;

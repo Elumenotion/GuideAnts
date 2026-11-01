@@ -38,6 +38,9 @@ public class NotebookConversationStreamingToolCallsTests
             _conversations.Add(dto);
             return Task.FromResult(dto);
         }
+
+        public Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title, Guid? sourceConversationId)
+            => CreateConversationAsync(notebookId, title);
         
         public Task RenameConversationAsync(Guid conversationId, string newTitle) => throw new NotImplementedException();
         public Task DeleteConversationAsync(Guid conversationId) => throw new NotImplementedException();
@@ -329,6 +332,7 @@ public class NotebookConversationStreamingToolCallsTests
         public Task<NotebookConversationWithMessagesDto?> GetConversationWithMessagesAsync(Guid conversationId) => throw new NotImplementedException();
         public Task<IReadOnlyList<NotebookConversationListDto>> GetListAsync(Guid notebookId) => throw new NotImplementedException();
         public Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title) => throw new NotImplementedException();
+        public Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title, Guid? sourceConversationId) => throw new NotImplementedException();
         public Task RenameConversationAsync(Guid conversationId, string newTitle) => throw new NotImplementedException();
         public Task DeleteConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task EditMessageAsync(Guid messageId, string newContent) => throw new NotImplementedException();

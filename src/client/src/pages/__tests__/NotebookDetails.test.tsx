@@ -1356,6 +1356,49 @@ describe('NotebookDetails page', () => {
     vi.useRealTimers();
   });
 
+  it('does not open the load dialog when a runtime status check fails with no load operation', async () => {
+    // The AI container is stopped mid-stream: the runtime CHECK cannot reach the llama
+    // servers and returns failed. No load operation was started, so no "Load Failed"
+    // dialog — that was the bogus dialog that stacked over the crash dialog.
+    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValue({
+      state: 'failed',
+      activeOperation: { errorDetails: 'Failed to communicate with local llama servers.' },
+    } as never);
+
+    renderNotebook();
+
+    // Give the mount-time check a moment to resolve, then assert the load dialog never opened.
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByTestId('llama-runtime-modal')).not.toBeInTheDocument();
+  });
+
+  it('still opens the load dialog when a real load operation fails', async () => {
+    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValue({
+      state: 'requires_load',
+    } as never);
+    vi.mocked(api.projects.notebooks.conversations.loadLlamaRuntime).mockResolvedValueOnce({
+      state: 'failed',
+      operationId: 'op-fail-2',
+      errorDetails: 'model load blew up',
+    } as never);
+
+    renderNotebook();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('llama-runtime-modal')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Start Load'));
+
+    await waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Model Load Failed', message: 'model load blew up' })
+      );
+    });
+    // A genuine load failure keeps the dialog open so the user can Retry Load.
+    expect(screen.getByTestId('llama-runtime-modal')).toBeInTheDocument();
+  });
+
   it('shows toast when runtime poll reports failed operation', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValueOnce({

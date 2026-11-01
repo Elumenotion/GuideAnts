@@ -237,7 +237,10 @@ public sealed class ConversationStreamRunRegistry
 
     /// <summary>
     /// True while a stream worker is still registered or detached-but-unwinding for
-    /// <paramref name="turnId"/>. Undo and recovery must treat these as in-flight.
+    /// <paramref name="turnId"/>. Recovery must treat these as in-flight. Undo must only
+    /// block on these while the turn's durable row is still pre-terminal (streaming /
+    /// pending_client_tool); a hard-stop fence terminalizes the row and fences the detached
+    /// worker out of every write, so its physical unwind cannot race the undo delete.
     /// </summary>
     public bool IsInFlight(Guid turnId) =>
         _activeRuns.ContainsKey(turnId) || _detachedRuns.ContainsKey(turnId);
