@@ -7,6 +7,7 @@ import { WORKSPACE_CONTROLS_COPY, statusToneClass } from './toolbarFormatters';
 import type { ChatDefaultsDto, UpdateChatDefaultsRequest } from '../../../types/settings';
 import type { ModelDto } from '../../../types/guides';
 import { modelOptionLabel } from '../../../lib/modelOptionLabel';
+import { useNotebook } from '../../../contexts/NotebookContext';
 import {
   buildChatDefaultsModelChangeRequest,
   buildChatDefaultsUpdateRequest,
@@ -40,6 +41,10 @@ export function ChatToolbarPanel({
   const [conversationModelOverride, setConversationModelOverride] = useState<string | null>(
     () => getConversationModelOverride(conversationId)
   );
+  // Shared notebook-level catalog (written so the composer reads the same copy
+  // the toolbar uses). Aliased because the local state setter above is named
+  // setCatalogModels.
+  const { setCatalogModels: setSharedCatalogModels } = useNotebook();
   const [chatDefaultsError, setChatDefaultsError] = useState<string | null>(null);
   const hasPendingOp =
     chat.inProgressState &&
@@ -106,11 +111,12 @@ export function ChatToolbarPanel({
     try {
       const models = await api.guides.catalogs.models();
       setCatalogModels(models);
+      setSharedCatalogModels(models as ModelDto[]);
       setCatalogLoaded(true);
     } catch (error: any) {
       setChatDefaultsError(error?.message ?? 'Failed to load catalog models.');
     }
-  }, []);
+  }, [setSharedCatalogModels]);
 
   useEffect(() => {
     void loadChatDefaults();

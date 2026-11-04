@@ -16,6 +16,12 @@ import CameraCapture from '../../common/CameraCapture';
 import { useToast } from '../../common/Toast';
 import ContextMeter from './ContextMeter';
 import CompactButton from './CompactButton';
+import { getReasoningChoicesForModel } from '../../chat-model/reasoning';
+import {
+  getConversationReasoningEffortOverride,
+  setConversationReasoningEffortOverride,
+} from '../../../contexts/conversation/conversationReasoningEffortOverride';
+import type { ModelDto } from '../../../types/guides';
 
 /**
  * Normalizes markdown content for chat messages by converting paragraph breaks
@@ -92,9 +98,25 @@ export default function DraftUserCell({
   // Camera capture state
   const [isCameraOpen, setIsCameraOpen] = useState(false);
 
+  // --- Thinking-level override (per-conversation, session-scoped) ---
+  const [showThinkingPicker, setShowThinkingPicker] = useState(false);
+  const [thinkingSelectedIndex, setThinkingSelectedIndex] = useState(0);
+  const [footerRect, setFooterRect] = useState<DOMRect | null>(null);
+  const [thinkingLevel, setThinkingLevel] = useState<string | null>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const thinkingPickerRef = useRef<HTMLDivElement>(null);
+
   // Access notebook / project IDs needed for file upload
-  const { notebook } = useNotebook();
+  const { notebook, chatReadiness, catalogModels } = useNotebook();
   const notebookCtxProjectId = notebook?.projectId;
+
+  // Derived from the shared notebook-level facts (server-computed effective model
+  // + shared catalog). We never re-derive the effective model here.
+  const effectiveModelId = chatReadiness?.effectiveModelId ?? null;
+  const effectiveModel: ModelDto | undefined =
+    (catalogModels ?? []).find((m) => m.modelId === effectiveModelId);
+  const reasoningChoices = getReasoningChoicesForModel(effectiveModel);
+  const hasThinkingSupport = reasoningChoices.length > 0;
   const notebookCtxNotebookId = notebook?.id;
 
   // Fallback to URL params if context not yet ready
@@ -115,6 +137,14 @@ export default function DraftUserCell({
   // logic here — the draft cell is a pure view of pendingAttachments; ownership lives in the
   // action layer so the SSE handler never has to manage composer state.
   const { pendingAttachments, addPendingAttachment, removePendingAttachment, conversationId, contextStatus, refresh, mergeContextStatusAfterCompact } = useConversation();
+
+  // Hydrate the thinking-level from the per-conversation registry on mount
+  // (so a soft nav back to this conversation restores the chip).
+  useEffect(() => {
+    const stored = getConversationReasoningEffortOverride(conversationId);
+    if (stored) setThinkingLevel(stored);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const { showToast } = useToast();
 
   // Speech-to-text hook
@@ -411,6 +441,89 @@ export default function DraftUserCell({
     };
   }, [handleClickOutside]);
 
+  // Thinking picker: select a level (writes to the shared per-conversation registry)
+  const selectThinkingLevel = useCallback(
+    (level: string) => {
+      setThinkingLevel(level);
+      setConversationReasoningEffortOverride(conversationId, level);
+      setShowThinkingPicker(false);
+      setThinkingSelectedIndex(0);
+    },
+    [conversationId]
+  );
+
+  const closeThinkingPicker = useCallback(() => {
+    setShowThinkingPicker(false);
+    setThinkingSelectedIndex(0);
+  }, []);
+
+  // Keyboard nav for the thinking picker (same feel as the @-assistant picker)
+  const handleThinkingPickerKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (!showThinkingPicker) return;
+      switch (event.key) {
+        case 'ArrowDown':
+          event.preventDefault();
+          setThinkingSelectedIndex((prev) => Math.min(prev + 1, reasoningChoices.length - 1));
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          setThinkingSelectedIndex((prev) => Math.max(prev - 1, 0));
+          break;
+        case 'Enter':
+        case 'Tab':
+          event.preventDefault();
+          if (reasoningChoices[thinkingSelectedIndex]) {
+            selectThinkingLevel(reasoningChoices[thinkingSelectedIndex]);
+          }
+          break;
+        case 'Escape':
+          event.preventDefault();
+          closeThinkingPicker();
+          break;
+      }
+    },
+    [showThinkingPicker, reasoningChoices, thinkingSelectedIndex, selectThinkingLevel, closeThinkingPicker]
+  );
+
+  // Close the thinking picker on outside click
+  const handleThinkingClickOutside = useCallback(
+    (event: MouseEvent) => {
+      if (!showThinkingPicker) return;
+      const target = event.target as Node;
+      if (footerRef.current?.contains(target)) return;
+      if (thinkingPickerRef.current?.contains(target)) return;
+      closeThinkingPicker();
+    },
+    [showThinkingPicker, closeThinkingPicker]
+  );
+
+  useEffect(() => {
+    document.addEventListener('mousedown', handleThinkingClickOutside);
+    return () => document.removeEventListener('mousedown', handleThinkingClickOutside);
+  }, [handleThinkingClickOutside]);
+
+  // Auto-clear: if the effective model changes and no longer supports the picked
+  // level, drop the override. Guard on catalog load so we don't clear while the
+  // catalog is still empty (not yet fetched).
+  useEffect(() => {
+    if (!thinkingLevel) return;
+    if ((catalogModels ?? []).length === 0) return;
+    const choices = getReasoningChoicesForModel(effectiveModel);
+    if (!choices.some((c) => c.toLowerCase() === thinkingLevel.toLowerCase())) {
+      setThinkingLevel(null);
+      setConversationReasoningEffortOverride(conversationId, null);
+    }
+  }, [effectiveModel, catalogModels, thinkingLevel, conversationId]);
+
+  // Clear on unmount: the keyed ConversationProvider unmounts the composer when the
+  // user navigates to a different conversation, so cleanup = navigate-away.
+  useEffect(() => {
+    return () => {
+      setConversationReasoningEffortOverride(conversationId, null);
+    };
+  }, [conversationId]);
+
   const handleSend = (content: string) => {
     const hasText = Boolean(content && content.trim());
     const hasAttachments = pendingAttachments.length > 0;
@@ -642,6 +755,19 @@ export default function DraftUserCell({
               handleSelectorKeyDown(e as any);
               handleFilterInput(e as any);
 
+              // Ctrl/Cmd + ` toggles the thinking-level picker (footer-anchored)
+              if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isBusy || !hasThinkingSupport) return;
+                if (footerRef.current) {
+                  setFooterRect(footerRef.current.getBoundingClientRect());
+                }
+                setShowThinkingPicker((v) => !v);
+                return;
+              }
+              handleThinkingPickerKeyDown(e);
+
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -668,6 +794,38 @@ export default function DraftUserCell({
               }}
             />
             
+                        {/* Thinking-level picker – footer-anchored */}
+            {showThinkingPicker && hasThinkingSupport && footerRect && (
+              <div
+                ref={thinkingPickerRef}
+                className="fixed z-[9999] bg-white border border-gray-200 rounded-md shadow-lg min-w-[200px]"
+                style={{
+                  position: 'fixed',
+                  left: Math.max(8, Math.min(footerRect.left, window.innerWidth - 220)),
+                  bottom: Math.max(8, window.innerHeight - footerRect.top + 8),
+                }}
+              >
+                <div className="p-2 border-b border-gray-100">
+                  <div className="text-sm text-gray-500 font-medium">Thinking Level</div>
+                </div>
+                <div className="max-h-60 overflow-y-auto">
+                  {reasoningChoices.map((choice, index) => (
+                    <button
+                      key={choice}
+                      onClick={() => selectThinkingLevel(choice)}
+                      className={`w-full flex items-center px-3 py-2 text-left text-sm focus:outline-none transition-colors ${
+                        index === thinkingSelectedIndex
+                          ? 'bg-blue-50 border-l-2 border-blue-500'
+                          : 'hover:bg-gray-50'
+                      } ${thinkingLevel?.toLowerCase() === choice.toLowerCase() ? 'font-semibold text-blue-900' : ''}`}
+                    >
+                      {choice}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
                         {/* Assistant selector dropdown */}
             {showAssistantSelector && atPosition && assistants.length > 0 && (
               <div
@@ -750,11 +908,26 @@ export default function DraftUserCell({
             )}
 
             {/* Action buttons */}
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+            <div ref={footerRef} className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
               <div className="text-sm text-gray-500">
                 {!isReadOnly && (
                   <span className="mr-3">
                     <ContextMeter contextStatus={contextStatus} />
+                  </span>
+                )}
+                {/* Thinking-level override chip – visible whenever an override is set */}
+                {!isReadOnly && thinkingLevel && (
+                  <span className="mr-3 inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                    <span>Thinking: {thinkingLevel}</span>
+                    <button
+                      onClick={() => {
+                        setThinkingLevel(null);
+                        setConversationReasoningEffortOverride(conversationId, null);
+                      }}
+                      className="text-amber-400 hover:text-amber-700"
+                      type="button"
+                      aria-label="Clear thinking level"
+                    >×</button>
                   </span>
                 )}
                 {/* Keyboard shortcuts - hidden on mobile */}
@@ -764,6 +937,11 @@ export default function DraftUserCell({
                     {assistants.length > 0 && (
                       <span className="ml-3">
                         <kbd className="px-2 py-1 bg-gray-100 rounded text-xs">@</kbd> to mention guide
+                      </span>
+                    )}
+                    {hasThinkingSupport && (
+                      <span className="ml-3">
+                        <kbd className="px-2 py-1 bg-gray-100 rounded text-xs">Ctrl+`</kbd> to set thinking
                       </span>
                     )}
                   </span>
