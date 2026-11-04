@@ -833,14 +833,32 @@ public class ConversationService : IConversationService
         var requestedModelDeploymentId = modelDeploymentId;
         var resolvedModel = _chatModelResolver.Resolve(modelDeploymentId);
         modelDeploymentId = resolvedModel.ModelId;
+
+        // Per-request reasoning-effort override: the client picks a valid value from
+        // the model's declared choices and sends it here. Pass it straight into the
+        // execution-policy parameter bag so ThreadRun uses it as the highest-priority
+        // source (beats ChatDefaults global override, assistant definition, and model
+        // defaultChoice). No server-side validation: if the value doesn't match the
+        // model's choices, ThreadRun's own resolution falls through to the cascade.
+        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
+        {
+            var newParams = new Dictionary<string, JsonElement>(resolvedModel.ExecutionPolicy.Parameters, StringComparer.Ordinal);
+            newParams["reasoning_effort"] = JsonSerializer.SerializeToElement(request.ReasoningEffort.Trim());
+            resolvedModel = new ResolvedChatModel(
+                resolvedModel.ModelId,
+                resolvedModel.ReferenceKind,
+                resolvedModel.ExecutionPolicy with { Parameters = newParams });
+        }
+
         _logger.LogInformation(
-            "Conversation chat model resolved. ConversationId={ConversationId}, AssistantName={AssistantName}, RequestedModelId={RequestedModelId}, ResolvedModelId={ResolvedModelId}, ReferenceKind={ReferenceKind}, Authority={Authority}, ParameterKeys=[{ParameterKeys}]",
+            "Conversation chat model resolved. ConversationId={ConversationId}, AssistantName={AssistantName}, RequestedModelId={RequestedModelId}, ResolvedModelId={ResolvedModelId}, ReferenceKind={ReferenceKind}, Authority={Authority}, ReasoningEffort={ReasoningEffort}, ParameterKeys=[{ParameterKeys}]",
             LogValueSanitizer.Sanitize(conversationId),
             LogValueSanitizer.Sanitize(assistantName),
             LogValueSanitizer.Sanitize(string.IsNullOrWhiteSpace(requestedModelDeploymentId) ? "(unset)" : requestedModelDeploymentId),
             LogValueSanitizer.Sanitize(resolvedModel.ModelId),
             LogValueSanitizer.Sanitize(resolvedModel.ReferenceKind),
             LogValueSanitizer.Sanitize(resolvedModel.ExecutionPolicy.Authority),
+            LogValueSanitizer.Sanitize(request.ReasoningEffort?.Trim() ?? "(cascade)"),
             LogValueSanitizer.Sanitize(string.Join(", ", resolvedModel.ExecutionPolicy.Parameters.Keys)));
 
         var assistantId = resolvedAssistantId

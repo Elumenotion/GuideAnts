@@ -21,6 +21,7 @@ vi.mock('../../../services/userService', () => ({
 
 import { useConversationActions } from '../useConversationActions';
 import { setConversationModelOverride, getConversationModelOverride } from '../conversationModelOverride';
+import { setConversationReasoningEffortOverride, getConversationReasoningEffortOverride } from '../conversationReasoningEffortOverride';
 import { api } from '../../../services/api';
 import { ensureValidTokensForTemplate } from '../../../utils/notebookAuth';
 import {
@@ -119,6 +120,7 @@ describe('useConversationActions', () => {
     conversations.get = vi.fn().mockResolvedValue({ messages: [] });
     // Reset the per-conversation model override store so tests are isolated.
     setConversationModelOverride(CONVERSATION_ID, null);
+    setConversationReasoningEffortOverride(CONVERSATION_ID, null);
   });
 
   afterEach(() => {
@@ -247,6 +249,65 @@ describe('useConversationActions', () => {
         });
         payload = vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mock.calls[1]?.[3] as Record<string, unknown>;
         expect(payload.modelDeploymentId).toBe('claude-3');
+      });
+    });
+
+    describe('per-conversation reasoning-effort passthrough', () => {
+      it('includes reasoningEffort when the conversation override is set', async () => {
+        setConversationReasoningEffortOverride(CONVERSATION_ID, 'High');
+        const { actions } = mountActions();
+
+        await act(async () => {
+          await actions.sendMessage('hello');
+        });
+
+        expect(api.projects.notebooks.conversations.sendMessageStream).toHaveBeenCalledWith(
+          PROJECT_ID,
+          NOTEBOOK_ID,
+          CONVERSATION_ID,
+          expect.objectContaining({
+            instructions: 'hello',
+            assistantName: 'Claude',
+            reasoningEffort: 'High',
+          }),
+          expect.any(Function),
+          expect.any(Function),
+          expect.any(Function),
+          expect.any(AbortSignal),
+        );
+      });
+
+      it('omits reasoningEffort when no conversation override is set', async () => {
+        const { actions } = mountActions();
+
+        await act(async () => {
+          await actions.sendMessage('hello');
+        });
+
+        const sendCall = vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mock.calls[0];
+        const payload = sendCall?.[3] as Record<string, unknown>;
+        expect(payload.instructions).toBe('hello');
+        // No override -> the field is undefined, so JSON.stringify omits it on the wire.
+        expect(payload.reasoningEffort).toBeUndefined();
+      });
+
+      it('does not clear the override after send (persists for subsequent sends)', async () => {
+        setConversationReasoningEffortOverride(CONVERSATION_ID, 'Low');
+        const { actions } = mountActions();
+
+        await act(async () => {
+          await actions.sendMessage('first');
+        });
+
+        // The override survives the send.
+        expect(getConversationReasoningEffortOverride(CONVERSATION_ID)).toBe('Low');
+
+        // A second send carries it again.
+        await act(async () => {
+          await actions.sendMessage('second');
+        });
+        const payload = vi.mocked(api.projects.notebooks.conversations.sendMessageStream).mock.calls[1]?.[3] as Record<string, unknown>;
+        expect(payload.reasoningEffort).toBe('Low');
       });
     });
 

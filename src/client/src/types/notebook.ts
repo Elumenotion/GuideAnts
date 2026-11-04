@@ -1,5 +1,7 @@
 import { ProjectFolderDto } from './project';
 import { MessageDto } from './conversation';
+import { NotebookChatReadinessDto } from './notebookToolbar';
+import { ModelDto } from './guides';
 
 // Notebook-specific types
 export interface NotebookCell {
@@ -120,6 +122,9 @@ export interface NotebookState {
     assistants: Array<{ name: string; model?: string; avatarUrl: string }>;
     isLoadingAssistants: boolean;
     assistantsError: string | null;
+    // Shared notebook-level chat facts (server-computed effective model + catalog)
+    chatReadiness: NotebookChatReadinessDto | null;
+    catalogModels: ModelDto[];
 }
 
 // Notebook context interface
@@ -151,6 +156,12 @@ export interface NotebookContextValue {
     assistants: Array<{ name: string; model?: string; avatarUrl: string }>;
     isLoadingAssistants: boolean;
     assistantsError: string | null;
+    
+    // Shared notebook-level chat facts (server-computed effective model + catalog)
+    chatReadiness: NotebookChatReadinessDto | null;
+    catalogModels: ModelDto[];
+    setChatReadiness: (v: NotebookChatReadinessDto | null) => void;
+    setCatalogModels: (v: ModelDto[]) => void;
     
     // Actions
     loadNotebook: (notebookId: string) => Promise<void>;

@@ -11,6 +11,7 @@ import { NotebookSidebarSectionType, NotebookSidebarSelectedItem, NotebookFileDt
 import { NotebookTemplateDto } from '../types/project';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNotebookWorkspaceControls } from '../hooks/useNotebookWorkspaceControls';
+import type { ModelDto } from '../types/guides';
 import { NotebookServiceToolbar } from '../components/notebook/header-toolbar/NotebookServiceToolbar';
 import { PublishToProjectDialog } from '../components/notebook/dialogs/PublishToProjectDialog';
 import { notebookFilesApi } from '../services/notebookFiles';
@@ -61,7 +62,9 @@ function NotebookDetailsContent() {
         filesError,
         assistants,
         setHomePageFile,
-        clearHomePage
+        clearHomePage,
+        setChatReadiness,
+        setCatalogModels
     } = useNotebook();
 
     const [publishDialogState, setPublishDialogState] = useState<{
@@ -156,6 +159,31 @@ function NotebookDetailsContent() {
         includeToolbar: isAuthenticatedAdmin,
         enabled: Boolean(notebookId),
     });
+
+    // Write the server-computed chat readiness into the shared NotebookContext
+    // so the composer (DraftUserCell) can read the effective model without
+    // re-deriving it.
+    useEffect(() => {
+        setChatReadiness(workspaceControls.chat);
+    }, [workspaceControls.chat, setChatReadiness]);
+
+    // Fetch the catalog models into the shared NotebookContext so the composer
+    // can look up reasoningChoices for the effective model.
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const models = await api.guides.catalogs.models() as ModelDto[];
+                if (!cancelled) {
+                    setCatalogModels(models);
+                }
+            } catch {
+                // Non-fatal: the composer's thinking picker will be hidden
+                // if no catalog is available.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [setCatalogModels]);
 
     const publishedNotebookTitle = project?.notebooks.find((n) => n.id === notebookId)?.title ?? notebook?.title;
     usePublishGuideViewContext({

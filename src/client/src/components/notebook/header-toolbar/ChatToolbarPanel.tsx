@@ -7,6 +7,7 @@ import { WORKSPACE_CONTROLS_COPY, statusToneClass } from './toolbarFormatters';
 import type { ChatDefaultsDto, UpdateChatDefaultsRequest } from '../../../types/settings';
 import type { ModelDto } from '../../../types/guides';
 import { modelOptionLabel } from '../../../lib/modelOptionLabel';
+import { useNotebook } from '../../../contexts/NotebookContext';
 import {
   buildChatDefaultsModelChangeRequest,
   buildChatDefaultsUpdateRequest,
@@ -40,6 +41,7 @@ export function ChatToolbarPanel({
   const [conversationModelOverride, setConversationModelOverride] = useState<string | null>(
     () => getConversationModelOverride(conversationId)
   );
+  const { setCatalogModels: setSharedCatalogModels } = useNotebook();
   const [chatDefaultsError, setChatDefaultsError] = useState<string | null>(null);
   const hasPendingOp =
     chat.inProgressState &&
@@ -111,6 +113,15 @@ export function ChatToolbarPanel({
       setChatDefaultsError(error?.message ?? 'Failed to load catalog models.');
     }
   }, []);
+
+  // Write the loaded catalog to the shared NotebookContext so the composer
+  // reads the same copy. Done in a separate effect (not inside loadCatalogModels)
+  // so the async load's re-render doesn't interfere with callers.
+  useEffect(() => {
+    if (catalogModels.length > 0) {
+      setSharedCatalogModels(catalogModels);
+    }
+  }, [catalogModels, setSharedCatalogModels]);
 
   useEffect(() => {
     void loadChatDefaults();

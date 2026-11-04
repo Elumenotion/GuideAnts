@@ -17,6 +17,10 @@ vi.mock('../../../common/Toast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }));
 
+vi.mock('../../../../contexts/NotebookContext', () => ({
+  useNotebook: () => ({ setCatalogModels: vi.fn() }),
+}));
+
 vi.mock('../../../../services/api', () => ({
   api: {
     projects: {

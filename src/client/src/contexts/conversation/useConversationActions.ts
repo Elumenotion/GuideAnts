@@ -6,6 +6,7 @@ import { userService } from '../../services/userService';
 import { ensureValidTokensForTemplate } from '../../utils/notebookAuth';
 import { checkRuntimeStatus, getRuntimeBlockingMessage, dispatchRuntimeStatusWindowEvent } from './runtimeChecks';
 import { getConversationModelOverride } from './conversationModelOverride';
+import { getConversationReasoningEffortOverride } from './conversationReasoningEffortOverride';
 import type { ActionType, ComposerTerminalOutcome, ComposerTerminalPolicy, ExtendedConversationState, SendStreamState, StreamingMode } from './types';
 
 interface ActionDeps {
@@ -612,6 +613,7 @@ export function useConversationActions(
       // `null` means no override, so the field is omitted and the server applies its
       // normal cascade (assistant model -> global default).
       const modelDeploymentId = getConversationModelOverride(conversationId) ?? undefined;
+      const reasoningEffort = getConversationReasoningEffortOverride(conversationId) ?? undefined;
 
       // Optimistic render: paint the user's message and the placeholder immediately,
       // before the runtime preflight. Every early-return below must roll this back.
@@ -702,6 +704,7 @@ export function useConversationActions(
             instructions: content,
             assistantName: state.selectedAssistant || (() => { throw new Error('No assistant selected when sending message'); })(),
             modelDeploymentId,
+            reasoningEffort,
             attachments: attList.map(toSendAttachment),
           } as any,
           (event) => {

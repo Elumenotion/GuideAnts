@@ -14,6 +14,8 @@ import {
     CreateNotebookFolderDto,
     NotebookConversationDto
 } from '../types/notebook';
+import { NotebookChatReadinessDto } from '../types/notebookToolbar';
+import { ModelDto } from '../types/guides';
 import { api } from '../services/api';
 import { useToast } from '../components/common/Toast';
 import { notebookFilesApi } from '../services/notebookFiles';
@@ -46,6 +48,8 @@ type NotebookAction =
     | { type: 'SET_ASSISTANTS'; payload: Array<{ name: string; model?: string; avatarUrl: string, id?: string }> }
     | { type: 'SET_ASSISTANTS_LOADING'; payload: boolean }
     | { type: 'SET_ASSISTANTS_ERROR'; payload: string | null }
+    | { type: 'SET_CHAT_READINESS'; payload: NotebookChatReadinessDto | null }
+    | { type: 'SET_CATALOG_MODELS'; payload: ModelDto[] }
     | { type: 'RESET' };
 
 // Initial state
@@ -69,6 +73,8 @@ const initialState: NotebookState = {
     assistants: [],
     isLoadingAssistants: false,
     assistantsError: null,
+    chatReadiness: null,
+    catalogModels: [],
 };
 
 // Reducer
@@ -191,6 +197,12 @@ function notebookReducer(state: NotebookState, action: NotebookAction): Notebook
         
         case 'SET_ASSISTANTS_ERROR':
             return { ...state, assistantsError: action.payload };
+
+        case 'SET_CHAT_READINESS':
+            return { ...state, chatReadiness: action.payload };
+
+        case 'SET_CATALOG_MODELS':
+            return { ...state, catalogModels: action.payload };
         
         case 'RESET':
             return initialState;
@@ -641,6 +653,14 @@ export function NotebookProvider({ children, notebookId, projectId }: NotebookPr
         await refreshNotebook();
     }, [projectId, notebookId, refreshNotebook]);
 
+    const setChatReadiness = useCallback((v: NotebookChatReadinessDto | null) => {
+        dispatch({ type: 'SET_CHAT_READINESS', payload: v });
+    }, []);
+
+    const setCatalogModels = useCallback((v: ModelDto[]) => {
+        dispatch({ type: 'SET_CATALOG_MODELS', payload: v });
+    }, []);
+
     // call loadConversations after notebook load effect at end of provider initialization (maybe use useEffect)
     useEffect(() => {
         if (notebookId) {
@@ -714,6 +734,10 @@ export function NotebookProvider({ children, notebookId, projectId }: NotebookPr
         // Home page management
         setHomePageFile,
         clearHomePage,
+        chatReadiness: state.chatReadiness,
+        setChatReadiness,
+        catalogModels: state.catalogModels,
+        setCatalogModels,
     }), [
         state,
         projectId,
@@ -744,7 +768,9 @@ export function NotebookProvider({ children, notebookId, projectId }: NotebookPr
         deleteConversation,
         deleteConversations,
         setHomePageFile,
-        clearHomePage
+        clearHomePage,
+        setChatReadiness,
+        setCatalogModels
     ]);
 
     return (

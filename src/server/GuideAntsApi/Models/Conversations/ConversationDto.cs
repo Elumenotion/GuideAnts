@@ -88,6 +88,16 @@ public class SendMessageRequest
     public string? ModelDeploymentId { get; set; }
     public bool? UseAssistantDefinitionModel { get; set; }
 
+    /// <summary>
+    /// Optional per-request reasoning-effort override. When set, it beats the
+    /// normal cascade (ChatDefaults global override → assistant definition →
+    /// model defaultChoice). The client picks the value from the model's declared
+    /// <c>ReasoningChoicesJson</c> and sends it; the server passes it straight into
+    /// the run's parameter bag. If it doesn't match the model's choices, the
+    /// runtime's own resolution falls through to the cascade.
+    /// </summary>
+    public string? ReasoningEffort { get; set; }
+
     // NEW: Optional list of notebook file attachments to include with this message
     public List<AttachmentDto>? Attachments { get; set; }
 

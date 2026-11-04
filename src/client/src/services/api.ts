@@ -1344,7 +1344,7 @@ export const api = {
                     projectId: string,
                     notebookId: string,
                     convoId: string,
-                    data: { instructions: string; assistantName?: string; modelDeploymentId?: string; useAssistantDefinitionModel?: boolean },
+                    data: { instructions: string; assistantName?: string; modelDeploymentId?: string; useAssistantDefinitionModel?: boolean; reasoningEffort?: string },
                     onEvent: (event: { type: string; data: any }) => void,
                     onError: (error: Error) => void,
                     onComplete: (terminalEventType?: string) => void,
