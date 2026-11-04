@@ -8,6 +8,10 @@ import {
 } from '../../../../contexts/conversation/conversationModelOverride';
 import { api } from '../../../../services/api';
 
+vi.mock('../../../../contexts/NotebookContext', () => ({
+  useNotebook: () => ({ setCatalogModels: vi.fn() }),
+}));
+
 vi.mock('../../../../services/api', () => ({
   api: {
     settings: {
@@ -454,7 +458,7 @@ describe('ChatToolbarPanel', () => {
     );
 
     await waitFor(() => expect(api.settings.chatDefaults.get).toHaveBeenCalled());
-    const option = screen.getByRole('option', { name: /Gemini 2.5 Flash/i });
+    const option = (screen.getAllByRole('option', { name: /Gemini 2.5 Flash/i }).find(o => o.tagName === 'BUTTON') ?? screen.getAllByRole('option', { name: /Gemini 2.5 Flash/i })[0]);
     expect(option).toBeDisabled();
     await user.click(option);
     expect(api.settings.chatDefaults.update).not.toHaveBeenCalled();
@@ -507,7 +511,7 @@ describe('ChatToolbarPanel', () => {
     );
 
     await waitFor(() => expect(api.settings.chatDefaults.get).toHaveBeenCalled());
-    const option = screen.getByRole('option', { name: /Gemini 2.5 Flash/i });
+    const option = (screen.getAllByRole('option', { name: /Gemini 2.5 Flash/i }).find(o => o.tagName === 'BUTTON') ?? screen.getAllByRole('option', { name: /Gemini 2.5 Flash/i })[0]);
     expect(option).toBeEnabled();
     await user.click(option);
     expect(api.settings.chatDefaults.update).toHaveBeenCalledWith(
@@ -702,7 +706,7 @@ describe('ChatToolbarPanel', () => {
       />
     );
 
-    await user.click(screen.getByRole('option', { name: /Gemini 2.5 Flash/i }));
+    await user.click((screen.getAllByRole('option', { name: /Gemini 2.5 Flash/i }).find(o => o.tagName === 'BUTTON') ?? screen.getAllByRole('option', { name: /Gemini 2.5 Flash/i })[0]));
     await waitFor(() => expect(screen.getByText('Update rejected')).toBeInTheDocument());
   });
 

@@ -640,6 +640,8 @@ function createReadyContexts(overrides?: {
     copyFromProject: vi.fn(),
     setHomePageFile: vi.fn(),
     clearHomePage: vi.fn(),
+    setChatReadiness: vi.fn(),
+    setCatalogModels: vi.fn(),
     ...(overrides?.notebookContext ?? {}),
   };
 }

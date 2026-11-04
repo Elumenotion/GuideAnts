@@ -41,9 +41,6 @@ export function ChatToolbarPanel({
   const [conversationModelOverride, setConversationModelOverride] = useState<string | null>(
     () => getConversationModelOverride(conversationId)
   );
-  // Shared notebook-level catalog (written so the composer reads the same copy
-  // the toolbar uses). Aliased because the local state setter above is named
-  // setCatalogModels.
   const { setCatalogModels: setSharedCatalogModels } = useNotebook();
   const [chatDefaultsError, setChatDefaultsError] = useState<string | null>(null);
   const hasPendingOp =
@@ -111,12 +108,20 @@ export function ChatToolbarPanel({
     try {
       const models = await api.guides.catalogs.models();
       setCatalogModels(models);
-      setSharedCatalogModels(models as ModelDto[]);
       setCatalogLoaded(true);
     } catch (error: any) {
       setChatDefaultsError(error?.message ?? 'Failed to load catalog models.');
     }
-  }, [setSharedCatalogModels]);
+  }, []);
+
+  // Write the loaded catalog to the shared NotebookContext so the composer
+  // reads the same copy. Done in a separate effect (not inside loadCatalogModels)
+  // so the async load's re-render doesn't interfere with callers.
+  useEffect(() => {
+    if (catalogModels.length > 0) {
+      setSharedCatalogModels(catalogModels);
+    }
+  }, [catalogModels, setSharedCatalogModels]);
 
   useEffect(() => {
     void loadChatDefaults();
