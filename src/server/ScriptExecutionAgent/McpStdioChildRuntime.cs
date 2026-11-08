@@ -18,7 +18,7 @@ internal static class McpStdioChildRuntime
         var scope = ScriptExecutionScopeRuntime.ResolveScope(projectId, guideScopeId, scopeOptions);
         ScriptExecutionScopeRuntime.EnsureScopeDirectory(scope);
 
-        var environmentValidation = ValidateExecutionEnvironment(request.Environment);
+        var environmentValidation = ExecutionRequestValidator.ValidateExecutionEnvironment(request.Environment);
         if (!environmentValidation.IsValid)
         {
             return McpStdioDiscoverResult.Failed($"Environment validation failed: {environmentValidation.ErrorMessage}");
@@ -39,7 +39,7 @@ internal static class McpStdioChildRuntime
         var arguments = request.Arguments?.Where(arg => arg is not null).Select(arg => arg!).ToArray()
             ?? Array.Empty<string>();
 
-        var (commandFile, commandArgs) = ApplyPrivacyWrapper(command, arguments);
+        var (commandFile, commandArgs) = ScriptProcessRuntime.ApplyPrivacyWrapper(command, arguments);
         var launch = ScriptExecutionScopeRuntime.BuildIsolatedProcessLaunchPlan(
             commandFile,
             commandArgs,
@@ -104,7 +104,7 @@ internal static class McpStdioChildRuntime
         var scope = ScriptExecutionScopeRuntime.ResolveScope(projectId, guideScopeId, scopeOptions);
         ScriptExecutionScopeRuntime.EnsureScopeDirectory(scope);
 
-        var environmentValidation = ValidateExecutionEnvironment(request.Environment);
+        var environmentValidation = ExecutionRequestValidator.ValidateExecutionEnvironment(request.Environment);
         if (!environmentValidation.IsValid)
         {
             return McpStdioExecutionResult.Failed($"Environment validation failed: {environmentValidation.ErrorMessage}");
@@ -125,7 +125,7 @@ internal static class McpStdioChildRuntime
         var arguments = request.Arguments?.Where(arg => arg is not null).Select(arg => arg!).ToArray()
             ?? Array.Empty<string>();
 
-        var (commandFile, commandArgs) = ApplyPrivacyWrapper(command, arguments);
+        var (commandFile, commandArgs) = ScriptProcessRuntime.ApplyPrivacyWrapper(command, arguments);
         var launch = ScriptExecutionScopeRuntime.BuildIsolatedProcessLaunchPlan(
             commandFile,
             commandArgs,
@@ -221,7 +221,7 @@ internal static class McpStdioChildRuntime
             return ValidationResult.Failure("TimeoutSeconds must be between 1 and 600.");
         }
 
-        return ValidateExecutionEnvironment(request.Environment);
+        return ExecutionRequestValidator.ValidateExecutionEnvironment(request.Environment);
     }
 
     public static ValidationResult ValidateMcpStdioRequest(McpStdioExecutionRequest request)
@@ -292,36 +292,7 @@ internal static class McpStdioChildRuntime
             return ValidationResult.Failure("TimeoutSeconds must be between 1 and 600.");
         }
 
-        return ValidateExecutionEnvironment(request.Environment);
-    }
-
-    private static ValidationResult ValidateExecutionEnvironment(IReadOnlyDictionary<string, string>? environment)
-    {
-        if (environment is null)
-        {
-            return ValidationResult.Success();
-        }
-
-        if (environment.Count > 128)
-        {
-            return ValidationResult.Failure("Environment contains too many entries.");
-        }
-
-        foreach (var (key, value) in environment)
-        {
-            var keyValidation = ScriptExecutionScopeRuntime.ValidateEnvironmentKey(key);
-            if (!keyValidation.IsValid)
-            {
-                return keyValidation;
-            }
-
-            if (value.Length > 64 * 1024)
-            {
-                return ValidationResult.Failure($"Environment value for '{key}' exceeds maximum size.");
-            }
-        }
-
-        return ValidationResult.Success();
+        return ExecutionRequestValidator.ValidateExecutionEnvironment(request.Environment);
     }
 
     private static Dictionary<string, object?> ConvertToolArguments(JsonElement? toolArguments)
@@ -353,29 +324,6 @@ internal static class McpStdioChildRuntime
             error = $"MCP stdio child process failed to start: {ex.Message}";
             return null;
         }
-    }
-
-    private static (string FileName, string[] Arguments) ApplyPrivacyWrapper(string commandFile, string[] commandArgs)
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            return (commandFile, commandArgs);
-        }
-
-        var wrapper = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_PRIVACY_WRAPPER");
-        if (string.IsNullOrWhiteSpace(wrapper))
-        {
-            wrapper = "/usr/local/bin/ga-script-exec";
-        }
-
-        if (!File.Exists(wrapper))
-        {
-            return (commandFile, commandArgs);
-        }
-
-        var wrappedArgs = new List<string> { commandFile };
-        wrappedArgs.AddRange(commandArgs);
-        return (wrapper, wrappedArgs.ToArray());
     }
 }
 
