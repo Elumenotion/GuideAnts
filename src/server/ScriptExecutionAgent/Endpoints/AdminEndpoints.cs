@@ -45,7 +45,16 @@ internal static class AdminEndpoints
 
         group.MapPut("/requirements", async (HttpContext context, ILogger<Program> logger) =>
         {
-            var body = await AgentRequestBody.ReadTextAsync(context);
+            string body;
+            try
+            {
+                body = await AgentRequestBody.ReadTextAsync(context, AgentRequestBody.RequirementsBodyMaxBytes);
+            }
+            catch (RequestBodyTooLargeException ex)
+            {
+                return AgentErrorResult.FromRequestBodyTooLarge(ex, "/admin/requirements", logger);
+            }
+
             var validation = ScriptExecutionScopeRuntime.ValidateRequirements(body);
             if (!validation.IsValid)
             {
@@ -75,7 +84,16 @@ internal static class AdminEndpoints
 
         group.MapPut("/apt-packages", async (HttpContext context, ILogger<Program> logger) =>
         {
-            var body = await AgentRequestBody.ReadTextAsync(context);
+            string body;
+            try
+            {
+                body = await AgentRequestBody.ReadTextAsync(context, AgentRequestBody.AptPackagesBodyMaxBytes);
+            }
+            catch (RequestBodyTooLargeException ex)
+            {
+                return AgentErrorResult.FromRequestBodyTooLarge(ex, "/admin/apt-packages", logger);
+            }
+
             var validation = AdminStateRuntime.ValidateAptPackages(body);
             if (!validation.IsValid)
             {
@@ -125,7 +143,16 @@ internal static class AdminEndpoints
                     : error, StatusCodes.Status400BadRequest);
             }
 
-            var body = await AgentRequestBody.ReadTextAsync(context);
+            string body;
+            try
+            {
+                body = await AgentRequestBody.ReadTextAsync(context, AgentRequestBody.InstallScriptsBodyMaxBytes);
+            }
+            catch (RequestBodyTooLargeException ex)
+            {
+                return AgentErrorResult.FromRequestBodyTooLarge(ex, "/admin/install-scripts", logger);
+            }
+
             try
             {
                 var document = await AdminInstallScriptsRuntime.ParseAndValidateSubmitAsync(body, context.RequestAborted);
@@ -148,7 +175,7 @@ internal static class AdminEndpoints
 
             try
             {
-                var body = await AgentRequestBody.ReadTextAsync(context);
+                var body = await AgentRequestBody.ReadTextAsync(context, AgentRequestBody.ApplyBodyMaxBytes);
                 AdminApplyRequest? applyRequest = null;
                 if (!string.IsNullOrWhiteSpace(body))
                 {
@@ -166,6 +193,10 @@ internal static class AdminEndpoints
                     context.RequestAborted);
 
                 return Results.Json(accepted, adminApiJsonOptions, statusCode: StatusCodes.Status202Accepted);
+            }
+            catch (RequestBodyTooLargeException ex)
+            {
+                return AgentErrorResult.FromRequestBodyTooLarge(ex, "/admin/apply", logger);
             }
             catch (InvalidOperationException ex)
             {

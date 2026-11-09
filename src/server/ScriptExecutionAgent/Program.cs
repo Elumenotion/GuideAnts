@@ -46,6 +46,28 @@ public class Program
 
         app.StartAsync().GetAwaiter().GetResult();
 
+        if (options.Security.ReapOrphanIdentities)
+        {
+            // Bind the HTTP listener first, then reap orphaned notebook identities in the
+            // background so that user/group deletion never delays /execute or /health. The
+            // reaper is opt-in (SCRIPT_EXECUTION_REAP_ORPHAN_IDENTITIES) until the 24-hex
+            // naming has been observed in one release.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await NotebookExecutionIdentityProvider.ReapOrphanedIdentitiesAsync(
+                        options.FileStorageRoot,
+                        startupLogger,
+                        app.Lifetime.ApplicationStopping);
+                }
+                catch (Exception ex)
+                {
+                    startupLogger.LogWarning(ex, "SECURITY: startup identity reaping failed; continuing without reaping.");
+                }
+            });
+        }
+
         if (options.AdminOptions.Enabled)
         {
             // Bind the HTTP listener first, then reconcile sandbox scopes in the background so that

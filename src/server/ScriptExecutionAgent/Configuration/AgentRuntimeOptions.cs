@@ -34,6 +34,8 @@ internal sealed record AgentRuntimeOptions(
                 StringComparison.OrdinalIgnoreCase));
         var enableNotebookIdentityIsolation = AgentEnvironment.GetBooleanEnvironmentVariable(
             "SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION", defaultValue: true);
+        var reapOrphanIdentities = AgentEnvironment.GetBooleanEnvironmentVariable(
+            "SCRIPT_EXECUTION_REAP_ORPHAN_IDENTITIES", defaultValue: false);
         var agentToken = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_AGENT_TOKEN");
 
         var adminStateDir = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_ADMIN_STATE_DIR");
@@ -76,7 +78,11 @@ internal sealed record AgentRuntimeOptions(
             fileStorageRoot,
             scriptConfig,
             new AgentSecurityOptions(
-                requireAgentToken, agentToken, allowOwnershipFallback, enableNotebookIdentityIsolation),
+                requireAgentToken,
+                agentToken,
+                allowOwnershipFallback,
+                enableNotebookIdentityIsolation,
+                reapOrphanIdentities),
             scopeOptions,
             adminOptions);
     }
@@ -99,12 +105,13 @@ internal sealed record AgentRuntimeOptions(
     public void LogStartupConfiguration(ILogger logger)
     {
         logger.LogInformation(
-            "SECURITY: startup config tokenRequired={TokenRequired} tokenConfigured={TokenConfigured} storageRootConfigured={StorageRootConfigured} linuxIdentityIsolation={IdentityIsolation} allowOwnershipFallback={AllowOwnershipFallback} scopeStateRoot={ScopeStateRoot} requireScopedVenv={RequireScopedVenv} adminApiEnabled={AdminApiEnabled} adminTokenConfigured={AdminTokenConfigured} adminStateDir={AdminStateDir}",
+            "SECURITY: startup config tokenRequired={TokenRequired} tokenConfigured={TokenConfigured} storageRootConfigured={StorageRootConfigured} linuxIdentityIsolation={IdentityIsolation} allowOwnershipFallback={AllowOwnershipFallback} reapOrphanIdentities={ReapOrphanIdentities} scopeStateRoot={ScopeStateRoot} requireScopedVenv={RequireScopedVenv} adminApiEnabled={AdminApiEnabled} adminTokenConfigured={AdminTokenConfigured} adminStateDir={AdminStateDir}",
             Security.RequireAgentToken,
             !string.IsNullOrWhiteSpace(Security.AgentToken),
             !string.IsNullOrWhiteSpace(FileStorageRoot),
             Security.EnableNotebookIdentityIsolation,
             Security.AllowOwnershipFallback,
+            Security.ReapOrphanIdentities,
             GuideAnts.Logging.LogValueSanitizer.Sanitize(ScopeOptions.StateRootPath),
             ScopeOptions.RequireScopedPythonVenv,
             AdminOptions.Enabled,

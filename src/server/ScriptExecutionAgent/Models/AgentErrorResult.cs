@@ -11,6 +11,11 @@ internal static class AgentErrorResult
 {
     public static IResult FromExecutionRoute(string route, Exception exception, ILogger logger)
     {
+        if (exception is RequestBodyTooLargeException)
+        {
+            return FromRequestBodyTooLarge(exception, route, logger);
+        }
+
         if (exception is JsonException jsonEx)
         {
             logger.LogError(jsonEx, $"{route} JSON parsing exception");
@@ -25,5 +30,12 @@ internal static class AgentErrorResult
     {
         logger.LogError(exception, "Error listing files");
         return AgentResponses.Text($"Error: {exception.Message}", StatusCodes.Status500InternalServerError);
+    }
+
+    public static IResult FromRequestBodyTooLarge(Exception exception, string route, ILogger logger)
+    {
+        var tooLarge = (RequestBodyTooLargeException)exception;
+        logger.LogWarning("SECURITY: {Route} rejected because request body exceeds {MaxBytes} bytes.", route, tooLarge.MaxBytes);
+        return AgentResponses.Text("Request body too large", StatusCodes.Status413RequestEntityTooLarge);
     }
 }
