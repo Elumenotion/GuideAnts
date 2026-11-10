@@ -8,10 +8,8 @@ namespace ScriptExecutionAgent;
 /// deserialized streaming, exactly as the pre-refactor code did, so malformed JSON keeps
 /// producing the plain-text 400 messages the agent has always returned instead of an
 /// ASP.NET problem+json response. JSON body size is bounded by Kestrel's default 30 MB
-/// request body limit (no route in this agent needs more; the largest legal JSON payload
-/// is an /execute request with the max 1 MB script plus the maximum environment, 128
-/// values x 64 KB, ~9.4 MB). Text bodies are read with a per-route streaming cap that
-/// throws <see cref="RequestBodyTooLargeException"/> the moment the limit is crossed -
+/// request body limit. Text bodies are read with a per-route streaming cap that throws
+/// <see cref="RequestBodyTooLargeException"/> the moment the limit is crossed -
 /// authoritative against a faked Content-Length header, which Kestrel's own limit trusts.
 /// </summary>
 internal static class AgentRequestBody
@@ -60,14 +58,23 @@ internal static class AgentRequestBody
             throw new ArgumentOutOfRangeException(nameof(maxBytes));
         }
 
+        // The decoder is stateful across buffer boundaries: decoding each chunk on its own
+        // turns any multi-byte UTF-8 sequence that straddles a chunk into replacement
+        // characters. flush:false for every chunk but the last so a trailing partial sequence
+        // is completed by the next read, and flush:true at EOF surfaces an incomplete tail
+        // sequence as an invalid-bytes exception.
+        var decoder = Utf8Streaming.GetDecoder();
         var builder = new StringBuilder(64 * 1024);
         var buffer = new byte[64 * 1024];
+        var charBuffer = new char[Utf8Streaming.GetMaxCharCount(buffer.Length)];
         var total = 0L;
         while (true)
         {
             var read = await context.Request.Body.ReadAsync(buffer, context.RequestAborted);
             if (read == 0)
             {
+                var charWritten = decoder.GetChars(buffer, 0, 0, charBuffer, 0, flush: true);
+                builder.Append(charBuffer, 0, charWritten);
                 return builder.ToString();
             }
 
@@ -77,7 +84,14 @@ internal static class AgentRequestBody
                 throw new RequestBodyTooLargeException(maxBytes);
             }
 
-            builder.Append(Encoding.UTF8.GetString(buffer, 0, read));
+            var written = decoder.GetChars(buffer, 0, read, charBuffer, 0, flush: false);
+            builder.Append(charBuffer, 0, written);
         }
     }
+
+    /// <summary>
+    /// ThrowOnInvalidBytes encoding so malformed text is an exception rather than silent
+    /// U+FFFD replacement, which the previous per-chunk GetString() produced at boundaries.
+    /// </summary>
+    private static readonly UTF8Encoding Utf8Streaming = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 }

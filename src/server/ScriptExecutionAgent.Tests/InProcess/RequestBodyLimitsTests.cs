@@ -60,7 +60,7 @@ public sealed class RequestBodyLimitsTests
     }
 
     [TestMethod]
-    public async Task Empty_and_whitespace_json_bodies_return_invalid_request_body_400()
+    public async Task Empty_json_body_returns_invalid_request_body_400()
     {
         _factory = new ScriptExecutionAgentWebApplicationFactory();
         using var client = _factory.CreateAuthenticatedClient();
@@ -71,13 +71,23 @@ public sealed class RequestBodyLimitsTests
             emptyResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             (await emptyResponse.Content.ReadAsStringAsync()).Should().Be("Invalid request body");
         }
+    }
 
-        using (var whitespaceContent = new StringContent("   \n  ", Encoding.UTF8, "application/json"))
-        {
-            var whitespaceResponse = await client.PostAsync("/execute", whitespaceContent);
-            whitespaceResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-            (await whitespaceResponse.Content.ReadAsStringAsync()).Should().Be("Invalid request body");
-        }
+    [TestMethod]
+    public async Task Whitespace_only_json_body_returns_plain_text_json_parse_error_400()
+    {
+        // Whitespace with a declared Content-Length reaches the deserializer, which throws,
+        // so the agent answers with the plain-text JSON parse error - the contract it has had
+        // since before the Program.cs split, and the same text /execute returns for
+        // "{ not-json". Only a body with no content at all is "Invalid request body".
+        _factory = new ScriptExecutionAgentWebApplicationFactory();
+        using var client = _factory.CreateAuthenticatedClient();
+
+        using var whitespaceContent = new StringContent("   \n  ", Encoding.UTF8, "application/json");
+        var whitespaceResponse = await client.PostAsync("/execute", whitespaceContent);
+
+        whitespaceResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await whitespaceResponse.Content.ReadAsStringAsync()).Should().StartWith("JSON parsing error:");
     }
 
     [TestMethod]
