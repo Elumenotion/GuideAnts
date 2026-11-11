@@ -10,6 +10,7 @@ import { reducer, initialState } from './conversation/reducer';
 import { getNotebookRuntimeReadyCache, checkRuntimeStatus, clearNotebookRuntimeReadyCache } from './conversation/runtimeChecks';
 import { useStreamingEventHandler } from './conversation/useStreamingEventHandler';
 import { useConversationActions } from './conversation/useConversationActions';
+import { clearConversationReasoningEffortOverride } from './conversation/conversationReasoningEffortOverride';
 import {
   appendStreamingPreviewMessage,
   buildInlineUserProfiles,
@@ -99,6 +100,19 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
 
   const { loadNotebookFiles } = useNotebook();
   const { showToast } = useToast();
+
+  // The provider is keyed by conversationId (NotebookDetails renders it as
+  // <ConversationProvider key={activeConversationId} ...>), so this cleanup
+  // fires exactly when the conversation view is torn down - a real
+  // navigate-away, never a per-turn composer remount. Clearing the thinking
+  // level here (not in the composer) is what keeps the override sticky across
+  // turns within the conversation: the composer unmounts on every turn while
+  // streaming, and its old unmount cleanup wiped the registry each time.
+  useEffect(() => {
+    return () => {
+      clearConversationReasoningEffortOverride(conversationId);
+    };
+  }, [conversationId]);
 
   const isStreamingRef = React.useRef(state.isStreaming);
   const selectedAssistantRef = React.useRef(state.selectedAssistant);
