@@ -94,6 +94,7 @@ vi.mock('../../services/userService', () => ({
 }));
 
 import { useConversation } from '../ConversationContext';
+import { setConversationReasoningEffortOverride, getConversationReasoningEffortOverride } from '../conversation/conversationReasoningEffortOverride';
 import { ensureValidTokensForTemplate } from '../../utils/notebookAuth';
 import { checkRuntimeStatus, clearNotebookRuntimeReadyCache } from '../conversation/runtimeChecks';
 
@@ -737,6 +738,34 @@ describe('ConversationContext Provider', () => {
       await waitFor(() => {
         expect(result.current.userProfiles?.['user-9']?.name).toBe('Fetched Profile');
       });
+    });
+
+    it('clears this conversation reasoning-effort override on unmount (navigate away) and leaves others intact', async () => {
+      // Regression: the thinking-level override was cleared by the composer's
+      // unmount effect, which fired on every turn (the composer only renders
+      // at-rest) - resetting the thinking mode after every turn. Navigate-away
+      // clearing now belongs to the keyed provider; unmount of THIS conversation
+      // must not touch other conversations' entries.
+      const wrapper = renderConversationProvider({
+        conversationId: 'convo-A',
+        guideId: 'guide-1',
+        assistants: defaultAssistants,
+      });
+      setConversationReasoningEffortOverride('convo-A', 'High');
+      setConversationReasoningEffortOverride('convo-B', 'Low');
+      const { unmount } = renderHook(() => useConversation(), { wrapper });
+
+      expect(getConversationReasoningEffortOverride('convo-A')).toBe('High');
+      expect(getConversationReasoningEffortOverride('convo-B')).toBe('Low');
+
+      act(() => {
+        unmount();
+      });
+      expect(getConversationReasoningEffortOverride('convo-A')).toBeNull();
+      // A different conversation's override must survive this conversation's teardown.
+      expect(getConversationReasoningEffortOverride('convo-B')).toBe('Low');
+      setConversationReasoningEffortOverride('convo-A', null);
+      setConversationReasoningEffortOverride('convo-B', null);
     });
 
     it('ignores llama runtime events for other notebooks', async () => {

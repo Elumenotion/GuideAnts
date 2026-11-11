@@ -516,13 +516,10 @@ export default function DraftUserCell({
     }
   }, [effectiveModel, catalogModels, thinkingLevel, conversationId]);
 
-  // Clear on unmount: the keyed ConversationProvider unmounts the composer when the
-  // user navigates to a different conversation, so cleanup = navigate-away.
-  useEffect(() => {
-    return () => {
-      setConversationReasoningEffortOverride(conversationId, null);
-    };
-  }, [conversationId]);
+  // NOTE: no unmount cleanup here. The composer unmounts on EVERY turn while
+  // streaming (CellList renders it only at-rest), so clearing the registry in
+  // an unmount effect wiped the thinking level after each turn. Navigate-away
+  // clearing is owned by the keyed ConversationProvider's unmount.
 
   const handleSend = (content: string) => {
     const hasText = Boolean(content && content.trim());

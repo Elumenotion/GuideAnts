@@ -147,12 +147,26 @@ describe('DraftUserCell – thinking-level override', () => {
     expect(screen.queryByText(/Thinking:/)).not.toBeInTheDocument();
   });
 
-  it('clears the registry on unmount (navigate away)', () => {
+  it('does NOT clear the registry on unmount (turn remount keeps the override sticky)', () => {
+    // The composer unmounts on every turn while streaming (CellList renders it
+    // only at-rest). The old unmount cleanup here wiped the registry on each
+    // turn - the defect that reset the thinking level after every turn.
+    // Navigate-away clearing is owned by the keyed ConversationProvider.
     setConversationReasoningEffortOverride(CONVO, 'High');
     const { unmount } = render(<DraftUserCell {...baseProps} />);
     expect(getConversationReasoningEffortOverride(CONVO)).toBe('High');
     unmount();
-    expect(getConversationReasoningEffortOverride(CONVO)).toBeNull();
+    expect(getConversationReasoningEffortOverride(CONVO)).toBe('High');
+  });
+
+  it('hydrates the chip again after a turn remount (unmount + remount round trip)', () => {
+    setConversationReasoningEffortOverride(CONVO, 'High');
+    const first = render(<DraftUserCell {...baseProps} />);
+    expect(first.getByText('Thinking: High')).toBeInTheDocument();
+    first.unmount();
+    const second = render(<DraftUserCell {...baseProps} />);
+    expect(second.getByText('Thinking: High')).toBeInTheDocument();
+    second.unmount();
   });
 
   it('auto-clears when the effective model changes to one that lacks the choice', () => {
