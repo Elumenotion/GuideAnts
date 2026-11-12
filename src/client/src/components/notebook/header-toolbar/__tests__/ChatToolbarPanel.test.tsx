@@ -856,4 +856,100 @@ describe('ChatToolbarPanel', () => {
       expect(getConversationModelOverride('c-override')).toBeNull();
     });
   });
+
+  // ---- T-C3 (F-2): offline pick works; presence shown; no infinite spinner ----
+
+  it('offline: renders the selectable list, a pick calls chatDefaults.update, presence line shown', async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'blocked',
+          summary: 'Qwen Local — RUNTIME_STATE: alias runtime state is unloaded.',
+          conversationId: null,
+          selectedAssistantName: null,
+          effectiveModelId: 'qwen-local',
+          effectiveModelDisplayName: 'Qwen Local',
+          effectiveProvider: 'llama-cpp',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'qwen-local', displayName: 'Qwen Local', provider: 'llama-cpp', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+          presence: {
+            serviceId: 'llama',
+            baseUrl: 'http://max:8112/llama-cpp',
+            availability: 'Unknown',
+            artifactPresent: null,
+            selectedRef: null,
+            observedUtc: null,
+            error: null,
+          },
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId={null}
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => undefined)}
+      />,
+    );
+
+    // Unknown presence renders as the named status, never a spinner.
+    expect(screen.getByTestId('presence-line')).toHaveTextContent('not yet observed · Refresh');
+
+    // The selectable list is rendered even offline; picking a model persists it.
+    const option = await screen.findByRole('option', { name: /Qwen Local/ });
+    await user.click(option);
+    await waitFor(() => {
+      expect(api.settings.chatDefaults.update).toHaveBeenCalled();
+    });
+  });
+
+  it('no infinite spinner on Load when merely unreachable (hasPendingOp false)', async () => {
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'requiresLoad',
+          summary: 'Qwen Local selected. No local model is loaded.',
+          conversationId: null,
+          selectedAssistantName: null,
+          effectiveModelId: 'qwen-local',
+          effectiveModelDisplayName: 'Qwen Local',
+          effectiveProvider: 'llama-cpp',
+          overrideAllChatModels: false,
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          modelOptions: [],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+          presence: {
+            serviceId: 'llama',
+            baseUrl: 'http://max:8112/llama-cpp',
+            availability: 'Unreachable',
+            artifactPresent: null,
+            selectedRef: null,
+            observedUtc: new Date().toISOString(),
+            error: 'connection refused',
+          },
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId={null}
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => undefined)}
+      />,
+    );
+
+    await screen.findByTestId('presence-line');
+    // No in-progress operation is reported merely because the engine is unreachable.
+    expect(screen.queryByText(/in progress/i)).toBeNull();
+    expect(screen.queryByTestId('presence-line')).toHaveTextContent('endpoint unreachable');
+  });
 });

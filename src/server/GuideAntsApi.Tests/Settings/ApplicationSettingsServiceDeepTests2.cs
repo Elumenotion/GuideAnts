@@ -161,7 +161,7 @@ public sealed class ApplicationSettingsServiceDeepTests2
             DisplayOrder: displayOrder);
 
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"settings-deep2-{Guid.NewGuid():N}")
@@ -194,11 +194,6 @@ public sealed class ApplicationSettingsServiceDeepTests2
             }
         });
 
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 }

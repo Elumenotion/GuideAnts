@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Moq;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -8,6 +8,8 @@ using GuideAntsApi.Tests.TestUtils;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAnts.Usage;
+using System.Collections;
+using System.Reflection;
 using System.Security.Claims;
 using FluentAssertions;
 using AntRunner.Chat.Abstractions;
@@ -19,10 +21,17 @@ using Microsoft.Extensions.Configuration;
 namespace GuideAntsApi.Tests.Services;
 
 [TestClass]
+[DoNotParallelize]
 public class ConversationServiceAssistantSwitchingTests
 {
-    private const string ConnectionStringEnvColon = "ConnectionStrings:DefaultConnection";
-    private const string ConnectionStringEnvDoubleUnderscore = "ConnectionStrings__DefaultConnection";
+    // AssistantUtility caches definitions in a static, process-wide dictionary and
+    // PrepareMessagesForAssistantAsync resolves EVERY assistant name through it. An unseeded name falls
+    // through to DatabaseStorage, which reads ConnectionStrings:DefaultConnection from the PROCESS
+    // environment and opens real SQL - that is the ~15 s failure this class used to show once another
+    // assembly's container connection string was in the environment. This class now seeds the one name
+    // its assertions need and never reads or writes the env var, following the precedent in
+    // ConversationHistoryBuilderCompactionTests / ConversationServicePreflightTests.
+    private const string SwitchAssistantName = "Code and Data";
 
     private ApplicationDbContext _dbContext = null!;
     private ConversationService _service = null!;
@@ -35,21 +44,10 @@ public class ConversationServiceAssistantSwitchingTests
     private Guid _notebookId;
     private Guid _conversationId;
     private Guid _templateId;
-    private string? _priorConnectionStringColon;
-    private string? _priorConnectionStringDoubleUnderscore;
 
     [TestInitialize]
     public void TestInitialize()
     {
-        // PrepareMessagesForAssistantAsync loads assistants via DatabaseStorage, which
-        // opens SQL using these env vars. When integration tests share the VS Test host
-        // they leave a container connection string behind; if that SQL is gone, each
-        // call hangs for ~15s (Connect Timeout). Keep this suite hermetic.
-        _priorConnectionStringColon = Environment.GetEnvironmentVariable(ConnectionStringEnvColon);
-        _priorConnectionStringDoubleUnderscore = Environment.GetEnvironmentVariable(ConnectionStringEnvDoubleUnderscore);
-        Environment.SetEnvironmentVariable(ConnectionStringEnvColon, null);
-        Environment.SetEnvironmentVariable(ConnectionStringEnvDoubleUnderscore, null);
-
         // Create in-memory database
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
@@ -121,9 +119,35 @@ public class ConversationServiceAssistantSwitchingTests
             _mockChatClientFactory.Object,
             distributedLockMock.Object);
 
-        // Seed test data
+        // Seed test data, then seed the static assistant cache so no assistant lookup can reach SQL.
+        // ClearAllCache first: another suite may have left an entry for this name behind.
         SeedTestData();
         AssistantUtility.ClearAllCache();
+        // Seeded with no Instructions on purpose: these tests assert the conversation tail only, and a
+        // non-empty Instructions would prepend a system message and change every expected count.
+        SeedAssistantCache("assistant");
+        SeedAssistantCache("python-assistant");
+        // Seeded WITH instructions so the assistant-switch branch is the branch under test.
+        SeedAssistantCache(SwitchAssistantName, "You are a Python data analyst. Use pandas.");
+    }
+
+    /// <summary>
+    /// Seeds AssistantUtility's static cache directly, bypassing the DatabaseStorage lookup
+    /// PrepareMessagesForAssistantAsync would otherwise perform. Mirrors
+    /// ConversationHistoryBuilderCompactionTests.SeedAssistantCache.
+    /// </summary>
+    private static void SeedAssistantCache(string assistantName, string? instructions = null)
+    {
+        var cacheType = typeof(AssistantUtility).GetNestedType("CachedAssistant", BindingFlags.NonPublic)!;
+        var entry = Activator.CreateInstance(cacheType, new AntRunner.ToolCalling.AssistantDefinitions.AssistantDefinition
+        {
+            Name = assistantName,
+            Instructions = instructions
+        })!;
+        var cache = (IDictionary)typeof(AssistantUtility)
+            .GetField("AssistantDefinitionCache", BindingFlags.Static | BindingFlags.NonPublic)!
+            .GetValue(null)!;
+        cache[assistantName] = entry;
     }
 
     private void SeedTestData()
@@ -162,9 +186,6 @@ public class ConversationServiceAssistantSwitchingTests
         AssistantUtility.ClearAllCache();
 
         _dbContext.Dispose();
-
-        Environment.SetEnvironmentVariable(ConnectionStringEnvColon, _priorConnectionStringColon);
-        Environment.SetEnvironmentVariable(ConnectionStringEnvDoubleUnderscore, _priorConnectionStringDoubleUnderscore);
     }
 
     #region New Conversation Tests
@@ -242,26 +263,19 @@ public class ConversationServiceAssistantSwitchingTests
     {
         // Arrange
         var conversation = await SetupConversationWithMessagesAndToolCalls("assistant");
-        var switchedAssistant = await AssistantUtility.GetAssistantCreateRequest("Code and Data");
+
+        // "Code and Data" is seeded into AssistantUtility's static cache by TestInitialize, so the
+        // switch branch is deterministic and cannot fall back to the null-definition path (which used
+        // to make every assertion below unreachable).
 
         // Act
         var result = await _historyBuilder.PrepareMessagesForAssistantAsync(
             conversation,
-            "Code and Data",
+            SwitchAssistantName,
             _userId,
             CancellationToken.None);
 
         // Assert
-        if (switchedAssistant == null)
-        {
-            // If no assistant definition is available, switch logic falls back to existing conversation messages.
-            result.Should().HaveCount(3);
-            result[0].Role.Should().Be(ChatMessageRole.User);
-            result[1].Role.Should().Be(ChatMessageRole.Assistant);
-            result[2].Role.Should().Be(ChatMessageRole.User);
-            return;
-        }
-
         // Should apply assistant switching logic with system messages and filtered conversation messages
         result.Should().HaveCount(4); // 1 system message + 2 filtered conversation messages + 1 handoff context message
         
@@ -284,15 +298,36 @@ public class ConversationServiceAssistantSwitchingTests
         // Arrange
         var conversation = await SetupConversationWithMessages("assistant");
 
-        // Act
-        var result = await _historyBuilder.PrepareMessagesForAssistantAsync(
-            conversation,
-            "definitely-does-not-exist-assistant",
-            _userId,
-            CancellationToken.None);
+        // This is the one test that must exercise a real cache MISS, so it cannot be served from the
+        // seeded static cache. A miss falls through to DatabaseStorage, which reads
+        // ConnectionStrings:DefaultConnection from the process environment; with no value set it throws
+        // InvalidOperationException internally and returns null immediately (no SQL attempt), which is the
+        // outcome asserted here. Guard the variable for just this call and restore it in finally so the
+        // class never leaves a value - or a stale snapshot of one - behind.
+        const string connectionStringKey = "ConnectionStrings:DefaultConnection";
+        const string connectionStringKeyDoubleUnderscore = "ConnectionStrings__DefaultConnection";
+        var priorConnectionString = Environment.GetEnvironmentVariable(connectionStringKey);
+        var priorConnectionStringDoubleUnderscore = Environment.GetEnvironmentVariable(connectionStringKeyDoubleUnderscore);
+        Environment.SetEnvironmentVariable(connectionStringKey, null);
+        Environment.SetEnvironmentVariable(connectionStringKeyDoubleUnderscore, null);
 
-        // Assert
-        result.Should().HaveCount(4); // Original messages without filtering since assistant definition not found
+        try
+        {
+            // Act
+            var result = await _historyBuilder.PrepareMessagesForAssistantAsync(
+                conversation,
+                "definitely-does-not-exist-assistant",
+                _userId,
+                CancellationToken.None);
+
+            // Assert
+            result.Should().HaveCount(4); // Original messages without filtering since assistant definition not found
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(connectionStringKey, priorConnectionString);
+            Environment.SetEnvironmentVariable(connectionStringKeyDoubleUnderscore, priorConnectionStringDoubleUnderscore);
+        }
     }
 
     #endregion

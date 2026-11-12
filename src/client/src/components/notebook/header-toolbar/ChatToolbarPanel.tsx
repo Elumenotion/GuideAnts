@@ -1,3 +1,4 @@
+import { PresenceLine } from './PresenceLine';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FaCheck, FaCog, FaPlay, FaSpinner, FaStop, FaTimes } from 'react-icons/fa';
 import { api } from '../../../services/api';
@@ -292,6 +293,7 @@ export function ChatToolbarPanel({
           : chat.summary}
       </div>
       {chatDefaultsError ? <div className="text-xs text-amber-700">{chatDefaultsError}</div> : null}
+      <PresenceLine presence={chat.presence} />
 
       <div className="rounded border border-slate-200 bg-slate-50/60 p-2" data-testid="conversation-model-override">
         <div className="flex items-center justify-between gap-2">

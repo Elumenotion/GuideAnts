@@ -54,7 +54,7 @@ public sealed class ServiceEditorMetadataProviderTests
         }
     }
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"service-editor-metadata-{Guid.NewGuid():N}")
@@ -117,11 +117,6 @@ public sealed class ServiceEditorMetadataProviderTests
                 ["tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
             }
         });
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 }

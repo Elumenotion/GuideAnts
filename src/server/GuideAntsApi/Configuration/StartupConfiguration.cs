@@ -222,6 +222,17 @@ public static class StartupConfiguration
         services.AddSingleton<IRouterModelsConfigService, RouterModelsConfigService>();
         services.AddScoped<ILlamaRuntimeInventoryService, LlamaRuntimeInventoryService>();
         services.AddHostedService<LocalModelStartupReconciliationService>();
+
+        // Plane C — reachability + last-known inventory, out-of-band by mechanism (S-2).
+        // Singletons: the probe loop and every configuration reader share them. The
+        // probe service resolves scoped dependencies per cycle through
+        // IServiceScopeFactory (it must not take them in its constructor).
+        services.AddSingleton<GuideAntsApi.Services.Reachability.ILocalEndpointProbe, GuideAntsApi.Services.Reachability.LocalEndpointProbe>();
+        services.AddScoped<GuideAntsApi.Services.Bootstrap.IServiceLocalModelInstallationStore, GuideAntsApi.Services.Bootstrap.ServiceLocalModelInstallationStore>();
+        services.AddScoped<GuideAntsApi.Services.Reachability.ILocalModelObservationRecorder, GuideAntsApi.Services.Bootstrap.LocalModelObservationRecorder>();
+        services.AddSingleton<GuideAntsApi.Services.Reachability.ILocalEndpointCache, GuideAntsApi.Services.Reachability.LocalEndpointCache>();
+        services.AddSingleton<GuideAntsApi.Services.Reachability.ILocalInventoryMirror, GuideAntsApi.Services.Reachability.LocalInventoryMirror>();
+        services.AddHostedService<GuideAntsApi.Services.Reachability.LocalEndpointProbeService>();
         services.AddScoped<ILocalModelOnboardingValidator, LocalModelOnboardingValidator>();
         services.AddScoped<ILocalModelOnboardingOrchestrator, LocalModelOnboardingOrchestrator>();
         services.AddScoped<ICuratedInstallResolver, CuratedInstallResolver>();

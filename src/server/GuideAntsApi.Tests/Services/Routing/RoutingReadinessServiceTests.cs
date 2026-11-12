@@ -1136,7 +1136,7 @@ public sealed class RoutingReadinessServiceTests
         overview.ChatTargets.Targets.Should().OnlyContain(t => t.ReferenceKind == "direct");
     }
 
-    private static ApplicationDbContext CreateDb()
+private static ApplicationDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"routing-readiness-{Guid.NewGuid():N}")
@@ -1252,12 +1252,7 @@ public sealed class RoutingReadinessServiceTests
                 ["tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
             }
         });
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 }
 

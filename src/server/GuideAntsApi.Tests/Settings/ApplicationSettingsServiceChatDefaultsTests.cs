@@ -96,7 +96,7 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
         result.Section.Payload["SamplingParametersJson"]!.GetValue<string>().Should().Be("""{"min_p":0.05}""");
     }
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"chat-defaults-validation-{Guid.NewGuid():N}")
@@ -145,11 +145,6 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
             }
         });
 
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 }

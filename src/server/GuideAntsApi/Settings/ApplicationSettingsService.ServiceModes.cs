@@ -18,6 +18,23 @@ public sealed partial class ApplicationSettingsService
 
     private async Task<JsonObject> LoadServiceModesPayloadAsync(CancellationToken cancellationToken)
     {
+        // Read lane (rev3 plan §12.3): pure AsNoTracking read returning a detached payload,
+        // so it may open its own short-lived context via the factory and be called from
+        // parallel branches (e.g. the P2 Task.WhenAll fan-out). The scoped _db is shared
+        // per request and EF's ConcurrencyDetector throws when two operations on it run at
+        // once; this method is the only read that crossed into parallel territory.
+        if (_dbFactory is not null)
+        {
+            using var factoryDb = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            var factoryRow = await factoryDb.ApplicationSettings
+                .AsNoTracking()
+                .SingleOrDefaultAsync(x => x.SectionName == ServiceModeResolver.SectionName, cancellationToken)
+                .ConfigureAwait(false);
+            return factoryRow == null
+                ? new JsonObject()
+                : ApplicationSettingsJson.DeserializeObject(factoryRow.JsonValue);
+        }
+
         var row = await _db.ApplicationSettings
             .AsNoTracking()
             .SingleOrDefaultAsync(x => x.SectionName == ServiceModeResolver.SectionName, cancellationToken)

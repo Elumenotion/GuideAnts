@@ -476,7 +476,11 @@ public sealed record ModeReadinessDto(
     IReadOnlyList<string> Blockers,
     string? ProviderSection,
     string? ModelId,
-    string? RuntimeState);
+    string? RuntimeState,
+    // Plane C overlay (F-2): shown, never awaited. Defaults keep every existing
+    // construction site compiling; no test asserts whole-DTO equality.
+    bool RuntimeObserved = false,
+    DateTime? RuntimeObservedUtc = null);
 
 /// <summary>
 /// Composed readiness for a chat target (R-9.2). <see cref="ReferenceKind"/> is
@@ -490,7 +494,11 @@ public sealed record ChatTargetReadinessDto(
     IReadOnlyList<string> Blockers,
     string? RuntimeState,
     int AssistantUsageCount,
-    string ReferenceKind);
+    string ReferenceKind,
+    // Plane C overlay (F-2). Additive-with-defaults: avoids breaking the 8 test
+    // construction sites; verdicts remain authoritative at the real use paths.
+    bool RuntimeObserved = false,
+    DateTime? RuntimeObservedUtc = null);
 
 public sealed record ServiceModeRollupDto(
     string Service,
@@ -510,7 +518,11 @@ public sealed record ProviderConnectionIssueDto(
 public sealed record LlamaRuntimeSnapshotDto(
     int LoadedAliases,
     int TotalAliases,
-    IReadOnlyList<string> MissingArtifactAliases);
+    IReadOnlyList<string> MissingArtifactAliases,
+    // "None" means never observed (cold cache, L-2): TotalAliases stays 0 but the
+    // DTO says so rather than implying "no aliases exist".
+    string InventorySource = "None",
+    DateTime? ObservedUtc = null);
 
 /// <summary>
 /// Overview composite returned by <c>GET /api/settings/overview</c>. Summarizes
@@ -522,7 +534,25 @@ public sealed record SettingsOverviewDto(
     IReadOnlyList<ServiceModeRollupDto> ServiceModeReadiness,
     ChatTargetsRollupDto ChatTargets,
     IReadOnlyList<ProviderConnectionIssueDto> ProviderIssues,
-    LlamaRuntimeSnapshotDto LlamaRuntime);
+    LlamaRuntimeSnapshotDto LlamaRuntime,
+    // Per-endpoint presence (observed state + timestamp) so each status line can be
+    // stamped "observed HH:MM". Presence augments the row; it never replaces status (F-2).
+    IReadOnlyList<EndpointPresenceDto>? Endpoints = null);
+
+/// <summary>
+/// Per-endpoint presence stamp for a configuration surface: a state plus when it was
+/// last observed. It augments an existing status line, it does not replace it (F-2).
+/// Availability is Unknown | Reachable | Unreachable; ArtifactPresent is the last-known
+/// comparison of the persisted selection against inventory (null when unobserved or N/A).
+/// </summary>
+public sealed record EndpointPresenceDto(
+    string ServiceId,
+    string BaseUrl,
+    string Availability,
+    bool? ArtifactPresent,
+    string? SelectedRef,
+    DateTime? ObservedUtc,
+    string? Error);
 
 /// <summary>
 /// Consumers referencing a single provider connection section. Drives the

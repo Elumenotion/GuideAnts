@@ -531,7 +531,7 @@ public sealed class ServiceEditorUpdateValidationTests
             && string.Equals(mode.ModelId, "chatterbox", StringComparison.Ordinal));
     }
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"service-editor-validation-{Guid.NewGuid():N}")
@@ -643,12 +643,7 @@ public sealed class ServiceEditorUpdateValidationTests
                 ["tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
             }
         });
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 
     private static IReadOnlyDictionary<string, JsonElement> JF(Dictionary<string, string?> fields)

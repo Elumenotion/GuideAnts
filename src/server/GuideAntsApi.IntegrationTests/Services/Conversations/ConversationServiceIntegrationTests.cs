@@ -65,6 +65,38 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         finalStatus.Should().Be(expectedStatus);
     }
 
+    /// <summary>
+    /// Waits until the in-process stream worker for <paramref name="turnId"/> has physically finished
+    /// (registered, or detached-but-still-unwinding, per the registry's own definition).
+    /// The Stop fence commits Status="cancelled" and releases the lease BEFORE the worker reaches its
+    /// finally block, where it preserves the announced tool calls and materializes the cancellation
+    /// tool results. Waiting on turn status alone therefore lets a test read the message rows before
+    /// the worker has written them.
+    /// </summary>
+    private static async Task WaitForWorkerToFinishAsync(Guid turnId, TimeSpan? timeout = null)
+    {
+        var waitTimeout = timeout ?? TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + waitTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            using var scope = SharedFactory!.Services.CreateScope();
+            var registry = scope.ServiceProvider.GetRequiredService<ConversationStreamRunRegistry>();
+            if (!registry.IsInFlight(turnId))
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        using var finalScope = SharedFactory!.Services.CreateScope();
+        finalScope.ServiceProvider
+            .GetRequiredService<ConversationStreamRunRegistry>()
+            .IsInFlight(turnId)
+            .Should()
+            .BeFalse($"the stream worker for turn {turnId} must finish before its terminal writes are asserted");
+    }
+
     private static async Task WaitForLockReleasedAsync(
         ApplicationDbContext db,
         Guid conversationId,
@@ -1116,52 +1148,68 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
 
         try
         {
-            await SendConversationStreamUntilCancelledAsync(
-                projectId,
-                notebookId,
-                pruneConversationId,
-                new { instructions = "Trigger tool calls then cancel", assistantName = "assistant" },
-                pruneCts.Token);
+            try
+            {
+                await SendConversationStreamUntilCancelledAsync(
+                    projectId,
+                    notebookId,
+                    pruneConversationId,
+                    new { instructions = "Trigger tool calls then cancel", assistantName = "assistant" },
+                    pruneCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // expected when the HTTP stream is aborted
+            }
+
+            using (var pruneMidScope = SharedFactory!.Services.CreateScope())
+            {
+                var pruneMidDb = pruneMidScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                pruneTurnId = await GetActiveTurnIdAsync(pruneMidDb, pruneConversationId);
+                (await pruneMidDb.ConversationTurns
+                    .AsNoTracking()
+                    .Where(t => t.Id == pruneTurnId)
+                    .Select(t => t.Status)
+                    .SingleAsync()).Should().Be("streaming");
+            }
+
+            await CancelTurnViaApiAsync(projectId, notebookId, pruneConversationId, pruneTurnId);
+
+            // Stop's fence has committed Status="cancelled" by now, but the ERROR: tool results asserted
+            // below are written by the worker's finally block. Wait for the worker instead of racing it:
+            // under full-suite load the worker can lose that race, which is what made this assertion
+            // fail in-suite and pass in isolation.
+            await WaitForWorkerToFinishAsync(pruneTurnId);
+
+            using (var pruneVerifyScope = SharedFactory!.Services.CreateScope())
+            {
+                var pruneVerifyDb = pruneVerifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                await WaitForTurnStatusAsync(pruneVerifyDb, pruneConversationId, "cancelled");
+
+                var pruneTurn = await pruneVerifyDb.ConversationTurns.SingleAsync(t => t.NotebookConversationId == pruneConversationId);
+
+                var pruneAssistant = await pruneVerifyDb.NotebookConversationMessages
+                    .Where(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Assistant)
+                    .SingleAsync();
+                pruneAssistant.ToolCalls.Should().NotBeNullOrWhiteSpace(
+                    "cancelled turns keep announced tool calls and record ERROR tool results instead of pruning");
+
+                var pruneToolMessages = await pruneVerifyDb.NotebookConversationMessages
+                    .Where(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Tool)
+                    .ToListAsync();
+                pruneToolMessages.Should().NotBeEmpty(
+                    "in-flight tool cancellation must propagate as tool results, like other tool errors.");
+                pruneToolMessages.Should().Contain(m =>
+                    m.Content != null && m.Content.Contains("ERROR:", StringComparison.Ordinal));
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // expected when the HTTP stream is aborted
-        }
-
-        using (var pruneMidScope = SharedFactory!.Services.CreateScope())
-        {
-            var pruneMidDb = pruneMidScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            pruneTurnId = await GetActiveTurnIdAsync(pruneMidDb, pruneConversationId);
-            (await pruneMidDb.ConversationTurns
-                .AsNoTracking()
-                .Where(t => t.Id == pruneTurnId)
-                .Select(t => t.Status)
-                .SingleAsync()).Should().Be("streaming");
-        }
-
-        await CancelTurnViaApiAsync(projectId, notebookId, pruneConversationId, pruneTurnId);
-
-        using (var pruneVerifyScope = SharedFactory!.Services.CreateScope())
-        {
-            var pruneVerifyDb = pruneVerifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-            await WaitForTurnStatusAsync(pruneVerifyDb, pruneConversationId, "cancelled");
-
-            var pruneTurn = await pruneVerifyDb.ConversationTurns.SingleAsync(t => t.NotebookConversationId == pruneConversationId);
-
-            var pruneAssistant = await pruneVerifyDb.NotebookConversationMessages
-                .Where(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Assistant)
-                .SingleAsync();
-            pruneAssistant.ToolCalls.Should().NotBeNullOrWhiteSpace(
-                "cancelled turns keep announced tool calls and record ERROR tool results instead of pruning");
-
-            var pruneToolMessages = await pruneVerifyDb.NotebookConversationMessages
-                .Where(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Tool)
-                .ToListAsync();
-            pruneToolMessages.Should().NotBeEmpty(
-                "in-flight tool cancellation must propagate as tool results, like other tool errors");
-            pruneToolMessages.Should().Contain(m =>
-                m.Content != null && m.Content.Contains("ERROR:", StringComparison.Ordinal));
+            // OnToolCallsReturning is a callback on the process-wide fake and pruneCts is disposed when
+            // this test returns. Reset so neither is left installed for the next test, matching the
+            // cleanup already used by SendMessageStream_HttpCancel_during_nestedReadWeb_...
+            FakeChatCompletionBehavior.Instance.Reset();
         }
     }
 

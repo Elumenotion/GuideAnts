@@ -608,7 +608,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         modes[0].ProviderSection.Should().Be("LocalServiceHosts:EmbeddingsBaseUrl");
     }
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"settings-schema-readiness-{Guid.NewGuid():N}")
@@ -624,12 +624,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
 
         var settingsSecrets = new Mock<IOptionsMonitor<SettingsSecretsOptions>>();
         settingsSecrets.SetupGet(value => value.CurrentValue).Returns(CreateValidSecretsOptions());
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 
     private static SettingsSecretsOptions CreateValidSecretsOptions() => new()

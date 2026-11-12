@@ -144,6 +144,65 @@ describe('OverviewTab', () => {
     expect(onOpenServices).toHaveBeenCalledWith('Embeddings');
   });
 
+  // ---- T-C1 additions: offline regression locks (R1 / F-2) ----
+
+  it('renders the configurator and Save path when getOverview never resolves — no full-tab spinner (R1)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.getOverview).mockImplementation(
+      () => new Promise(() => undefined), // never resolves: the hostile case
+    );
+
+    renderOverviewTab();
+
+    // The chat configurator is present and usable even while overview data is absent.
+    expect(await screen.findByText('Default Chat Model')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'set-default-model' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'set-default-model' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(api.settings.chatDefaults.update).toHaveBeenCalled();
+    });
+
+    // No full-tab blocking spinner: the tab never replaces its content with a spinner.
+    const spinnerRoles = screen.queryAllByRole('status');
+    expect(spinnerRoles.length).toBeLessThanOrEqual(1);
+  });
+
+  it('readiness rows render a status with observed state; Unknown renders as "not yet observed" (F-2)', async () => {
+    vi.mocked(api.settings.getOverview).mockResolvedValue({
+      ...overview,
+      llamaRuntime: {
+        loadedAliases: 0,
+        totalAliases: 0,
+        missingArtifactAliases: [],
+        inventorySource: 'None',
+        observedUtc: null,
+      },
+    } as never);
+
+    renderOverviewTab();
+
+    await screen.findByText('Overview');
+    // The runtime section states its never-observed truth instead of a blank or a spinner.
+    const cell = await screen.findByText(/not yet observed/i);
+    expect(cell).toBeInTheDocument();
+    expect(screen.queryByText(/checking…/i)).toBeNull();
+  });
+
+  it('service row failure shows per-row unavailable, not a blank tab (loadServiceRows)', async () => {
+    vi.mocked(api.settings.services.get).mockRejectedValue(new Error('service row down'));
+
+    renderOverviewTab();
+
+    await screen.findByText('Overview');
+    // The Embeddings row reports unavailable inline; the rest of the tab still renders.
+    await waitFor(() => {
+      expect(screen.getAllByText(/unavailable/i).length).toBeGreaterThan(0);
+    });
+    expect(screen.getByText('Default Chat Model')).toBeInTheDocument();
+  });
+
   it('shows overview load failures with retry', async () => {
     const user = userEvent.setup();
     vi.mocked(api.settings.getOverview)

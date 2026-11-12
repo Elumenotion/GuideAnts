@@ -5,7 +5,9 @@ using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Endpoints;
 using GuideAntsApi.Services.OpenAiCompatible;
+using GuideAntsApi.Services.Reachability;
 using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Services.Routing;
@@ -26,6 +28,14 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         public const string RuntimeArtifactMissing = "RUNTIME_ARTIFACT_MISSING";
         public const string RuntimeUnregistered = "RUNTIME_UNREGISTERED";
         public const string InvalidLocalRuntimeJson = "MODEL_LOCAL_RUNTIME_INVALID";
+
+        /// <summary>
+        /// Emitted ONLY on the aux (local-service) branch in NonBlocking when the
+        /// endpoint was observed unreachable. Never emitted on the llama/chat branch:
+        /// a non-whitelisted blocker on a chat row would hide it from the selectable
+        /// list (ShouldExposeChatModelOption). F-4 boundary; enforced by T-U7.
+        /// </summary>
+        public const string EndpointUnreachable = "ENDPOINT_UNREACHABLE";
     }
 
     private readonly IApplicationSettingsService _settings;
@@ -33,6 +43,11 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILocalServiceLoadService? _loadService;
     private readonly GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider? _stackClients;
+    // Plane C (reachability + last-known inventory). Optional so the Live path and
+    // every existing construction/test behave exactly as today; NonBlocking reads them.
+    private readonly ILocalEndpointCache? _endpointCache;
+    private readonly ILocalInventoryMirror? _inventoryMirror;
+    private readonly Bootstrap.IServiceLocalModelInstallationStore? _installStore;
     private readonly ILogger<RoutingReadinessService> _logger;
 
     public RoutingReadinessService(
@@ -41,7 +56,10 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         IServiceScopeFactory scopeFactory,
         ILogger<RoutingReadinessService> logger,
         ILocalServiceLoadService? loadService = null,
-        GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider? stackClients = null)
+        GuideAntsApi.Services.LlamaCpp.ILlamaStackRuntimeClientProvider? stackClients = null,
+        ILocalEndpointCache? endpointCache = null,
+        ILocalInventoryMirror? inventoryMirror = null,
+        Bootstrap.IServiceLocalModelInstallationStore? installStore = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
@@ -49,9 +67,16 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _loadService = loadService;
         _stackClients = stackClients;
+        _endpointCache = endpointCache;
+        _inventoryMirror = inventoryMirror;
+        _installStore = installStore;
     }
 
-    public async Task<ModeReadinessDto> ProbeModeAsync(string service, string modeId, CancellationToken cancellationToken = default)
+    public async Task<ModeReadinessDto> ProbeModeAsync(
+        string service,
+        string modeId,
+        CancellationToken cancellationToken = default,
+        RoutingProbeMode probeMode = RoutingProbeMode.Live)
     {
         if (string.IsNullOrWhiteSpace(service))
         {
@@ -121,13 +146,40 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
             if (catalogRow != null
                 && string.Equals(mode.ProviderSection, "LlamaCpp", StringComparison.OrdinalIgnoreCase))
             {
-                var llamaResult = await ProbeLlamaRuntimeAsync(catalogRow, cancellationToken).ConfigureAwait(false);
-                runtimeState = llamaResult.RuntimeState;
-                blockers.AddRange(llamaResult.Blockers);
+                if (probeMode == RoutingProbeMode.NonBlocking)
+                {
+                    // No inline network call (S-2). Runtime state from the Plane C alias mirror;
+                    // no RUNTIME_ARTIFACT_MISSING / ENDPOINT_UNREACHABLE on the chat side here —
+                    // this is a routed-service LlamaCpp mode, surfaced via cache only (F-4).
+                    runtimeState = ReadCachedLlamaRuntimeState();
+                }
+                else
+                {
+                    var llamaResult = await ProbeLlamaRuntimeAsync(catalogRow, cancellationToken).ConfigureAwait(false);
+                    runtimeState = llamaResult.RuntimeState;
+                    blockers.AddRange(llamaResult.Blockers);
+                }
             }
         }
 
-        blockers.AddRange(await ProbeWarmupOrchestratorBlockersAsync(service, mode, cancellationToken).ConfigureAwait(false));
+        var auxBlockers = await ProbeWarmupOrchestratorBlockersAsync(service, mode, probeMode, cancellationToken).ConfigureAwait(false);
+        blockers.AddRange(auxBlockers);
+
+        // F-2 on the aux surface: under NonBlocking the mode's RuntimeState comes from the
+        // Plane C cache (shown, never awaited). Live keeps its historical shape — it never
+        // populated RuntimeState for aux modes and must stay byte-for-byte.
+        DateTime? runtimeObservedUtc = null;
+        bool runtimeObserved = false;
+        if (probeMode == RoutingProbeMode.NonBlocking && IsLocalServiceProviderSection(mode.ProviderSection ?? string.Empty))
+        {
+            var cached = TryReadAuxObservation(service);
+            if (cached is not null)
+            {
+                runtimeState = cached.Value.Observation.RuntimeState;
+                runtimeObserved = true;
+                runtimeObservedUtc = cached.Value.Observation.ObservedUtc;
+            }
+        }
 
         return new ModeReadinessDto(
             Service: service,
@@ -136,13 +188,34 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
             Blockers: blockers,
             ProviderSection: mode.ProviderSection,
             ModelId: mode.ModelId,
-            RuntimeState: runtimeState);
+            RuntimeState: runtimeState,
+            RuntimeObserved: runtimeObserved,
+            RuntimeObservedUtc: runtimeObservedUtc);
+    }
+
+    /// <summary>
+    /// Plane C observation for one aux service's readiness URL (cache read only). Null when
+    /// the service is not configured locally or nothing has been observed yet.
+    /// </summary>
+    private (EndpointObservation Observation, string ReadinessUrl)? TryReadAuxObservation(string service)
+    {
+        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(service, ConfigurationForScope());
+        if (string.IsNullOrWhiteSpace(adminBase) || _endpointCache is null)
+        {
+            return null;
+        }
+
+        var readinessUrl = $"{adminBase.TrimEnd('/')}{(string.Equals(service, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal) ? "/health" : "/ready")}";
+        return _endpointCache.TryGet(readinessUrl, out var observation)
+            ? (observation, readinessUrl)
+            : null;
     }
 
     public async Task<ChatTargetReadinessDto> ProbeChatTargetAsync(
         string modelId,
         CancellationToken cancellationToken = default,
-        string referenceKind = "direct")
+        string referenceKind = "direct",
+        RoutingProbeMode mode = RoutingProbeMode.Live)
     {
         if (string.IsNullOrWhiteSpace(modelId))
         {
@@ -201,9 +274,19 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
 
             if (string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
             {
-                var llamaResult = await ProbeLlamaRuntimeAsync(catalogRow, cancellationToken).ConfigureAwait(false);
-                runtimeState = llamaResult.RuntimeState;
-                blockers.AddRange(llamaResult.Blockers);
+                if (mode == RoutingProbeMode.NonBlocking)
+                {
+                    // Configuration surface: no inline network call. Runtime state from the
+                    // Plane C alias mirror only — never RUNTIME_ARTIFACT_MISSING / ENDPOINT_UNREACHABLE
+                    // here, so ShouldExposeChatModelOption keeps local models selectable (F-4).
+                    runtimeState = ReadCachedLlamaRuntimeState();
+                }
+                else
+                {
+                    var llamaResult = await ProbeLlamaRuntimeAsync(catalogRow, cancellationToken).ConfigureAwait(false);
+                    runtimeState = llamaResult.RuntimeState;
+                    blockers.AddRange(llamaResult.Blockers);
+                }
             }
         }
 
@@ -374,11 +457,23 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
     private async Task<IReadOnlyList<string>> ProbeWarmupOrchestratorBlockersAsync(
         string service,
         ServiceModeDto mode,
+        RoutingProbeMode probeMode,
         CancellationToken cancellationToken)
     {
-        if (_loadService is null
-            || string.IsNullOrWhiteSpace(mode.ProviderSection)
+        if (string.IsNullOrWhiteSpace(mode.ProviderSection)
             || !IsLocalServiceProviderSection(mode.ProviderSection))
+        {
+            return Array.Empty<string>();
+        }
+
+        // NonBlocking: no inline network call. Evidence comes from the Plane C cache
+        // (reachability + last-known inventory), never from a live /ready GET (S-2).
+        if (probeMode == RoutingProbeMode.NonBlocking)
+        {
+            return BuildAuxRuntimeBlockersFromCache(service);
+        }
+
+        if (_loadService is null)
         {
             return Array.Empty<string>();
         }
@@ -410,6 +505,152 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         }
 
         return Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Aux runtime blockers derived purely from the Plane C cache (NonBlocking). Three
+    /// distinguishable outcomes replace aux's single historical runtime string (§5 P5):
+    /// <list type="bullet">
+    /// <item>Endpoint observed unreachable → ENDPOINT_UNREACHABLE (a shown status; config
+    /// unaffected; the use-path guard still fails as today).</item>
+    /// <item>Reachable but the persisted selection is absent from last-known inventory AND an
+    /// install row exists → RUNTIME_ARTIFACT_MISSING (F-4 reuses the existing key; the UI can
+    /// offer Remove). Requires the install-row precondition so a down host never masquerades
+    /// as a deleted model.</item>
+    /// <item>Otherwise → RUNTIME_STATE text sourced from cache, matching the Live wording so
+    /// ShouldExposeChatModelOption and the toolbar tests keep passing.</item>
+    /// </list>
+    /// Unknown (never observed) yields no blocker — it is a renderable status, not an error (L-2).
+    /// </summary>
+    private IReadOnlyList<string> BuildAuxRuntimeBlockersFromCache(string service)
+    {
+        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(service, ConfigurationForScope());
+        if (string.IsNullOrWhiteSpace(adminBase))
+        {
+            // Not configured locally: same silent behavior as the Live path's Configured=false.
+            return Array.Empty<string>();
+        }
+
+        var readinessUrl = $"{adminBase.TrimEnd('/')}{(string.Equals(service, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal) ? "/health" : "/ready")}";
+        if (_endpointCache is null || !_endpointCache.TryGet(readinessUrl, out var observation))
+        {
+            // Never observed: truthful absence, no blocker, no spinner.
+            return Array.Empty<string>();
+        }
+
+        if (observation.Availability == EndpointAvailability.Unreachable)
+        {
+            return [$"{BlockerKeys.EndpointUnreachable}: local engine for '{service}' was not reachable (observed {observation.ObservedUtc:O})."];
+        }
+
+        // Reachable. Is the persisted selection present in the last-known inventory?
+        var selectedRef = ReadPersistedSelectionSync(service);
+        if (!string.IsNullOrWhiteSpace(selectedRef)
+            && _inventoryMirror is not null
+            && _inventoryMirror.TryGet(service, out var models, out var source, out _)
+            && source != InventorySource.None
+            && !models.Any(m => string.Equals(m.ModelRef, selectedRef, StringComparison.Ordinal))
+            && InstallRowExists(service, selectedRef))
+        {
+            return [$"{BlockerKeys.RuntimeArtifactMissing}: selected local artifact '{selectedRef}' for '{service}' is not present on the reachable engine."];
+        }
+
+        // Reachable but not loaded → RUNTIME_STATE text identical in shape to the Live path.
+        if (!string.Equals(observation.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase))
+        {
+            var detail = string.IsNullOrWhiteSpace(observation.RuntimeState) ? "engine not loaded" : observation.RuntimeState;
+            return [$"{BlockerKeys.RuntimeState}: local engine not loaded for '{service}' ({detail})."];
+        }
+
+        return Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Llama runtime state for a NonBlocking probe, read from the Plane C alias mirror
+    /// (key "llama", written by the probe loop). Returns null when never observed —
+    /// rendered as unobserved, never a spinner (F-2/L-2). No inline network call.
+    /// </summary>
+    private string? ReadCachedLlamaRuntimeState()
+    {
+        if (_inventoryMirror is not null
+            && _inventoryMirror.TryGet("llama", out var models, out var source, out _)
+            && source != InventorySource.None)
+        {
+            // The mirror's IsActive flag encodes "loaded" for the llama alias table.
+            return models.Any(m => m.IsActive) ? "loaded" : "unloaded";
+        }
+        return null;
+    }
+
+    private IConfiguration ConfigurationForScope()
+    {
+        using var scope = _scopeFactory.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<IConfiguration>();
+    }
+
+    private static string BuildReadinessUrl(string serviceId, string adminBase)
+    {
+        var path = string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal) ? "/health" : "/ready";
+        return $"{adminBase.TrimEnd('/')}{path}";
+    }
+
+    /// <summary>
+    /// Reads the persisted ServiceModes selection synchronously via the scoped settings
+    /// service. This is a DB read (Plane A), not a network call, so it is permitted on the
+    /// NonBlocking path. Best-effort: any failure yields null (no artifact claim).
+    /// </summary>
+    private string? ReadPersistedSelectionSync(string serviceId)
+    {
+        // Plane A read via the injected settings service (a DB read, permitted on the
+        // NonBlocking path). Resolving IApplicationSettingsService from an arbitrary scope
+        // would fail under test scope factories and any host that registers it scoped-only.
+        try
+        {
+            var localSection = Bootstrap.LocalServiceModeSelectionReader.ResolveLocalProviderSection(serviceId);
+            if (localSection is null)
+            {
+                return null;
+            }
+            var modes = _settings.GetServiceModesAsync(serviceId, CancellationToken.None).GetAwaiter().GetResult();
+            var selected = modes.FirstOrDefault(m => string.Equals(m.ProviderSection, localSection, StringComparison.OrdinalIgnoreCase))?.ModelId?.Trim();
+            return string.IsNullOrWhiteSpace(selected) ? null : selected;
+        }
+        catch (Exception ex)
+        {
+            // Best-effort read: null (no artifact claim) is the product decision, but the
+            // swallow must stay visible. It previously masked the EF ConcurrencyDetector
+            // class on the NonBlocking fan-out path (rev3 plan §12.2); the read is now
+            // factory-backed, so any residual failure here is a real regression.
+            _logger.LogWarning(ex, "NonBlocking selection read failed for '{Service}': {ExceptionType}.", serviceId, ex.GetType().FullName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// True when the API owns an install row (Plane B) for this service+ref. The
+    /// RUNTIME_ARTIFACT_MISSING blocker requires this precondition so a merely-down host
+    /// can never masquerade as a deleted model (T-U7). Before P5 lands there are no rows,
+    /// so this returns false and no artifact claim is made — a legitimate pre-migration state.
+    /// </summary>
+    private bool InstallRowExists(string serviceId, string modelRef)
+    {
+        // Plane B install memory (P5): the RUNTIME_ARTIFACT_MISSING blocker requires the
+        // API to own a row for this ref, so a merely-down host can never masquerade as a
+        // deleted model (T-U7). No row => "provenance unknown", never an artifact claim.
+        if (_installStore is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _installStore.TryGetAsync(serviceId, modelRef).GetAwaiter().GetResult() is not null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Install-row lookup failed for '{Service}'/'{Ref}'.", serviceId, modelRef);
+            return false;
+        }
     }
 
     private static bool IsLocalServiceProviderSection(string providerSection) =>

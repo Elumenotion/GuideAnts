@@ -68,7 +68,7 @@ public sealed class ApplicationSettingsServiceRuntimeDependencyOverrideTests
         updated!.CurrentValue.Should().Be("http://localhost:8110/llama-cpp");
     }
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"settings-runtime-deps-{Guid.NewGuid():N}")
@@ -84,12 +84,7 @@ public sealed class ApplicationSettingsServiceRuntimeDependencyOverrideTests
 
         var settingsSecrets = new Mock<IOptionsMonitor<SettingsSecretsOptions>>();
         settingsSecrets.SetupGet(value => value.CurrentValue).Returns(CreateValidSecretsOptions());
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 
     private static SettingsSecretsOptions CreateValidSecretsOptions() => new()

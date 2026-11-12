@@ -30,6 +30,15 @@ public partial interface IApplicationSettingsService
     Task<ServiceEditorStateDto> SetServiceActiveProviderAsync(string serviceId, string providerId, CancellationToken cancellationToken = default);
     Task EnsureServiceModeExistsAsync(string serviceId, string providerId, CancellationToken cancellationToken = default);
     Task SetServiceModeModelIdAsync(string serviceId, string modelId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Clears a local model/bundle selection on the service's local mode (sets ModelId null).
+    /// Companion to <see cref="SetServiceModeModelIdAsync"/>, which cannot express absence.
+    /// Used by the offline delete path (F-1): with the engine unreachable the row is removed
+    /// from install memory and the selection must not keep pointing at a deleted artifact.
+    /// No-op when no local mode exists or nothing is selected.
+    /// </summary>
+    Task ClearServiceModeModelIdAsync(string serviceId, CancellationToken cancellationToken = default);
     Task<ServiceEditorStateDto> UpdateServiceProviderFieldsAsync(
         string serviceId,
         string providerId,
@@ -82,9 +91,15 @@ public sealed partial class ApplicationSettingsService(
     IServiceEditorMetadataProvider? metadataProvider = null,
     ILlamaRouterIniSyncService? llamaRouterIniSync = null,
     ITtsRuntimeTimeoutSyncService? ttsRuntimeTimeoutSync = null,
-    IChatDefaultsStore? chatDefaultsStore = null) : IApplicationSettingsService
+    IChatDefaultsStore? chatDefaultsStore = null,
+    IDbContextFactory<ApplicationDbContext>? dbFactory = null) : IApplicationSettingsService
 {
     private readonly ApplicationDbContext _db = db;
+    // Lane split (rev3 plan §12.3): read-only settings reads go through a short-lived
+    // factory context so they are safe to fan out in parallel (the scoped _db is not
+    // thread-safe); writes and bootstrap keep the scoped _db, which they require for
+    // change tracking. Null factory (design-time / non-parallel tests) falls back to _db.
+    private readonly IDbContextFactory<ApplicationDbContext>? _dbFactory = dbFactory;
     private readonly ISettingsSectionRegistry _registry = registry;
     private readonly IWebHostEnvironment _environment = environment;
     private readonly IConfiguration _configuration = configuration;

@@ -189,6 +189,9 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
         public IReadOnlyCollection<string> AllServiceIds { get; } =
             new[] { "SpeechTranscription", "Embeddings", "SpeechSynthesis", "ImageGeneration" };
 
+        // These stubs never run a real load/unload, so nothing is ever in flight.
+        public bool IsOperationInFlight(string serviceId) => false;
+
         public Task<LocalServiceReadiness> ProbeAsync(string serviceId, CancellationToken cancellationToken = default) =>
             Task.FromResult(new LocalServiceReadiness
             {

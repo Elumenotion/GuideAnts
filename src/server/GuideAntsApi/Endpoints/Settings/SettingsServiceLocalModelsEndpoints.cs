@@ -1,6 +1,7 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Services.Bootstrap;
+using GuideAntsApi.Services.Reachability;
 using GuideAntsApi.Services.HuggingFace;
 using GuideAntsApi.Settings;
 
@@ -12,11 +13,19 @@ public static class SettingsServiceLocalModelsEndpoints
     {
         var serviceEditorsGroup = SettingsGroupFactory.MapServiceEditorsGroup(app);
 
+        // P5b (grounded in R5's "configuration stays fully usable"): the editor page calls
+        // this on mount. A raw 503 when the engine is down is our code, not physics. When the
+        // endpoint is unreachable we serve the last-known inventory from the Plane C mirror
+        // (marked last-known per S-2), so the list renders with a timestamp instead of 503ing
+        // the whole editor. When the mirror has never observed anything, a named state is
+        // returned — never a blank, never a spinner (F-2).
         serviceEditorsGroup.MapGet("/{serviceId}/local-models", async (
             string serviceId,
             IHttpClientFactory httpClientFactory,
             IConfiguration configuration,
             IApplicationSettingsService settings,
+            ILocalInventoryMirror inventoryMirror,
+            ILocalEndpointCache endpointCache,
             CancellationToken cancellationToken) =>
         {
             var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
@@ -28,7 +37,42 @@ public static class SettingsServiceLocalModelsEndpoints
             var path = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
                 ? "/admin/bundles"
                 : "/admin/models";
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}{path}");
+            var listUrl = $"{adminBase}{path}";
+
+            if (!endpointCache.TryGet($"{adminBase.TrimEnd('/')}{(string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal) ? "/health" : "/ready")}", out var observation)
+                || observation.Availability == EndpointAvailability.Unreachable)
+            {
+                // Unreachable (or never observed): serve last-known from the mirror.
+                if (inventoryMirror.TryGet(serviceId, out var models, out var source, out var observedUtc)
+                    && source != InventorySource.None)
+                {
+                    var items = models.Select(m => new Dictionary<string, object?>
+                    {
+                        ["modelRef"] = m.ModelRef,
+                        ["complete"] = m.IsComplete,
+                        ["active"] = m.IsActive,
+                        ["lastKnown"] = true,
+                        ["observedUtc"] = observedUtc,
+                    }).ToList();
+                    return Results.Ok(new
+                    {
+                        source = source.ToString(),
+                        observedUtc,
+                        items,
+                    });
+                }
+
+                return Results.Json(
+                    new
+                    {
+                        error = $"The local {serviceId} endpoint is not reachable; its model list has not been observed yet.",
+                        code = "ENDPOINT_UNREACHABLE",
+                        serviceId,
+                    },
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, listUrl);
             if (string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal))
             {
                 return await ServiceLocalModelListEnricher.ProxyAndEnrichImageBundlesAsync(
@@ -125,11 +169,10 @@ public static class SettingsServiceLocalModelsEndpoints
         // (ASR, TTS, Embeddings). Image Generation's SD wrapper exposes
         // /health but its "active bundle" state is observable via
         // /admin/bundles, so it stays on its own shape and is excluded here.
-        serviceEditorsGroup.MapGet("/{serviceId}/runtime-readiness", async (
+        serviceEditorsGroup.MapGet("/{serviceId}/runtime-readiness", (
             string serviceId,
-            IHttpClientFactory httpClientFactory,
             IConfiguration configuration,
-            CancellationToken cancellationToken) =>
+            ILocalEndpointCache endpointCache) =>
         {
             if (!string.Equals(serviceId, "SpeechTranscription", StringComparison.Ordinal)
                 && !string.Equals(serviceId, "SpeechSynthesis", StringComparison.Ordinal)
@@ -142,9 +185,32 @@ public static class SettingsServiceLocalModelsEndpoints
             {
                 return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
             }
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}/ready");
-            return await LocalServiceAdminRouting.ProxyAsync(
-                httpClientFactory.CreateClient(), request, cancellationToken);
+
+            // P5b: a raw inline /ready proxy with no budget is a second 503 on the editor
+            // mount path. What this displays is governed by F-2: named state from the Plane C
+            // cache (with observed timestamp); never a raw socket wait. The handler is therefore
+            // synchronous (no await, no proxy) - same shape as GET /reachability.
+            var readinessUrl = $"{adminBase.TrimEnd('/')}/ready";
+            if (!endpointCache.TryGet(readinessUrl, out var observation))
+            {
+                return Results.Ok(new
+                {
+                    serviceId,
+                    state = (string?)"unknown",
+                    availability = "Unknown",
+                    observedUtc = (DateTime?)null,
+                    note = "not yet observed · Refresh",
+                });
+            }
+
+            return Results.Ok(new
+            {
+                serviceId,
+                state = observation.RuntimeState,
+                availability = observation.Availability.ToString(),
+                observedUtc = observation.ObservedUtc,
+                error = observation.Error,
+            });
         })
         .WithName("GetServiceRuntimeReadiness");
 
@@ -156,12 +222,30 @@ public static class SettingsServiceLocalModelsEndpoints
             IHuggingFaceTokenResolver hfTokenResolver,
             IApplicationSettingsService settings,
             IBundleDefinitionProjectionService projectionService,
+            IServiceLocalModelInstallationStore installStore,
+            ILocalEndpointCache endpointCache,
             CancellationToken cancellationToken) =>
         {
             var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
                 return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
+            }
+
+            // P5b/R-B: a download needs a live engine — while unreachable it stays out of
+            // scope, but the affordance must fail with a named reason, not a raw 503.
+            var downloadReadinessUrl = $"{adminBase.TrimEnd('/')}{(string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal) ? "/health" : "/ready")}";
+            if (!endpointCache.TryGet(downloadReadinessUrl, out var downloadObservation)
+                || downloadObservation.Availability == EndpointAvailability.Unreachable)
+            {
+                return Results.Json(
+                    new
+                    {
+                        error = $"The local {serviceId} endpoint is not reachable; downloading requires a live engine.",
+                        code = "ENDPOINT_UNREACHABLE",
+                        serviceId,
+                    },
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
             }
 
             var validationError = ServiceLocalModelDownloadValidator.ValidateDownloadPayload(serviceId, payload);
@@ -217,8 +301,55 @@ public static class SettingsServiceLocalModelsEndpoints
             {
                 Content = LocalServiceAdminRouting.BuildForwardedBodyWithHfToken(payload, resolvedHfToken),
             };
-            return await LocalServiceAdminRouting.ProxyAsync(
+            var upstream = await LocalServiceAdminRouting.ProxyAsync(
                 httpClientFactory.CreateClient(), request, cancellationToken);
+
+            // Plane B (F-5): record install memory at acceptance, from what the API already
+            // possesses — its own payload coordinates plus the engine's catalog version read
+            // once at acceptance. A download requires a live engine by definition, so this
+            // read stays inside the non-goals; no other engine interrogation happens.
+            try
+            {
+                if (TryExtractDownloadAccepted(upstream, payload, out var modelRef, out var operationId))
+                {
+                    string? catalogVersion = null;
+                    try
+                    {
+                        catalogVersion = await ServiceLocalModelCatalogSupport.TryReadCatalogVersionAsync(
+                            serviceId, configuration, httpClientFactory.CreateClient(), cancellationToken);
+                    }
+                    catch
+                    {
+                        // Version is enrichment, not truth: absence is recorded as null.
+                    }
+
+                    var catalogId = LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_id", out var mid) ? mid
+                        : LocalServiceAdminRouting.TryGetNonEmptyString(payload, "bundle_id", out var bid) ? bid
+                        : null;
+                    var requestedRevision = LocalServiceAdminRouting.TryGetNonEmptyString(payload, "revision", out var rev) ? rev : null;
+                    var isBundle = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal);
+
+                    await installStore.UpsertAsync(
+                        serviceId,
+                        modelRef,
+                        isBundle ? "bundle" : "model",
+                        catalogId,
+                        catalogVersion,
+                        requestedRevision,
+                        "Accepted",
+                        operationId,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Install memory is best-effort at acceptance: a recording failure must not
+                // fail a download the engine already accepted. Absence of a row renders as
+                // "provenance unknown — verify or remove", never a null reference.
+                Console.Error.WriteLine($"install-memory recording failed for {serviceId}: {ex.Message}");
+            }
+
+            return upstream;
         })
         .WithName("StartServiceLocalModelDownload");
 
@@ -227,6 +358,7 @@ public static class SettingsServiceLocalModelsEndpoints
             string operationId,
             IHttpClientFactory httpClientFactory,
             IConfiguration configuration,
+            IServiceLocalModelInstallationStore installStore,
             CancellationToken cancellationToken) =>
         {
             var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
@@ -239,8 +371,54 @@ public static class SettingsServiceLocalModelsEndpoints
                 ? $"/admin/bundles/operations/{Uri.EscapeDataString(operationId)}"
                 : $"/admin/models/{Uri.EscapeDataString(operationId)}";
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}{path}");
-            return await LocalServiceAdminRouting.ProxyAsync(
+            var upstream = await LocalServiceAdminRouting.ProxyAsync(
                 httpClientFactory.CreateClient(), request, cancellationToken);
+
+            // Plane B: on a terminal engine verdict, record it. Terminal success enriches the
+            // row with target directory + artifact path/size from the admin listing (the only
+            // place the engines report them); terminal failure stamps Failed + ObservedError.
+            // Engine contract unchanged (O-2): we read the same operation dict the UI polls.
+            try
+            {
+                var json = ExtractJsonBody(upstream);
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+                    var status = root.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.String
+                        ? st.GetString()
+                        : null;
+                    var row = await installStore.FindByOperationAsync(serviceId, operationId, cancellationToken).ConfigureAwait(false);
+                    if (row is not null)
+                    {
+                        if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var finalRef = root.TryGetProperty("modelRef", out var mr) && mr.ValueKind == JsonValueKind.String
+                                ? mr.GetString()
+                                : row.ModelRef;
+                            var (targetDir, artifacts) = await TryReadArtifactsAsync(
+                                serviceId, adminBase, httpClientFactory.CreateClient(), finalRef ?? row.ModelRef, cancellationToken).ConfigureAwait(false);
+                            await installStore.SetInstalledAsync(serviceId, row.ModelRef, targetDir, artifacts, cancellationToken).ConfigureAwait(false);
+                        }
+                        else if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var error = root.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String
+                                ? err.GetString()
+                                : status;
+                            await installStore.MarkFailedAsync(serviceId, row.ModelRef, error, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Enrichment is best-effort; the poll response is the engine's verbatim body
+                // regardless (the row converges on a later poll).
+            }
+
+            return upstream;
         })
         .WithName("GetServiceLocalModelOperation");
 
@@ -382,6 +560,17 @@ public static class SettingsServiceLocalModelsEndpoints
             ILocalServiceLoadService loadService,
             CancellationToken cancellationToken) =>
         {
+            // Same ref grammar the load endpoint enforces: a route value is user-provided,
+            // and it is persisted into ServiceModes (which EnsureLoadedAsync later loads at
+            // startup). Reject a malformed ref before it is stored or sent to the engine.
+            if (!LocalServiceModelRefRules.IsLoadableLocalModelRef(modelRef))
+            {
+                var refKind = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
+                    ? "bundle id"
+                    : "local model path";
+                return Results.BadRequest(new { error = $@"Model reference '{modelRef}' is not a valid {refKind}." });
+            }
+
             await settings
                 .SetServiceModeModelIdAsync(serviceId, modelRef, cancellationToken)
                 .ConfigureAwait(false);
@@ -414,27 +603,197 @@ public static class SettingsServiceLocalModelsEndpoints
         })
         .WithName("GetServiceLocalModel");
 
+        // F-1 — delete is a configuration act, not a use path: it must succeed with the
+        // engine unreachable (R5/R-B). The DB row is removed and a dangling ServiceModes
+        // selection is cleared; the engine DELETE is a best-effort courtesy whose outcome
+        // never changes the result (diskCleanup true|false). Nothing is queued, nothing is
+        // replayed, no deferred cleanup exists (T-A4).
         serviceEditorsGroup.MapDelete("/{serviceId}/local-models/{modelRef}", async (
             string serviceId,
             string modelRef,
             IHttpClientFactory httpClientFactory,
             IConfiguration configuration,
+            IServiceLocalModelInstallationStore installStore,
+            IApplicationSettingsService settings,
             CancellationToken cancellationToken) =>
         {
+            var diskCleanup = false;
+
             var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
-            if (string.IsNullOrWhiteSpace(adminBase))
+            if (!string.IsNullOrWhiteSpace(adminBase))
             {
-                return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
+                var path = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
+                    ? $"/admin/bundles/{Uri.EscapeDataString(modelRef)}"
+                    : $"/admin/models/{Uri.EscapeDataString(modelRef)}";
+                using var request = new HttpRequestMessage(HttpMethod.Delete, $"{adminBase}{path}");
+                var upstream = await LocalServiceAdminRouting.ProxyAsync(
+                    httpClientFactory.CreateClient(), request, cancellationToken);
+                // A pass-through success (2xx incl. 204) counts as disk cleanup; anything the
+                // proxy converted to an envelope (502) or a non-pass-through status does not.
+                // The proxy returns ContentHttpResult for pass-throughs with the upstream
+                // status in its StatusCode; envelopes are JsonHttpResult (502).
+                diskCleanup = TryGetUpstreamStatusCode(upstream) is >= 200 and < 300;
             }
 
-            var path = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
-                ? $"/admin/bundles/{Uri.EscapeDataString(modelRef)}"
-                : $"/admin/models/{Uri.EscapeDataString(modelRef)}";
-            using var request = new HttpRequestMessage(HttpMethod.Delete, $"{adminBase}{path}");
-            return await LocalServiceAdminRouting.ProxyAsync(
-                httpClientFactory.CreateClient(), request, cancellationToken);
+            await installStore.RemoveAsync(serviceId, modelRef, cancellationToken).ConfigureAwait(false);
+
+            // Clear a dangling selection: the removed ref must not keep pointing at a
+            // deleted artifact. Compare then clear via the API-owned settings surface.
+            var current = await LocalServiceModeSelectionReader.TryReadLocalModelRefAsync(settings, serviceId, cancellationToken).ConfigureAwait(false);
+            if (string.Equals(current, modelRef, StringComparison.Ordinal))
+            {
+                await settings.ClearServiceModeModelIdAsync(serviceId, cancellationToken).ConfigureAwait(false);
+            }
+
+            return Results.Ok(new
+            {
+                serviceId,
+                modelRef,
+                deleted = true,
+                diskCleanup,
+            });
         })
         .WithName("DeleteServiceLocalModel");
+    }
+
+    /// <summary>
+    /// Extracts (modelRef, operationId) from an accepted download response. The engines
+    /// return 202 with the operation dict — {"operationId": "...", "modelRef"/"modelId"/
+    /// "model_id": ...}. The ref falls back to the API's own payload when the engine does
+    /// not echo one (SD returns the bundle id it was given). Best-effort: false when the
+    /// upstream returned an error envelope or an unparseable body.
+    /// </summary>
+    private static bool TryExtractDownloadAccepted(IResult upstream, JsonElement payload, out string modelRef, out string? operationId)
+    {
+        modelRef = string.Empty;
+        operationId = null;
+        var json = ExtractJsonBody(upstream);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            // Fall back to the API's own payload coordinates: the row is still created
+            // (Accepted) when we cannot parse the engine's operation dict.
+            modelRef = LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_path", out var mp) ? mp
+                : LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_id", out var mi) ? mi
+                : LocalServiceAdminRouting.TryGetNonEmptyString(payload, "bundle_id", out var bi) ? bi
+                : string.Empty;
+            return !string.IsNullOrWhiteSpace(modelRef);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            string? GetStr(string name) =>
+                root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            operationId = GetStr("operationId") ?? GetStr("operation_id");
+            modelRef = GetStr("modelRef") ?? GetStr("model_id") ?? GetStr("modelId") ?? GetStr("bundleId") ?? GetStr("bundle_id") ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(modelRef))
+            {
+                modelRef = LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_path", out var mp) ? mp
+                    : LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_id", out var mi) ? mi
+                    : LocalServiceAdminRouting.TryGetNonEmptyString(payload, "bundle_id", out var bi) ? bi
+                    : string.Empty;
+            }
+            return !string.IsNullOrWhiteSpace(modelRef);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the /admin/models (or /admin/bundles) listing for one ref and extracts its
+    /// install path and size bytes — the fields the listing exposes (asr_service.py:988)
+    /// and the operation dicts do not. Returns (null, "[]") on any failure.
+    /// </summary>
+    private static async Task<(string? TargetDirectory, string ArtifactsJson)> TryReadArtifactsAsync(
+        string serviceId, string adminBase, HttpClient client, string modelRef, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var listPath = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
+                ? "/admin/bundles"
+                : "/admin/models";
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}{listPath}");
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return (null, "[]");
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            var items = root.ValueKind == JsonValueKind.Array
+                ? root
+                : root.TryGetProperty("items", out var nested) ? nested : default;
+
+            if (items.ValueKind != JsonValueKind.Array)
+            {
+                return (null, "[]");
+            }
+
+            foreach (var item in items.EnumerateArray())
+            {
+                var ref_ = item.TryGetProperty("modelRef", out var mr) && mr.ValueKind == JsonValueKind.String ? mr.GetString()
+                    : item.TryGetProperty("bundleId", out var bi) && bi.ValueKind == JsonValueKind.String ? bi.GetString()
+                    : item.TryGetProperty("model_id", out var mi) && mi.ValueKind == JsonValueKind.String ? mi.GetString()
+                    : item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString()
+                    : null;
+                if (!string.Equals(ref_, modelRef, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var path = item.TryGetProperty("path", out var pp) && pp.ValueKind == JsonValueKind.String ? pp.GetString() : null;
+                var size = item.TryGetProperty("sizeBytes", out var sz) && sz.ValueKind == JsonValueKind.Number ? sz.GetInt64() : (long?)null;
+
+                var artifact = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["path"] = path,
+                    ["sizeBytes"] = size,
+                };
+                var array = new System.Text.Json.Nodes.JsonArray { artifact };
+                return (path, array.ToJsonString());
+            }
+
+            return (null, "[]");
+        }
+        catch (Exception)
+        {
+            return (null, "[]");
+        }
+    }
+
+    /// <summary>
+    /// Pulls the JSON body out of a proxy IResult. Pass-through results carry the body as
+    /// content; envelopes (502) serialize their record shape — we only care about the
+    /// pass-through case, so anything else returns null.
+    /// </summary>
+    /// <summary>
+    /// Upstream HTTP status of a proxy IResult (ContentHttpResult.StatusCode for
+    /// pass-throughs). Null when the result shape carries no status.
+    /// </summary>
+    private static int? TryGetUpstreamStatusCode(IResult upstream)
+    {
+        var property = upstream.GetType().GetProperty("StatusCode");
+        if (property is null)
+        {
+            return null;
+        }
+
+        var value = property.GetValue(upstream);
+        return value is int i ? i : null;
+    }
+
+    private static string? ExtractJsonBody(IResult upstream)
+    {
+        // ContentHttpResult and StatusCodeHttpResult are the shapes ProxyAsync returns;
+        // reflection keeps this independent of the concrete closed generic types.
+        var contentProperty = upstream.GetType().GetProperty("Content");
+        var content = contentProperty?.GetValue(upstream) as string;
+        return content;
     }
 
     private static IResult MapLoadResult(string serviceId, LocalServiceOperationResult result)

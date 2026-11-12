@@ -760,6 +760,9 @@ export interface ModeReadinessDto {
   providerSection?: string | null;
   modelId?: string | null;
   runtimeState?: string | null;
+  /** Plane C overlay (F-2): shown, never awaited. */
+  runtimeObserved?: boolean;
+  runtimeObservedUtc?: string | null;
 }
 
 /** Composed readiness for a chat target (R-9.2). */
@@ -771,6 +774,9 @@ export interface ChatTargetReadinessDto {
   runtimeState?: string | null;
   assistantUsageCount: number;
   referenceKind: string;
+  /** Plane C overlay (F-2). */
+  runtimeObserved?: boolean;
+  runtimeObservedUtc?: string | null;
 }
 
 export interface ServiceModeRollupDto {
@@ -795,10 +801,25 @@ export interface LlamaRuntimeSnapshotDto {
   loadedAliases: number;
   totalAliases: number;
   missingArtifactAliases: string[];
+  /** 'None' = never observed (cold cache, L-2): totalAliases is 0 but the DTO says so rather than implying "no aliases exist". */
+  inventorySource?: 'None' | 'Live' | 'LastKnown';
+  observedUtc?: string | null;
+}
+
+export interface EndpointPresenceDto {
+  serviceId: string;
+  baseUrl: string;
+  availability: 'Unknown' | 'Reachable' | 'Unreachable';
+  artifactPresent: boolean | null;
+  selectedRef: string | null;
+  observedUtc: string | null;
+  error: string | null;
 }
 
 /** Overview composite returned by GET /api/settings/overview. */
 export interface SettingsOverviewDto {
+  /** Per-endpoint presence stamps (observed state + timestamp); augment the rows, never replace status (F-2). */
+  endpoints?: EndpointPresenceDto[] | null;
   generatedUtc: string;
   serviceModeReadiness: ServiceModeRollupDto[];
   chatTargets: ChatTargetsRollupDto;

@@ -115,7 +115,7 @@ public sealed class ApplicationSettingsServiceConnectionUsageTests
         });
     }
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"connection-usage-{Guid.NewGuid():N}")
@@ -137,12 +137,7 @@ public sealed class ApplicationSettingsServiceConnectionUsageTests
                 ["tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
             }
         });
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 
     private static IConfiguration BuildConfiguration()
