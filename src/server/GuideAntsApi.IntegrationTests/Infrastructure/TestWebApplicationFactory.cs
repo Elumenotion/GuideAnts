@@ -11,6 +11,7 @@ using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.IntegrationTests.TestUtils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using AntRunner.Chat.Abstractions;
 
 namespace GuideAntsApi.IntegrationTests.Infrastructure;
@@ -105,6 +106,67 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
                 contextLifetime: ServiceLifetime.Scoped, 
                 optionsLifetime: ServiceLifetime.Singleton);
 
+            // No background stale-turn recovery sweep in the test host.
+            //
+            // The API registers ConversationTurnRecoveryService as a hosted service that sweeps the
+            // database every second (StartupConfiguration.cs, AddHostedService<ConversationTurnRecoveryService>).
+            // Every test class here stands up its own host against ONE shared Testcontainers database that
+            // BaseIntegrationTest.BaseTestInitialize wipes before each test, so a live sweep from any
+            // still-running host claims and rewrites other tests' in-flight turns: it terminalizes
+            // 'streaming' turns older than its 3-minute cutoff, honors 'cancel_requested' markers left
+            // behind by earlier Stop tests, and calls the destructive PruneIncompleteToolCallsAsync. Its
+            // batch is capped and ordered (OrderBy(LastUpdated).Take(20)), so which rows it reaches shifts
+            // with suite load - the mechanism behind order-dependent, 'fails once then passes' behaviour.
+            //
+            // ConversationTurnRecoverySqlIntegrationTests constructs the service and calls
+            // RecoverStaleTurnsAsync explicitly, so recovery itself stays under test; only the
+            // unsupervised background actor is removed.
+            // AddHostedService<T> stores T in ImplementationFactory as a compiled lambda, so the type is
+            // not readable off the descriptor. Enumerate every IHostedService registration, build it
+            // against a throwaway provider, and remove the one that materializes as the recovery service.
+            var recoveryType = typeof(GuideAntsApi.Services.Conversations.Recovery.ConversationTurnRecoveryService);
+            using (var probeProvider = services.BuildServiceProvider())
+            {
+                for (var i = services.Count - 1; i >= 0; i--)
+                {
+                    var candidate = services[i];
+                    if (!typeof(IHostedService).IsAssignableFrom(candidate.ServiceType)
+                        || candidate.ServiceType != typeof(IHostedService))
+                    {
+                        continue;
+                    }
+
+                    Type? concreteType = candidate.ImplementationType;
+                    if (concreteType == null)
+                    {
+                        try
+                        {
+                            concreteType = candidate.ImplementationInstance?.GetType()
+                                ?? candidate.ImplementationFactory?.Invoke(probeProvider).GetType();
+                        }
+                        catch
+                        {
+                            // A factory that cannot run in this probe is left in place; the guard below
+                            // catches the case where that means the sweep survived.
+                            continue;
+                        }
+                    }
+
+                    if (concreteType == recoveryType)
+                    {
+                        services.RemoveAt(i);
+                    }
+                }
+            }
+
+            if (HasRecoveryHostedService(services))
+            {
+                throw new InvalidOperationException(
+                    "TestWebApplicationFactory failed to remove the ConversationTurnRecoveryService hosted service. " +
+                    "Do not run the integration suite with an unsupervised 1s stale-turn sweep writing to the " +
+                    "shared test database.");
+            }
+
             // Integration tests should not depend on external LLM providers.
             services.RemoveAll<IChatCompletionClientFactory>();
             services.AddSingleton<IChatCompletionClientFactory, FakeChatCompletionClientFactory>();
@@ -155,6 +217,41 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
             services.RemoveAll<ICurrentUserService>();
             services.AddScoped<ICurrentUserService, IntegrationTestCurrentUserService>();
         });
+    }
+
+    /// <summary>
+    /// True when a ConversationTurnRecoveryService hosted service is still registered. Inspects the
+    /// service collection's own factory closures by rebuilding the collection and asking the resulting
+    /// IHostedService set which concrete types it would start.
+    /// </summary>
+    private static bool HasRecoveryHostedService(IServiceCollection services)
+    {
+        var recoveryType = typeof(GuideAntsApi.Services.Conversations.Recovery.ConversationTurnRecoveryService);
+        using var probeProvider = services.BuildServiceProvider();
+        foreach (var d in services)
+        {
+            if (d.ServiceType != typeof(IHostedService))
+            {
+                continue;
+            }
+
+            try
+            {
+                var concrete = d.ImplementationType
+                    ?? d.ImplementationInstance?.GetType()
+                    ?? d.ImplementationFactory?.Invoke(probeProvider).GetType();
+                if (concrete == recoveryType)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // Cannot resolve in probe; treat as not-recovery so unrelated factories do not fail startup.
+            }
+        }
+
+        return false;
     }
 
     private static string GetTestProjectDirectory()
