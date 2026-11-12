@@ -1,4 +1,4 @@
-using GuideAntsApi.Endpoints;
+﻿using GuideAntsApi.Endpoints;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using System.Collections.Concurrent;
@@ -191,9 +191,15 @@ public sealed class LocalServiceLoadService : ILocalServiceLoadService
             return LocalServiceOperationResult.Failure(serviceId, "No local admin base URL is configured for this service.");
         }
 
-        var payload = IsImageGeneration(serviceId)
-            ? $$"""{"bundle_id":"{{modelRef}}"}"""
-            : $$"""{"model_path":"{{modelRef}}"}""";
+        // Serialize, never concatenate: a modelRef containing a quote would break out
+        // of the JSON string and let the caller append arbitrary members to the
+        // admin/load body (CodeQL "Cross-site scripting" alert on PR #185 - the real
+        // risk class is JSON injection into the engine admin request, not HTML).
+        var payload = JsonSerializer.Serialize(
+            new Dictionary<string, string>
+            {
+                [IsImageGeneration(serviceId) ? "bundle_id" : "model_path"] = modelRef,
+            });
 
         // In-flight marker: the Plane C probe loop skips this engine while a
         // load owns it; cleared in the outer finally so it never outlives the op.

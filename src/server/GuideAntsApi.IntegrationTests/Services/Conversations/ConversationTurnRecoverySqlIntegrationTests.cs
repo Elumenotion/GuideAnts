@@ -83,6 +83,15 @@ public sealed class ConversationTurnRecoverySqlIntegrationTests : BaseEndpointTe
 
         await service.RecoverStaleTurnsAsync(CancellationToken.None);
 
+        // The seeded turn is already stale, so the host's own ConversationTurnRecoveryService - which
+        // sweeps every second against the same database - can claim it before this call does. Claiming
+        // (an ExecuteUpdate that sets Status="interrupted") and the preview repair that follows it are
+        // two separate writes, so reading immediately after RecoverStaleTurnsAsync returns can observe
+        // the winner's claim before the winner's repair. Wait for the terminal state instead of for
+        // this particular sweep call: the contract under test is that recovery leaves the orphan
+        // terminalized, whichever sweep in the process performs it.
+        await WaitForRecoveryAsync(turnId);
+
         await using var verify = SharedFactory.Services.CreateScope().ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var turn = await verify.ConversationTurns.SingleAsync(t => t.Id == turnId);
         turn.Status.Should().Be("interrupted");
@@ -92,6 +101,52 @@ public sealed class ConversationTurnRecoverySqlIntegrationTests : BaseEndpointTe
             .Where(m => m.NotebookConversationId == turn.NotebookConversationId && m.Role == DataModelChatRole.Assistant)
             .SingleAsync();
         assistant.IsStreaming.Should().BeFalse();
+    }
+
+    private static async Task WaitForRecoveryAsync(Guid turnId, TimeSpan? timeout = null)
+    {
+        var waitTimeout = timeout ?? TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + waitTimeout;
+
+        Guid conversationId;
+        await using (var lookup = SharedFactory!.Services.CreateScope().ServiceProvider
+            .GetRequiredService<ApplicationDbContext>())
+        {
+            conversationId = await lookup.ConversationTurns
+                .AsNoTracking()
+                .Where(t => t.Id == turnId)
+                .Select(t => t.NotebookConversationId)
+                .SingleAsync();
+        }
+
+        while (DateTime.UtcNow < deadline)
+        {
+            await using var probe = SharedFactory.Services.CreateScope().ServiceProvider
+                .GetRequiredService<ApplicationDbContext>();
+
+            var status = await probe.ConversationTurns
+                .AsNoTracking()
+                .Where(t => t.Id == turnId)
+                .Select(t => t.Status)
+                .SingleAsync();
+
+            var streamingPreviews = await probe.NotebookConversationMessages
+                .AsNoTracking()
+                .CountAsync(m => m.NotebookConversationId == conversationId
+                    && m.Role == DataModelChatRole.Assistant
+                    && m.IsStreaming == true);
+
+            if (!string.Equals(status, "streaming", StringComparison.OrdinalIgnoreCase) && streamingPreviews == 0)
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.Fail(
+            $"recovery did not finish terminalizing turn {turnId} and clearing its streaming preview " +
+            $"within {waitTimeout.TotalSeconds}s");
     }
 
     private async Task<(Guid TurnId, Guid ExecutionId, DateTime Cutoff, Guid MessageId)> SeedStaleStreamingTurnAsync(

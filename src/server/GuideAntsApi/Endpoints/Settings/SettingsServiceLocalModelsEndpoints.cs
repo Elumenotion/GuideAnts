@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Reachability;
@@ -560,6 +560,17 @@ public static class SettingsServiceLocalModelsEndpoints
             ILocalServiceLoadService loadService,
             CancellationToken cancellationToken) =>
         {
+            // Same ref grammar the load endpoint enforces: a route value is user-provided,
+            // and it is persisted into ServiceModes (which EnsureLoadedAsync later loads at
+            // startup). Reject a malformed ref before it is stored or sent to the engine.
+            if (!LocalServiceModelRefRules.IsLoadableLocalModelRef(modelRef))
+            {
+                var refKind = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
+                    ? "bundle id"
+                    : "local model path";
+                return Results.BadRequest(new { error = $@"Model reference '{modelRef}' is not a valid {refKind}." });
+            }
+
             await settings
                 .SetServiceModeModelIdAsync(serviceId, modelRef, cancellationToken)
                 .ConfigureAwait(false);

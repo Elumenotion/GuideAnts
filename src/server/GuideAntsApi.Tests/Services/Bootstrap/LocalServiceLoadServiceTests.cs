@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using FluentAssertions;
@@ -58,6 +58,42 @@ public sealed class LocalServiceLoadServiceTests
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("bundle not found");
+    }
+
+    [TestMethod]
+    public async Task LoadServiceAsync_EscapesModelRef_InPostedPayload()
+    {
+        // CodeQL alert on PR #185: the payload used to be built by string interpolation,
+        // so a ref containing a double quote closed the JSON string early and let the
+        // caller append members to the admin/load body. The body must stay a one-key
+        // object whose model_path is exactly the ref, character for character.
+        var handler = new CapturingHandler(_ => ReadyJson(loaded: true));
+        var (service, _) = CreateService(handler, local: true, modelRef: "x\"}\"injected\":\"1");
+
+        await service.LoadServiceAsync(RoutedServiceNames.SpeechTranscription, "x\"}\"injected\":\"1");
+
+        var load = handler.Requests.Single(r => r.AbsolutePath.EndsWith("/admin/load"));
+        using var doc = System.Text.Json.JsonDocument.Parse(load.Body!);
+        var root = doc.RootElement;
+        root.EnumerateObject().Count().Should().Be(1);
+        root.TryGetProperty("model_path", out var prop).Should().BeTrue();
+        prop.ValueKind.Should().Be(System.Text.Json.JsonValueKind.String);
+        prop.GetString().Should().Be("x\"}\"injected\":\"1");
+    }
+
+    [TestMethod]
+    public async Task LoadServiceAsync_EscapesBundleId_InPostedPayload()
+    {
+        var handler = new CapturingHandler(_ => HealthJson(status: "ok", bundleId: "flux"));
+        var (service, _) = CreateService(handler, local: true, modelRef: "flux\"}\"evil\":[1]");
+
+        await service.LoadServiceAsync(RoutedServiceNames.ImageGeneration, "flux\"}\"evil\":[1]");
+
+        var load = handler.Requests.Single(r => r.AbsolutePath.EndsWith("/admin/load"));
+        using var doc = System.Text.Json.JsonDocument.Parse(load.Body!);
+        var root = doc.RootElement;
+        root.EnumerateObject().Count().Should().Be(1);
+        root.GetProperty("bundle_id").GetString().Should().Be("flux\"}\"evil\":[1]");
     }
 
     [TestMethod]
