@@ -267,6 +267,145 @@ public sealed class LocalServiceLoadServiceTests
                 "application/json"),
         };
 
+    // ---- T-U8: probe budget vs load budget; unknown-model mapping (F-4) ----
+
+    [TestMethod]
+    public async Task LoadServiceAsync_StillAwaitsReadinessThroughFullVerifyBudget()
+    {
+        // The load guard's budget is provably intact: the engine accepts the POST but
+        // reports loaded only after 3.5 s of readiness polling — beyond the 3 s probe
+        // budget. If LoadServiceAsync used ProbeTimeout for its readiness loop this would
+        // fail; with the full ReadyTimeout it succeeds (R3).
+        var start = DateTimeOffset.UtcNow;
+        var loadedAfter = start + TimeSpan.FromSeconds(3.5);
+        var handler = new CapturingHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/admin/load"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"status\":\"loaded\"}", System.Text.Encoding.UTF8, "application/json"),
+                };
+            }
+            var isLoaded = DateTimeOffset.UtcNow >= loadedAfter;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    isLoaded ? "{\"loaded\":true,\"ready\":true}" : "{\"loaded\":false,\"ready\":false,\"loading\":true}",
+                    System.Text.Encoding.UTF8, "application/json"),
+            };
+        });
+        var (service, _) = CreateService(handler, local: true, modelRef: "qwen-asr");
+
+        var result = await service.LoadServiceAsync(RoutedServiceNames.SpeechTranscription, "qwen-asr");
+
+        result.Success.Should().BeTrue("the load guard keeps its full verification budget (R3)");
+    }
+
+    [TestMethod]
+    public async Task ProbeAsync_BoundedByProbeTimeout_WhileHttpTimeoutStays300s()
+    {
+        // A blackholed engine never completes; the probe must return inside ~3 s
+        // (ProbeTimeout), not 300 s. The fake handler honors the cancellation token —
+        // exactly like SocketsHttpHandler does on an async connect — so the linked
+        // CancelAfter(3s) is what bounds the probe. (A synchronously-blocking handler
+        // cannot be interrupted by any token, so it proves nothing about the budget.)
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LocalServiceHosts:SpeechTranscriptionBaseUrl"] = "http://localhost:8110/asr",
+                ["LocalServiceHosts:SpeechSynthesisBaseUrl"] = "http://localhost:8110/tts",
+                ["LocalServiceHosts:EmbeddingsBaseUrl"] = "http://localhost:8110/emb",
+                ["LocalServiceHosts:ImageGenerationBaseUrl"] = "http://localhost:8110/sd",
+            })
+            .Build();
+        var service = new LocalServiceLoadService(
+            new SingleHandlerFactory(new TokenHonoringBlackholeHandler()),
+            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            configuration,
+            NullLogger<LocalServiceLoadService>.Instance);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var readiness = await service.ProbeAsync(RoutedServiceNames.SpeechTranscription);
+        sw.Stop();
+
+        readiness.Loaded.Should().BeFalse();
+        readiness.Error.Should().NotBeEmpty();
+        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10),
+            "the probe must be bounded by the 3s ProbeTimeout, not the 300s HttpTimeout");
+    }
+
+    private sealed class TokenHonoringBlackholeHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            // Never completes; observes cancellation exactly like a real socket connect.
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+
+    private sealed class SingleHandlerFactory : IHttpClientFactory
+    {
+        private readonly HttpMessageHandler _handler;
+        public SingleHandlerFactory(HttpMessageHandler handler) => _handler = handler;
+        public HttpClient CreateClient(string name) => new(_handler);
+    }
+
+    [TestMethod]
+    public async Task LoadServiceAsync_UnknownModel_MapsToRuntimeArtifactMissing_WithRemediation()
+    {
+        // /admin/load fails AND the live listing does not contain the ref → the named
+        // artifact-missing blocker with remediation, deterministically (no error-string match).
+        var handler = new CapturingHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/admin/load"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent("{\"error\":\"model_load_failed\"}", System.Text.Encoding.UTF8, "application/json"),
+                };
+            }
+            // Live listing: contains only another model.
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("[{\"modelRef\":\"other-model\"}]", System.Text.Encoding.UTF8, "application/json"),
+            };
+        });
+        var (service, _) = CreateService(handler, local: true, modelRef: "ghost-model");
+
+        var result = await service.LoadServiceAsync(RoutedServiceNames.SpeechTranscription, "ghost-model");
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("RUNTIME_ARTIFACT_MISSING").And.Contain("ghost-model").And.Contain("Download it first");
+    }
+
+    [TestMethod]
+    public async Task LoadServiceAsync_UpstreamFailureWithKnownModel_KeepsUpstreamMessage()
+    {
+        // Load fails but the listing HAS the ref → not provably unknown; upstream text stands.
+        var handler = new CapturingHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/admin/load"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent("{\"error\":\"warmup exploded\"}", System.Text.Encoding.UTF8, "application/json"),
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("[{\"modelRef\":\"qwen-asr\"}]", System.Text.Encoding.UTF8, "application/json"),
+            };
+        });
+        var (service, _) = CreateService(handler, local: true, modelRef: "qwen-asr");
+
+        var result = await service.LoadServiceAsync(RoutedServiceNames.SpeechTranscription, "qwen-asr");
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("warmup exploded").And.NotContain("RUNTIME_ARTIFACT_MISSING");
+    }
+
     private sealed class CapturedRequest
     {
         public required Uri Uri { get; init; }

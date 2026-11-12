@@ -1,6 +1,7 @@
 using GuideAntsApi.Endpoints;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace GuideAntsApi.Services.Bootstrap;
@@ -52,6 +53,14 @@ public interface ILocalServiceLoadService
 {
     IReadOnlyCollection<string> AllServiceIds { get; }
 
+    /// <summary>
+    /// True while an API-owned load/unload is in flight for the service. The
+    /// Plane C probe loop uses this to skip an engine that a load operation
+    /// already owns (probe-load risk, §9). Set around load/unload, cleared in
+    /// finally — the marker never outlives the operation.
+    /// </summary>
+    bool IsOperationInFlight(string serviceId);
+
     Task<LocalServiceReadiness> ProbeAsync(string serviceId, CancellationToken cancellationToken = default);
 
     Task<LocalServiceOperationResult> LoadServiceAsync(
@@ -90,6 +99,16 @@ public sealed class LocalServiceLoadService : ILocalServiceLoadService
     private static readonly TimeSpan ReadyPollInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan ReadyTimeout = TimeSpan.FromMinutes(3);
 
+    /// <summary>
+    /// Probe-only budget. Readiness polling is a liveness check, not a load:
+    /// a 3 s bound keeps a dead or blackholed engine from stalling readiness
+    /// (the incident that motivated Plane C). Load/verify keep the full
+    /// <see cref="ReadyTimeout"/> budget (R3).
+    /// </summary>
+    public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
+
+    private static readonly ConcurrentDictionary<string, byte> _inFlightOperations = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
@@ -116,6 +135,9 @@ public sealed class LocalServiceLoadService : ILocalServiceLoadService
         RoutedServiceNames.ImageGeneration,
     };
 
+    public bool IsOperationInFlight(string serviceId) =>
+        serviceId is not null && _inFlightOperations.ContainsKey(serviceId);
+
     public async Task<LocalServiceReadiness> ProbeAsync(string serviceId, CancellationToken cancellationToken = default)
     {
         var adminBase = ResolveAdminBase(serviceId);
@@ -131,10 +153,15 @@ public sealed class LocalServiceLoadService : ILocalServiceLoadService
 
         try
         {
+            // Probe-only 3 s budget (linked): a blackholed engine must not be
+            // able to hold a readiness check for 300 s. Load/unload keep
+            // HttpTimeout on their own requests.
+            using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            probeCts.CancelAfter(ProbeTimeout);
             using var response = await CreateClient(adminBase)
-                .GetAsync(IsImageGeneration(serviceId) ? "health" : "ready", HttpCompletionOption.ResponseContentRead, cancellationToken)
+                .GetAsync(IsImageGeneration(serviceId) ? "health" : "ready", HttpCompletionOption.ResponseContentRead, probeCts.Token)
                 .ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(probeCts.Token).ConfigureAwait(false);
             return ParseReadiness(serviceId, adminBase, (int)response.StatusCode, body);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
@@ -168,27 +195,49 @@ public sealed class LocalServiceLoadService : ILocalServiceLoadService
             ? $$"""{"bundle_id":"{{modelRef}}"}"""
             : $$"""{"model_path":"{{modelRef}}"}""";
 
+        // In-flight marker: the Plane C probe loop skips this engine while a
+        // load owns it; cleared in the outer finally so it never outlives the op.
+        _inFlightOperations[serviceId] = 1;
         try
         {
-            using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-            using var response = await CreateClient(adminBase).PostAsync("admin/load", content, cancellationToken).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                return LocalServiceOperationResult.Failure(
-                    serviceId,
-                    $"Load failed ({(int)response.StatusCode}): {Truncate(body, 400)}");
-            }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            return LocalServiceOperationResult.Failure(serviceId, $"Load request failed: {ex.Message}");
-        }
+                using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+                using var response = await CreateClient(adminBase).PostAsync("admin/load", content, cancellationToken).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    // F-4: an unknown-model load must map to RUNTIME_ARTIFACT_MISSING with
+                    // remediation, and must NOT burn the 3-minute ReadyTimeout waiting for
+                    // something that cannot load. The check is deterministic, not an error
+                    // string match: the live listing settles whether the ref exists (the
+                    // same listing the UI shows). Anything else keeps the upstream message.
+                    if (await IsUnknownModelRefAsync(serviceId, adminBase, modelRef, cancellationToken).ConfigureAwait(false))
+                    {
+                        return LocalServiceOperationResult.Failure(
+                            serviceId,
+                            $"{RoutingReadinessService.BlockerKeys.RuntimeArtifactMissing}: '{modelRef}' is not present on the local {serviceId} engine. Download it first, then load.");
+                    }
 
-        var readiness = await WaitForLoadedAsync(serviceId, cancellationToken).ConfigureAwait(false);
-        return readiness.Loaded
-            ? new LocalServiceOperationResult { ServiceId = serviceId, Success = true, Readiness = readiness }
-            : LocalServiceOperationResult.Failure(serviceId, "Load command accepted but the service did not report loaded in time.");
+                    return LocalServiceOperationResult.Failure(
+                        serviceId,
+                        $"Load failed ({(int)response.StatusCode}): {Truncate(body, 400)}");
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                return LocalServiceOperationResult.Failure(serviceId, $"Load request failed: {ex.Message}");
+            }
+
+            var readiness = await WaitForLoadedAsync(serviceId, cancellationToken).ConfigureAwait(false);
+            return readiness.Loaded
+                ? new LocalServiceOperationResult { ServiceId = serviceId, Success = true, Readiness = readiness }
+                : LocalServiceOperationResult.Failure(serviceId, "Load command accepted but the service did not report loaded in time.");
+        }
+        finally
+        {
+            _inFlightOperations.TryRemove(serviceId, out _);
+        }
     }
 
     public async Task<LocalServiceOperationResult> UnloadServiceAsync(string serviceId, CancellationToken cancellationToken = default)
@@ -199,24 +248,33 @@ public sealed class LocalServiceLoadService : ILocalServiceLoadService
             return LocalServiceOperationResult.Failure(serviceId, "No local admin base URL is configured for this service.");
         }
 
+        // In-flight marker (cleared in the outer finally).
+        _inFlightOperations[serviceId] = 1;
         try
         {
-            using var response = await CreateClient(adminBase).PostAsync("admin/unload", null, cancellationToken).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                return LocalServiceOperationResult.Failure(
-                    serviceId,
-                    $"Unload failed ({(int)response.StatusCode}): {Truncate(body, 400)}");
+                using var response = await CreateClient(adminBase).PostAsync("admin/unload", null, cancellationToken).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return LocalServiceOperationResult.Failure(
+                        serviceId,
+                        $"Unload failed ({(int)response.StatusCode}): {Truncate(body, 400)}");
+                }
             }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            return LocalServiceOperationResult.Failure(serviceId, $"Unload request failed: {ex.Message}");
-        }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                return LocalServiceOperationResult.Failure(serviceId, $"Unload request failed: {ex.Message}");
+            }
 
-        var readiness = await ProbeAsync(serviceId, cancellationToken).ConfigureAwait(false);
-        return new LocalServiceOperationResult { ServiceId = serviceId, Success = true, Readiness = readiness };
+            var readiness = await ProbeAsync(serviceId, cancellationToken).ConfigureAwait(false);
+            return new LocalServiceOperationResult { ServiceId = serviceId, Success = true, Readiness = readiness };
+        }
+        finally
+        {
+            _inFlightOperations.TryRemove(serviceId, out _);
+        }
     }
 
     public async Task<LocalServiceOperationResult> EnsureLoadedAsync(string serviceId, CancellationToken cancellationToken = default)
@@ -332,6 +390,56 @@ public sealed class LocalServiceLoadService : ILocalServiceLoadService
         // server root (/ready), which nginx answers with a 404 HTML page.
         client.BaseAddress = new Uri(adminBase.EndsWith('/') ? adminBase : adminBase + "/");
         return client;
+    }
+
+    /// <summary>
+    /// True when the requested modelRef is absent from the engine's live model listing.
+    /// Deterministic unknown-model detection (F-4): the same listing the UI displays, not an
+    /// error-string pattern. Any listing failure yields false — the upstream error text
+    /// stands and the load keeps its normal failure semantics.
+    /// </summary>
+    private async Task<bool> IsUnknownModelRefAsync(string serviceId, string adminBase, string modelRef, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(ProbeTimeout);
+            var listPath = IsImageGeneration(serviceId) ? "admin/bundles" : "admin/models";
+            using var response = await CreateClient(adminBase).GetAsync(listPath, HttpCompletionOption.ResponseContentRead, cts.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return false;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
+            var root = document.RootElement;
+            var items = root.ValueKind == JsonValueKind.Array
+                ? root
+                : root.TryGetProperty("items", out var nested) ? nested : default;
+
+            if (items.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            foreach (var item in items.EnumerateArray())
+            {
+                static string? Str(System.Text.Json.JsonElement e, string name) =>
+                    e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+                var ref_ = Str(item, "modelRef") ?? Str(item, "bundleId") ?? Str(item, "model_id") ?? Str(item, "id");
+                if (string.Equals(ref_, modelRef, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch (Exception)
+        {
+            return false; // listing unavailable: not provably unknown
+        }
     }
 
     private static LocalServiceReadiness ParseReadiness(string serviceId, string adminBase, int statusCode, string body)

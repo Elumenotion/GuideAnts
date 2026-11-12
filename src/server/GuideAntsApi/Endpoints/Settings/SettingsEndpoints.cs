@@ -11,6 +11,7 @@ public static class SettingsEndpoints
         app.MapSettingsImageGenerationBundleDefinitionsEndpoints();
         app.MapSettingsRoutingEndpoints();
         app.MapSettingsOverviewEndpoints();
+        app.MapSettingsReachabilityEndpoints();
         app.MapSettingsInfrastructureEndpoints();
         app.MapSettingsLlamaEndpoints();
         app.MapSettingsHuggingFaceEndpoints();

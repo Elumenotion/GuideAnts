@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FaExternalLinkAlt, FaRedo, FaSave, FaSpinner, FaSyncAlt } from 'react-icons/fa';
-import LoadingSpinner from '../../../components/LoadingSpinner';
 import { useToast } from '../../../components/common/Toast';
 import { api } from '../../../services/api';
 import {
@@ -249,16 +248,11 @@ export function OverviewTab({
     }
   }, [chatDefaults, configValue, overrideAllChatModels, showToast]);
 
-  const showInitialSpinner = overviewLoading && !overview && !overviewError;
-
-  if (showInitialSpinner) {
-    return (
-      <section className="rounded-lg border border-gray-200 bg-white p-8">
-        <LoadingSpinner message="Loading overview..." />
-      </section>
-    );
-  }
-
+  // R1/F-2: the tab NEVER blocks on a full-tab spinner. getOverview hanging (engine
+  // blackholed) must not hold the whole tab: sections render their own per-row states
+  // (loading pill / unavailable / not yet observed), and the chat-defaults editor does
+  // not depend on overview data at all. A status row pending its first observation says
+  // so explicitly instead of a blank or an infinite spinner.
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -471,7 +465,25 @@ export function OverviewTab({
             );
           })}
         </ul>
-      </section>
+              {/* Local llama runtime snapshot (Plane C overlay, F-2): a status with an observed
+            timestamp, never a blank and never a spinner. 'None' = never observed (cold cache
+            after an API restart) and is stated plainly with the refresh affordance. */}
+        <section className="rounded-lg border border-gray-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-5 py-3">
+            <h3 className="text-sm font-semibold text-gray-900">Local llama runtime</h3>
+            {overview?.llamaRuntime?.inventorySource === 'None' || !overview?.llamaRuntime ? (
+              <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-inset ring-gray-400/30">
+                not yet observed · Refresh
+              </span>
+            ) : (
+              <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                {overview?.llamaRuntime?.loadedAliases ?? 0}/{overview?.llamaRuntime?.totalAliases ?? 0} loaded
+                {overview?.llamaRuntime?.observedUtc ? ` · observed ${new Date(overview.llamaRuntime.observedUtc).toLocaleTimeString()}` : ''}
+              </span>
+            )}
+          </div>
+        </section>
+</section>
     </div>
   );
 }

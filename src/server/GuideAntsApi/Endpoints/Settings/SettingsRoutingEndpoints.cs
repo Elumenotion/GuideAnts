@@ -33,13 +33,14 @@ public static class SettingsRoutingEndpoints
             var anyAssistantsWithoutModel = await db.Assistants
                 .AsNoTracking()
                 .AnyAsync(a => a.IsActive && a.ModelId == null, cancellationToken);
-            var results = new List<ChatTargetReadinessDto>(distinctActive.Count);
-            foreach (var modelId in distinctActive)
+            // Configuration surface (R-A): concurrent, NonBlocking. Feeds a readiness column;
+            // nothing here loads/dispatches/runs, so it must never block on an engine (F-3).
+            var results = await Task.WhenAll(distinctActive.Select(modelId =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var kind = SettingsRoutingProbeSupport.InferChatTargetReferenceKind(modelId, configuration, anyAssistantsWithoutModel);
-                results.Add(await readiness.ProbeChatTargetAsync(modelId, cancellationToken, kind));
-            }
+                return readiness.ProbeChatTargetAsync(modelId, cancellationToken, kind, RoutingProbeMode.NonBlocking);
+            }));
 
             return Results.Ok((IReadOnlyList<ChatTargetReadinessDto>)results);
         })
@@ -57,7 +58,11 @@ public static class SettingsRoutingEndpoints
                 return Results.BadRequest(new { error = "modelId is required" });
             }
 
-            var result = await readiness.ProbeChatTargetAsync(modelId, cancellationToken);
+            // A-1 (resolved): `strict` is response-shaping only — this route probes identically
+            // for both values and no action here loads/dispatches/runs, so it is configuration
+            // under R-A → NonBlocking. The 404/409 problem+json shapes are preserved unchanged;
+            // verdicts remain available at the real use paths (dispatch preflight, chat-readiness).
+            var result = await readiness.ProbeChatTargetAsync(modelId, cancellationToken, "direct", RoutingProbeMode.NonBlocking);
 
             var modelMissing = result.Blockers.Any(b =>
                 b.StartsWith(RoutingReadinessService.BlockerKeys.ModelMissing + ":", StringComparison.Ordinal));

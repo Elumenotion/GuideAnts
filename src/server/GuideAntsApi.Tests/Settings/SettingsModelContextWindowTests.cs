@@ -137,7 +137,7 @@ public sealed class SettingsModelContextWindowTests
         ContextWindowTokens: window,
         MaxOutputTokens: maxOutput);
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"settings-model-context-window-{Guid.NewGuid():N}")
@@ -169,11 +169,6 @@ public sealed class SettingsModelContextWindowTests
             })
             .Build();
 
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 }

@@ -1,3 +1,5 @@
+using GuideAntsApi.Models.Settings;
+
 namespace GuideAntsApi.Models;
 
 public sealed record NotebookHeaderToolbarDto(
@@ -39,7 +41,12 @@ public sealed record NotebookToolbarServiceDto(
     IReadOnlyList<string> Blockers,
     IReadOnlyList<NotebookToolbarLocalModelOptionDto> LocalModelOptions,
     string? InProgressOperationId,
-    string? InProgressState);
+    string? InProgressState,
+    // Plane A selection ∈ Plane C inventory. False => a deleted artifact surfaces as a
+    // named condition instead of a phantom "(active)" marker (P6 empty-state).
+    bool SelectionExists = true,
+    EndpointPresenceDto? Presence = null,
+    DateTime? ObservedUtc = null);
 
 public sealed record NotebookToolbarLocalModelOptionDto(
     string ModelRef,
@@ -62,7 +69,10 @@ public sealed record NotebookToolbarChatDto(
     IReadOnlyList<string> Blockers,
     string? InProgressOperationId,
     string? InProgressState,
-    string? EffectiveModelSource = null);
+    string? EffectiveModelSource = null,
+    // Chat section carries presence ONLY (nothing else): the config section renders it
+    // from cache; readiness stays live and unchanged bit-for-bit.
+    EndpointPresenceDto? Presence = null);
 
 public sealed record NotebookChatReadinessDto(
     string? EffectiveModelId,

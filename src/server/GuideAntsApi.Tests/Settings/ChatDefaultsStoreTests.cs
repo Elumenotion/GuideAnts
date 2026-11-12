@@ -110,7 +110,7 @@ public sealed class ChatDefaultsStoreTests
         otherReplicaStore.Current.OverrideAllChatModels.Should().BeFalse();
     }
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"chat-defaults-store-{Guid.NewGuid():N}")
@@ -160,12 +160,6 @@ public sealed class ChatDefaultsStoreTests
             }
         });
 
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object,
-            chatDefaultsStore: chatDefaultsStore);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object, chatDefaultsStore: chatDefaultsStore);
     }
 }

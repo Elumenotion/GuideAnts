@@ -5,6 +5,8 @@ import type { ServicePanelCommonProps } from './types';
 import { WORKSPACE_CONTROLS_COPY, serviceStatusHeadline, statusToneClass, toolbarProviderOptionLabel } from './toolbarFormatters';
 import { ServiceLocalRuntimePowerSection } from './ServiceLocalRuntimePowerSection';
 import { ToolbarActionError } from './ToolbarActionError';
+import { PresenceLine } from './PresenceLine';
+import { RemovedArtifactNotice } from './RemovedArtifactNotice';
 import { useToolbarAsyncAction } from './useToolbarAsyncAction';
 
 export function TtsToolbarPanel({
@@ -57,6 +59,7 @@ export function TtsToolbarPanel({
       {service.blockers.length > 0 && (
         <div className="text-xs text-red-700">{service.blockers[0]}</div>
       )}
+      <PresenceLine presence={service.presence} />
       <ToolbarActionError message={error} />
 
       <div className="space-y-1">
@@ -107,7 +110,15 @@ export function TtsToolbarPanel({
         })}
       </div>
 
-      <ServiceLocalRuntimePowerSection
+      {service.selectionExists === false && service.selection?.resourceId ? (
+        <RemovedArtifactNotice
+          serviceId={service.serviceId}
+          modelRef={service.selection.resourceId}
+          onRemoved={onRefresh}
+        />
+      ) : null}
+
+            <ServiceLocalRuntimePowerSection
         service={service}
         setInFlight={setInFlight}
         onRefresh={onRefresh}

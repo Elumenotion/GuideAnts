@@ -696,6 +696,51 @@ public sealed partial class ApplicationSettingsService
         await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task ClearServiceModeModelIdAsync(
+        string serviceId,
+        CancellationToken cancellationToken = default)
+    {
+        var contract = GetServiceContract(serviceId);
+        var (row, payload) = await LoadOrCreateServiceModesRowAsync(cancellationToken).ConfigureAwait(false);
+        var canonicalService = CanonicalizeServiceName(contract.ServiceId);
+        var modes = ServiceModesPayload.ReadModesFor(payload, canonicalService).ToList();
+        var activeMode = modes.FirstOrDefault(mode => mode.IsDefault && mode.Enabled)
+            ?? modes.FirstOrDefault(mode => mode.IsDefault);
+        if (activeMode is null)
+        {
+            return; // nothing selected anywhere: clearing is a no-op
+        }
+
+        var localProviderSection = ResolveLocalProviderSectionKey(canonicalService);
+        ServiceMode? targetMode;
+        if (!string.IsNullOrWhiteSpace(localProviderSection))
+        {
+            targetMode = modes.FirstOrDefault(mode =>
+                string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase));
+            if (targetMode is null)
+            {
+                return; // no local mode: nothing to clear
+            }
+        }
+        else
+        {
+            targetMode = activeMode;
+        }
+
+        if (string.IsNullOrWhiteSpace(targetMode.ModelId))
+        {
+            return; // already clear
+        }
+
+        var updatedModes = modes
+            .Select(mode => string.Equals(mode.ModeId, targetMode.ModeId, StringComparison.Ordinal)
+                ? mode with { ModelId = null }
+                : mode)
+            .ToList();
+        ServiceModesPayload.WriteModesFor(payload, canonicalService, updatedModes, activeMode.ModeId);
+        await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
+    }
+
     private static string? ResolveLocalProviderSectionKey(string serviceId) =>
         serviceId switch
         {

@@ -1,12 +1,14 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.NotebookHeaderToolbar;
+using GuideAntsApi.Services.Reachability;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using AntRunner.Chat.Abstractions;
@@ -77,8 +79,8 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         var readiness = new Mock<IRoutingReadinessService>(MockBehavior.Strict);
         readiness
-            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()))
-            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind) =>
+            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<RoutingProbeMode>()))
+            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind, RoutingProbeMode _) =>
                 string.Equals(modelId, "gemini-2.5-flash", StringComparison.Ordinal)
                     ? new ChatTargetReadinessDto(
                         ModelId: modelId,
@@ -139,7 +141,8 @@ public sealed class NotebookHeaderToolbarServiceTests
             llamaRuntime.Object,
             chatDefaults,
             configuration,
-            Mock.Of<IHttpClientFactory>(),
+            new LocalEndpointCache(new NoopProbe()),
+            new LocalInventoryMirror(),
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
@@ -196,8 +199,8 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         var readiness = new Mock<IRoutingReadinessService>(MockBehavior.Strict);
         readiness
-            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()))
-            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind) =>
+            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<RoutingProbeMode>()))
+            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind, RoutingProbeMode _) =>
                 new ChatTargetReadinessDto(
                     ModelId: modelId,
                     Provider: "llama-cpp",
@@ -244,7 +247,8 @@ public sealed class NotebookHeaderToolbarServiceTests
             llamaRuntime.Object,
             chatDefaults,
             configuration,
-            Mock.Of<IHttpClientFactory>(),
+            new LocalEndpointCache(new NoopProbe()),
+            new LocalInventoryMirror(),
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
@@ -303,7 +307,7 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         var readiness = new Mock<IRoutingReadinessService>(MockBehavior.Strict);
         readiness
-            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()))
+            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<RoutingProbeMode>()))
             .ReturnsAsync(new ChatTargetReadinessDto(
                 "qwen-local",
                 "llama-cpp",
@@ -347,7 +351,8 @@ public sealed class NotebookHeaderToolbarServiceTests
             llamaRuntime.Object,
             chatDefaults,
             configuration,
-            Mock.Of<IHttpClientFactory>(),
+            new LocalEndpointCache(new NoopProbe()),
+            new LocalInventoryMirror(),
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
@@ -411,8 +416,8 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         var readiness = new Mock<IRoutingReadinessService>(MockBehavior.Strict);
         readiness
-            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()))
-            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind) =>
+            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<RoutingProbeMode>()))
+            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind, RoutingProbeMode _) =>
                 string.Equals(modelId, "qwen-local", StringComparison.Ordinal)
                     ? new ChatTargetReadinessDto(
                         ModelId: modelId,
@@ -473,6 +478,13 @@ public sealed class NotebookHeaderToolbarServiceTests
         var configuration = new ConfigurationBuilder().Build();
         var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: false);
 
+        // Plane C: the alias mirror last reported mistral-local loaded (this used to arrive
+        // via the live GetRuntimeStatusAsync stub, which the config path no longer calls).
+        var mirror = new LocalInventoryMirror();
+        mirror.SetLive("llama",
+            [new NotebookToolbarLocalModelOptionDto("mistral-local", "mistral-local", true, IsActive: true)],
+            DateTime.UtcNow);
+
         var sut = new NotebookHeaderToolbarService(
             db,
             settings.Object,
@@ -482,7 +494,8 @@ public sealed class NotebookHeaderToolbarServiceTests
             llamaRuntime.Object,
             chatDefaults,
             configuration,
-            Mock.Of<IHttpClientFactory>(),
+            new LocalEndpointCache(new NoopProbe()),
+            mirror,
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
@@ -540,8 +553,8 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         var readiness = new Mock<IRoutingReadinessService>(MockBehavior.Strict);
         readiness
-            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()))
-            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind) =>
+            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<RoutingProbeMode>()))
+            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind, RoutingProbeMode _) =>
                 new ChatTargetReadinessDto(
                     ModelId: modelId,
                     Provider: "llama-cpp",
@@ -603,16 +616,18 @@ public sealed class NotebookHeaderToolbarServiceTests
             llamaRuntime.Object,
             chatDefaults,
             configuration,
-            Mock.Of<IHttpClientFactory>(),
+            new LocalEndpointCache(new NoopProbe()),
+            new LocalInventoryMirror(),
             NullLogger<NotebookHeaderToolbarService>.Instance);
 
-        var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
+        // T-U5b retarget: the toolbar (configuration) no longer probes live llama state, so
+        // "prefers live readiness over the stale runtime cache" is asserted on the use-path
+        // surface that still keeps Live: GetChatReadinessAsync (R3).
+        var readinessDto = await sut.GetChatReadinessAsync(notebook.Id, conversationId: null);
 
-        toolbar.Chat.SupportsLocalRuntimePower.Should().BeTrue();
-        toolbar.Chat.LocalRuntimeOn.Should().BeFalse("readiness reports runtime state as unloaded");
-        toolbar.Chat.Status.Should().Be("requiresLoad");
-        toolbar.Chat.Blockers.Should().BeEmpty();
-        toolbar.Chat.Summary.Should().Contain("Load Qwen Local");
+        readinessDto.SupportsLocalRuntimePower.Should().BeTrue();
+        readinessDto.LocalRuntimeOn.Should().BeFalse("readiness reports runtime state as unloaded");
+        readinessDto.Blockers.Should().BeEmpty();
     }
 
     [TestMethod]
@@ -640,24 +655,8 @@ public sealed class NotebookHeaderToolbarServiceTests
             db,
             notebook.Id,
             settings.Object,
-            httpClientFactory: CreateHttpClientFactory(request =>
-            {
-                if (request.RequestUri?.AbsolutePath.Contains("/ready", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.ServiceUnavailable,
-                        """{"ready":false,"loaded":false,"loading":true,"warmupEnabled":true,"warmupSucceeded":false}""");
-                }
-
-                if (request.RequestUri?.AbsolutePath.Contains("/admin/models", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.OK,
-                        """[{"model_id":"chatterbox","activeModel":true,"model_path":"/models/chatterbox","complete":true}]""");
-                }
-
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            }));
+            endpointCache: CacheWith(TtsReadyUrl, EndpointAvailability.Reachable, "loading"),
+            inventoryMirror: MirrorWith(RoutedServiceNames.SpeechSynthesis, LocalModel("chatterbox", complete: true, active: true)));
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
         var tts = toolbar.Services.Single(service => service.Kind == "tts");
@@ -693,24 +692,8 @@ public sealed class NotebookHeaderToolbarServiceTests
             db,
             notebook.Id,
             settings.Object,
-            httpClientFactory: CreateHttpClientFactory(request =>
-            {
-                if (request.RequestUri?.AbsolutePath.Contains("/ready", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.ServiceUnavailable,
-                        """{"ready":false,"loaded":false,"loading":false,"warmupEnabled":true,"warmupSucceeded":false}""");
-                }
-
-                if (request.RequestUri?.AbsolutePath.Contains("/admin/models", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.OK,
-                        """[{"model_id":"chatterbox","activeModel":true,"model_path":"/models/chatterbox","complete":true}]""");
-                }
-
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            }));
+            endpointCache: CacheWith(TtsReadyUrl, EndpointAvailability.Reachable, "unloaded"),
+            inventoryMirror: MirrorWith(RoutedServiceNames.SpeechSynthesis, LocalModel("chatterbox", complete: true, active: true)));
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
         var tts = toolbar.Services.Single(service => service.Kind == "tts");
@@ -745,29 +728,10 @@ public sealed class NotebookHeaderToolbarServiceTests
             db,
             notebook.Id,
             settings.Object,
-            httpClientFactory: CreateHttpClientFactory(request =>
-            {
-                if (request.RequestUri?.AbsolutePath.Contains("/ready", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.ServiceUnavailable,
-                        """{"ready":false,"loaded":false,"loading":false,"warmupEnabled":true,"warmupSucceeded":false}""");
-                }
-
-                if (request.RequestUri?.AbsolutePath.Contains("/admin/models", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.OK,
-                        """
-                        [
-                          {"modelRef":"chatterbox","activeModel":true,"complete":true},
-                          {"modelRef":"OmniVoice","activeModel":false,"complete":false}
-                        ]
-                        """);
-                }
-
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            }));
+            endpointCache: CacheWith(TtsReadyUrl, EndpointAvailability.Reachable, "unloaded"),
+            inventoryMirror: MirrorWith(RoutedServiceNames.SpeechSynthesis,
+                LocalModel("chatterbox", complete: true, active: true),
+                LocalModel("OmniVoice", complete: false, active: false)));
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
         var tts = toolbar.Services.Single(service => service.Kind == "tts");
@@ -817,31 +781,10 @@ public sealed class NotebookHeaderToolbarServiceTests
             db,
             notebook.Id,
             settings.Object,
-            httpClientFactory: CreateHttpClientFactory(request =>
-            {
-                if (request.RequestUri?.AbsolutePath.Contains("/health", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.OK,
-                        """{"status":"ok","engine":{"processAlive":true,"healthy":true}}""");
-                }
-
-                if (request.RequestUri?.AbsolutePath.Contains("/admin/bundles", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.OK,
-                        $$"""
-                        {
-                          "items": [
-                            {"bundleId":"{{bundleId}}","complete":true,"loaded":true},
-                            {"bundleId":"flux2-klein-4b","complete":true,"loaded":false}
-                          ]
-                        }
-                        """);
-                }
-
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            }));
+            endpointCache: CacheWith(SdHealthUrl, EndpointAvailability.Reachable, "loaded"),
+            inventoryMirror: MirrorWith(RoutedServiceNames.ImageGeneration,
+                LocalModel(bundleId, complete: true, active: true),
+                LocalModel("flux2-klein-4b", complete: true, active: false)));
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
         var image = toolbar.Services.Single(service => service.Kind == "image");
@@ -887,24 +830,8 @@ public sealed class NotebookHeaderToolbarServiceTests
             db,
             notebook.Id,
             settings.Object,
-            httpClientFactory: CreateHttpClientFactory(request =>
-            {
-                if (request.RequestUri?.AbsolutePath.Contains("/admin/bundles", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.OK,
-                        """{"items":[{"bundleId":"saved-bundle","complete":true,"loaded":false}]}""");
-                }
-
-                if (request.RequestUri?.AbsolutePath.Contains("/admin/models", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.OK,
-                        """[{"modelRef":"saved-model","complete":true,"activeModel":false}]""");
-                }
-
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            }));
+            endpointCache: new LocalEndpointCache(new NoopProbe()),
+            inventoryMirror: SeedMirrorForAll());
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
 
@@ -943,24 +870,8 @@ public sealed class NotebookHeaderToolbarServiceTests
             db,
             notebook.Id,
             settings.Object,
-            httpClientFactory: CreateHttpClientFactory(request =>
-            {
-                if (request.RequestUri?.AbsolutePath.Contains("/admin/bundles", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return JsonResponse(
-                        HttpStatusCode.OK,
-                        $$"""
-                        {
-                          "activeBundleMarkerId":"{{bundleId}}",
-                          "items": [
-                            {"bundleId":"{{bundleId}}","complete":true,"loaded":true}
-                          ]
-                        }
-                        """);
-                }
-
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            }));
+            endpointCache: new LocalEndpointCache(new NoopProbe()),
+            inventoryMirror: SeedMirrorOnlyImage(bundleId));
 
         var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
         var image = toolbar.Services.Single(service => service.Kind == "image");
@@ -1012,8 +923,11 @@ public sealed class NotebookHeaderToolbarServiceTests
         INotebookModelRuntimeService? llamaRuntime = null,
         IConfiguration? configuration = null,
         IChatDefaultsStore? chatDefaultsStore = null,
-        IHttpClientFactory? httpClientFactory = null)
+        ILocalEndpointCache? endpointCache = null,
+        ILocalInventoryMirror? inventoryMirror = null)
 {
+    endpointCache ??= new LocalEndpointCache(new NoopProbe());
+    inventoryMirror ??= new LocalInventoryMirror();
         var readinessMock = readiness ?? CreateDefaultReadinessMock().Object;
         var chatModelResolverMock = chatModelResolver ?? CreateDefaultChatModelResolver().Object;
         var conversationsMock = conversations ?? new Mock<IConversationManager>(MockBehavior.Strict).Object;
@@ -1037,16 +951,71 @@ public sealed class NotebookHeaderToolbarServiceTests
             llamaRuntimeMock,
             chatDefaults,
             config,
-            httpClientFactory ?? Mock.Of<IHttpClientFactory>(),
+            endpointCache,
+            inventoryMirror,
             NullLogger<NotebookHeaderToolbarService>.Instance);
+    }
+
+    /// <summary>
+    /// Probe fake that never touches the network; used where a test does not seed the
+    /// cache itself. A probe should never run — TryGet performs no I/O (T-U1).
+    /// </summary>
+    private sealed class NoopProbe : ILocalEndpointProbe
+    {
+        public Task<EndpointObservation> ProbeAsync(string readinessUrl, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("toolbar tests must not probe; seed the cache instead");
+    }
+
+
+    // Literal Plane C URLs matching CreateSut's default configuration:
+    // SpeechSynthesis :8110 -> /tts, SpeechTranscription :8111 -> /asr, ImageGeneration :8112 -> /sd.
+    private const string TtsReadyUrl = "http://localhost:8110/tts/ready";
+    private const string SdHealthUrl = "http://localhost:8112/sd/health";
+
+    private static NotebookToolbarLocalModelOptionDto LocalModel(string modelRef, bool complete = true, bool active = false) =>
+        new(modelRef, modelRef, complete, active);
+
+    private static LocalEndpointCache CacheWith(string readinessUrl, EndpointAvailability availability, string? runtimeState = null)
+    {
+        var cache = new LocalEndpointCache(new NoopProbe());
+        cache.MarkObserved(readinessUrl, new EndpointObservation(
+            readinessUrl, availability, DateTime.UtcNow, 5, null, 0, runtimeState));
+        return cache;
+    }
+
+    private static LocalInventoryMirror MirrorWith(string serviceId, params NotebookToolbarLocalModelOptionDto[] models)
+    {
+        var mirror = new LocalInventoryMirror();
+        mirror.SetLive(serviceId, models, DateTime.UtcNow);
+        return mirror;
+    }
+
+    private static LocalInventoryMirror SeedMirrorForAll()
+    {
+        var mirror = new LocalInventoryMirror();
+        mirror.SetLive(RoutedServiceNames.ImageGeneration,
+            [new NotebookToolbarLocalModelOptionDto("saved-bundle", "saved-bundle", true, false)], DateTime.UtcNow);
+        mirror.SetLive(RoutedServiceNames.SpeechSynthesis,
+            [new NotebookToolbarLocalModelOptionDto("saved-model", "saved-model", true, false)], DateTime.UtcNow);
+        mirror.SetLive(RoutedServiceNames.SpeechTranscription,
+            [new NotebookToolbarLocalModelOptionDto("saved-model", "saved-model", true, false)], DateTime.UtcNow);
+        return mirror;
+    }
+
+    private static LocalInventoryMirror SeedMirrorOnlyImage(string bundleId)
+    {
+        var mirror = new LocalInventoryMirror();
+        mirror.SetLive(RoutedServiceNames.ImageGeneration,
+            [new NotebookToolbarLocalModelOptionDto(bundleId, bundleId, true, true)], DateTime.UtcNow);
+        return mirror;
     }
 
     private static Mock<IRoutingReadinessService> CreateDefaultReadinessMock()
     {
         var readiness = new Mock<IRoutingReadinessService>(MockBehavior.Strict);
         readiness
-            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()))
-            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind) =>
+            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<RoutingProbeMode>()))
+            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind, RoutingProbeMode _) =>
                 new ChatTargetReadinessDto(
                     ModelId: modelId,
                     Provider: "google-gemini-chat",

@@ -13,13 +13,23 @@ namespace GuideAntsApi.Services.Routing;
 /// </summary>
 public interface IRoutingReadinessService
 {
-    Task<ModeReadinessDto> ProbeModeAsync(string service, string modeId, CancellationToken cancellationToken = default);
+    Task<ModeReadinessDto> ProbeModeAsync(
+        string service,
+        string modeId,
+        CancellationToken cancellationToken = default,
+        RoutingProbeMode mode = RoutingProbeMode.Live);
 
     /// <param name="modelId">Catalog model id to probe.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="referenceKind">Per R-9.2: <c>direct</c>, <c>defaultedTo</c>, or <c>overriddenToDefault</c>.</param>
+    /// <param name="mode">
+    /// Guard invariant (T-A3): <see cref="RoutingProbeMode.Live"/> is a use-path surface —
+    /// substituting a cached read here is forbidden. Configuration surfaces pass
+    /// <see cref="RoutingProbeMode.NonBlocking"/> and must never load, dispatch, or run anything.
+    /// </param>
     Task<ChatTargetReadinessDto> ProbeChatTargetAsync(
         string modelId,
         CancellationToken cancellationToken = default,
-        string referenceKind = "direct");
+        string referenceKind = "direct",
+        RoutingProbeMode mode = RoutingProbeMode.Live);
 }

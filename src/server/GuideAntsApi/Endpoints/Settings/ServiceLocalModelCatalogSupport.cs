@@ -66,6 +66,44 @@ internal static class ServiceLocalModelCatalogSupport
         }
     }
 
+    /// <summary>
+    /// Reads the curated catalog's version (F-5: the only engine fact beyond the API's own
+    /// payload that install memory records, read once at download acceptance). Returns null
+    /// on any failure — version is enrichment, not truth.
+    /// </summary>
+    public static async Task<string?> TryReadCatalogVersionAsync(
+        string serviceId,
+        IConfiguration configuration,
+        HttpClient httpClient,
+        CancellationToken cancellationToken)
+    {
+        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
+        if (string.IsNullOrWhiteSpace(adminBase))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}/admin/catalog");
+            using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(payload);
+            return doc.RootElement.TryGetProperty("version", out var v) && v.ValueKind == JsonValueKind.String
+                ? v.GetString()
+                : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     internal static bool TryParseCatalogIds(string payload, out HashSet<string> ids, out string error)
     {
         ids = new HashSet<string>(StringComparer.Ordinal);

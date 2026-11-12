@@ -45,6 +45,11 @@ export interface NotebookToolbarServiceDto {
   localModelOptions: NotebookToolbarLocalModelOptionDto[];
   inProgressOperationId: string | null;
   inProgressState: string | null;
+  /** Plane A selection ∈ Plane C inventory. False => the selected artifact was not in the last-known listing (deleted artifact / named condition, T-C4 "Remove offered"). */
+  selectionExists?: boolean;
+  /** Plane C presence overlay: shown, never awaited (F-2). */
+  presence?: EndpointPresence | null;
+  observedUtc?: string | null;
 }
 
 export interface NotebookToolbarChatDto {
@@ -64,6 +69,19 @@ export interface NotebookToolbarChatDto {
   inProgressState: string | null;
   /** Why the effective model is selected: 'direct' (assistant definition), 'defaultedTo' (assistant has no model), 'overriddenToDefault' (global override on). */
   effectiveModelSource?: string | null;
+  /** Plane C presence overlay (the chat section carries presence ONLY). */
+  presence?: EndpointPresence | null;
+}
+
+/** Per-endpoint presence stamp: a state plus when it was last observed. Augments a status row; never replaces it (F-2). */
+export interface EndpointPresence {
+  serviceId: string;
+  baseUrl: string;
+  availability: 'Unknown' | 'Reachable' | 'Unreachable';
+  artifactPresent: boolean | null;
+  selectedRef: string | null;
+  observedUtc: string | null;
+  error: string | null;
 }
 
 export interface NotebookHeaderToolbarDto {

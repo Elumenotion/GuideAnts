@@ -8,6 +8,7 @@ using GuideAntsApi.Options;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.Reachability;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 
@@ -23,7 +24,10 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
     private readonly INotebookModelRuntimeService _llamaRuntime;
     private readonly IChatDefaultsStore _chatDefaultsStore;
     private readonly IConfiguration _configuration;
-    private readonly IHttpClientFactory _httpClientFactory;
+    // Plane C (reachability + last-known inventory). Configuration reads here are
+    // synchronous cache reads — no inline local-admin HTTP (T-A1 removes the client factory).
+    private readonly ILocalEndpointCache _endpointCache;
+    private readonly ILocalInventoryMirror _inventoryMirror;
     private readonly ILogger<NotebookHeaderToolbarService> _logger;
 
     public NotebookHeaderToolbarService(
@@ -35,7 +39,8 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         INotebookModelRuntimeService llamaRuntime,
         IChatDefaultsStore chatDefaultsStore,
         IConfiguration configuration,
-        IHttpClientFactory httpClientFactory,
+        ILocalEndpointCache endpointCache,
+        ILocalInventoryMirror inventoryMirror,
         ILogger<NotebookHeaderToolbarService> logger)
     {
         _db = db;
@@ -46,7 +51,8 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         _llamaRuntime = llamaRuntime;
         _chatDefaultsStore = chatDefaultsStore;
         _configuration = configuration;
-        _httpClientFactory = httpClientFactory;
+        _endpointCache = endpointCache;
+        _inventoryMirror = inventoryMirror;
         _logger = logger;
     }
 
@@ -90,12 +96,15 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         var modelOptions = await BuildSelectableChatModelOptionsAsync(orderedModels, cancellationToken)
             .ConfigureAwait(false);
 
+        // Configuration surface (R-A): NonBlocking. No live llama probe, no inline
+        // reachability wait; localRuntimeOn comes from the Plane C cache (S-1/S-2).
         var chat = await BuildChatSectionAsync(
             notebookId,
             conversationId,
             orderedModels,
             allModelOptions,
             modelOptions,
+            RoutingProbeMode.NonBlocking,
             cancellationToken).ConfigureAwait(false);
 
         var image = await BuildRoutedServiceAsync(
@@ -154,12 +163,15 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
                 m.IsActive))
             .ToList();
 
+        // Use-path surface (R3): Live, byte-for-byte as today — this drives the load
+        // affordance and NoChatModelDialog. Output unchanged bit-for-bit.
         var chat = await BuildChatSectionAsync(
             notebookId,
             conversationId,
             orderedModels,
             allModelOptions,
             modelOptions: Array.Empty<NotebookToolbarModelOptionDto>(),
+            RoutingProbeMode.Live,
             cancellationToken).ConfigureAwait(false);
 
         return new NotebookChatReadinessDto(
@@ -173,12 +185,25 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             chat.InProgressState);
     }
 
+    /// <summary>
+    /// Builds the toolbar chat section. Split by caller via <paramref name="mode"/> (S-1):
+    /// <list type="bullet">
+    /// <item><see cref="RoutingProbeMode.NonBlocking"/> (GetToolbarAsync): configuration. The
+    /// effective-model readiness probe runs NonBlocking and the live per-instance llama status
+    /// (<c>_llamaRuntime.GetRuntimeStatusAsync</c>) is NOT called; localRuntimeOn is derived
+    /// from the Plane C alias mirror. Never awaits reachability.</item>
+    /// <item><see cref="RoutingProbeMode.Live"/> (GetChatReadinessAsync): the historical body
+    /// verbatim — live ProbeChatTargetAsync, live GetRuntimeStatusAsync, the RuntimeState
+    /// override, IsOnlyRuntimeStateUnloadedBlocker, requiresLoad. Byte-for-byte output.</item>
+    /// </list>
+    /// </summary>
     private async Task<NotebookToolbarChatDto> BuildChatSectionAsync(
         Guid notebookId,
         Guid? conversationId,
         IReadOnlyList<SettingsModelDto> orderedModels,
         IReadOnlyList<NotebookToolbarModelOptionDto> allModelOptions,
         IReadOnlyList<NotebookToolbarModelOptionDto> modelOptions,
+        RoutingProbeMode mode,
         CancellationToken cancellationToken)
     {
         string? effectiveModelId = null;
@@ -241,7 +266,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
                 _ => "direct"
             };
             var chatReady = await _readiness
-                .ProbeChatTargetAsync(effectiveModelId, cancellationToken, referenceKind)
+                .ProbeChatTargetAsync(effectiveModelId, cancellationToken, referenceKind, mode)
                 .ConfigureAwait(false);
             chatReadiness = chatReady;
             chatStatus = MapChatToolbarStatus(chatReady);
@@ -252,9 +277,15 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             }
         }
 
-        var llamaStatus = await _llamaRuntime
-            .GetRuntimeStatusAsync(notebookId, assistantId, cancellationToken)
-            .ConfigureAwait(false);
+        // Live per-instance llama status is a use-path probe. Under NonBlocking we do NOT
+        // call it (S-2): localRuntimeOn/inProgress come from the Plane C alias mirror instead.
+        NotebookLlamaRuntimeStatusDto? llamaStatus = null;
+        if (mode == RoutingProbeMode.Live)
+        {
+            llamaStatus = await _llamaRuntime
+                .GetRuntimeStatusAsync(notebookId, assistantId, cancellationToken)
+                .ConfigureAwait(false);
+        }
         var effectiveProvider = effectiveModelId != null
             ? orderedModels.FirstOrDefault(m => string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal))?.Provider
             : null;
@@ -263,43 +294,78 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             && string.Equals(m.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
             && string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal))
             || string.Equals(effectiveProvider, "llama-cpp", StringComparison.OrdinalIgnoreCase);
-        var selectedLocalModelLoaded = supportsLocalLlama
-            && !string.IsNullOrWhiteSpace(effectiveModelId)
-            && llamaStatus.LoadedModels.Any(m => string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal));
-        var localRuntimeOn = supportsLocalLlama
-            && (selectedLocalModelLoaded || string.Equals(llamaStatus.State, "ready", StringComparison.OrdinalIgnoreCase));
-        // Runtime status from NotebookModelRuntimeService may be briefly stale due cached router snapshots.
-        // When readiness has a concrete llama runtime state, trust it to avoid contradictory UI like
-        // "Loaded" while chat is blocked on RUNTIME_STATE: ... 'unloaded'.
-        if (supportsLocalLlama && !string.IsNullOrWhiteSpace(chatReadiness?.RuntimeState))
+        bool localRuntimeOn = false;
+        string? chatInProgressId;
+        string? chatInProgressState;
+        if (mode == RoutingProbeMode.NonBlocking)
         {
-            localRuntimeOn = string.Equals(chatReadiness!.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase);
-        }
-        var inProg = llamaStatus.ActiveOperation;
-        var chatInProgressId = inProg is { State: not "ready" and not "failed" } ? inProg.OperationId : null;
-        var chatInProgressState = inProg?.State;
+            // Configuration path: derive everything from Plane C. No live llama probe, no
+            // live operation store read (S-2). Unknown => not on, not blocked, never a spinner.
+            localRuntimeOn = supportsLocalLlama
+                && string.Equals(chatReadiness?.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase);
 
-        if (supportsLocalLlama)
-        {
-            var hasActiveOperation = llamaStatus.ActiveOperation is { State: not "ready" and not "failed" };
-            if (hasActiveOperation)
+            if (supportsLocalLlama)
             {
-                chatStatus = "inProgress";
-                chatSummary = BuildLocalLlamaOperationSummary(effectiveModelDisplay, llamaStatus.ActiveOperation);
-                chatBlockers = Array.Empty<string>();
-            }
-            else if (localRuntimeOn)
-            {
-                if (!string.Equals(chatStatus, "blocked", StringComparison.OrdinalIgnoreCase))
+                if (localRuntimeOn
+                    && !string.Equals(chatStatus, "blocked", StringComparison.OrdinalIgnoreCase))
                 {
                     chatSummary = BuildLocalLlamaLoadedSummary(effectiveModelDisplay);
                 }
+                else if (chatReadiness is not null && IsOnlyRuntimeStateUnloadedBlocker(chatReadiness))
+                {
+                    // Same named conversion as the Live path: an only-unloaded blocker is a
+                    // "requiresLoad" affordance, not an error. The loaded-others summary is
+                    // derived from the Plane C alias mirror (cache, not a live probe).
+                    chatStatus = "requiresLoad";
+                    chatSummary = BuildLocalLlamaRequiresLoadSummaryFromMirror(effectiveModelDisplay, orderedModels);
+                    chatBlockers = Array.Empty<string>();
+                }
             }
-            else if (chatReadiness is not null && IsOnlyRuntimeStateUnloadedBlocker(chatReadiness))
+
+            chatInProgressId = null;
+            chatInProgressState = null;
+        }
+        else
+        {
+            var liveStatus = llamaStatus!;
+            var selectedLocalModelLoaded = supportsLocalLlama
+                && !string.IsNullOrWhiteSpace(effectiveModelId)
+                && liveStatus.LoadedModels.Any(m => string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal));
+            localRuntimeOn = supportsLocalLlama
+                && (selectedLocalModelLoaded || string.Equals(liveStatus.State, "ready", StringComparison.OrdinalIgnoreCase));
+            // Runtime status from NotebookModelRuntimeService may be briefly stale due cached router snapshots.
+            // When readiness has a concrete llama runtime state, trust it to avoid contradictory UI like
+            // "Loaded" while chat is blocked on RUNTIME_STATE: ... 'unloaded'.
+            if (supportsLocalLlama && !string.IsNullOrWhiteSpace(chatReadiness?.RuntimeState))
             {
-                chatStatus = "requiresLoad";
-                chatSummary = BuildLocalLlamaRequiresLoadSummary(effectiveModelDisplay, llamaStatus);
-                chatBlockers = Array.Empty<string>();
+                localRuntimeOn = string.Equals(chatReadiness!.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase);
+            }
+            var inProg = liveStatus.ActiveOperation;
+            chatInProgressId = inProg is { State: not "ready" and not "failed" } ? inProg.OperationId : null;
+            chatInProgressState = inProg?.State;
+
+            if (supportsLocalLlama)
+            {
+                var hasActiveOperation = liveStatus.ActiveOperation is { State: not "ready" and not "failed" };
+                if (hasActiveOperation)
+                {
+                    chatStatus = "inProgress";
+                    chatSummary = BuildLocalLlamaOperationSummary(effectiveModelDisplay, liveStatus.ActiveOperation);
+                    chatBlockers = Array.Empty<string>();
+                }
+                else if (localRuntimeOn)
+                {
+                    if (!string.Equals(chatStatus, "blocked", StringComparison.OrdinalIgnoreCase))
+                    {
+                        chatSummary = BuildLocalLlamaLoadedSummary(effectiveModelDisplay);
+                    }
+                }
+                else if (chatReadiness is not null && IsOnlyRuntimeStateUnloadedBlocker(chatReadiness))
+                {
+                    chatStatus = "requiresLoad";
+                    chatSummary = BuildLocalLlamaRequiresLoadSummary(effectiveModelDisplay, liveStatus);
+                    chatBlockers = Array.Empty<string>();
+                }
             }
         }
 
@@ -325,7 +391,69 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
                 ChatModelReferenceKind.DefaultedTo => "defaultedTo",
                 ChatModelReferenceKind.OverriddenToDefault => "overriddenToDefault",
                 _ => "direct"
-            });
+            },
+            // Chat carries presence ONLY (from cache under NonBlocking; null under Live so
+            // the use-path output stays byte-for-byte identical).
+            mode == RoutingProbeMode.NonBlocking ? BuildChatLlamaPresence() : null);
+    }
+
+    /// <summary>
+    /// "requiresLoad" summary naming which other local model(s) the mirror last reported
+    /// loaded, preserving the Live path's wording ("Mistral Local is currently loaded.
+    /// Load Qwen Local to switch."). When the mirror has no loaded models (or was never
+    /// observed) it falls back to the plain requiresLoad summary — never a blank.
+    /// </summary>
+    private string BuildLocalLlamaRequiresLoadSummaryFromMirror(
+        string? effectiveModelDisplay,
+        IReadOnlyList<SettingsModelDto> orderedModels)
+    {
+        var loadedRefs = Array.Empty<string>();
+        if (_inventoryMirror.TryGet("llama", out var models, out var source, out _)
+            && source != InventorySource.None)
+        {
+            loadedRefs = models
+                .Where(m => m.IsActive)
+                .Select(m => m.ModelRef)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+        }
+
+        var name = LocalModelDisplayName(effectiveModelDisplay);
+        if (loadedRefs.Length == 0)
+        {
+            return $"{name} selected. No local model is loaded. Load {name} to start.";
+        }
+
+        // Map alias ids to catalog display names where the catalog knows them.
+        var names = loadedRefs
+            .Select(ref_ => orderedModels.FirstOrDefault(m => string.Equals(m.ModelId, ref_, StringComparison.Ordinal))?.DisplayName)
+            .Select(dn => string.IsNullOrWhiteSpace(dn) ? "local model" : dn!)
+            .ToList();
+        var loadedSummary = names.Count == 1
+            ? $"{names[0]} is currently loaded"
+            : $"{names[0]} and {names.Count - 1} others are currently loaded";
+        return $"{name} selected. {loadedSummary}. Load {name} to switch.";
+    }
+
+    /// <summary>Llama presence for the chat section, read from Plane C (no inline HTTP).</summary>
+    private EndpointPresenceDto? BuildChatLlamaPresence()
+    {
+        var llamaBase = _configuration["LlamaCpp:BaseUrl"];
+        if (!Configuration.RuntimeConfigurationPlaceholders.HasUsableUrl(llamaBase))
+        {
+            return null;
+        }
+        var readinessUrl = $"{llamaBase!.TrimEnd('/')}/ready";
+        var availability = "Unknown";
+        DateTime? observedUtc = null;
+        string? error = null;
+        if (_endpointCache.TryGet(readinessUrl, out var observation))
+        {
+            availability = observation.Availability.ToString();
+            observedUtc = observation.ObservedUtc;
+            error = observation.Error;
+        }
+        return new EndpointPresenceDto("llama", llamaBase, availability, null, null, observedUtc, error);
     }
 
     private async Task<IReadOnlyList<NotebookToolbarModelOptionDto>> BuildSelectableChatModelOptionsAsync(
@@ -345,7 +473,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             try
             {
                 var readiness = await _readiness
-                    .ProbeChatTargetAsync(model.ModelId, cancellationToken, "direct")
+                    .ProbeChatTargetAsync(model.ModelId, cancellationToken, "direct", RoutingProbeMode.NonBlocking)
                     .ConfigureAwait(false);
                 return (Model: model, Readiness: readiness, Error: (Exception?)null);
             }
@@ -565,11 +693,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         string? selectedLocalRef = null;
         if (hasLocalServiceMode)
         {
-            var inventory = await TryLoadLocalModelInventoryAsync(
-                serviceId,
-                localListPath,
-                isImage,
-                cancellationToken).ConfigureAwait(false);
+            var inventory = LoadLocalModelInventoryFromMirror(serviceId);
             localModels = inventory.Models;
 
             // A saved local selection is operational only while routing is local.
@@ -601,7 +725,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             ? BuildSelectionForService(isImage, localModels, selectedLocalRef)
             : null;
         var runtimeProbe = supportsPower
-            ? await ProbeLocalRuntimeAsync(serviceId, isImage, cancellationToken).ConfigureAwait(false)
+            ? ProbeLocalRuntimeFromCache(serviceId)
             : new LocalRuntimeProbe(false, false, false, false);
         var localOn = supportsPower && runtimeProbe.IsOperational;
         string? inProgressOperationId = null;
@@ -649,6 +773,11 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             summary = BuildDefaultServiceSummary(activeLabel, readiness);
         }
 
+        // Plane C presence stamp (shown, never awaited) + selection-exists so a deleted
+        // artifact surfaces as a named condition instead of a phantom "(active)" marker.
+        var presence = BuildPresenceForService(serviceId);
+        var selectionExists = SelectionExistsInInventory(selectedLocalRef, localModels);
+
         return new NotebookToolbarServiceDto(
             serviceId,
             displayName,
@@ -664,7 +793,49 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             blockers,
             localModels,
             inProgressOperationId,
-            inProgressState);
+            inProgressState,
+            selectionExists,
+            presence,
+            presence?.ObservedUtc);
+    }
+
+    /// <summary>
+    /// Synchronous Plane C presence for one routed service (no inline HTTP). Unknown when
+    /// never observed — rendered "not yet observed · Refresh", never a spinner (F-2).
+    /// </summary>
+    private EndpointPresenceDto? BuildPresenceForService(string serviceId)
+    {
+        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
+        if (string.IsNullOrWhiteSpace(adminBase))
+        {
+            return null;
+        }
+
+        var readinessUrl = $"{adminBase.TrimEnd('/')}{(isImageService(serviceId) ? "/health" : serviceId == RoutedServiceNames.DocumentIntelligence ? "" : "/ready")}";
+        var availability = "Unknown";
+        DateTime? observedUtc = null;
+        string? error = null;
+        if (_endpointCache.TryGet(readinessUrl, out var observation))
+        {
+            availability = observation.Availability.ToString();
+            observedUtc = observation.ObservedUtc;
+            error = observation.Error;
+        }
+        return new EndpointPresenceDto(serviceId, adminBase, availability, ArtifactPresent: null, SelectedRef: null, observedUtc, error);
+    }
+
+    /// <summary>
+    /// True when there is no persisted selection, or the selected ref is present in the
+    /// last-known inventory. A selection absent from a reachable inventory => false, so the
+    /// UI offers Remove against a named condition rather than showing a phantom active row.
+    /// </summary>
+    private static bool SelectionExistsInInventory(string? selectedLocalRef, IReadOnlyList<NotebookToolbarLocalModelOptionDto> localModels)
+    {
+        if (string.IsNullOrWhiteSpace(selectedLocalRef))
+        {
+            return true;
+        }
+        return localModels.Any(m => string.Equals(m.ModelRef, selectedLocalRef, StringComparison.Ordinal));
     }
 
     private static string BuildDefaultServiceSummary(string activeLabel, ServiceEditorReadinessDto readiness)
@@ -797,162 +968,61 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             .ToList();
     }
 
-    private async Task<LocalRuntimeProbe> ProbeLocalRuntimeAsync(
-        string serviceId,
-        bool isImage,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads local runtime state from the Plane C reachability cache (no inline HTTP).
+    /// Unknown => not on, not blocked, status labelled unobserved (rendered "not yet
+    /// observed · Refresh", never a spinner — F-2). IsOperational semantics preserved:
+    /// Loaded and not Loading, PostLoadWarming, or StartupWarmupRunning.
+    /// </summary>
+    private LocalRuntimeProbe ProbeLocalRuntimeFromCache(string serviceId)
     {
-        if (isImage)
-        {
-            var json = await HttpGetLocalAdminJsonAsync(serviceId, "/health", cancellationToken)
-                .ConfigureAwait(false);
-            if (json is null)
-            {
-                return new LocalRuntimeProbe(false, false, false, false);
-            }
-
-            try
-            {
-                var node = JsonNode.Parse(json);
-                var engine = node?["engine"] as JsonObject;
-                var processAlive = engine?["processAlive"]?.GetValue<bool?>() ?? false;
-                var healthy = engine?["healthy"]?.GetValue<bool?>() ?? false;
-                var startupWarmupRunning = node?["startupWarmup"]?["running"]?.GetValue<bool?>() ?? false;
-                var status = node?["status"]?.GetValue<string>();
-                var loaded = processAlive && healthy
-                    || string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase);
-                var loading = startupWarmupRunning || (processAlive && !healthy);
-                return new LocalRuntimeProbe(loaded, loading, false, startupWarmupRunning);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Image runtime probe parse");
-                return new LocalRuntimeProbe(false, false, false, false);
-            }
-        }
-
-        var readyJson = await HttpGetLocalAdminJsonAsync(
-            serviceId,
-            "/ready",
-            cancellationToken,
-            readBodyOnAnyStatus: true).ConfigureAwait(false);
-        if (readyJson is null)
+        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
+        if (string.IsNullOrWhiteSpace(adminBase))
         {
             return new LocalRuntimeProbe(false, false, false, false);
         }
 
-        try
+        var readinessUrl = $"{adminBase.TrimEnd('/')}{(isImageService(serviceId) ? "/health" : "/ready")}";
+        if (!_endpointCache.TryGet(readinessUrl, out var observation)
+            || observation.Availability == EndpointAvailability.Unknown)
         {
-            var node = JsonNode.Parse(readyJson);
-            var loaded = node?["loaded"]?.GetValue<bool?>() ?? false;
-            var loading = node?["loading"]?.GetValue<bool?>() ?? false;
-            var warmupEnabled = node?["warmupEnabled"]?.GetValue<bool?>() ?? false;
-            var warmupSucceeded = node?["warmupSucceeded"]?.GetValue<bool?>() ?? false;
-            var postLoadWarming = loaded && warmupEnabled && !warmupSucceeded;
-            return new LocalRuntimeProbe(loaded, loading, postLoadWarming, false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Asr/tts runtime probe parse");
+            // Never observed: truthful absence. Not on, not blocked.
             return new LocalRuntimeProbe(false, false, false, false);
         }
+
+        if (observation.Availability == EndpointAvailability.Unreachable)
+        {
+            // Reachability is a shown status; it does not report loaded/loading here.
+            return new LocalRuntimeProbe(false, false, false, false);
+        }
+
+        // Reachable: map the cached body-derived runtime state into the probe shape.
+        var loaded = string.Equals(observation.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase);
+        var loading = string.Equals(observation.RuntimeState, "loading", StringComparison.OrdinalIgnoreCase);
+        return new LocalRuntimeProbe(loaded, loading, false, false);
     }
 
-    private async Task<LocalModelInventoryLoadResult> TryLoadLocalModelInventoryAsync(
-        string serviceId,
-        string listPath,
-        bool isImage,
-        CancellationToken cancellationToken)
+    private static bool isImageService(string serviceId) =>
+        string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Reads last-known inventory from the Plane C mirror (no inline HTTP). The mirror is
+    /// written by the probe loop and by successful download/load operations only. A cold
+    /// cache yields an empty list with a null root — rendered as an explicit empty state,
+    /// never a blank select (P6). Same shape as before so callers are unchanged.
+    /// </summary>
+    private LocalModelInventoryLoadResult LoadLocalModelInventoryFromMirror(string serviceId)
     {
-        var json = await HttpGetLocalAdminJsonAsync(serviceId, listPath, cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(json))
+        if (_inventoryMirror.TryGet(serviceId, out var models, out var source, out _) && source != InventorySource.None)
         {
-            return new LocalModelInventoryLoadResult(
-                Array.Empty<NotebookToolbarLocalModelOptionDto>(),
-                null);
+            return new LocalModelInventoryLoadResult(models, null);
         }
-
-        try
-        {
-            var node = JsonNode.Parse(json);
-            if (isImage)
-            {
-                return new LocalModelInventoryLoadResult(ParseImageBundles(node), node);
-            }
-
-            return new LocalModelInventoryLoadResult(ParseVoiceModels(node), node);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Local inventory parse for {ServiceId}", serviceId);
-            return new LocalModelInventoryLoadResult(
-                Array.Empty<NotebookToolbarLocalModelOptionDto>(),
-                null);
-        }
+        return new LocalModelInventoryLoadResult(Array.Empty<NotebookToolbarLocalModelOptionDto>(), null);
     }
 
-    private static IReadOnlyList<NotebookToolbarLocalModelOptionDto> ParseImageBundles(JsonNode? root)
-    {
-        var items = root?["items"] as JsonArray;
-        if (items is null) return Array.Empty<NotebookToolbarLocalModelOptionDto>();
 
-        var list = new List<NotebookToolbarLocalModelOptionDto>();
-        foreach (var it in items)
-        {
-            if (it?["bundleId"]?.GetValue<string>() is not { } id)
-            {
-                continue;
-            }
-            var complete = it["complete"]?.GetValue<bool>() ?? false;
-            var loaded = it["loaded"]?.GetValue<bool>() ?? false;
-            var label = loaded ? $"{id} (loaded)" : id;
-            list.Add(new NotebookToolbarLocalModelOptionDto(id, label, complete, IsActive: false));
-        }
-        return list;
-    }
 
-    private static IReadOnlyList<NotebookToolbarLocalModelOptionDto> ParseVoiceModels(JsonNode? root)
-    {
-        JsonArray? arr = root as JsonArray;
-        if (arr is null)
-        {
-            arr = root?["items"] as JsonArray;
-        }
-        if (arr is null) return Array.Empty<NotebookToolbarLocalModelOptionDto>();
 
-        var list = new List<NotebookToolbarLocalModelOptionDto>();
-        foreach (var it in arr)
-        {
-            var id = it?["model_id"]?.GetValue<string>()
-                ?? it?["modelId"]?.GetValue<string>()
-                ?? it?["modelRef"]?.GetValue<string>()
-                ?? it?["id"]?.GetValue<string>();
-            if (string.IsNullOrWhiteSpace(id))
-            {
-                continue;
-            }
-            if (id.StartsWith(".", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var activeTokenizer = it?["activeTokenizer"]?.GetValue<bool>() is true;
-            var activeModel = it?["activeModel"]?.GetValue<bool>() is true;
-            if (activeTokenizer && !activeModel)
-            {
-                // Tokenizer-only artifacts are runtime dependencies, not selectable service models.
-                continue;
-            }
-            var path = it?["model_path"]?.GetValue<string>();
-            var label = string.IsNullOrWhiteSpace(path) ? id : $"{id} ({path})";
-            var active = it?["active"]?.GetValue<bool>() is true
-                || it?["activeModel"]?.GetValue<bool>() is true
-                || string.Equals(id, it?["active_model_id"]?.GetValue<string>(), StringComparison.Ordinal);
-            var complete = it?["complete"]?.GetValue<bool>() ?? false;
-            list.Add(new NotebookToolbarLocalModelOptionDto(id, label, complete, active));
-        }
-        return list;
-    }
 
     private static string? ExtractModelId(ProviderEditorStateDto provider)
     {
@@ -969,39 +1039,4 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
 
         return null;
     }
-
-    private async Task<string?> HttpGetLocalAdminJsonAsync(
-        string serviceId,
-        string path,
-        CancellationToken cancellationToken,
-        bool readBodyOnAnyStatus = false)
-    {
-        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
-        if (string.IsNullOrWhiteSpace(adminBase))
-        {
-            return null;
-        }
-
-        var client = _httpClientFactory.CreateClient();
-        var url = $"{adminBase.TrimEnd('/')}{path}";
-        try
-        {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
-            using var response = await client.GetAsync(new Uri(url), timeoutCts.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode && !readBodyOnAnyStatus)
-            {
-                return null;
-            }
-
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            return string.IsNullOrWhiteSpace(body) ? null : body;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Local admin GET {Url}", url);
-            return null;
-        }
-    }
 }
-

@@ -77,6 +77,7 @@ namespace GuideAntsApi.DataModel
         public DbSet<ApplicationSetting> ApplicationSettings { get; set; } = null!;
         public DbSet<LocalModelInstallation> LocalModelInstallations { get; set; } = null!;
         public DbSet<LocalModelOperation> LocalModelOperations { get; set; } = null!;
+        public DbSet<ServiceLocalModelInstallation> ServiceLocalModelInstallations { get; set; } = null!;
         public DbSet<HostFolderMount> HostFolderMounts { get; set; } = null!;
         public DbSet<HostFolderMountLink> HostFolderMountLinks { get; set; } = null!;
         public DbSet<ProjectScheduledJob> ProjectScheduledJobs { get; set; } = null!;
@@ -470,6 +471,19 @@ namespace GuideAntsApi.DataModel
                     .WithOne(m => m.Installation)
                     .HasForeignKey<LocalModelInstallation>(x => x.ModelId)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // Plane B — API-owned install memory for aux local models/bundles.
+            // Composite key (ServiceId, ModelRef): one row per installed artifact per service.
+            modelBuilder.Entity<ServiceLocalModelInstallation>(b =>
+            {
+                b.HasKey(x => new { x.ServiceId, x.ModelRef });
+                b.Property(x => x.ModelRef).HasMaxLength(512);
+                b.Property(x => x.ArtifactsJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.CreatedUtc).HasDefaultValueSql("GETUTCDATE()");
+                b.Property(x => x.UpdatedUtc).HasDefaultValueSql("GETUTCDATE()");
+                b.Property(x => x.RowVersion).IsRowVersion();
+                b.HasIndex(x => x.ServiceId);
             });
 
             modelBuilder.Entity<LocalModelOperation>(b =>

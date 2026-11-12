@@ -339,7 +339,7 @@ public sealed class ApplicationSettingsServiceDeepTests
             .Build();
     }
 
-    private static ApplicationDbContext CreateDbContext()
+private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"settings-deep-{Guid.NewGuid():N}")
@@ -385,11 +385,6 @@ public sealed class ApplicationSettingsServiceDeepTests
                 ["tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
             }
         });
-        return new ApplicationSettingsService(
-            db,
-            new SettingsSectionRegistry(),
-            environment.Object,
-            configuration,
-            settingsSecrets.Object);
+        return new ApplicationSettingsService(db, new SettingsSectionRegistry(), environment.Object, configuration, settingsSecrets.Object);
     }
 }
