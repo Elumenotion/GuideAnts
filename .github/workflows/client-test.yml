@@ -92,4 +92,8 @@ jobs:
         env:
           GA_INTEGRATION_TEST_MSSQL_IMAGE: ghcr.io/${{ env.OWNER_LC }}/mssql2025-express-fts:latest
           GA_ENABLE_RUNTIME_LOAD_TESTS: '0'
+          # The runner is a VM, not a container, so Program.cs does not default this
+          # to false. Without it, every host the test suite builds arms config file
+          # watchers and the job exhausts the runner's 128 inotify instances.
+          DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE: 'false'
         run: dotnet test GuideAntsApi.IntegrationTests/GuideAntsApi.IntegrationTests.csproj --configuration Release --verbosity minimal
