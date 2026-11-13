@@ -60,13 +60,19 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
         builder.ConfigureAppConfiguration((context, config) =>
         {
             var testProjectDir = GetTestProjectDirectory();
+            // reloadOnChange: false everywhere. Each enabled provider arms a FileSystemWatcher
+            // (FileConfigurationProvider ctor -> PhysicalFileProvider.Watch). This assembly
+            // builds one host per test class and MSTest 3 defers [ClassCleanup] to the end of
+            // the assembly, so the watchers accumulate: 39 hosts x the providers below blew
+            // past the GitHub runner's 128 inotify instances. No test depends on reload -
+            // nothing in this assembly subscribes to configuration change tokens.
             var configPath = Path.GetFullPath(Path.Combine(testProjectDir, "..", "GuideAntsApi"));
 
-            config.AddJsonFile(Path.Combine(configPath, "appsettings.json"), optional: false, reloadOnChange: true);
-            config.AddJsonFile(Path.Combine(configPath, $"appsettings.{context.HostingEnvironment.EnvironmentName}.json"), optional: true, reloadOnChange: true);
+            config.AddJsonFile(Path.Combine(configPath, "appsettings.json"), optional: false, reloadOnChange: false);
+            config.AddJsonFile(Path.Combine(configPath, $"appsettings.{context.HostingEnvironment.EnvironmentName}.json"), optional: true, reloadOnChange: false);
             
             // Add test-specific configuration to reduce logging noise
-            config.AddJsonFile(Path.Combine(testProjectDir, "appsettings.test.json"), optional: true, reloadOnChange: true);
+            config.AddJsonFile(Path.Combine(testProjectDir, "appsettings.test.json"), optional: true, reloadOnChange: false);
             
             config.AddEnvironmentVariables();
             
