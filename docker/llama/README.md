@@ -55,7 +55,7 @@ pwsh .\run\test-openai-chat.ps1
 - `/sd/*` -> stable-diffusion.cpp wrapper service (txt2img/img2img)
 - `/tts/*` -> local TTS service (synthesize WAV)
 - `/emb/*` -> local embeddings service (query/document vectors)
-- `--no-mmap` is the default in scripts/compose for stability on this host.
+- `load-mode = none` (via `GA_LLAMA_NO_MMAP=1`) is the default in scripts/compose for stability on this host.
 - To explicitly enable mmap, pass `-UseMmap` to `run/start-llama-server.ps1`.
 - Default context window is `262144` (Qwen 3.5 default context length).
 - Vision input requires `mmproj`; the download script fetches it by default and places it in a model-specific subdirectory so the router can load it automatically.

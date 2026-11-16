@@ -345,6 +345,7 @@ def upsert_router_entry(
 def remove_router_entry(
     alias: str,
     *,
+    reload_callback: Callable[[], RuntimeApplyResult] | None = None,
     log_event: Callable[..., None] | None = None,
 ) -> tuple[str, str] | None:
     """Remove a router alias from the ini file. Returns (modelPath, mmprojPath) if removed.
@@ -370,4 +371,12 @@ def remove_router_entry(
         removed = (removed_sec.model, removed_sec.mmproj)
         write_router_config_pair(entries, log_event=log_event)
 
+    if removed and reload_callback is not None:
+        runtime_apply = reload_callback()
+        if log_event is not None:
+            log_event(
+                "router_entry_remove_reload_triggered",
+                alias=alias_trimmed,
+                runtimeApplied=runtime_apply.applied,
+            )
     return removed

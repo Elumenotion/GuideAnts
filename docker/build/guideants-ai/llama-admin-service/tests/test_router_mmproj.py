@@ -111,7 +111,7 @@ class RouterMmprojTests(unittest.TestCase):
         }
         resolved = resolve_env_default_extras({"spec-type": "draft-mtp"}, environ=env)
         self.assertEqual(resolved["jinja"], "true")
-        self.assertEqual(resolved["no-mmap"], "true")
+        self.assertEqual(resolved["load-mode"], "none")
         self.assertEqual(resolved["n-gpu-layers"], "999")
         self.assertNotIn("spec-type", resolved)
 
@@ -139,7 +139,7 @@ class RouterMmprojTests(unittest.TestCase):
                 serialize_router_ini_for_runtime=router.serialize_router_ini_for_runtime,
             )
         self.assertIn("jinja = true", runtime)
-        self.assertIn("no-mmap = true", runtime)
+        self.assertIn("load-mode = none", runtime)
         self.assertIn("spec-type = draft-mtp", runtime)
 
     def test_runtime_ini_keeps_alias_override_over_env(self) -> None:

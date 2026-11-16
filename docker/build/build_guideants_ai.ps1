@@ -278,13 +278,13 @@ $buildPlatform = if ($Backend -eq 'spark') { 'linux/arm64' } else { $null }
 
 # Upstream llama.cpp server images copied into each backend's deps image.
 $llamaCppImageByBackend = @{
-    # llama.cpp v0.7.0 = build tag b11669 (server-*-v0.7.0 does not exist on ghcr)
-    cpu    = 'ghcr.io/ggml-org/llama.cpp:server-b11669'
-    cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-b11669'
-    rocm   = 'ghcr.io/ggml-org/llama.cpp:server-rocm-b11669'
-    slim   = 'ghcr.io/ggml-org/llama.cpp:server-b11669'
-    vulkan = 'ghcr.io/ggml-org/llama.cpp:server-vulkan-b11669'
-    spark  = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-b11669'
+    # llama.cpp b12407 = newest published server build (server-*-v0.7.0 does not exist on ghcr; v1.0.0 = b12359)
+    cpu    = 'ghcr.io/ggml-org/llama.cpp:server-b12407'
+    cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-b12407'
+    rocm   = 'ghcr.io/ggml-org/llama.cpp:server-rocm-b12407'
+    slim   = 'ghcr.io/ggml-org/llama.cpp:server-b12407'
+    vulkan = 'ghcr.io/ggml-org/llama.cpp:server-vulkan-b12407'
+    spark  = 'ghcr.io/ggml-org/llama.cpp:server-cuda13-b12407'
 }
 
 # Build a unique tag per build, and also maintain a stable backend-specific latest tag.
