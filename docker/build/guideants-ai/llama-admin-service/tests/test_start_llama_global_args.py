@@ -71,7 +71,7 @@ class StartLlamaGlobalArgsTests(unittest.TestCase):
         self.assertNotIn("--jinja", argv)
         self.assertNotIn("--kv-unified", argv)
         self.assertNotIn("--cont-batching", argv)
-        self.assertNotIn("--no-mmap", argv)
+        self.assertNotIn("--load-mode", argv)
         self.assertNotIn("--flash-attn", argv)
 
     def test_materializes_env_defaults_into_runtime_ini(self) -> None:
@@ -117,7 +117,7 @@ class StartLlamaGlobalArgsTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             runtime_text = router_runtime.read_text(encoding="utf-8")
             self.assertIn("jinja = true", runtime_text)
-            self.assertIn("no-mmap = true", runtime_text)
+            self.assertIn("load-mode = none", runtime_text)
 
     def test_excludes_alias_scoped_ctx_and_cache_from_parent_argv(self) -> None:
         argv = self._run_start_llama_argv(

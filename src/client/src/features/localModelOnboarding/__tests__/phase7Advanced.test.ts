@@ -19,7 +19,7 @@ describe('routerPreset', () => {
   it('accepts env-default override keys on the alias row', () => {
     const errors = validateAliasPresetRows([
       { key: 'n-gpu-layers', value: '999' },
-      { key: 'no-mmap', value: 'true' },
+      { key: 'load-mode', value: 'none' },
       { key: 'parallel', value: '2' },
       { key: 'jinja', value: 'true' },
     ]);

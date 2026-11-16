@@ -11,7 +11,7 @@ from typing import Any
 ENV_DEFAULT_PRESET_KEYS = frozenset(
     {
         "n-gpu-layers",
-        "no-mmap",
+        "load-mode",
         "threads",
         "parallel",
         "kv-unified",
@@ -58,7 +58,7 @@ def _kv_offload_entries(value: str | None) -> dict[str, str]:
 # (ini_key, env_var, resolver) — resolver returns INI value or None to skip.
 _ENV_DEFAULT_SOURCES: tuple[tuple[str, str, EnvResolver | None], ...] = (
     ("n-gpu-layers", "GA_LLAMA_GPU_LAYERS", _passthrough),
-    ("no-mmap", "GA_LLAMA_NO_MMAP", lambda v: "true" if v == "1" else None),
+    ("load-mode", "GA_LLAMA_NO_MMAP", lambda v: "none" if v == "1" else None),
     ("threads", "GA_LLAMA_THREADS", _passthrough),
     ("parallel", "GA_LLAMA_PARALLEL", _passthrough),
     ("kv-unified", "GA_LLAMA_KV_UNIFIED", lambda v: "true" if v == "1" else None),

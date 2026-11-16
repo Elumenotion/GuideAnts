@@ -149,6 +149,17 @@ def _pydantic_set_fields(m: BaseModel) -> set[str]:
     return set(fs) if fs is not None else set()
 
 
+LLAMA_PID_FILE = "/run/llama-server.pid"
+LLAMA_LAST_EXIT_FILE = "/run/llama-server.last-exit.json"
+LLAMA_SERVER_HOST = (os.getenv("GA_LLAMA_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+LLAMA_SERVER_PORT = parse_int(os.getenv("GA_LLAMA_PORT"), 8080)
+LLAMA_SERVER_BASE_URL = f"http://{LLAMA_SERVER_HOST}:{LLAMA_SERVER_PORT}"
+
+# Upper bound on how long we'll wait for entrypoint.sh to respawn llama-server and /models to
+# answer after an operator-initiated restart. 30s matches the chat UI's restart spinner timeout.
+LLAMA_RESTART_TIMEOUT_SECONDS = parse_int(os.getenv("GA_LLAMA_ADMIN_RESTART_TIMEOUT_SECONDS"), 30)
+
+
 def _llama_http_get_json(path: str, timeout: float) -> Any:
     url = f"{LLAMA_SERVER_BASE_URL}{path}"
     req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
@@ -357,18 +368,23 @@ def _soft_reload_router() -> "router_ini.RuntimeApplyResult":
     """Make a just-committed router INI visible to the running router WITHOUT restarting
     the parent process.
 
-    ``GET /models?reload`` runs the router's non-destructive reconcile: it re-reads
+    ``GET /models?reload=1`` runs the router's non-destructive reconcile: it re-reads
     router-models.ini, registers any new/changed alias (as unloaded) and updates idle
     alias presets, but never spawns or restarts a child. In-flight turns on currently
     loaded models are untouched. Used for the not-active case so a catalog edit to a new
     or unused model does not kill every active conversation.
+
+    The query param MUST carry a non-empty value: the engine handler is
+    ``bool reload = !req.get_param("reload", "").empty();`` - a bare ``?reload`` parses
+    to an empty value and is a silent no-op, leaving the just-written INI invisible to
+    the running router (every preset change ignored until a full container restart).
     """
     ini_sha256 = ""
     if os.path.exists(ROUTER_CONFIG_PATH):
         with open(ROUTER_CONFIG_PATH, "rb") as handle:
             ini_sha256 = hashlib.sha256(handle.read()).hexdigest()
     try:
-        _llama_http_get_json("/models?reload", timeout=10.0)
+        _llama_http_get_json("/models?reload=1", timeout=10.0)
         return router_ini.RuntimeApplyResult(applied=True, ini_sha256=ini_sha256)
     except Exception as exc:  # noqa: BLE001 - INI is committed; reload is best-effort
         return router_ini.RuntimeApplyResult(
@@ -689,10 +705,15 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
             if mmproj_name
             else ""
         )
+        # Legacy onboarding download: the freshly-installed alias is not loaded yet, so
+        # register it in the running router non-destructively (soft reload) - matching the
+        # exact-download path. The original local upsert hard-reloaded here (SIGTERM) which
+        # is the defect; a soft reload registers the alias without killing active turns.
         router_ini.upsert_router_entry(
             alias,
             model_container_path,
             mmproj_container_path,
+            soft_reload_callback=_soft_reload_router,
             log_event=log_event,
         )
 
@@ -1184,7 +1205,7 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
         #     SIGTERM+respawn+restore is what makes its new argv take effect, and it is the
         #     only loaded alias that gets disturbed;
         #   - the edited alias is NOT loaded (new model / model you are not using) -> a
-        #     non-destructive soft reload (GET /models?reload) re-reads the INI so the alias
+        #     non-destructive soft reload (GET /models?reload=1) re-reads the INI so the alias
         #     becomes visible WITHOUT killing the parent router or the in-flight turns on the
         #     other loaded models. This is the defect fix: a catalog edit to a model that is
         #     not the active one no longer crashes every active conversation.

@@ -32,7 +32,7 @@ const MANAGED_PRESET_KEYS = new Set(['ctx-size', 'cache-ram']);
  */
 export const ENV_DEFAULT_PRESET_KEYS = new Set([
   'n-gpu-layers',
-  'no-mmap',
+  'load-mode',
   'threads',
   'parallel',
   'kv-unified',

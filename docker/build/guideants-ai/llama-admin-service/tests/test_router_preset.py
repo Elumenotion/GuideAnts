@@ -77,7 +77,7 @@ class RouterPresetTests(unittest.TestCase):
                 "mmproj = \n"
                 "ctx-size = 131072\n"
                 "n-gpu-layers = 999\n"
-                "no-mmap = true\n"
+                "load-mode = none\n"
                 "spec-type = draft-mtp\n"
             )
         router.upsert_router_entry(
@@ -91,7 +91,7 @@ class RouterPresetTests(unittest.TestCase):
         entries = router.read_router_entries()
         self.assertEqual(entries["alias"].extras, {"ctx-size": "131072", "spec-type": "draft-mtp"})
         self.assertNotIn("n-gpu-layers", entries["alias"].extras)
-        self.assertNotIn("no-mmap", entries["alias"].extras)
+        self.assertNotIn("load-mode", entries["alias"].extras)
 
     def test_upsert_without_preset_preserves_existing_extras_for_qwen_alias(self) -> None:
         alias = "qwen3.6-35b-a3b"
@@ -362,6 +362,28 @@ class RouterPresetTests(unittest.TestCase):
         self.assertEqual(removed, ("/m/a.gguf", "/m/mm.gguf"))
         self.assertNotIn("alias", router.read_router_entries())
         self.assertIsNone(router.remove_router_entry("alias"))
+
+
+    def test_remove_router_entry_triggers_reload_callback_on_removal(self) -> None:
+        # The DELETE path must refresh the running router after removing an alias
+        # (non-destructively, via the injected callback) so the alias is dropped from the
+        # live router, matching the pre-refactor post-delete reload - but without a SIGTERM.
+        with open(router.ROUTER_CONFIG_PATH, "w", encoding="utf-8") as handle:
+            handle.write("version = 1\n\n[alias]\nmodel = /m/a.gguf\nmmproj = /m/mm.gguf\n")
+        events: list[str] = []
+        removed = router.remove_router_entry(
+            "alias",
+            reload_callback=lambda: (events.append("refresh"), router.RuntimeApplyResult(True, "s"))[1],
+        )
+        self.assertEqual(removed, ("/m/a.gguf", "/m/mm.gguf"))
+        self.assertEqual(events, ["refresh"])
+        # A missing alias removes nothing and must not refresh.
+        events.clear()
+        self.assertIsNone(router.remove_router_entry(
+            "ghost",
+            reload_callback=lambda: (events.append("refresh"), router.RuntimeApplyResult(True, "s"))[1],
+        ))
+        self.assertEqual(events, [])
 
 
 if __name__ == "__main__":
