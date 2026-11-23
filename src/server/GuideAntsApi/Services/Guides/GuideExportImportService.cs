@@ -222,10 +222,21 @@ public class GuideExportImportService : IGuideExportImportService
     }
 
     /// <summary>
-    /// Writes assistant files (VectorStores and CodeInterpreter) to archive
+    /// Writes an assistant's files (VectorStores, CodeInterpreter, skills, etc.) to the archive.
+    /// Files are fetched with a dedicated per-assistant query (never as part of the guide's
+    /// big Include tree), so each file's varbinary(max) is loaded exactly once and the
+    /// one-to-many fan-out that SingleQuery splitting would otherwise produce across the
+    /// crew joins cannot occur.
     /// </summary>
-    private static async Task WriteAssistantFilesAsync(ZipArchive archive, string basePath, IEnumerable<AssistantFile> files)
+    private async Task WriteAssistantFilesAsync(ZipArchive archive, string basePath, Guid assistantId)
     {
+        var files = await _context.AssistantFiles
+            .AsNoTracking()
+            .Where(f => f.AssistantId == assistantId)
+            .Select(f => new { f.FolderKind, f.VectorStoreName, f.RelativePath, f.ContentBytes })
+            .OrderBy(f => f.RelativePath)
+            .ToListAsync();
+
         foreach (var file in files)
         {
             if (file.ContentBytes == null || file.ContentBytes.Length == 0)
@@ -249,6 +260,7 @@ public class GuideExportImportService : IGuideExportImportService
         }
     }
 
+
     /// <summary>
     /// Normalizes a path by combining basePath and relativePath, avoiding leading slashes
     /// </summary>
@@ -262,7 +274,7 @@ public class GuideExportImportService : IGuideExportImportService
     /// <summary>
     /// Exports a complete assistant to a specific path in the archive
     /// </summary>
-    private static async Task ExportAssistantToArchiveAsync(ZipArchive archive, string basePath, Assistant assistant)
+    private async Task ExportAssistantToArchiveAsync(ZipArchive archive, string basePath, Assistant assistant)
     {
         // Manifest - use AssistantDefinition for proper serialization with all attributes
         var assistantDef = new AntRunner.ToolCalling.AssistantDefinitions.AssistantDefinition
@@ -306,8 +318,8 @@ public class GuideExportImportService : IGuideExportImportService
         // OpenAPI Schemas and Auth
         await WriteOpenApiSchemasAsync(archive, basePath, assistant.OpenApiSchemas);
 
-        // Assistant Files
-        await WriteAssistantFilesAsync(archive, basePath, assistant.Files);
+        // Assistant Files (loaded per-file, never included in the parent query)
+        await WriteAssistantFilesAsync(archive, basePath, assistant.Id);
     }
 
     public async Task<byte[]> ExportGuideAsync(Guid guideId)
@@ -318,14 +330,14 @@ public class GuideExportImportService : IGuideExportImportService
             .Include(a => a.Tools).ThenInclude(t => t.Tool)
             .Include(a => a.ContextOptions)
             .Include(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider).ThenInclude(ap => ap!.Scopes)
-            .Include(a => a.Files)
             .Include(a => a.ConversationStarters)
-            // Include full data for crew member assistants
+            // Crew metadata only. File binaries are loaded per-assistant below (see
+            // WriteAssistantFilesAsync) to avoid the one-to-many varbinary(max) fan-out
+            // that a single-query Include of Files produces across the crew joins.
             .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.Model)
             .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.Tools).ThenInclude(t => t.Tool)
             .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.ContextOptions)
             .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider).ThenInclude(ap => ap!.Scopes)
-            .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.Files)
             .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.ConversationStarters)
             .Where(a => a.Id == guideId && a.Kind == AssistantKind.Guide)
             .FirstOrDefaultAsync();
@@ -395,7 +407,7 @@ public class GuideExportImportService : IGuideExportImportService
             await WriteContextOptionsAsync(archive, "", guide.ContextOptions);
             // Write only the guide's own OpenAPI schemas (crew schemas are in their own assistants/ folders)
             await WriteOpenApiSchemasAsync(archive, "", guide.OpenApiSchemas);
-            await WriteAssistantFilesAsync(archive, "", guide.Files);
+            await WriteAssistantFilesAsync(archive, "", guide.Id);
 
             // Note: Crew is included in the manifest.json above, no separate crews/ directory needed
 
@@ -1128,7 +1140,6 @@ public class GuideExportImportService : IGuideExportImportService
             .Include(a => a.Tools).ThenInclude(t => t.Tool)
             .Include(a => a.ContextOptions)
             .Include(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider).ThenInclude(ap => ap!.Scopes)
-            .Include(a => a.Files)
             .Include(a => a.ConversationStarters)
             .Where(a => a.Id == assistantId && a.Kind == AssistantKind.Assistant)
             .FirstOrDefaultAsync();
