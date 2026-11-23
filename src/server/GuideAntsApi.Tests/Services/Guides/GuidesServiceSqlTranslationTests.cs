@@ -131,4 +131,46 @@ public sealed class GuidesServiceSqlTranslationTests
             .ToQueryString();
         Assert.Contains("[GuideMembers]", crewSql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [TestMethod]
+    public void ExportGuideAsync_query_does_not_join_assistant_files()
+    {
+        // Regression guard for the 2026-11-23 export hang: the guide graph was loaded with
+        // Include(a => a.Files) and crew ThenInclude(a => a.Files). Under the app-wide
+        // QuerySplittingBehavior.SingleQuery that is one statement whose row count is the
+        // product of every collection include, and every row carries each crew
+        // assistant's varbinary(max) ContentBytes - the export died in materialization.
+        // File binaries are now loaded per-assistant by WriteAssistantFilesAsync, so the
+        // graph query must not reference AssistantFiles at all.
+        Guid guideId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        using var context = CreateSqlServerContext();
+
+        // Keep this in lockstep with GuideExportImportService.ExportGuideAsync.
+        var exportSql = context.Assistants
+            .Include(a => a.Model)
+            .Include(a => a.Tools).ThenInclude(t => t.Tool)
+            .Include(a => a.ContextOptions)
+            .Include(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider).ThenInclude(ap => ap!.Scopes)
+            .Include(a => a.ConversationStarters)
+            .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.Model)
+            .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.Tools).ThenInclude(t => t.Tool)
+            .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.ContextOptions)
+            .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider).ThenInclude(ap => ap!.Scopes)
+            .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant).ThenInclude(a => a.ConversationStarters)
+            .Where(a => a.Id == guideId && a.Kind == AssistantKind.Guide)
+            .ToQueryString();
+
+        Assert.Contains("[Assistants]", exportSql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("[AssistantFiles]", exportSql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ContentBytes", exportSql);
+
+        // The replacement per-assistant file query must stay a plain index-able lookup.
+        var filesSql = context.AssistantFiles
+            .AsNoTracking()
+            .Where(f => f.AssistantId == guideId)
+            .Select(f => new { f.FolderKind, f.VectorStoreName, f.RelativePath, f.ContentBytes })
+            .OrderBy(f => f.RelativePath)
+            .ToQueryString();
+        Assert.Contains("[AssistantFiles]", filesSql, StringComparison.OrdinalIgnoreCase);
+    }
 }
