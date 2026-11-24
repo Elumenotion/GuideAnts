@@ -143,7 +143,7 @@ RUN ln -sf /usr/local/bin/python3.11 /usr/local/bin/python3 \
 
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel 8.0 --runtime aspnetcore --install-dir /usr/share/dotnet \
+    && /tmp/dotnet-install.sh --channel 10.0 --runtime aspnetcore --install-dir /usr/share/dotnet \
     && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet \
     && rm /tmp/dotnet-install.sh
 ENV DOTNET_ROOT=/usr/share/dotnet
@@ -174,6 +174,7 @@ ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
 ENV C_INCLUDE_PATH=/usr/include/gdal
 
 FROM runtime-cuda13-base AS pydeps-cuda13-builder
+ENV CFLAGS="-Wno-error=incompatible-pointer-types"
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \

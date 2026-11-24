@@ -115,8 +115,8 @@ public sealed class RebuildEmbeddingsHandler(
         ApplicationDbContext context,
         CancellationToken cancellationToken)
     {
-        var inFlightStatuses = new[] { JobStatus.Pending, JobStatus.Processing };
-        var indexJobTypes = new[]
+        var inFlightStatuses = new List<JobStatus> { JobStatus.Pending, JobStatus.Processing };
+        var indexJobTypes = new List<string>
         {
             nameof(IndexAssistantFileMarkdownShadowJob).Replace("Job", string.Empty),
             nameof(IndexNotebookMarkdownShadowJob).Replace("Job", string.Empty),

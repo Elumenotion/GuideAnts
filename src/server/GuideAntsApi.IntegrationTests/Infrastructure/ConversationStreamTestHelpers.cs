@@ -80,13 +80,8 @@ internal static class ConversationStreamTestHelpers
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
         string? currentEvent = null;
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync() is { } line)
         {
-            var line = await reader.ReadLineAsync();
-            if (line == null)
-            {
-                break;
-            }
 
             if (line.StartsWith("event:", StringComparison.Ordinal))
             {

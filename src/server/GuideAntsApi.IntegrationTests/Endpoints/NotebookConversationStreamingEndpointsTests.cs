@@ -217,10 +217,8 @@ public class NotebookConversationStreamingEndpointsTests
         var stream = await resp.Content.ReadAsStreamAsync();
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var events = new List<string>();
-        while (!reader.EndOfStream && events.Count < 5)
+        while (events.Count < 5 && await reader.ReadLineAsync() is { } line)
         {
-            var line = await reader.ReadLineAsync();
-            if (line == null) break;
             if (line.StartsWith("event:"))
             {
                 var evtName = line.Substring("event:".Length).Trim();

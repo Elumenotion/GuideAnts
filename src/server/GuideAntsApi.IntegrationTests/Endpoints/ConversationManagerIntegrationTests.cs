@@ -38,10 +38,9 @@ public class ConversationManagerIntegrationTests : BaseEndpointTest
         // Read the stream to completion to ensure the background task finishes
         using var stream = await response.Content.ReadAsStreamAsync();
         using var reader = new StreamReader(stream);
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync() is { } line)
         {
-            var line = await reader.ReadLineAsync();
-            if (line != null && line.StartsWith("event: error"))
+            if (line.StartsWith("event: error"))
             {
                 var data = await reader.ReadLineAsync();
                 throw new Exception($"Stream returned error: {data}");
