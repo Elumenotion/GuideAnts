@@ -1,10 +1,10 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS api-build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api-build
 WORKDIR /src/server
 COPY src/server/ ./
 RUN dotnet restore "GuideAntsApi/GuideAntsApi.csproj"
 RUN dotnet publish "GuideAntsApi/GuideAntsApi.csproj" -c Release -o /app/publish /p:UseAppHost=false --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime-deps
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime-deps
 RUN apt-get update && apt-get install -y \
     docker.io \
     ffmpeg \
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     tini && \
     rm -rf /var/lib/apt/lists/*
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime-slim-deps
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime-slim-deps
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     nginx \
@@ -71,13 +71,20 @@ RUN apt-get update \
     && curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list | tee /etc/apt/sources.list.d/microsoft-prod.list > /dev/null \
     && apt-get update \
     && apt-get install -y \
-        aspnetcore-runtime-8.0 \
         ffmpeg \
         mssql-server-fts \
         nginx \
         tini \
         util-linux \
     && rm -rf /var/lib/apt/lists/*
+
+# .NET 10 ASP.NET Core runtime (portable install; the MS apt feed has no aspnetcore-runtime-10.0 for jammy)
+RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && chmod +x /tmp/dotnet-install.sh \
+    && /tmp/dotnet-install.sh --channel 10.0 --runtime aspnetcore --install-dir /usr/share/dotnet \
+    && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet \
+    && rm /tmp/dotnet-install.sh
+ENV DOTNET_ROOT=/usr/share/dotnet
 
 WORKDIR /app
 COPY --from=runtime-base /app/ /app/

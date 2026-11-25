@@ -293,13 +293,8 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
         string? currentEvent = null;
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync() is { } line)
         {
-            var line = await reader.ReadLineAsync();
-            if (line == null)
-            {
-                break;
-            }
 
             if (line.StartsWith("event:", StringComparison.Ordinal))
             {
@@ -346,13 +341,8 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
         string? currentEvent = null;
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync() is { } line)
         {
-            var line = await reader.ReadLineAsync();
-            if (line == null)
-            {
-                break;
-            }
 
             if (line.StartsWith("event:", StringComparison.Ordinal))
             {
@@ -407,11 +397,6 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (reader.EndOfStream)
-                {
-                    break;
-                }
-
                 var line = await reader.ReadLineAsync(cancellationToken);
                 if (line == null)
                 {
@@ -542,14 +527,8 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
         string? currentEvent = null;
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line == null)
-            {
-                break;
-            }
 
             if (line.StartsWith("event:", StringComparison.Ordinal))
             {

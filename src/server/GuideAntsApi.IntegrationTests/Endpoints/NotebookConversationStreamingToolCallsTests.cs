@@ -213,10 +213,8 @@ public class NotebookConversationStreamingToolCallsTests
         var events = new List<string>();
         var eventData = new List<string>();
         
-        while (!reader.EndOfStream && events.Count < 10)
+        while (events.Count < 10 && await reader.ReadLineAsync() is { } line)
         {
-            var line = await reader.ReadLineAsync();
-            if (line == null) break;
             if (line.StartsWith("event:"))
             {
                 var evtName = line.Substring("event:".Length).Trim();
@@ -272,10 +270,8 @@ public class NotebookConversationStreamingToolCallsTests
         var eventData = new List<string>();
         var events = new List<string>();
         
-        while (!reader.EndOfStream && events.Count < 10)
+        while (events.Count < 10 && await reader.ReadLineAsync() is { } line)
         {
-            var line = await reader.ReadLineAsync();
-            if (line == null) break;
             if (line.StartsWith("event:"))
             {
                 var evtName = line.Substring("event:".Length).Trim();

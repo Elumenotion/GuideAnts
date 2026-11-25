@@ -78,13 +78,8 @@ public sealed class GoogleGeminiChatClient : IChatCompletionClient
         var accumulator = new GoogleGeminiStreamingAccumulator();
         var eventData = new StringBuilder();
 
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
-            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (line == null)
-            {
-                break;
-            }
 
             if (line.Length == 0)
             {

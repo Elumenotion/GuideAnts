@@ -88,13 +88,8 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         var accumulator = new HuggingFaceStreamingAccumulator();
         var eventData = new StringBuilder();
 
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
-            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (line == null)
-            {
-                break;
-            }
 
             if (line.Length == 0)
             {
