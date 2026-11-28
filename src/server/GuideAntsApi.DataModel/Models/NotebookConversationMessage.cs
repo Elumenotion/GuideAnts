@@ -110,4 +110,12 @@ public class NotebookConversationMessage
     /// Null for legacy rows created before streaming support.
     /// </summary>
     public bool? IsStreaming { get; set; }
+
+    /// <summary>
+    /// True when this row was synthesized by the run loop (the tool-attachment bridge and
+    /// user-attachment messages composed by <c>AntRunner.Chat.MessageComposer</c>) rather than
+    /// produced by the model or the user. Such rows are real model context (replayed on
+    /// continued turns) but must never appear in the user-facing transcript.
+    /// </summary>
+    public bool IsSynthetic { get; set; } = false;
 } 

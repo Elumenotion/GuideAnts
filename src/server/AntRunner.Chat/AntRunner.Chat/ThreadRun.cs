@@ -1686,6 +1686,7 @@ namespace AntRunner.Chat
                         TryReportToolActivity(ctx, toolName, toolCallId);
 
                         string output;
+                        List<VisionAttachment>? visionAttachments = null;
                         if (builder.ActionType == ActionType.WebApi)
                         {
                             string responseContent;
@@ -1848,7 +1849,16 @@ namespace AntRunner.Chat
                             try
                             {
                                 var toolResult = await builder.ExecuteLocalFunctionAsync(cancellationToken);
-                                if (toolResult != null)
+                                if (toolResult is VisionToolResult visionResult)
+                                {
+                                    // Keep image bytes out of the tool-result text: the model-facing
+                                    // Output is the tool text, and Attachments ride the ToolOutput side
+                                    // channel so the run loop can compose the synthetic bridge +
+                                    // user-attachment sequence (see MessageComposer).
+                                    output = visionResult.Output;
+                                    visionAttachments = visionResult.Attachments.ToList();
+                                }
+                                else if (toolResult != null)
                                 {
                                     output = SerializeToolResult(toolResult);
                                 }
@@ -1938,7 +1948,8 @@ namespace AntRunner.Chat
                         return new ToolOutput()
                         {
                             Output = output,
-                            ToolCallId = requiredOutput.Id
+                            ToolCallId = requiredOutput.Id,
+                            Attachments = visionAttachments
                         };
                     }, cancellationToken);
 
@@ -2010,6 +2021,35 @@ namespace AntRunner.Chat
                     }
                     messages.Add(new ChatMessage(id, toolCall.Function.Name, [new ChatContent(truncation.Output ?? string.Empty)]));
                     messageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText(), toolCall.Id, toolCall.Function.Name, toolCall.Function.Arguments.ToString()));
+                }
+
+                // Compose the synthetic bridge + user-attachment message for tool calls that
+                // produced image attachments. All tool-result messages for the batch have already
+                // been appended above, so this yields the calibrated
+                // [tool result(s) ..., assistant bridge, user attachment] ordering (R3).
+                var batchAttachments = toolOutputs
+                    .SelectMany(to => to.Attachments ?? [])
+                    .ToList();
+                if (batchAttachments.Count > 0)
+                {
+                    var (bridge, attachmentMessage) = MessageComposer.ComposeAttachmentSequence(batchAttachments);
+                    messages.Add(bridge);
+                    messages.Add(attachmentMessage);
+                    var attachmentRefs = batchAttachments
+                        .Select(a => new SyntheticAttachmentRef(a.NotebookFileId, a.SourcePath, 0))
+                        .ToList();
+                    if (messageAdded != null)
+                    {
+                        messageAdded(null, new MessageAddedEventArgs(
+                            "assistant",
+                            bridge.GetText(),
+                            isSynthetic: true));
+                        messageAdded(null, new MessageAddedEventArgs(
+                            "user",
+                            attachmentMessage.GetText(),
+                            isSynthetic: true,
+                            attachments: attachmentRefs));
+                    }
                 }
 
                 // Extract file lists from all tool outputs

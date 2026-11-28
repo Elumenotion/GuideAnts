@@ -626,6 +626,7 @@ public class PublishedConversationService : IPublishedConversationService
         var sequence = currentMessageSequence;
         var deferredAssistantMessages = new List<StartAssistantMessageRequest>();
         var deferredToolMessages = new List<CreateToolMessageRequest>();
+        var deferredSyntheticUserMessages = new List<CreateSyntheticUserMessageRequest>();
 
         MessageAddedEventHandler onMessageAdded = (_, e) =>
         {
@@ -651,7 +652,26 @@ public class PublishedConversationService : IPublishedConversationService
                         Content: sanitizedAssistant,
                         IsStreaming: false,
                         ToolCallsJson: string.IsNullOrEmpty(e.ToolCallsJson) ? null : e.ToolCallsJson,
+                        IsSynthetic: e.IsSynthetic,
                         ExpectedExecutionId: dbTurn.ExecutionId));
+            }
+            else if (e.Role.Equals("user", StringComparison.OrdinalIgnoreCase) && e.IsSynthetic)
+            {
+                // Synthetic tool-attachment user message: persist it (real model context) so it
+                // is filtered from the client transcript by the query service.
+                var attachmentRequests = (e.Attachments ?? [])
+                    .Select(a => new SyntheticMessageAttachmentRequest(a.NotebookFileId, a.RelativePath, a.OrderIndex))
+                    .ToList();
+                deferredSyntheticUserMessages.Add(new CreateSyntheticUserMessageRequest(
+                    dbConversation.Id,
+                    dbTurn.Id,
+                    dbTurn.TurnIndex,
+                    sequence++,
+                    e.Message ?? string.Empty,
+                    assistantName,
+                    publishedAssistantId,
+                    attachmentRequests,
+                    ExpectedExecutionId: dbTurn.ExecutionId));
             }
             else if (e.Role.Equals("tool", StringComparison.OrdinalIgnoreCase))
             {
@@ -694,6 +714,11 @@ public class PublishedConversationService : IPublishedConversationService
         foreach (var assistantRequest in deferredAssistantMessages)
         {
             await _persistence.StartAssistantMessageAsync(assistantRequest, cancellationToken);
+        }
+
+        foreach (var syntheticUserRequest in deferredSyntheticUserMessages)
+        {
+            await _persistence.CreateSyntheticUserMessageAsync(syntheticUserRequest, cancellationToken);
         }
 
         foreach (var toolRequest in deferredToolMessages)

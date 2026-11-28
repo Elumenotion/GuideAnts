@@ -2032,6 +2032,9 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<bool?>("IsStreaming")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsSynthetic")
+                        .HasColumnType("bit");
+
                     b.Property<DateTime?>("LastEditedAt")
                         .HasColumnType("datetime2");
 

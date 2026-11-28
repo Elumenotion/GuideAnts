@@ -5,6 +5,15 @@ namespace AntRunner.Chat
 {
     public delegate void MessageAddedEventHandler(object? sender, MessageAddedEventArgs e);
 
+    /// <summary>
+    /// A reference to a notebook file attached to a synthetic (tool-produced) user message,
+    /// used to create a MessageAttachment row so the image re-expands across turns.
+    /// </summary>
+    public sealed record SyntheticAttachmentRef(
+        Guid? NotebookFileId,
+        string? RelativePath,
+        int OrderIndex);
+
     public class MessageAddedEventArgs : EventArgs
     {
         public string Message { get; }
@@ -13,18 +22,32 @@ namespace AntRunner.Chat
         public string? FunctionName { get; }
         public string? ToolCallsJson { get; }
 
+        /// <summary>True when the message was synthesized by the run loop (e.g. tool-attachment
+        /// bridge/attachment). Synthetic messages are persisted but never streamed to the client
+        /// as model/user speech.</summary>
+        public bool IsSynthetic { get; }
+
+        /// <summary>For synthetic attachment user messages: the notebook files to link via
+        /// MessageAttachment rows so the images re-expand across turns. Null for non-attachment
+        /// messages.</summary>
+        public IReadOnlyList<SyntheticAttachmentRef>? Attachments { get; }
+
         public MessageAddedEventArgs(
             string role,
             string newMessage,
             string? toolCallId = null,
             string? functionName = null,
-            string? toolCallsJson = null)
+            string? toolCallsJson = null,
+            bool isSynthetic = false,
+            IReadOnlyList<SyntheticAttachmentRef>? attachments = null)
         {
             Message = newMessage;
             Role = role;
             ToolCallId = toolCallId;
             FunctionName = functionName;
             ToolCallsJson = toolCallsJson;
+            IsSynthetic = isSynthetic;
+            Attachments = attachments;
         }
     }
 

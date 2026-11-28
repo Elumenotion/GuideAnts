@@ -114,4 +114,68 @@ public sealed class ConversationMessageMapperTests
         dto.Messages.Should().Contain(m => m.Content == "where is the hosted file name");
         dto.Messages.Should().NotContain(m => m.Id == assistantId);
     }
+
+    [TestMethod]
+    public void ToConversationDto_ExcludesSyntheticRunLoopMessages()
+    {
+        // The vision-tool sequence persists a synthetic assistant bridge and a synthetic
+        // user attachment message. Both are real model context (replayed on continued
+        // turns) but must never appear in the user-facing transcript.
+        var realUser = new NotebookConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            Role = DataModelChatRole.User,
+            Content = "inspect the number png",
+            TurnIndex = 1,
+            MessageSequence = 1,
+            Created = DateTime.UtcNow,
+            IsStreaming = false
+        };
+        var bridge = new NotebookConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            Role = DataModelChatRole.Assistant,
+            Content = "Presenting the retrieved image as the output of GetImageForInspection for inspection.",
+            TurnIndex = 1,
+            MessageSequence = 3,
+            Created = DateTime.UtcNow,
+            IsStreaming = false,
+            IsSynthetic = true
+        };
+        var attachment = new NotebookConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            Role = DataModelChatRole.User,
+            Content = "[The following image(s) were produced by the tool call(s) immediately above...]",
+            TurnIndex = 1,
+            MessageSequence = 4,
+            Created = DateTime.UtcNow,
+            IsStreaming = false,
+            IsSynthetic = true
+        };
+        var finalAssistant = new NotebookConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            Role = DataModelChatRole.Assistant,
+            Content = "The number in the image is 8446.",
+            TurnIndex = 1,
+            MessageSequence = 5,
+            Created = DateTime.UtcNow,
+            IsStreaming = false
+        };
+
+        var conversation = new NotebookConversation
+        {
+            NotebookId = Guid.NewGuid(),
+            Created = DateTime.UtcNow,
+            Messages = [realUser, bridge, attachment, finalAssistant]
+        };
+
+        var dto = ConversationMessageMapper.ToConversationDto(conversation);
+
+        dto.Messages.Should().ContainSingle(m => m.Id == realUser.Id);
+        dto.Messages.Should().ContainSingle(m => m.Id == finalAssistant.Id);
+        dto.Messages.Should().NotContain(m => m.Id == bridge.Id);
+        dto.Messages.Should().NotContain(m => m.Id == attachment.Id);
+    }
 }

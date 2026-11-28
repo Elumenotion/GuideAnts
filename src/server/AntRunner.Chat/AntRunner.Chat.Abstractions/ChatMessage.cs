@@ -22,6 +22,16 @@ public sealed class ChatMessage
     [JsonPropertyName("name")]
     public string? FunctionName { get; }
 
+    /// <summary>
+    /// True when this message was synthesized by the run loop rather than produced
+    /// by the model or the user (e.g. the tool-attachment bridge and attachment
+    /// messages composed by <c>MessageComposer</c>). Such messages are real model
+    /// context and must replay identically, but clients must render them as tool
+    /// artifacts, not as human turns.
+    /// </summary>
+    [JsonPropertyName("is_synthetic")]
+    public bool IsSynthetic { get; }
+
     public ChatMessage(ChatRole role, string content)
         : this(role, new List<ChatContent> { new(content) }, null, null, null, null) { }
 
@@ -53,7 +63,8 @@ public sealed class ChatMessage
         IReadOnlyList<ChatToolCall>? toolCalls,
         IReadOnlyList<ChatThinkingBlock>? thinkingBlocks,
         string? toolCallId,
-        string? functionName)
+        string? functionName,
+        bool isSynthetic = false)
     {
         Role = role;
         Content = content ?? [];
@@ -61,7 +72,20 @@ public sealed class ChatMessage
         ThinkingBlocks = thinkingBlocks;
         ToolCallId = toolCallId;
         FunctionName = functionName;
+        IsSynthetic = isSynthetic;
     }
+
+    /// <summary>
+    /// Creates a synthetic message (run-loop composed, not model- or user-produced).
+    /// See <see cref="IsSynthetic"/>.
+    /// </summary>
+    public static ChatMessage Synthetic(
+        ChatRole role,
+        IReadOnlyList<ChatContent> content)
+    {
+        return new ChatMessage(role, content, null, null, null, null, true);
+    }
+
 }
 
 public static class ChatMessageExtensions
