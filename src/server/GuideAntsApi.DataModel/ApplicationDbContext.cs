@@ -69,6 +69,9 @@ namespace GuideAntsApi.DataModel
         public DbSet<AssistantFile> AssistantFiles { get; set; } = null!;
         public DbSet<AssistantFileMarkdownShadow> AssistantFileMarkdownShadows { get; set; } = null!;
         public DbSet<AssistantSkillMeta> AssistantSkillMetas { get; set; } = null!;
+        public DbSet<Skill> Skills { get; set; } = null!;
+        public DbSet<SkillVersion> SkillVersions { get; set; } = null!;
+        public DbSet<SkillFile> SkillFiles { get; set; } = null!;
         public DbSet<AssistantContextOption> AssistantContextOptions { get; set; } = null!;
         public DbSet<AssistantAuthProvider> AssistantAuthProviders { get; set; } = null!;
         public DbSet<AssistantAuthScope> AssistantAuthScopes { get; set; } = null!;
@@ -217,6 +220,44 @@ namespace GuideAntsApi.DataModel
                 .WithMany(a => a.SkillMetas)
                 .HasForeignKey(m => m.AssistantId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // ------------------------------------------------------------
+            // Skill catalog (skill store): standalone, versioned skill packages
+            // ------------------------------------------------------------
+            modelBuilder.Entity<Skill>()
+                .HasIndex(sk => sk.Name)
+                .IsUnique()
+                .HasDatabaseName("IX_Skills_Name_Unique");
+
+            modelBuilder.Entity<Skill>()
+                .HasMany(sk => sk.Versions)
+                .WithOne(v => v.Skill)
+                .HasForeignKey(v => v.SkillId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SkillVersion>()
+                .HasIndex(v => new { v.SkillId, v.Version })
+                .IsUnique()
+                .HasDatabaseName("IX_SkillVersions_SkillId_Version_Unique");
+
+            modelBuilder.Entity<SkillVersion>()
+                .HasMany(v => v.Files)
+                .WithOne(f => f.SkillVersion)
+                .HasForeignKey(f => f.SkillVersionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SkillFile>()
+                .HasIndex(f => new { f.SkillVersionId, f.RelativePath })
+                .IsUnique()
+                .HasDatabaseName("IX_SkillFiles_SkillVersionId_RelativePath_Unique");
+
+            // Installs are copies: removing a catalog entry orphans the install, it never
+            // deletes the assistant's own skill files.
+            modelBuilder.Entity<AssistantSkillMeta>()
+                .HasOne(m => m.Skill)
+                .WithMany()
+                .HasForeignKey(m => m.SkillId)
+                .OnDelete(DeleteBehavior.SetNull);
 
             // ------------------------------------------------------------
             // DocumentChunk configuration

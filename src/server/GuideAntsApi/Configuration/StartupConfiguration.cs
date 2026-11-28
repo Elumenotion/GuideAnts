@@ -132,6 +132,8 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.Guides.IGuideExportImportService, GuideAntsApi.Services.Guides.GuideExportImportService>();
         services.AddScoped<GuideAntsApi.Services.Guides.Skills.ISkillImportService, GuideAntsApi.Services.Guides.Skills.SkillImportService>();
         services.AddScoped<GuideAntsApi.Services.Guides.Skills.IAssistantSkillMetaSync, GuideAntsApi.Services.Guides.Skills.AssistantSkillMetaSync>();
+        services.AddScoped<GuideAntsApi.Services.Skills.ISkillCatalogService, GuideAntsApi.Services.Skills.SkillCatalogService>();
+        services.AddScoped<GuideAntsApi.Services.Skills.ISkillInstallService, GuideAntsApi.Services.Skills.SkillInstallService>();
         services.AddScoped<GuideAntsApi.Services.Guides.IGuideUsageService, GuideAntsApi.Services.Guides.GuideUsageService>();
 
         // Component Services

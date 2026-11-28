@@ -1,4 +1,5 @@
 import type { AssistantSkillDto, FileDto } from '../../../../types/guides';
+import { canUpdateFromCatalog } from './skillStoreHelpers';
 import { sortSkillsByDisplayOrder } from './skillOrdering';
 import { SkillCard } from './SkillCard';
 
@@ -12,6 +13,10 @@ interface SkillListProps {
   onPreviewFile: (skillName: string, file: FileDto) => void;
   onDownloadFile?: (fileId: string, fileName: string) => void;
   onCreateAssistantFromSkill?: (skillName: string) => void;
+  /** Publish handler; omit to hide the action (e.g. an unsaved assistant with no id). */
+  onPublishSkill?: (skillName: string) => void;
+  /** Update-from-catalog handler; shown only for pinned installs behind the catalog. */
+  onUpdateSkillFromStore?: (skillName: string) => void;
 }
 
 export function SkillList({
@@ -24,6 +29,8 @@ export function SkillList({
   onPreviewFile,
   onDownloadFile,
   onCreateAssistantFromSkill,
+  onPublishSkill,
+  onUpdateSkillFromStore,
 }: SkillListProps) {
   const sortedSkills = sortSkillsByDisplayOrder(skills);
 
@@ -50,6 +57,12 @@ export function SkillList({
           onPreviewFile={(file) => onPreviewFile(skill.name, file)}
           onDownloadFile={onDownloadFile}
           onCreateAssistant={() => onCreateAssistantFromSkill?.(skill.name)}
+          onPublish={onPublishSkill ? () => onPublishSkill(skill.name) : undefined}
+          onUpdateFromStore={
+            onUpdateSkillFromStore && canUpdateFromCatalog(skill)
+              ? () => onUpdateSkillFromStore(skill.name)
+              : undefined
+          }
         />
       ))}
     </div>

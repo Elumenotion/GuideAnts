@@ -429,6 +429,8 @@ public class Program
         app.MapGuidesEndpoints();
         app.MapGuidesPublishingEndpoints();
         app.MapAssistantsEndpoints();
+        app.MapSkillStoreEndpoints();
+        app.MapAssistantSkillCatalogEndpoints();
         app.MapQuickStartEndpoints();
         app.MapProjectContentFileEndpoints();
         app.MapProjectContentFileMarkdownEndpoints();

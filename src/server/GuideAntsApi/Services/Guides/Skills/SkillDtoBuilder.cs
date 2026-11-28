@@ -11,7 +11,8 @@ internal static class SkillDtoBuilder
     public static List<AssistantSkillDto> BuildFromAssistantFiles(
         IEnumerable<AssistantFile> assistantFiles,
         IEnumerable<AssistantSkillMeta>? skillMetas = null,
-        Func<AssistantFile, AssistantFileMarkdownShadowDto?>? shadowFactory = null)
+        Func<AssistantFile, AssistantFileMarkdownShadowDto?>? shadowFactory = null,
+        IReadOnlyDictionary<string, int>? catalogCurrentVersions = null)
     {
         var skillFiles = assistantFiles.Where(f => f.FolderKind == "Skill").ToList();
         if (skillFiles.Count == 0)
@@ -21,6 +22,7 @@ internal static class SkillDtoBuilder
 
         var metaByName = (skillMetas ?? [])
             .ToDictionary(m => m.SkillName, StringComparer.OrdinalIgnoreCase);
+        catalogCurrentVersions ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         var skills = new List<AssistantSkillDto>();
         foreach (var group in skillFiles.GroupBy(f => SkillPathSafety.SkillFolderKey(f.RelativePath))
@@ -38,6 +40,12 @@ internal static class SkillDtoBuilder
             metaByName.TryGetValue(frontmatter.Name, out var meta);
             var tier1 = SkillTier1Resolver.Resolve(manifest.ContentBytes, meta);
             var source = DetectSource(markdown);
+
+            int? catalogCurrent = meta?.SkillId is null || meta.CatalogVersion is null
+                ? null
+                : catalogCurrentVersions.TryGetValue(tier1.Name, out var newest)
+                    ? newest
+                    : null;
 
             var files = group.Select(f => new FileDto(
                 f.Id,
@@ -58,7 +66,10 @@ internal static class SkillDtoBuilder
                 frontmatter.RequiresToolsets,
                 frontmatter.RequiresTools,
                 frontmatter.FallbackForToolsets,
-                frontmatter.FallbackForTools));
+                frontmatter.FallbackForTools,
+                meta?.SkillId,
+                meta?.CatalogVersion,
+                catalogCurrent));
         }
 
         return skills

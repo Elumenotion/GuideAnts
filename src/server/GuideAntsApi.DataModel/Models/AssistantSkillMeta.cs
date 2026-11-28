@@ -33,6 +33,17 @@ public class AssistantSkillMeta
     [Required]
     public int DisplayOrder { get; set; }
 
+    /// <summary>Catalog entry this skill was installed from. Null means the skill is local
+    /// (authored or imported). No cascade: deleting a catalog entry never deletes an install.</summary>
+    public Guid? SkillId { get; set; }
+
+    [ForeignKey(nameof(SkillId))]
+    public Skill? Skill { get; set; }
+
+    /// <summary>The <see cref="SkillVersion.Version"/> this install is pinned to. Set only when
+    /// <see cref="SkillId"/> is set; cleared by the meta sync as soon as local bytes drift.</summary>
+    public int? CatalogVersion { get; set; }
+
     /// <summary>SHA-256 hex of the canonical <c>SKILL.md</c> bytes.</summary>
     [Required]
     [StringLength(64)]

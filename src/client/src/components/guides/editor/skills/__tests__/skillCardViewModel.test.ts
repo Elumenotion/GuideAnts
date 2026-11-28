@@ -48,6 +48,28 @@ describe('skillCardViewModel', () => {
       gatingClassName: gatingBadgeClassName(satisfiedGating),
       payloadFileCount: 3,
       gatingSummary: satisfiedGating.summary,
+      catalogBadge: null,
     });
+  });
+
+  it('shows a catalog badge only for pinned store installs', () => {
+    const local = buildSkillCardViewModel('Imported', satisfiedGating, []);
+    expect(local.catalogBadge).toBeNull();
+
+    const pinned = buildSkillCardViewModel(
+      'Imported',
+      satisfiedGating,
+      [],
+      { catalogSkillId: 'catalog-1', catalogVersion: 2, catalogCurrentVersion: 2 },
+    );
+    expect(pinned.catalogBadge).toEqual({ label: 'Store v2', className: expect.stringContaining('emerald') });
+
+    const stale = buildSkillCardViewModel(
+      'Imported',
+      satisfiedGating,
+      [],
+      { catalogSkillId: 'catalog-1', catalogVersion: 1, catalogCurrentVersion: 3 },
+    );
+    expect(stale.catalogBadge?.label).toBe('Store v1 (update available)');
   });
 });

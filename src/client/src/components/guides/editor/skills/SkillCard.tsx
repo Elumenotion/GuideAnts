@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FaArrowDown, FaArrowUp, FaRobot, FaTimes, FaBook } from 'react-icons/fa';
+import { FaArrowDown, FaArrowUp, FaRobot, FaTimes, FaBook, FaStore } from 'react-icons/fa';
 import type { FileDto } from '../../../../types/guides';
 import { buildSkillCardViewModel } from './skillCardViewModel';
 import { computeSkillGating } from './skillGating';
@@ -17,6 +17,9 @@ interface SkillCardProps {
     fallbackForToolsets: string[];
     fallbackForTools: string[];
     files: FileDto[];
+    catalogSkillId?: string | null;
+    catalogVersion?: number | null;
+    catalogCurrentVersion?: number | null;
   };
   availableToolTypes: Set<string>;
   hasCodeInterpreterFiles: boolean;
@@ -31,6 +34,10 @@ interface SkillCardProps {
   onPreviewFile: (file: FileDto) => void;
   onDownloadFile?: (fileId: string, fileName: string) => void;
   onCreateAssistant?: () => void;
+  /** Publish this skill's saved package into the skill catalog. Needs a persisted assistant. */
+  onPublish?: () => void;
+  /** Replace the local copy with the newest catalog version. Shown only when one exists. */
+  onUpdateFromStore?: () => void;
 }
 
 export function SkillCard({
@@ -48,6 +55,8 @@ export function SkillCard({
   onPreviewFile,
   onDownloadFile,
   onCreateAssistant,
+  onPublish,
+  onUpdateFromStore,
 }: SkillCardProps) {
   const [filesExpanded, setFilesExpanded] = useState(false);
   const gating = computeSkillGating(
@@ -60,7 +69,7 @@ export function SkillCard({
     availableToolTypes,
     hasCodeInterpreterFiles,
   );
-  const viewModel = buildSkillCardViewModel(skill.source, gating, skill.files);
+  const viewModel = buildSkillCardViewModel(skill.source, gating, skill.files, skill);
 
   return (
     <article
@@ -79,6 +88,11 @@ export function SkillCard({
               <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${viewModel.gatingClassName}`}>
                 {gating.statusLabel}
               </span>
+              {viewModel.catalogBadge && (
+                <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${viewModel.catalogBadge.className}`}>
+                  {viewModel.catalogBadge.label}
+                </span>
+              )}
             </div>
             <p className="text-sm text-gray-700">{skill.description}</p>
             <p className="text-xs text-gray-600" role="status" aria-live="polite">
@@ -135,6 +149,27 @@ export function SkillCard({
               >
                 <FaRobot className="h-3 w-3" />
                 Create assistant
+              </button>
+            )}
+
+            {onUpdateFromStore && (
+              <button
+                type="button"
+                onClick={onUpdateFromStore}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-sm text-amber-900 hover:bg-amber-100"
+              >
+                Update from store
+              </button>
+            )}
+
+            {onPublish && (
+              <button
+                type="button"
+                onClick={onPublish}
+                className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-sm text-blue-700 hover:bg-blue-100"
+              >
+                <FaStore className="h-3 w-3" />
+                Publish
               </button>
             )}
 

@@ -1,5 +1,7 @@
 import { useRef } from 'react';
 import { FaFolderOpen, FaFileArchive } from 'react-icons/fa';
+import type { AssistantSkillDto, SkillCatalogEntryDto } from '../../../../types/guides';
+import { SkillStoreBrowsePanel } from './SkillStoreBrowsePanel';
 import { SKILL_IMPORT_GUIDANCE } from './skillFrontmatterErrors';
 import { SkillImportErrorPanel } from './SkillImportErrorPanel';
 import { useSkillImport } from './useSkillImport';
@@ -8,9 +10,19 @@ interface ImportSkillDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onImported: (result: import('./skillImportHelpers').SkillImportResult) => void;
+  /** Current skills, used to flag a store install that would replace a local skill. */
+  existingSkills?: AssistantSkillDto[];
+  /** Stages a catalog snapshot (fetch + onImported) for the given entry. */
+  onInstallFromStore?: (entry: SkillCatalogEntryDto, overwrite: boolean) => Promise<void>;
 }
 
-export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDialogProps) {
+export function ImportSkillDialog({
+  isOpen,
+  onClose,
+  onImported,
+  existingSkills = [],
+  onInstallFromStore,
+}: ImportSkillDialogProps) {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
   const {
@@ -150,6 +162,13 @@ export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDi
             Choose .zip
           </button>
         </div>
+
+        {onInstallFromStore && (
+          <SkillStoreBrowsePanel
+            existingSkills={existingSkills}
+            onInstall={onInstallFromStore}
+          />
+        )}
 
         <div className="mt-5 flex justify-end gap-2">
           <button

@@ -2137,6 +2137,16 @@ export const api = {
             update: (assistantId: string, dto: any) => callApi<any>(`/assistants/${assistantId}`, { method: 'PUT', body: JSON.stringify(dto) }),
             delete: (assistantId: string) => callApi<void>(`/assistants/${assistantId}`, { method: 'DELETE' }),
             duplicate: (assistantId: string) => callApi<any>(`/assistants/${assistantId}/duplicate`, { method: 'POST' }),
+            installSkill: (assistantId: string, skillName: string, version?: number, overwrite = false) =>
+                callApi<import('../types/guides').AssistantSkillDto>(
+                    `/assistants/${assistantId}/skills/install`,
+                    { method: 'POST', body: JSON.stringify({ skillName, version: version ?? null, overwrite }) }
+                ),
+            updateSkillFromStore: (assistantId: string, skillName: string, version?: number) =>
+                callApi<import('../types/guides').AssistantSkillDto>(
+                    `/assistants/${assistantId}/skills/${encodeURIComponent(skillName)}/update-from-store`,
+                    { method: 'POST', body: JSON.stringify({ version: version ?? null }) }
+                ),
             export: async (assistantId: string): Promise<Blob> => {
                 const response = await fetchWithAuth(`${API_BASE_URL}/assistants/${assistantId}/export`);
                 if (!response.ok) {
@@ -2227,6 +2237,38 @@ export const api = {
             const suffix = query.toString();
             return callApi<NotebookChatReadinessDto>(`/notebooks/${notebookId}/header-toolbar/chat-readiness${suffix ? `?${suffix}` : ''}`);
         },
+    },
+    skillStore: {
+        list: (search?: string) => {
+            const params = new URLSearchParams();
+            if (search) params.append('search', search);
+            const qs = params.toString();
+            return callApi<import('../types/guides').SkillCatalogEntryDto[]>(
+                `/skillstore${qs ? `?${qs}` : ''}`
+            );
+        },
+        get: (name: string, version?: number) => {
+            const qs = version ? `?version=${encodeURIComponent(String(version))}` : '';
+            return callApi<import('../types/guides').SkillCatalogDetailDto>(
+                `/skillstore/${encodeURIComponent(name)}${qs}`
+            );
+        },
+        package: (name: string, version?: number) => {
+            const qs = version ? `?version=${encodeURIComponent(String(version))}` : '';
+            return callApi<import('../types/guides').SkillCatalogPackageDto>(
+                `/skillstore/${encodeURIComponent(name)}/package${qs}`
+            );
+        },
+        publish: (assistantId: string, skillName: string) =>
+            callApi<import('../types/guides').SkillPublishResultDto>('/skillstore/publish', {
+                method: 'POST',
+                body: JSON.stringify({ assistantId, skillName }),
+            }),
+        delete: (name: string) =>
+            callApi<{ name: string; orphanedInstalls: number }>(
+                `/skillstore/${encodeURIComponent(name)}`,
+                { method: 'DELETE' }
+            ),
     },
     systemGuide: {
         getSession: () => callApi<import('../types/systemGuide').SystemGuideSessionDto>('/system-guide/session'),

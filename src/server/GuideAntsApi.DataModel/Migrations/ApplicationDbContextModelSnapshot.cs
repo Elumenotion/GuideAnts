@@ -612,6 +612,9 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<Guid>("AssistantId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("CatalogVersion")
+                        .HasColumnType("int");
+
                     b.Property<string>("ContentHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -633,6 +636,9 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("bit");
 
+                    b.Property<Guid?>("SkillId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("SkillName")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -642,6 +648,8 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SkillId");
 
                     b.HasIndex("AssistantId", "SkillName")
                         .IsUnique();
@@ -2846,6 +2854,141 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.ToTable("ServiceLocalModelInstallations");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.Skill", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("Created")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<Guid?>("CurrentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<bool>("IsGlobal")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid?>("PublishedFromAssistantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PublishedFromSkillName")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime?>("Updated")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Skills_Name_Unique");
+
+                    b.ToTable("Skills");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.SkillFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("ContentBytes")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime>("Created")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<Guid>("SkillVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SkillVersionId", "RelativePath")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SkillFiles_SkillVersionId_RelativePath_Unique");
+
+                    b.ToTable("SkillFiles");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.SkillVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<string>("FallbackForToolsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FallbackForToolsetsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PlatformsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("PublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RequiresToolsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("RequiresToolsetsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SkillId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SkillVersions_SkillId_Version_Unique");
+
+                    b.ToTable("SkillVersions");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Tool", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3509,7 +3652,14 @@ namespace GuideAntsApi.DataModel.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("GuideAntsApi.DataModel.Models.Skill", "Skill")
+                        .WithMany()
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Assistant");
+
+                    b.Navigation("Skill");
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantTool", b =>
@@ -4109,6 +4259,28 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.SkillFile", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.SkillVersion", "SkillVersion")
+                        .WithMany("Files")
+                        .HasForeignKey("SkillVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("SkillVersion");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.SkillVersion", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.Skill", "Skill")
+                        .WithMany("Versions")
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Skill");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.UsageReportCategoryOperation", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.UsageReportCategory", "UsageReportCategory")
@@ -4291,6 +4463,16 @@ namespace GuideAntsApi.DataModel.Migrations
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.SemiStructuredProjectData", b =>
                 {
                     b.Navigation("NotebookSemiStructuredDatas");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.Skill", b =>
+                {
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.SkillVersion", b =>
+                {
+                    b.Navigation("Files");
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Tool", b =>

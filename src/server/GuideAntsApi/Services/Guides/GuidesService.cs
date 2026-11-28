@@ -220,7 +220,11 @@ public class GuidesService(
             .Where(m => m.AssistantId == guideId)
             .ToListAsync();
 
-        var skills = SkillDtoBuilder.BuildFromAssistantFiles(skillFiles, skillMetas);
+        var catalogVersions = await CatalogVersionLookup.ResolveForAsync(_context, skillMetas);
+        var skills = SkillDtoBuilder.BuildFromAssistantFiles(
+            skillFiles,
+            skillMetas,
+            catalogCurrentVersions: catalogVersions);
 
         var conversationStarters = await _context.AssistantConversationStarters
             .Where(cs => cs.AssistantId == guideId)
@@ -889,8 +893,15 @@ public class GuidesService(
             ));
         }
 
+        var catalogVersionsForAssistant = assistant.Kind == AssistantKind.Guide
+            ? await CatalogVersionLookup.ResolveForAsync(_context, assistant.SkillMetas)
+            : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
         var skills = assistant.Kind == AssistantKind.Guide
-            ? SkillDtoBuilder.BuildFromAssistantFiles(assistant.Files, assistant.SkillMetas)
+            ? SkillDtoBuilder.BuildFromAssistantFiles(
+                assistant.Files,
+                assistant.SkillMetas,
+                catalogCurrentVersions: catalogVersionsForAssistant)
             : [];
 
         if (assistant.Kind == AssistantKind.Assistant)

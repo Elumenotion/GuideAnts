@@ -5,6 +5,8 @@ import type {
   AssistantSkillDto,
   AssistantSkillSaveDto,
   FileDto,
+  SkillCatalogEntryDto,
+  SkillPublishResultDto,
   ToolAssignmentDto,
 } from '../../../../types/guides';
 import { api } from '../../../../services/api';
@@ -14,6 +16,7 @@ import { ImportSkillDialog } from './ImportSkillDialog';
 import { AuthorSkillEditor } from './AuthorSkillEditor';
 import { CreateFromSkillDialog } from './CreateFromSkillDialog';
 import { SkillFilePreviewModal } from './SkillFilePreviewModal';
+import { PublishSkillDialog } from './PublishSkillDialog';
 import { parseSkillFrontmatter } from './skillFrontmatter';
 import {
   buildCreateAssistantFromSkillPayload,
@@ -25,6 +28,7 @@ import {
   reindexSkillDisplayOrders,
 } from './skillOrdering';
 import { decodePendingFileContent } from './skillFileTreeModel';
+import { catalogPackageToImportResult } from './skillStoreHelpers';
 
 interface SkillsTabProps {
   projectId?: string;
@@ -84,6 +88,7 @@ export function SkillsTab({
   const [isCreatingFromSkill, setIsCreatingFromSkill] = useState(false);
   const [createFromSkillError, setCreateFromSkillError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [publishTarget, setPublishTarget] = useState<AssistantSkillDto | null>(null);
 
   const availableToolTypes = useMemo(
     () => new Set([...selectedToolTypes, ...toolAssignments.map((tool) => tool.toolType)]),
@@ -183,6 +188,62 @@ export function SkillsTab({
     updateSkills([...skills.filter((item) => item.name !== skill.name), displaySkill]);
   };
 
+  /**
+   * Stages a store snapshot exactly like a folder/.zip import: fetch the package, then feed it
+   * through handleImported so ordering, pending uploads and the save path stay identical.
+   */
+  const handleInstallFromStore = async (entry: SkillCatalogEntryDto, overwrite: boolean) => {
+    const pkg = await api.skillStore.package(entry.name, entry.currentVersion);
+    handleImported(catalogPackageToImportResult(pkg, nextSkillDisplayOrder(skills)));
+    showToast({
+      type: 'success',
+      title: overwrite ? `Replaced "${entry.name}" from the skill store` : `Installed "${entry.name}"`,
+      message: `v${pkg.version} with ${pkg.files.length} file(s). Save to apply.`,
+    });
+  };
+
+  const handlePublished = (result: SkillPublishResultDto) => {
+    showToast({
+      type: 'success',
+      title: result.createdNewSkill
+        ? `Published \"${result.name}\" to the skill store`
+        : `Published \"${result.name}\" v${result.version}`,
+      message: result.createdNewSkill
+        ? 'Other guides can now install it from the skill store.'
+        : 'Installed guides update on request; nothing changed for them yet.',
+    });
+  };
+
+  const handleUpdateFromStore = async (skillName: string) => {
+    if (!assistantId) {
+      showToast({
+        type: 'error',
+        title: 'Cannot update yet',
+        message: 'Save the assistant before updating a skill from the store.',
+      });
+      return;
+    }
+
+    try {
+      const updated = await api.guides.assistants.updateSkillFromStore(assistantId, skillName);
+      updateSkills(skills.map((item) => (item.name === skillName ? updated : item)));
+      onPendingSkillUploadsChange(
+        pendingSkillUploads.filter((item) => item.name !== skillName),
+      );
+      showToast({
+        type: 'success',
+        title: `Updated \"${skillName}\" to store v${updated.catalogVersion}`,
+        message: 'The saved package now matches the catalog snapshot.',
+      });
+    } catch (error) {
+      showToast({
+        type: 'error',
+        title: 'Update failed',
+        message: error instanceof Error ? error.message : 'Could not update from the store.',
+      });
+    }
+  };
+
   const handlePreviewFile = (skillName: string, file: FileDto) => {
     if (file.id.startsWith('pending-')) {
       const upload = pendingSkillUploads.find((item) => item.name === skillName);
@@ -275,6 +336,8 @@ export function SkillsTab({
           onPreviewFile={handlePreviewFile}
           onDownloadFile={onDownloadFile}
           onCreateAssistantFromSkill={openCreateFromSkill}
+          onPublishSkill={assistantId ? (skillName) => setPublishTarget(skills.find((item) => item.name === skillName) ?? null) : undefined}
+          onUpdateSkillFromStore={(skillName) => void handleUpdateFromStore(skillName)}
         />
       )}
 
@@ -290,10 +353,22 @@ export function SkillsTab({
         />
       )}
 
+      {publishTarget && assistantId && (
+        <PublishSkillDialog
+          isOpen
+          assistantId={assistantId}
+          skill={publishTarget}
+          onClose={() => setPublishTarget(null)}
+          onPublished={handlePublished}
+        />
+      )}
+
       <ImportSkillDialog
         isOpen={showImport}
         onClose={() => setShowImport(false)}
         onImported={handleImported}
+        existingSkills={skills}
+        onInstallFromStore={handleInstallFromStore}
       />
       <AuthorSkillEditor
         isOpen={showAuthor}

@@ -233,7 +233,10 @@ public record AssistantSkillDto(
     List<string> RequiresToolsets,
     List<string> RequiresTools,
     List<string> FallbackForToolsets,
-    List<string> FallbackForTools
+    List<string> FallbackForTools,
+    Guid? CatalogSkillId = null,
+    int? CatalogVersion = null,
+    int? CatalogCurrentVersion = null
 );
 
 public record AssistantSkillSaveDto(

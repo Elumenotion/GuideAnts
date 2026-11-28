@@ -23,6 +23,7 @@ public sealed class AssistantSkillMetaSync(ApplicationDbContext context) : IAssi
         var existing = await _context.AssistantSkillMetas
             .Where(m => m.AssistantId == assistantId)
             .ToListAsync(cancellationToken);
+        var catalogHashes = await LoadCatalogHashesAsync(existing, cancellationToken);
 
         if (skillFiles.Count == 0)
         {
@@ -74,7 +75,7 @@ public sealed class AssistantSkillMetaSync(ApplicationDbContext context) : IAssi
                 row.Description = frontmatter.Description;
                 row.Enabled = frontmatter.Enabled;
                 row.DisplayOrder = frontmatter.DisplayOrder;
-                row.ContentHash = hash;
+                ApplyContentHashWithFork(row, hash, catalogHashes);
                 row.Updated = now;
             }
         }
@@ -133,6 +134,7 @@ public sealed class AssistantSkillMetaSync(ApplicationDbContext context) : IAssi
         var existing = await _context.AssistantSkillMetas
             .Where(m => m.AssistantId == assistantId)
             .ToListAsync(cancellationToken);
+        var catalogHashes = await LoadCatalogHashesAsync(existing, cancellationToken);
 
         var skillNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var now = DateTime.UtcNow;
@@ -182,7 +184,7 @@ public sealed class AssistantSkillMetaSync(ApplicationDbContext context) : IAssi
                 row.Description = frontmatter.Description;
                 row.Enabled = enabled;
                 row.DisplayOrder = displayOrder;
-                row.ContentHash = hash;
+                ApplyContentHashWithFork(row, hash, catalogHashes);
                 row.Updated = now;
             }
         }
@@ -216,6 +218,9 @@ public sealed class AssistantSkillMetaSync(ApplicationDbContext context) : IAssi
                 m => m.AssistantId == assistantId
                      && m.SkillName == frontmatter.Name,
                 cancellationToken);
+        var catalogHashes = await LoadCatalogHashesAsync(
+            row is null ? [] : [row],
+            cancellationToken);
 
         if (row is null)
         {
@@ -236,10 +241,68 @@ public sealed class AssistantSkillMetaSync(ApplicationDbContext context) : IAssi
             row.Description = frontmatter.Description;
             row.Enabled = frontmatter.Enabled;
             row.DisplayOrder = frontmatter.DisplayOrder;
-            row.ContentHash = hash;
+            ApplyContentHashWithFork(row, hash, catalogHashes);
             row.Updated = now;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Loads the SKILL.md hash of each pinned catalog snapshot, keyed "SkillId:Version", so the
+    /// fork decision needs one query instead of one per skill.
+    /// </summary>
+    private async Task<Dictionary<string, string>> LoadCatalogHashesAsync(
+        List<AssistantSkillMeta> metas,
+        CancellationToken cancellationToken)
+    {
+        var pinned = metas.Where(m => m.SkillId is not null && m.CatalogVersion is not null).ToList();
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (pinned.Count == 0)
+        {
+            return result;
+        }
+
+        var skillIds = pinned.Select(m => m.SkillId!.Value).Distinct().ToList();
+        var versions = pinned.Select(m => m.CatalogVersion!.Value).Distinct().ToList();
+
+        var rows = await _context.SkillVersions
+            .AsNoTracking()
+            .Where(v => skillIds.Contains(v.SkillId) && versions.Contains(v.Version))
+            .Select(v => new { v.SkillId, v.Version, v.ContentHash })
+            .ToListAsync(cancellationToken);
+
+        foreach (var row in rows)
+        {
+            result[$"{row.SkillId}:{row.Version}"] = row.ContentHash;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Records the local SKILL.md hash and applies the fork rule: a catalog-pinned install keeps
+    /// its pin only while the local bytes still match the pinned snapshot. Any local edit (or a
+    /// vanished snapshot) detaches the pin so the skill is treated as a plain local package.
+    /// </summary>
+    private static void ApplyContentHashWithFork(
+        AssistantSkillMeta row,
+        string hash,
+        Dictionary<string, string> catalogHashes)
+    {
+        row.ContentHash = hash;
+
+        if (row.SkillId is null || row.CatalogVersion is null)
+        {
+            return;
+        }
+
+        var key = $"{row.SkillId}:{row.CatalogVersion}";
+        if (!catalogHashes.TryGetValue(key, out var snapshotHash)
+            || !string.Equals(snapshotHash, hash, StringComparison.OrdinalIgnoreCase))
+        {
+            row.SkillId = null;
+            row.CatalogVersion = null;
+        }
     }
 }

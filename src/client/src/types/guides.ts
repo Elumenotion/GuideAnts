@@ -361,6 +361,62 @@ export interface AssistantSkillDto {
   requiresTools: string[];
   fallbackForToolsets: string[];
   fallbackForTools: string[];
+  /** Skill catalog entry this skill was installed from; null/undefined when local. */
+  catalogSkillId?: string | null;
+  /** Catalog version this install is pinned to; cleared once the skill is edited locally. */
+  catalogVersion?: number | null;
+  /** Newest published catalog version, when the entry is still in the catalog. */
+  catalogCurrentVersion?: number | null;
+}
+
+export interface SkillCatalogEntryDto {
+  id: string;
+  name: string;
+  description: string;
+  currentVersion: number;
+  fileCount: number;
+  updated: string;
+}
+
+export interface SkillCatalogFileDto {
+  relativePath: string;
+  contentType?: string | null;
+  sizeBytes: number;
+}
+
+export interface SkillCatalogDetailDto {
+  id: string;
+  name: string;
+  description: string;
+  currentVersion: number;
+  contentHash: string;
+  requiresToolsets: string[];
+  requiresTools: string[];
+  fallbackForToolsets: string[];
+  fallbackForTools: string[];
+  platforms: string[];
+  files: SkillCatalogFileDto[];
+  versions: number[];
+  updated: string;
+}
+
+export interface SkillCatalogPackageFileDto {
+  relativePath: string;
+  contentType?: string | null;
+  contentBase64: string;
+}
+
+export interface SkillCatalogPackageDto {
+  name: string;
+  version: number;
+  files: SkillCatalogPackageFileDto[];
+}
+
+export interface SkillPublishResultDto {
+  skillId: string;
+  name: string;
+  version: number;
+  createdNewSkill: boolean;
 }
 
 export interface AssistantSkillSaveDto {
