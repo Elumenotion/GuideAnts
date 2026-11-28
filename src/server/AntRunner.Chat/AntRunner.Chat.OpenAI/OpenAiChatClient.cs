@@ -187,8 +187,13 @@ public sealed class OpenAiChatClient : IChatCompletionClient
         {
             if (message.Role == ChatRole.Tool && !string.IsNullOrEmpty(message.ToolCallId) && !string.IsNullOrEmpty(message.FunctionName))
             {
-                var content = ToOpenAiContent(message.Content);
-                return new Message(message.ToolCallId!, message.FunctionName!, content);
+                // OpenAI Chat Completions tool messages only accept string content on
+                // gpt-4o-class models; image parts in tool results are not supported.
+                // Images that a tool produces are presented as a user-role attachment
+                // message instead (see AntRunner.Chat.MessageComposer), so tool messages
+                // are flattened to text here.
+                var toolText = message.GetText();
+                return new Message(message.ToolCallId!, message.FunctionName!, new[] { new Content(toolText) });
             }
 
             var role = MapRole(message.Role);

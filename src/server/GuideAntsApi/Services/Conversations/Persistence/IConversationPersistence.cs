@@ -13,6 +13,29 @@ public sealed record CreateTurnRequest(
 
 public sealed record CreatedTurnResult(int TurnIndex, Guid TurnId, ConversationTurn Turn);
 
+/// <summary>
+/// Creates a user-role message mid-turn (synthetic, tool-produced) and links its image
+/// attachments so they re-expand across turns. Used for the tool-attachment message
+/// composed by <c>AntRunner.Chat.MessageComposer</c>.
+/// </summary>
+public sealed record CreateSyntheticUserMessageRequest(
+    Guid ConversationId,
+    Guid TurnId,
+    int TurnIndex,
+    int MessageSequence,
+    string Content,
+    string? AssistantName,
+    Guid? AssistantId,
+    IReadOnlyList<SyntheticMessageAttachmentRequest> Attachments,
+    Guid? ExpectedExecutionId = null);
+
+public sealed record SyntheticMessageAttachmentRequest(
+    Guid? NotebookFileId,
+    string? RelativePath,
+    int OrderIndex);
+
+public sealed record CreatedSyntheticUserMessageResult(Guid MessageId, NotebookConversationMessage Message);
+
 public sealed record CreateUserMessageRequest(
     Guid ConversationId,
     int TurnIndex,
@@ -37,6 +60,7 @@ public sealed record StartAssistantMessageRequest(
     string Content = "",
     bool IsStreaming = true,
     string? ToolCallsJson = null,
+    bool IsSynthetic = false,
     Guid? ExpectedExecutionId = null);
 
 public sealed record AssistantMessageUpdateRequest(
@@ -129,6 +153,8 @@ public interface IConversationPersistence
     Task<CreatedTurnResult> CreateNextTurnAsync(CreateTurnRequest request, CancellationToken ct = default);
 
     Task<CreatedUserMessageResult> CreateUserMessageAsync(CreateUserMessageRequest request, CancellationToken ct = default);
+
+    Task<CreatedSyntheticUserMessageResult> CreateSyntheticUserMessageAsync(CreateSyntheticUserMessageRequest request, CancellationToken ct = default);
 
     Task<bool> SetTurnStatusAsync(Guid turnId, string status, string? onlyIfCurrentStatus = null, CancellationToken ct = default);
 

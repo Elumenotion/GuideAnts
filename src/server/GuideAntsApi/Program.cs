@@ -319,6 +319,9 @@ public class Program
         // Initialize static service provider for SkillTools (skills_list/skills_read)
         GuideAntsApi.Services.SkillTools.InitializeServiceProvider(app.Services);
 
+        // Initialize static service provider for VisionTools (GetImageForInspection)
+        GuideAntsApi.Services.VisionTools.InitializeServiceProvider(app.Services);
+
         // Initialize static service provider for ConversationRecallTools (conversation_recall)
         GuideAntsApi.Services.ConversationRecallTools.InitializeServiceProvider(app.Services);
 

@@ -364,4 +364,57 @@ public sealed class OpenAiChatClientDeepTests
         response.FirstChoice.FinishReason.Should().Be("stop");
         response.Usage!.TotalTokens.Should().Be(5);
     }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_ToolMessageWithImageContent_SerializesToPlainTextOnly()
+    {
+        // Regression guard: OpenAI Chat Completions tool messages only accept string content
+        // on gpt-4o-class models. A tool message carrying image content must flatten to text,
+        // never emit an image_url part (images ride a user-role attachment message instead).
+        var handler = new CapturingHandler(_ => ChatHttpResponses.Json(ChatCompletionJson("done")));
+        using var httpClient = new HttpClient(handler);
+        var client = CreateClient(handler, httpClient);
+
+        await client.GetCompletionAsync(new ChatCompletionRequest(
+            messages:
+            [
+                new ChatMessage(ChatRole.User, "Look at the chart"),
+                new ChatMessage(ChatRole.Assistant, [new ChatContent("retrieving")],
+                    [new ChatToolCall
+                    {
+                        Id = "call_img",
+                        Type = "function",
+                        Function = new ChatToolCallFunction
+                        {
+                            Name = "GetImageForInspection",
+                            Arguments = JsonSerializer.SerializeToElement(new { path = "data/plot.png" })
+                        }
+                    }]),
+                new ChatMessage("call_img", "GetImageForInspection",
+                    [new ChatContent("Image retrieved: data/plot.png."),
+                     new ChatContent(new ChatImageUrl("data:image/png;base64,AAAA"))])
+            ],
+            model: "gpt-4o-mini"));
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody);
+        var toolMessage = body.RootElement.GetProperty("messages")[2];
+        toolMessage.GetProperty("role").GetString().Should().Be("tool");
+        toolMessage.GetProperty("tool_call_id").GetString().Should().Be("call_img");
+
+        // content must contain only text parts (no image_url part), regardless of whether the
+        // SDK serializes it as a plain string or an array of text parts
+        var content = toolMessage.GetProperty("content");
+        if (content.ValueKind == JsonValueKind.String)
+        {
+            content.GetString()!.Should().Contain("data/plot.png");
+        }
+        else
+        {
+            content.ValueKind.Should().Be(JsonValueKind.Array);
+            var part = content.EnumerateArray().Single();
+            part.GetProperty("type").GetString().Should().Be("text");
+            part.GetProperty("text").GetString().Should().Contain("data/plot.png");
+        }
+        handler.LastRequestBody.Should().NotContain("image_url");
+    }
 }
