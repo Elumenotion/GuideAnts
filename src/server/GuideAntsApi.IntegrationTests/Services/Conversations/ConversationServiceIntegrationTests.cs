@@ -1030,8 +1030,9 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
     }
 
     [TestMethod]
-    public async Task SendMessageStream_Cancel_finalizes_partial_message_marks_turn_cancelled_and_prunes_incomplete_tool_calls()
+    public async Task SendMessageStream_Cancel_finalizes_partial_message_marks_turn_cancelled()
     {
+
         Guid projectId;
         Guid notebookId;
         Guid conversationId;
@@ -1111,11 +1112,19 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
 
             (await db2.ConversationLocks.AnyAsync(l => l.ConversationId == conversationId)).Should().BeFalse();
         }
+    }
 
+
+    [TestMethod]
+    public async Task SendMessageStream_Cancel_prunes_incomplete_tool_calls_keeps_announced_and_records_error_results()
+    {
+        Guid projectId;
+        Guid notebookId;
         Guid pruneConversationId;
         using (var seedScope = SharedFactory!.Services.CreateScope())
         {
             var seedDb = seedScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(seedDb);
             pruneConversationId = await SeedConversationAsync(seedDb, notebookId, "Cancel prune tools");
         }
 
@@ -1168,6 +1177,23 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
 
                 var pruneTurn = await pruneVerifyDb.ConversationTurns.SingleAsync(t => t.NotebookConversationId == pruneConversationId);
 
+                var dumpRows = await pruneVerifyDb.NotebookConversationMessages
+                    .Where(m => m.NotebookConversationId == pruneConversationId)
+                    .OrderBy(m => m.MessageSequence)
+                    .Select(m => new { m.MessageSequence, m.Role, m.Content, m.IsStreaming, m.ToolCalls, m.ToolCallId, m.FunctionName, m.Created })
+                    .ToListAsync();
+                foreach (var dr in dumpRows)
+                {
+                    Console.WriteLine($"DUMP-ROWS seq={dr.MessageSequence} role={dr.Role} streaming={dr.IsStreaming} content={(dr.Content ?? "(null)")} toolCalls={(dr.ToolCalls == null ? "(null)" : dr.ToolCalls.Length + " chars")} toolCallId={(dr.ToolCallId ?? "-")} fn={(dr.FunctionName ?? "-")} created={dr.Created:HH:mm:ss.fff}");
+                }
+                var pruneTurnDump = await pruneVerifyDb.ConversationTurns
+                    .Where(t => t.NotebookConversationId == pruneConversationId)
+                    .Select(t => new { t.Status, t.CheckpointVersion, t.TerminalizedAt, t.ExecutionId, t.Created, t.LastUpdated })
+                    .ToListAsync();
+                foreach (var tr in pruneTurnDump)
+                {
+                    Console.WriteLine($"DUMP-TURN status={tr.Status} checkpointVersion={tr.CheckpointVersion} created={tr.Created:HH:mm:ss.fff} lastUpdated={tr.LastUpdated:HH:mm:ss.fff} terminalized={(tr.TerminalizedAt?.ToString("HH:mm:ss.fff") ?? "-")} executionId={(tr.ExecutionId ?? Guid.Empty).ToString("N")[..8]}");
+                }
                 var pruneAssistants = await pruneVerifyDb.NotebookConversationMessages
                     .Where(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Assistant)
                     .ToListAsync();
@@ -1194,6 +1220,7 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
             FakeChatCompletionBehavior.Instance.Reset();
         }
     }
+
 
     [TestMethod]
     public async Task SendMessageStream_HttpCancel_during_nestedReadWeb_stops_worker_before_success_and_preserves_data()
