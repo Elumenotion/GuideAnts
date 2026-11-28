@@ -680,6 +680,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         context.DbTurn.Id);
                     cancellationEvent = await HandleCancellationAsync(
                         context,
+                        checkpointQueue,
                         currentAssistantMessageId,
                         currentAssistantContent,
                         currentThinkingContent,
@@ -718,6 +719,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     {
                         cancellationEvent = await HandleCancellationAsync(
                             context,
+                            checkpointQueue,
                             currentAssistantMessageId,
                             currentAssistantContent,
                             currentThinkingContent,
@@ -779,6 +781,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                             context.DbTurn.Id);
                         cancellationEvent = await HandleCancellationAsync(
                             context,
+                            checkpointQueue,
                             currentAssistantMessageId,
                             currentAssistantContent,
                             currentThinkingContent,
@@ -858,6 +861,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     terminalizationAttempted = true;
                     cancellationEvent = await HandleCancellationAsync(
                         context,
+                        checkpointQueue,
                         currentAssistantMessageId,
                         currentAssistantContent,
                         currentThinkingContent,
@@ -1844,6 +1848,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
     private async Task<StreamingEvent> HandleCancellationAsync(
         ConversationStreamRunContext context,
+        StreamingCheckpointPersistenceQueue checkpointQueue,
         Guid? currentAssistantMessageId,
         StringBuilder currentAssistantContent,
         StringBuilder currentThinkingContent,
@@ -1929,7 +1934,10 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 }
                 else
                 {
-                    cancellationAssistantMessageId = await _persistence.StartAssistantMessageAsync(
+                    // Isolate the cancel finalizer's assistant-row write behind the same
+                    // single-writer pump as the streaming checkpoint, so it cannot interleave
+                    // with (and duplicate) the checkpoint's start of the same tool-call row.
+                    cancellationAssistantMessageId = await checkpointQueue.EnqueueAssistantStartAsync(
                         new StartAssistantMessageRequest(
                             context.Conversation.Id,
                             context.DbTurn.Id,
@@ -1941,8 +1949,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                             Content: cancellationAssistantContent.ToString(),
                             IsStreaming: cancellationToolCallsJson == null,
                             ToolCallsJson: cancellationToolCallsJson,
-                            ExpectedExecutionId: context.DbTurn.ExecutionId),
-                        CancellationToken.None);
+                            ExpectedExecutionId: context.DbTurn.ExecutionId));
                     assistantMessageIds = assistantMessageIds
                         .Append(cancellationAssistantMessageId.Value)
                         .ToList();

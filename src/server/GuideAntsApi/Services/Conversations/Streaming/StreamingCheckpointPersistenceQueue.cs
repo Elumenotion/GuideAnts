@@ -211,6 +211,30 @@ internal sealed class StreamingCheckpointPersistenceQueue : IAsyncDisposable
                 }));
     }
 
+    /// <summary>
+    /// Starts an assistant row through the single-writer pump so it serializes with the
+    /// streaming checkpoint's assistant writes. Returns the persisted message id. Used by the
+    /// cancellation finalizer so its assistant row cannot race (and duplicate) the checkpoint's.
+    /// </summary>
+    internal async Task<Guid> EnqueueAssistantStartAsync(StartAssistantMessageRequest request)
+    {
+        var completedSegment = new AssistantSegment(request);
+        lock (_stateGate)
+        {
+            _lastSegment = completedSegment;
+        }
+
+        Enqueue(
+            new WorkItem(
+                async () =>
+                {
+                    await ProcessStartAsync(completedSegment).ConfigureAwait(false);
+                },
+                ex => completedSegment.MessageIdTask.TrySetException(ex)));
+
+        return await completedSegment.MessageIdTask.Task.ConfigureAwait(false);
+    }
+
     internal void EnqueueToolMessage(
         CreateToolMessageRequest request,
         Action<CreateToolMessageResult> onSucceeded,
