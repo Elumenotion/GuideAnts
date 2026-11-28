@@ -40,6 +40,7 @@ internal sealed class FakeChatCompletionBehavior
     public TaskCompletionSource<bool> NonCooperativeStreamStarted { get; private set; } = CreateSignal();
     public TaskCompletionSource<bool> NonCooperativeStreamRelease { get; private set; } = CreateSignal();
     public TaskCompletionSource<bool> SlowStreamFirstChunkEmitted { get; private set; } = CreateSignal();
+    public TaskCompletionSource<bool> ToolCallsSecondRoundStarted { get; private set; } = CreateSignal();
     public IReadOnlyList<ChatMessage>? LastRequestMessages { get; private set; }
 
     /// <summary>
@@ -92,6 +93,7 @@ internal sealed class FakeChatCompletionBehavior
         NonCooperativeStreamStarted = CreateSignal();
         NonCooperativeStreamRelease = CreateSignal();
         SlowStreamFirstChunkEmitted = CreateSignal();
+        ToolCallsSecondRoundStarted = CreateSignal();
         OnToolCallsReturning = null;
         LastRequestMessages = null;
         PromptCharBudget = int.MaxValue;
@@ -144,6 +146,11 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
         {
             return WaitForNestedCompletionAsync(cancellationToken);
         }
+        if (_behavior.Scenario == FakeChatScenario.ToolCallsCancelBeforeExecution && _behavior.NextCallIndex() > 1)
+        {
+            _behavior.ToolCallsSecondRoundStarted.TrySetResult(true);
+            return BlockUntilCancelledAsync(cancellationToken);
+        }
 
         return Task.FromResult(CreateDefaultResponse());
     }
@@ -158,7 +165,7 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
         {
             FakeChatScenario.SlowCancellableStream => SlowCancellableStreamAsync(onChunk, cancellationToken),
             FakeChatScenario.NonCooperativeStream => NonCooperativeStreamAsync(onChunk),
-            FakeChatScenario.ToolCallsCancelBeforeExecution => ToolCallsCancelBeforeExecutionAsync(onChunk),
+            FakeChatScenario.ToolCallsCancelBeforeExecution => ToolCallsCancelBeforeExecutionAsync(onChunk, cancellationToken),
             FakeChatScenario.ToolCallThenReply => ToolCallThenReplyAsync(onChunk, cancellationToken),
             FakeChatScenario.ThinkingStream => ThinkingStreamAsync(onChunk, cancellationToken),
             FakeChatScenario.LongThinkingStream => LongThinkingStreamAsync(onChunk, cancellationToken),
@@ -256,15 +263,39 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
         return CreateResponse("Provider completed after cancellation.", finishReason: "stop");
     }
 
-    private Task<ChatCompletionResponse> ToolCallsCancelBeforeExecutionAsync(Action<ChatCompletionChunk> onChunk)
+    /// <summary>
+    /// Round 1 emits the text delta, fires the legacy <see cref="FakeChatCompletionBehavior.OnToolCallsReturning"/>
+    /// callback, and returns the tool calls. Rounds 2+ signal
+    /// <see cref="FakeChatCompletionBehavior.ToolCallsSecondRoundStarted"/> and then block until the worker
+    /// token is cancelled, so a test can place an API stop at the exact inter-round boundary instead of
+    /// racing it. The legacy callback remains for the test that still uses it.
+    /// </summary>
+    private Task<ChatCompletionResponse> ToolCallsCancelBeforeExecutionAsync(
+        Action<ChatCompletionChunk> onChunk,
+        CancellationToken cancellationToken)
     {
-        onChunk(new ChatCompletionChunk(
-        [
-            new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, "Calling tools."), null)
-        ]));
+        var callIndex = _behavior.NextCallIndex();
+        if (callIndex == 1)
+        {
+            onChunk(new ChatCompletionChunk(
+            [
+                new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, "Calling tools."), null)
+            ]));
 
-        _behavior.OnToolCallsReturning?.Invoke();
-        return Task.FromResult(CreateToolCallsResponse());
+            _behavior.OnToolCallsReturning?.Invoke();
+            return Task.FromResult(CreateToolCallsResponse());
+        }
+
+        _behavior.ToolCallsSecondRoundStarted.TrySetResult(true);
+        return BlockUntilCancelledAsync(cancellationToken);
+    }
+
+    private static async Task<ChatCompletionResponse> BlockUntilCancelledAsync(CancellationToken cancellationToken)
+    {
+        // A provider call that stays open until the client cancels it, at which point it throws
+        // like a real aborted request.
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        throw new InvalidOperationException("BlockUntilCancelledAsync returned without cancellation.");
     }
 
     private async Task<ChatCompletionResponse> ToolCallThenReplyAsync(
