@@ -113,6 +113,58 @@ public sealed class ConversationPersistence : IConversationPersistence
         return new CreatedUserMessageResult(userMessage.Id, userMessage);
     }
 
+    public async Task<CreatedSyntheticUserMessageResult> CreateSyntheticUserMessageAsync(
+        CreateSyntheticUserMessageRequest request,
+        CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var message = new NotebookConversationMessage
+        {
+            NotebookConversationId = request.ConversationId,
+            TurnIndex = request.TurnIndex,
+            MessageSequence = request.MessageSequence,
+            Role = DataModelChatRole.User,
+            Content = request.Content,
+            AssistantName = request.AssistantName,
+            AssistantId = request.AssistantId,
+            MessageContentType = request.Attachments.Count > 0
+                ? MessageContentType.Mixed
+                : MessageContentType.Text,
+            IsSynthetic = true,
+            Created = DateTime.UtcNow
+        };
+
+        db.NotebookConversationMessages.Add(message);
+        await db.SaveChangesAsync(ct);
+
+        foreach (var attachment in request.Attachments)
+        {
+            db.MessageAttachments.Add(new MessageAttachment
+            {
+                MessageId = message.Id,
+                NotebookFileId = attachment.NotebookFileId,
+                RelativePath = attachment.NotebookFileId.HasValue ? null : attachment.RelativePath,
+                UploadType = ContentUploadType.ImageFile,
+                Type = AttachmentType.Referenced,
+                OrderIndex = attachment.OrderIndex,
+                Created = DateTime.UtcNow
+            });
+        }
+
+        if (request.Attachments.Count > 0)
+        {
+            await db.SaveChangesAsync(ct);
+        }
+
+        _logger.LogInformation(
+            "Persisted synthetic user attachment message {MessageId} with {Count} attachment(s) for conversation {ConversationId} turn {TurnIndex}",
+            message.Id, request.Attachments.Count, request.ConversationId, request.TurnIndex);
+
+        return new CreatedSyntheticUserMessageResult(message.Id, message);
+    }
+
     public async Task<bool> SetTurnStatusAsync(Guid turnId, string status, string? onlyIfCurrentStatus = null, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -628,6 +680,33 @@ public sealed class ConversationPersistence : IConversationPersistence
                     throw new KeyNotFoundException($"Conversation turn {request.TurnId} was not found.");
                 }
 
+                // A cancellation can race the streaming checkpoint that already announced these
+                // tool calls on a row in this turn (the checkpoint segment is finalized before the
+                // worker observes the cancel, so its active-segment id is null here). Reuse that row
+                // instead of inserting a second assistant row for the same tool-call batch.
+                if (!string.IsNullOrWhiteSpace(request.ToolCallsJson))
+                {
+                    var existingToolCallMessage = await db.NotebookConversationMessages
+                        .FirstOrDefaultAsync(m =>
+                            m.NotebookConversationId == request.ConversationId
+                            && m.TurnIndex == request.TurnIndex
+                            && m.Role == DataModelChatRole.Assistant
+                            && m.ToolCalls == request.ToolCallsJson,
+                            ct);
+                    if (existingToolCallMessage != null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(request.Content)
+                            && string.IsNullOrWhiteSpace(existingToolCallMessage.Content))
+                        {
+                            existingToolCallMessage.Content = request.Content;
+                        }
+                        existingToolCallMessage.IsStreaming = false;
+                        TouchTurn(turn);
+                        await db.SaveChangesAsync(ct);
+                        return existingToolCallMessage.Id;
+                    }
+                }
+
                 var msg = new NotebookConversationMessage
                 {
                     NotebookConversationId = request.ConversationId,
@@ -639,6 +718,7 @@ public sealed class ConversationPersistence : IConversationPersistence
                     Content = request.Content,
                     ToolCalls = request.ToolCallsJson,
                     IsStreaming = request.IsStreaming,
+                    IsSynthetic = request.IsSynthetic,
                     Created = DateTime.UtcNow,
                     AssistantId = request.AssistantId
                 };

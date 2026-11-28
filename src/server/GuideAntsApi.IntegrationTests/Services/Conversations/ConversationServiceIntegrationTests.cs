@@ -1168,9 +1168,12 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
 
                 var pruneTurn = await pruneVerifyDb.ConversationTurns.SingleAsync(t => t.NotebookConversationId == pruneConversationId);
 
-                var pruneAssistant = await pruneVerifyDb.NotebookConversationMessages
+                var pruneAssistants = await pruneVerifyDb.NotebookConversationMessages
                     .Where(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Assistant)
-                    .SingleAsync();
+                    .ToListAsync();
+                pruneAssistants.Should().ContainSingle(
+                    "a cancelled turn finalizes the announced tool calls on the single assistant row; two rows mean cancellation raced the streaming checkpoint and duplicated it");
+                var pruneAssistant = pruneAssistants[0];
                 pruneAssistant.ToolCalls.Should().NotBeNullOrWhiteSpace(
                     "cancelled turns keep announced tool calls and record ERROR tool results instead of pruning");
 

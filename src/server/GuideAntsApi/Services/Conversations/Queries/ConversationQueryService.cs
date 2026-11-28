@@ -75,7 +75,7 @@ public class ConversationQueryService : IConversationQueryService
                         ? c.Messages.Where(m => m.Role == DataModelChatRole.Assistant).OrderByDescending(m => m.Created).FirstOrDefault()!.AssistantName
                         : null,
                 LastActivity = c.Messages.Any() ? c.Messages.Max(m => m.Created) : c.Created,
-                Messages = c.Messages.Where(m => m.IsStreaming != true).OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence)
+                Messages = c.Messages.Where(m => m.IsStreaming != true && !m.IsSynthetic).OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence)
                     .Select(m => new
                     {
                         m.Id,

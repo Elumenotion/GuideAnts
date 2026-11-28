@@ -480,6 +480,25 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
                 if (e.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
                 {
+                    // Synthetic assistant bridge (tool-attachment sequence): persist it as real
+                    // model context but do NOT stream it to the client as assistant speech.
+                    if (e.IsSynthetic)
+                    {
+                        checkpointQueue.ThrowIfFailed();
+                        HandleSyntheticAssistantMessageAdded(
+                            e,
+                            context,
+                            checkpointQueue,
+                            () => currentMessageSequence++,
+                            ex =>
+                            {
+                                toolMessagePersistenceFailed = true;
+                                checkpointPersistenceFailure ??= ex;
+                            });
+                        currentThinkingContent.Clear();
+                        return;
+                    }
+
                     checkpointQueue.ThrowIfFailed();
                     if (!string.IsNullOrEmpty(e.ToolCallsJson))
                     {
@@ -502,6 +521,27 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         TryWrite,
                         ex => checkpointPersistenceFailure ??= ex);
                     currentThinkingContent.Clear();
+                    return;
+                }
+
+                if (e.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Synthetic tool-attachment message: persist (so the caption survives into
+                    // future turns) but do NOT stream it to the client as user speech.
+                    if (e.IsSynthetic)
+                    {
+                        checkpointQueue.ThrowIfFailed();
+                        HandleSyntheticUserMessageAdded(
+                            e,
+                            context,
+                            checkpointQueue,
+                            () => currentMessageSequence++,
+                            ex =>
+                            {
+                                toolMessagePersistenceFailed = true;
+                                checkpointPersistenceFailure ??= ex;
+                            });
+                    }
                     return;
                 }
 
@@ -1206,6 +1246,72 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 writer.TryComplete();
             }
         }, CancellationToken.None);
+    }
+
+    private void HandleSyntheticUserMessageAdded(
+        MessageAddedEventArgs e,
+        ConversationStreamRunContext context,
+        StreamingCheckpointPersistenceQueue checkpointQueue,
+        Func<int> allocateMessageSequence,
+        Action<Exception> onPersistenceFailure)
+    {
+        var attachmentRequests = (e.Attachments ?? [])
+            .Select(a => new SyntheticMessageAttachmentRequest(
+                a.NotebookFileId,
+                a.RelativePath,
+                a.OrderIndex))
+            .ToList();
+
+        var request = new CreateSyntheticUserMessageRequest(
+            context.Conversation.Id,
+            context.DbTurn.Id,
+            context.TurnIndex,
+            allocateMessageSequence(),
+            e.Message ?? string.Empty,
+            "user",
+            context.AssistantId,
+            attachmentRequests,
+            ExpectedExecutionId: context.DbTurn.ExecutionId);
+
+        // Persist only. Synthetic tool-attachment messages are real model context (so the
+        // image and provenance caption survive into future turns) but are not user speech,
+        // so they are never streamed to the client.
+        checkpointQueue.EnqueueSyntheticUserMessage(
+            request,
+            _ => { },
+            onPersistenceFailure);
+    }
+
+    private void HandleSyntheticAssistantMessageAdded(
+        MessageAddedEventArgs e,
+        ConversationStreamRunContext context,
+        StreamingCheckpointPersistenceQueue checkpointQueue,
+        Func<int> allocateMessageSequence,
+        Action<Exception> onPersistenceFailure)
+    {
+        // Persist only. The synthetic assistant bridge is real model context (replayed on
+        // continued turns) but is not assistant speech, so it is never streamed to the client.
+        checkpointQueue.EnqueueAssistantResponse(
+            startRequestFactory: () => new StartAssistantMessageRequest(
+                context.Conversation.Id,
+                context.DbTurn.Id,
+                context.TurnIndex,
+                allocateMessageSequence(),
+                context.AssistantName,
+                context.ModelDeploymentId,
+                context.AssistantId,
+                Content: e.Message ?? string.Empty,
+                IsStreaming: false,
+                IsSynthetic: true,
+                ExpectedExecutionId: context.DbTurn.ExecutionId),
+            finalizeRequestFactory: messageId => new AssistantMessageUpdateRequest(
+                messageId,
+                context.DbTurn.Id,
+                e.Message ?? string.Empty,
+                Finalize: true,
+                ExpectedExecutionId: context.DbTurn.ExecutionId),
+            onSucceeded: () => { },
+            onFailed: onPersistenceFailure);
     }
 
     private void HandleAssistantMessageAdded(

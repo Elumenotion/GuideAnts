@@ -128,7 +128,11 @@ public static class ConversationMessageMapper
 
     public static ConversationDto ToConversationDto(NotebookConversation c)
     {
-        var messages = c.Messages.Where(m => m.IsStreaming != true).ToList();
+        // Synthetic run-loop messages (tool-attachment bridge/attachment) are real model
+        // context but never part of the user-facing transcript.
+        var messages = c.Messages
+            .Where(m => m.IsStreaming != true && !m.IsSynthetic)
+            .ToList();
         var filteredMessages = FilterDuplicateAssistantMessages(
             messages,
             m => m.Role,

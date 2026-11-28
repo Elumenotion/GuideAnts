@@ -228,6 +228,23 @@ internal sealed class StreamingCheckpointPersistenceQueue : IAsyncDisposable
                 onFailed));
     }
 
+    internal void EnqueueSyntheticUserMessage(
+        CreateSyntheticUserMessageRequest request,
+        Action<CreatedSyntheticUserMessageResult> onSucceeded,
+        Action<Exception> onFailed)
+    {
+        Enqueue(
+            new WorkItem(
+                async () =>
+                {
+                    var result = await _persistence.CreateSyntheticUserMessageAsync(
+                        request,
+                        CancellationToken.None).ConfigureAwait(false);
+                    onSucceeded(result);
+                },
+                onFailed));
+    }
+
     internal void ThrowIfFailed()
     {
         Exception? failure;
